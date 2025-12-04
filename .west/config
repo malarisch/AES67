@@ -1,0 +1,7 @@
+[manifest]
+path = soc_firmware
+file = app/west-manifest/west.yml
+
+[zephyr]
+base = external/zephyr
+
