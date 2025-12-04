@@ -46,3 +46,4 @@ db/
 .idea/
 .venv
 build/
+external/
