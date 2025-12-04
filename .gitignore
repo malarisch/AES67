@@ -42,3 +42,7 @@ db/
 */timing/
 */testbench/
 */*_sim/
+
+.idea/
+.venv
+build/

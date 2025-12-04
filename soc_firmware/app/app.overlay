@@ -1,0 +1,28 @@
+&psram0 {
+	size = <DT_SIZE_M(8)>;
+};
+
+
+&spi2 {
+    status = "okay";
+    pinctrl-0 = <&spim2_default>;
+    pinctrl-names = "default";
+    cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+    
+    eth0: spi-ethernet@0 {
+        compatible = "vendor,spi-ethernet";
+        reg = <0>;
+        spi-max-frequency = <10000000>;  /* 10 MHz */
+        /* IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3) */
+        int-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+        full-duplex;
+        
+        /* Optional: feste MAC Adresse */
+        local-mac-address = [00 1c 23 17 4a cb];
+    };
+};
+
+/* Falls GPIO0 nicht aktiv ist */
+&gpio0 {
+    status = "okay";
+};

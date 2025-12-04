@@ -1,0 +1,1 @@
+add_subdirectory_ifdef(CONFIG_ETH_SPI_BASIC eth_spi_basic)

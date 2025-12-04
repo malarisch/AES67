@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+
+description: Basic SPI Ethernet Controller
+
+compatible: "vendor,spi-ethernet"
+
+include: [spi-device.yaml, ethernet-controller.yaml]
+
+properties:
+  int-gpios:
+    type: phandle-array
+    required: true
+    description: |
+      GPIO pin connected to the interrupt output of the chip.
+
+  full-duplex:
+    type: boolean
+    description: |
+      Enable full-duplex mode. If not set, half-duplex is used.
+
+  local-mac-address:
+    description: |
+      Specifies the MAC address that was assigned to the network device.

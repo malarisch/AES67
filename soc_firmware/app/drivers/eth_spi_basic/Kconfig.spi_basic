@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig ETH_SPI_BASIC
+    bool "Basic SPI Ethernet Driver"
+    default y
+    depends on DT_HAS_VENDOR_SPI_ETHERNET_ENABLED
+    select SPI
+    select GPIO
+    help
+      Enable driver for basic SPI-based Ethernet controller.
+
+if ETH_SPI_BASIC
+
+config ETH_SPI_BASIC_RX_STACK_SIZE
+    int "RX thread stack size"
+    default 1024
+    help
+      Stack size for the RX thread that processes incoming packets.
+
+config ETH_SPI_BASIC_TIMEOUT
+    int "Timeout for SPI operations (ms)"
+    default 200
+    help
+      Timeout in milliseconds for SPI read/write operations.
+
+config ETH_SPI_BASIC_INIT_PRIORITY
+    int "Driver initialization priority"
+    default 80
+    help
+      Initialization priority for the driver. Should be higher than
+      SPI and GPIO initialization priorities.
+
+endif # ETH_SPI_BASIC
