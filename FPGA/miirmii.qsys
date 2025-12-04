@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system name="$${FILENAME}">
+ <component
+   name="$${FILENAME}"
+   displayName="$${FILENAME}"
+   version="1.0"
+   description=""
+   tags="INTERNAL_COMPONENT=true"
+   categories="System" />
+ <parameter name="bonusData"><![CDATA[bonusData 
+{
+   element fpga_mii2rmii_0
+   {
+      datum _sortIndex
+      {
+         value = "0";
+         type = "int";
+      }
+   }
+}
+]]></parameter>
+ <parameter name="clockCrossingAdapter" value="HANDSHAKE" />
+ <parameter name="device" value="10CL025YU256I7G" />
+ <parameter name="deviceFamily" value="Cyclone 10 LP" />
+ <parameter name="deviceSpeedGrade" value="7" />
+ <parameter name="fabricMode" value="QSYS" />
+ <parameter name="generateLegacySim" value="false" />
+ <parameter name="generationId" value="0" />
+ <parameter name="globalResetBus" value="false" />
+ <parameter name="hdlLanguage" value="VERILOG" />
+ <parameter name="hideFromIPCatalog" value="true" />
+ <parameter name="lockedInterfaceDefinition" value="" />
+ <parameter name="maxAdditionalLatency" value="1" />
+ <parameter name="projectName" value="FPGA.qpf" />
+ <parameter name="sopcBorderPoints" value="false" />
+ <parameter name="systemHash" value="0" />
+ <parameter name="testBenchDutName" value="" />
+ <parameter name="timeStamp" value="0" />
+ <parameter name="useTestBenchNamingPattern" value="false" />
+ <instanceScript></instanceScript>
+ <interface
+   name="MACSPEED"
+   internal="fpga_mii2rmii_0.MACSPEED"
+   type="conduit"
+   dir="end">
+  <port name="ena_10" internal="ena_10" />
+ </interface>
+ <interface
+   name="clock_sink"
+   internal="fpga_mii2rmii_0.clock_sink"
+   type="clock"
+   dir="end">
+  <port name="RefClk" internal="RefClk" />
+ </interface>
+ <interface
+   name="mii_interface"
+   internal="fpga_mii2rmii_0.mii_interface"
+   type="conduit"
+   dir="end">
+  <port name="m_tx_en" internal="m_tx_en" />
+  <port name="m_tx_d" internal="m_tx_d" />
+  <port name="m_tx_err" internal="m_tx_err" />
+  <port name="m_rx_en" internal="m_rx_en" />
+  <port name="m_rx_d" internal="m_rx_d" />
+  <port name="m_rx_err" internal="m_rx_err" />
+  <port name="m_rx_crs" internal="m_rx_crs" />
+  <port name="m_rx_col" internal="m_rx_col" />
+ </interface>
+ <interface
+   name="pcs_mac_rx_clock_connection"
+   internal="fpga_mii2rmii_0.pcs_mac_rx_clock_connection"
+   type="clock"
+   dir="start">
+  <port name="rx_clk" internal="rx_clk" />
+ </interface>
+ <interface
+   name="pcs_mac_tx_clock_connection"
+   internal="fpga_mii2rmii_0.pcs_mac_tx_clock_connection"
+   type="clock"
+   dir="start">
+  <port name="tx_clk" internal="tx_clk" />
+ </interface>
+ <interface
+   name="reset_sink"
+   internal="fpga_mii2rmii_0.reset_sink"
+   type="reset"
+   dir="end">
+  <port name="Rstn" internal="Rstn" />
+ </interface>
+ <interface
+   name="rmii_interface"
+   internal="fpga_mii2rmii_0.rmii_interface"
+   type="conduit"
+   dir="end">
+  <port name="rmii_crs_dv" internal="rmii_crs_dv" />
+  <port name="rmii_rx_d" internal="rmii_rx_d" />
+  <port name="rmii_rx_err" internal="rmii_rx_err" />
+  <port name="rmii_tx_en" internal="rmii_tx_en" />
+  <port name="rmii_tx_d" internal="rmii_tx_d" />
+ </interface>
+ <module
+   name="fpga_mii2rmii_0"
+   kind="altera_fpga_mii2rmii"
+   version="24.1"
+   enabled="1"
+   autoexport="1">
+  <parameter name="MAC_SPEED" value="true" />
+  <parameter name="MBPS" value="true" />
+  <parameter name="RX_FIXED_THROUGHPUT" value="true" />
+ </module>
+ <interconnectRequirement for="$system" name="qsys_mm.clockCrossingAdapter" value="HANDSHAKE" />
+ <interconnectRequirement for="$system" name="qsys_mm.enableEccProtection" value="FALSE" />
+ <interconnectRequirement for="$system" name="qsys_mm.insertDefaultSlave" value="FALSE" />
+ <interconnectRequirement for="$system" name="qsys_mm.maxAdditionalLatency" value="1" />
+</system>
