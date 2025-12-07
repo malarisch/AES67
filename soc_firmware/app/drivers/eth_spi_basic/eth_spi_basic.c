@@ -497,7 +497,7 @@ static int eth_spi_basic_init(const struct device *dev)
 /* Assemble 64-bit timestamp from 8-byte little-endian array */
 static inline uint64_t assemble_timestamp(const uint8_t *bytes)
 {
-    return ((uint64_t)bytes[0] << 0)  |
+    return (uint64_t)bytes[0]        |
            ((uint64_t)bytes[1] << 8)  |
            ((uint64_t)bytes[2] << 16) |
            ((uint64_t)bytes[3] << 24) |

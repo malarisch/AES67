@@ -9,6 +9,7 @@
 #include <zephyr/device.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/logging/log.h>
+#include <inttypes.h>
 #include "../drivers/eth_spi_basic/eth_spi_basic.h"
 
 LOG_MODULE_REGISTER(ptp_example, LOG_LEVEL_DBG);
@@ -27,7 +28,7 @@ void example_read_tx_timestamp(const struct device *eth_dev)
     }
     
     if (tx_ts.valid) {
-        LOG_INF("TX Timestamp: %llu ns", tx_ts.ns);
+        LOG_INF("TX Timestamp: %" PRIu64 " ns", tx_ts.ns);
         
         /* Convert to seconds and nanoseconds for display */
         uint32_t sec = (uint32_t)(tx_ts.ns / 1000000000ULL);
@@ -58,7 +59,7 @@ void example_read_rx_timestamp(const struct device *eth_dev)
     }
     
     if (rx_ts.valid) {
-        LOG_INF("RX Timestamp: %llu ns", rx_ts.ns);
+        LOG_INF("RX Timestamp: %" PRIu64 " ns", rx_ts.ns);
         
         /* Convert to seconds and nanoseconds for display */
         uint32_t sec = (uint32_t)(rx_ts.ns / 1000000000ULL);
@@ -99,7 +100,7 @@ void example_calculate_latency(const struct device *eth_dev)
     if (rx_ts.ns > tx_ts.ns) {
         uint64_t latency_ns = rx_ts.ns - tx_ts.ns;
         uint32_t latency_us = (uint32_t)(latency_ns / 1000ULL);
-        LOG_INF("Packet latency: %llu ns (%u us)", latency_ns, latency_us);
+        LOG_INF("Packet latency: %" PRIu64 " ns (%u us)", latency_ns, latency_us);
     } else {
         LOG_WRN("RX timestamp before TX timestamp (counter wrap?)");
     }
