@@ -567,8 +567,8 @@ int eth_spi_basic_ack_tx_timestamp(const struct device *dev)
         return -EINVAL;
     }
     
-    /* Write 1 to acknowledge/clear the TX timestamp valid flag */
-    return spi_basic_write_reg(dev, REG_TX_TS_STATUS, 0x01);
+    /* Write TS_STATUS_VALID to acknowledge/clear the TX timestamp valid flag */
+    return spi_basic_write_reg(dev, REG_TX_TS_STATUS, TS_STATUS_VALID);
 }
 
 int eth_spi_basic_ack_rx_timestamp(const struct device *dev)
@@ -577,8 +577,8 @@ int eth_spi_basic_ack_rx_timestamp(const struct device *dev)
         return -EINVAL;
     }
     
-    /* Write 1 to acknowledge/clear the RX timestamp valid flag */
-    return spi_basic_write_reg(dev, REG_RX_TS_STATUS, 0x01);
+    /* Write TS_STATUS_VALID to acknowledge/clear the RX timestamp valid flag */
+    return spi_basic_write_reg(dev, REG_RX_TS_STATUS, TS_STATUS_VALID);
 }
 
 /* Device Makro */
