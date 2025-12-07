@@ -102,6 +102,7 @@ Clears the RX timestamp valid flag, allowing capture of the next timestamp.
 ```c
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <inttypes.h>
 #include "../drivers/eth_spi_basic/eth_spi_basic.h"
 
 void ptp_timestamp_example(const struct device *eth_dev)
@@ -112,7 +113,7 @@ void ptp_timestamp_example(const struct device *eth_dev)
     /* Read TX timestamp after sending a packet */
     ret = eth_spi_basic_get_tx_timestamp(eth_dev, &tx_ts);
     if (ret == 0 && tx_ts.valid) {
-        printk("TX timestamp: %llu ns\n", tx_ts.ns);
+        printk("TX timestamp: %" PRIu64 " ns\n", tx_ts.ns);
         
         /* Acknowledge to allow next timestamp capture */
         eth_spi_basic_ack_tx_timestamp(eth_dev);
@@ -121,7 +122,7 @@ void ptp_timestamp_example(const struct device *eth_dev)
     /* Read RX timestamp after receiving a packet */
     ret = eth_spi_basic_get_rx_timestamp(eth_dev, &rx_ts);
     if (ret == 0 && rx_ts.valid) {
-        printk("RX timestamp: %llu ns\n", rx_ts.ns);
+        printk("RX timestamp: %" PRIu64 " ns\n", rx_ts.ns);
         
         /* Acknowledge to allow next timestamp capture */
         eth_spi_basic_ack_rx_timestamp(eth_dev);
