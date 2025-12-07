@@ -184,6 +184,11 @@ entity spi_ethernet_client is
     spi_transaction_done : out std_ulogic; -- für Debug/Analyse: eine SPI-Transaktion abgeschlossen
 
     ------------------------------------------------------------------
+    -- PTP Timestamp Counter Input (64-bit nanoseconds)
+    ------------------------------------------------------------------
+    ptp_timestamp_ns_i : in unsigned(63 downto 0);
+
+    ------------------------------------------------------------------
     -- MAC-Client TX-Schnittstelle
     ------------------------------------------------------------------
     mac_tx_clock_i     : in  std_ulogic;        -- tx_clock_o
@@ -217,8 +222,12 @@ architecture rtl of spi_ethernet_client is
   --      0x22    : RX-Status-Clear (Bit0=ACK)
   --      0x10.. : TX-Daten, gehen in TX-FIFO
   --   Read-Register:
+  --      0x03-0x0A: TX-Timestamp (8 bytes, 64-bit)
+  --      0x0B    : TX-Timestamp-Status (Bit0=VALID)
   --      0x20/0x21: RX-Länge (Low/High)
   --      0x22    : RX-Status (Bit0=READY, Bit1=OVF)
+  --      0x23-0x2A: RX-Timestamp (8 bytes, 64-bit)
+  --      0x2B    : RX-Timestamp-Status (Bit0=VALID)
   --      0x30.. : RX-Daten aus RX-FIFO
   --------------------------------------------------------------------
 
@@ -315,6 +324,16 @@ architecture rtl of spi_ethernet_client is
   type t_tx_SM is (s_Idle, s_PrimeTx, s_Transmit, s_End);
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
 
+  --------------------------------------------------------------------
+  -- PTP Timestamper Signals
+  --------------------------------------------------------------------
+  signal tx_timestamp       : unsigned(63 downto 0) := (others => '0');
+  signal tx_timestamp_valid : std_ulogic := '0';
+  signal tx_timestamp_ack   : std_ulogic := '0';
+  signal rx_timestamp       : unsigned(63 downto 0) := (others => '0');
+  signal rx_timestamp_valid : std_ulogic := '0';
+  signal rx_timestamp_ack   : std_ulogic := '0';
+
 begin
 
   --------------------------------------------------------------------
@@ -359,6 +378,35 @@ begin
       rd_en_i    => rxfifo_rd_en,
       rd_data_o  => rxfifo_rd_data,
       rd_empty_o => rxfifo_rd_empty
+    );
+
+  --------------------------------------------------------------------
+  -- PTP Timestamper Instanz
+  --------------------------------------------------------------------
+  ptp_timestamper_inst : entity work.ptp_timestamper
+    port map (
+      clk_i       => clk_sys_i,
+      rst_i       => rst_sys_i,
+      
+      timestamp_ns_i => ptp_timestamp_ns_i,
+      
+      tx_clk_i        => mac_tx_clock_i,
+      tx_rst_i        => mac_tx_reset_i,
+      tx_enable_i     => mac_tx_enable_o,
+      tx_byte_sent_i  => mac_tx_byte_sent_i,
+      
+      tx_timestamp_o     => tx_timestamp,
+      tx_timestamp_valid_o => tx_timestamp_valid,
+      tx_timestamp_ack_i => tx_timestamp_ack,
+      
+      rx_clk_i        => mac_rx_clock_i,
+      rx_rst_i        => mac_rx_reset_i,
+      rx_frame_i      => mac_rx_frame_i,
+      rx_byte_rcv_i   => mac_rx_byte_rcv_i,
+      
+      rx_timestamp_o     => rx_timestamp,
+      rx_timestamp_valid_o => rx_timestamp_valid,
+      rx_timestamp_ack_i => rx_timestamp_ack
     );
 
   --------------------------------------------------------------------
@@ -465,7 +513,13 @@ begin
       is_first_byte := '0';
       data_cnt_tx_var  := (others => '0');
       spi_tx_data_count <= (others => '0');
+      tx_timestamp_ack <= '0';
+      rx_timestamp_ack <= '0';
     elsif rising_edge(clk_sys_i) then
+      -- Default: clear acknowledge signals (pulse behavior)
+      tx_timestamp_ack <= '0';
+      rx_timestamp_ack <= '0';
+      
       data_cnt_tx_var := spi_tx_data_count;
       if next_wr_en = '1' then
         if is_first_byte = '0' then
@@ -521,6 +575,26 @@ begin
                   -- Prefetch erstes Read-Byte
                   next_shift_out := (others => '0');
                   case next_addr is
+                    -- TX Timestamp registers (0x03-0x0A)
+                    when "0000011" =>      -- 0x03 TX_TS byte 0 (LSB)
+                      next_shift_out := std_ulogic_vector(tx_timestamp(7 downto 0));
+                    when "0000100" =>      -- 0x04 TX_TS byte 1
+                      next_shift_out := std_ulogic_vector(tx_timestamp(15 downto 8));
+                    when "0000101" =>      -- 0x05 TX_TS byte 2
+                      next_shift_out := std_ulogic_vector(tx_timestamp(23 downto 16));
+                    when "0000110" =>      -- 0x06 TX_TS byte 3
+                      next_shift_out := std_ulogic_vector(tx_timestamp(31 downto 24));
+                    when "0000111" =>      -- 0x07 TX_TS byte 4
+                      next_shift_out := std_ulogic_vector(tx_timestamp(39 downto 32));
+                    when "0001000" =>      -- 0x08 TX_TS byte 5
+                      next_shift_out := std_ulogic_vector(tx_timestamp(47 downto 40));
+                    when "0001001" =>      -- 0x09 TX_TS byte 6
+                      next_shift_out := std_ulogic_vector(tx_timestamp(55 downto 48));
+                    when "0001010" =>      -- 0x0A TX_TS byte 7 (MSB)
+                      next_shift_out := std_ulogic_vector(tx_timestamp(63 downto 56));
+                    when "0001011" =>      -- 0x0B TX_TS_STATUS
+                      next_shift_out(0) := tx_timestamp_valid;
+                      next_shift_out(7 downto 1) := (others => '0');
                     when "0100000" =>      -- 0x20 RX_LEN low
                       next_shift_out := std_ulogic_vector(reg_rx_len_sys(7 downto 0));
                     when "0100001" =>      -- 0x21 RX_LEN high
@@ -529,6 +603,26 @@ begin
                       next_shift_out(0) := reg_rx_ready_sys;
                       next_shift_out(1) := reg_rx_overflow_sys;
                       next_shift_out(7 downto 2) := (others => '0');
+                    -- RX Timestamp registers (0x23-0x2A)
+                    when "0100011" =>      -- 0x23 RX_TS byte 0 (LSB)
+                      next_shift_out := std_ulogic_vector(rx_timestamp(7 downto 0));
+                    when "0100100" =>      -- 0x24 RX_TS byte 1
+                      next_shift_out := std_ulogic_vector(rx_timestamp(15 downto 8));
+                    when "0100101" =>      -- 0x25 RX_TS byte 2
+                      next_shift_out := std_ulogic_vector(rx_timestamp(23 downto 16));
+                    when "0100110" =>      -- 0x26 RX_TS byte 3
+                      next_shift_out := std_ulogic_vector(rx_timestamp(31 downto 24));
+                    when "0100111" =>      -- 0x27 RX_TS byte 4
+                      next_shift_out := std_ulogic_vector(rx_timestamp(39 downto 32));
+                    when "0101000" =>      -- 0x28 RX_TS byte 5
+                      next_shift_out := std_ulogic_vector(rx_timestamp(47 downto 40));
+                    when "0101001" =>      -- 0x29 RX_TS byte 6
+                      next_shift_out := std_ulogic_vector(rx_timestamp(55 downto 48));
+                    when "0101010" =>      -- 0x2A RX_TS byte 7 (MSB)
+                      next_shift_out := std_ulogic_vector(rx_timestamp(63 downto 56));
+                    when "0101011" =>      -- 0x2B RX_TS_STATUS
+                      next_shift_out(0) := rx_timestamp_valid;
+                      next_shift_out(7 downto 1) := (others => '0');
                     when others =>
                       -- 0x30.. : RX-Datenfenster aus RX-FIFO (alles >= 0x30)
                       if unsigned(next_addr) >= 16#30# then
@@ -582,10 +676,16 @@ begin
                       reg_tx_start <= shift_in_var(0);
                       data_cnt_tx_var  := (others => '0');
                       spi_resume_data <= '0';
+                    when "0001011" =>  -- 0x0B TX_TS_STATUS acknowledge
+                      -- Generate pulse on write to acknowledge register
+                      tx_timestamp_ack <= shift_in_var(0);
                     when "0100010" =>  -- 0x22 RX_STATUS clear request
                       if shift_in_var(0) = '1' then
                         rx_clear_toggle_sys <= not rx_clear_toggle_sys;
                       end if;
+                    when "0101011" =>  -- 0x2B RX_TS_STATUS acknowledge
+                      -- Generate pulse on write to acknowledge register
+                      rx_timestamp_ack <= shift_in_var(0);
                     when others =>
                     if unsigned(next_addr) >= 16#10# then
                         if txfifo_wr_full = '0' then
@@ -632,6 +732,26 @@ begin
                   -- READ:
                   next_shift_out := (others => '0');
                   case next_addr_inc is
+                    -- TX Timestamp registers (0x03-0x0A)
+                    when "0000011" =>      -- 0x03 TX_TS byte 0 (LSB)
+                      next_shift_out := std_ulogic_vector(tx_timestamp(7 downto 0));
+                    when "0000100" =>      -- 0x04 TX_TS byte 1
+                      next_shift_out := std_ulogic_vector(tx_timestamp(15 downto 8));
+                    when "0000101" =>      -- 0x05 TX_TS byte 2
+                      next_shift_out := std_ulogic_vector(tx_timestamp(23 downto 16));
+                    when "0000110" =>      -- 0x06 TX_TS byte 3
+                      next_shift_out := std_ulogic_vector(tx_timestamp(31 downto 24));
+                    when "0000111" =>      -- 0x07 TX_TS byte 4
+                      next_shift_out := std_ulogic_vector(tx_timestamp(39 downto 32));
+                    when "0001000" =>      -- 0x08 TX_TS byte 5
+                      next_shift_out := std_ulogic_vector(tx_timestamp(47 downto 40));
+                    when "0001001" =>      -- 0x09 TX_TS byte 6
+                      next_shift_out := std_ulogic_vector(tx_timestamp(55 downto 48));
+                    when "0001010" =>      -- 0x0A TX_TS byte 7 (MSB)
+                      next_shift_out := std_ulogic_vector(tx_timestamp(63 downto 56));
+                    when "0001011" =>      -- 0x0B TX_TS_STATUS
+                      next_shift_out(0) := tx_timestamp_valid;
+                      next_shift_out(7 downto 1) := (others => '0');
                     when "0100000" =>      -- 0x20 RX_LEN low
                       next_shift_out := std_ulogic_vector(reg_rx_len_sys(7 downto 0));
                     when "0100001" =>      -- 0x21 RX_LEN high
@@ -640,6 +760,26 @@ begin
                       next_shift_out(0) := reg_rx_ready_sys;
                       next_shift_out(1) := reg_rx_overflow_sys;
                       next_shift_out(7 downto 2) := (others => '0');
+                    -- RX Timestamp registers (0x23-0x2A)
+                    when "0100011" =>      -- 0x23 RX_TS byte 0 (LSB)
+                      next_shift_out := std_ulogic_vector(rx_timestamp(7 downto 0));
+                    when "0100100" =>      -- 0x24 RX_TS byte 1
+                      next_shift_out := std_ulogic_vector(rx_timestamp(15 downto 8));
+                    when "0100101" =>      -- 0x25 RX_TS byte 2
+                      next_shift_out := std_ulogic_vector(rx_timestamp(23 downto 16));
+                    when "0100110" =>      -- 0x26 RX_TS byte 3
+                      next_shift_out := std_ulogic_vector(rx_timestamp(31 downto 24));
+                    when "0100111" =>      -- 0x27 RX_TS byte 4
+                      next_shift_out := std_ulogic_vector(rx_timestamp(39 downto 32));
+                    when "0101000" =>      -- 0x28 RX_TS byte 5
+                      next_shift_out := std_ulogic_vector(rx_timestamp(47 downto 40));
+                    when "0101001" =>      -- 0x29 RX_TS byte 6
+                      next_shift_out := std_ulogic_vector(rx_timestamp(55 downto 48));
+                    when "0101010" =>      -- 0x2A RX_TS byte 7 (MSB)
+                      next_shift_out := std_ulogic_vector(rx_timestamp(63 downto 56));
+                    when "0101011" =>      -- 0x2B RX_TS_STATUS
+                      next_shift_out(0) := rx_timestamp_valid;
+                      next_shift_out(7 downto 1) := (others => '0');
                     when others =>
                       -- 0x30.. : RX-Datenfenster aus RX-FIFO (alles >= 0x30)
                       if unsigned(next_addr) >= 16#30# then
