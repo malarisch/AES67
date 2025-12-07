@@ -393,7 +393,6 @@ begin
       tx_clk_i        => mac_tx_clock_i,
       tx_rst_i        => mac_tx_reset_i,
       tx_enable_i     => mac_tx_enable_o,
-      tx_byte_sent_i  => mac_tx_byte_sent_i,
       
       tx_timestamp_o     => tx_timestamp,
       tx_timestamp_valid_o => tx_timestamp_valid,
@@ -402,7 +401,6 @@ begin
       rx_clk_i        => mac_rx_clock_i,
       rx_rst_i        => mac_rx_reset_i,
       rx_frame_i      => mac_rx_frame_i,
-      rx_byte_rcv_i   => mac_rx_byte_rcv_i,
       
       rx_timestamp_o     => rx_timestamp,
       rx_timestamp_valid_o => rx_timestamp_valid,

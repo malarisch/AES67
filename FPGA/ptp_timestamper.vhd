@@ -22,7 +22,6 @@ entity ptp_timestamper is
     tx_clk_i        : in  std_ulogic;
     tx_rst_i        : in  std_ulogic;
     tx_enable_i     : in  std_ulogic;  -- TX enable signal from MAC
-    tx_byte_sent_i  : in  std_ulogic;  -- Byte sent signal from MAC
     
     -- TX Timestamp Output (synchronized to clk_i)
     tx_timestamp_o     : out unsigned(63 downto 0);
@@ -33,7 +32,6 @@ entity ptp_timestamper is
     rx_clk_i        : in  std_ulogic;
     rx_rst_i        : in  std_ulogic;
     rx_frame_i      : in  std_ulogic;  -- RX frame active signal
-    rx_byte_rcv_i   : in  std_ulogic;  -- Byte received signal
     
     -- RX Timestamp Output (synchronized to clk_i)
     rx_timestamp_o     : out unsigned(63 downto 0);
