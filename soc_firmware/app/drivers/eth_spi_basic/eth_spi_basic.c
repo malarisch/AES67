@@ -25,15 +25,21 @@ LOG_MODULE_REGISTER(eth_spi_basic, CONFIG_ETHERNET_LOG_LEVEL);
 #define REG_TX_LEN_L      0x00
 #define REG_TX_LEN_H      0x01
 #define REG_TX_CTRL       0x02
+#define REG_TX_TS_BASE    0x03  /* 0x03-0x0A: TX timestamp (8 bytes) */
+#define REG_TX_TS_STATUS  0x0B
 #define REG_TX_WINDOW     0x10  /* 0x10.. auto-increment */
 
 #define REG_RX_LEN_L      0x20
 #define REG_RX_LEN_H      0x21
 #define REG_RX_STATUS     0x22
+#define REG_RX_TS_BASE    0x23  /* 0x23-0x2A: RX timestamp (8 bytes) */
+#define REG_RX_TS_STATUS  0x2B
 #define REG_RX_WINDOW     0x30  /* 0x30.. auto-increment */
 
 #define RX_STATUS_READY   BIT(0)
 #define RX_STATUS_OVF     BIT(1)
+
+#define TS_STATUS_VALID   BIT(0)
 
 /* Helper to build the first SPI byte */
 #define SPI_CMD_WRITE(addr7)   (0x80 | ((addr7) & 0x7F))
@@ -485,6 +491,113 @@ static int eth_spi_basic_init(const struct device *dev)
     k_work_schedule(&data->link_work, K_MSEC(50));
     
     return 0;
+}
+
+/* PTP Timestamp Functions */
+int eth_spi_basic_get_tx_timestamp(const struct device *dev, 
+                                    struct eth_spi_basic_timestamp *ts)
+{
+    uint8_t ts_bytes[8];
+    uint8_t status;
+    int ret;
+    
+    if (!dev || !ts) {
+        return -EINVAL;
+    }
+    
+    /* Read timestamp status first */
+    ret = spi_basic_read_reg(dev, REG_TX_TS_STATUS, &status);
+    if (ret) {
+        return ret;
+    }
+    
+    ts->valid = (status & TS_STATUS_VALID) != 0;
+    
+    if (!ts->valid) {
+        ts->ns = 0;
+        return 0;
+    }
+    
+    /* Read 8-byte timestamp (little-endian) */
+    ret = spi_basic_read_bytes(dev, REG_TX_TS_BASE, ts_bytes, sizeof(ts_bytes));
+    if (ret) {
+        return ret;
+    }
+    
+    /* Assemble 64-bit timestamp */
+    ts->ns = ((uint64_t)ts_bytes[0] << 0)  |
+             ((uint64_t)ts_bytes[1] << 8)  |
+             ((uint64_t)ts_bytes[2] << 16) |
+             ((uint64_t)ts_bytes[3] << 24) |
+             ((uint64_t)ts_bytes[4] << 32) |
+             ((uint64_t)ts_bytes[5] << 40) |
+             ((uint64_t)ts_bytes[6] << 48) |
+             ((uint64_t)ts_bytes[7] << 56);
+    
+    return 0;
+}
+
+int eth_spi_basic_get_rx_timestamp(const struct device *dev, 
+                                    struct eth_spi_basic_timestamp *ts)
+{
+    uint8_t ts_bytes[8];
+    uint8_t status;
+    int ret;
+    
+    if (!dev || !ts) {
+        return -EINVAL;
+    }
+    
+    /* Read timestamp status first */
+    ret = spi_basic_read_reg(dev, REG_RX_TS_STATUS, &status);
+    if (ret) {
+        return ret;
+    }
+    
+    ts->valid = (status & TS_STATUS_VALID) != 0;
+    
+    if (!ts->valid) {
+        ts->ns = 0;
+        return 0;
+    }
+    
+    /* Read 8-byte timestamp (little-endian) */
+    ret = spi_basic_read_bytes(dev, REG_RX_TS_BASE, ts_bytes, sizeof(ts_bytes));
+    if (ret) {
+        return ret;
+    }
+    
+    /* Assemble 64-bit timestamp */
+    ts->ns = ((uint64_t)ts_bytes[0] << 0)  |
+             ((uint64_t)ts_bytes[1] << 8)  |
+             ((uint64_t)ts_bytes[2] << 16) |
+             ((uint64_t)ts_bytes[3] << 24) |
+             ((uint64_t)ts_bytes[4] << 32) |
+             ((uint64_t)ts_bytes[5] << 40) |
+             ((uint64_t)ts_bytes[6] << 48) |
+             ((uint64_t)ts_bytes[7] << 56);
+    
+    return 0;
+}
+
+int eth_spi_basic_ack_tx_timestamp(const struct device *dev)
+{
+    if (!dev) {
+        return -EINVAL;
+    }
+    
+    /* Write 1 to acknowledge/clear the TX timestamp valid flag */
+    return spi_basic_write_reg(dev, REG_TX_TS_STATUS, 0x01);
+}
+
+int eth_spi_basic_ack_rx_timestamp(const struct device *dev)
+{
+    if (!dev) {
+        return -EINVAL;
+    }
+    
+    /* Write 1 to acknowledge/clear the RX timestamp valid flag */
+    return spi_basic_write_reg(dev, REG_RX_TS_STATUS, 0x01);
 }
 
 /* Device Makro */
