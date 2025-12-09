@@ -238,6 +238,8 @@ architecture rtl of spi_ethernet_client is
   signal sck_sync_d     : std_ulogic := '0';
   signal sck_rising     : std_ulogic := '0';
   signal sck_falling    : std_ulogic := '0';
+  signal mosi_sync      : std_ulogic := '0';
+  signal mosi_sync_d    : std_ulogic := '0';
 
   --------------------------------------------------------------------
   -- Steuerregister
@@ -418,6 +420,8 @@ begin
       sck_sync    <= '0';
       sck_sync_d  <= '0';
       sck_rising  <= '0';
+      mosi_sync   <= '0';
+      mosi_sync_d <= '0';
     elsif rising_edge(clk_sys_i) then
       spi_cs_sync_d <= spi_cs_sync;
       spi_cs_sync   <= spi_cs_n_i;
@@ -428,6 +432,8 @@ begin
       end if;
       sck_sync_d  <= sck_sync;
       sck_sync    <= spi_sck_i;
+      mosi_sync_d <= mosi_sync;
+      mosi_sync   <= spi_mosi_i;
       if (sck_sync = '1') and (sck_sync_d = '0') then
         sck_rising <= '1';
       else
@@ -500,7 +506,7 @@ begin
       else
         if sck_rising = '1' then
           -- Bit von MOSI einlesen
-          shift_in_var(7 - spi_bit_cnt) := spi_mosi_i;
+          shift_in_var(7 - spi_bit_cnt) := mosi_sync_d;
           
           if spi_bit_cnt = 7 then
             spi_bit_cnt   <= 0;
@@ -679,15 +685,23 @@ begin
             -- Shift-Register updaten
             spi_shift_in  <= shift_in_var;
             spi_shift_out <= next_shift_out;
+            
+            -- MISO Update on Rising Edge (Delayed)
+            -- This ensures data is ready well before the next Master Rising Edge
+            if spi_bit_cnt = 7 then
+               spi_miso_lat <= next_shift_out(7);
+            else
+               spi_miso_lat <= next_shift_out(7 - (spi_bit_cnt + 1));
+            end if;
           else
             spi_bit_cnt <= spi_bit_cnt + 1;
             spi_shift_in  <= shift_in_var;
+            -- MISO Update on Rising Edge (Delayed)
+            spi_miso_lat <= next_shift_out(7 - (spi_bit_cnt + 1));
           end if;
         end if;
         
-        if sck_falling = '1' then
-             spi_miso_lat <= spi_shift_out(7 - spi_bit_cnt);
-        end if;
+        -- Removed sck_falling update to avoid race condition at high speeds
       end if;
       -- Auch außerhalb Bitende den Zähler zurückschreiben
       spi_tx_data_count <= data_cnt_tx_var;

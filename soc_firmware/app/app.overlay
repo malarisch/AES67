@@ -27,7 +27,7 @@
         compatible = "vendor,spi-ethernet";
         reg = <0>;
         /* Max SPI clock in Hz (30 MHz) */
-        spi-max-frequency = <30000000>;
+        spi-max-frequency = <25000000>;
         /* Dedicated GPIO CS on D14/PB9 for this device */
         cs-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;
         /* IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3) */
