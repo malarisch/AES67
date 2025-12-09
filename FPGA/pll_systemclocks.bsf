@@ -82,7 +82,7 @@ on the Quartus Prime software download page.
 		(text "0.00" (rect 113 125 243 259)(font "Arial" ))
 		(text "50.00" (rect 146 125 314 259)(font "Arial" ))
 		(text "c3" (rect 62 137 133 283)(font "Arial" ))
-		(text "1/5" (rect 84 137 180 283)(font "Arial" ))
+		(text "5/1" (rect 84 137 180 283)(font "Arial" ))
 		(text "0.00" (rect 113 137 243 283)(font "Arial" ))
 		(text "50.00" (rect 146 137 314 283)(font "Arial" ))
 		(text "c4" (rect 62 149 133 307)(font "Arial" ))

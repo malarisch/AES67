@@ -233,13 +233,18 @@ architecture rtl of spi_ethernet_client is
   signal spi_rw_n       : std_ulogic := '0';  -- 1=Write, 0=Read
   signal spi_addr       : std_ulogic_vector(6 downto 0) := (others => '0');
 
-  signal spi_cs_sync    : std_ulogic := '1';
+  signal sck_meta       : std_ulogic := '0';
   signal sck_sync       : std_ulogic := '0';
   signal sck_sync_d     : std_ulogic := '0';
   signal sck_rising     : std_ulogic := '0';
   signal sck_falling    : std_ulogic := '0';
+  
+  signal mosi_meta      : std_ulogic := '0';
   signal mosi_sync      : std_ulogic := '0';
-  signal mosi_sync_d    : std_ulogic := '0';
+  
+  signal cs_meta        : std_ulogic := '1';
+  signal spi_cs_sync    : std_ulogic := '1';
+  signal spi_cs_sync_d  : std_ulogic := '1';
 
   --------------------------------------------------------------------
   -- Steuerregister
@@ -310,7 +315,6 @@ architecture rtl of spi_ethernet_client is
   signal spi_tx_data_count   : unsigned(15 downto 0) := (others => '0');
   
   signal spi_resume_data     : std_ulogic := '0';
-  signal spi_cs_sync_d       : std_ulogic := '1';
   signal spi_cs_falling      : std_ulogic := '0';
 
   signal mac_tx_preamble_bytes_sent : unsigned(3 downto 0) := (others => '0');
@@ -414,36 +418,48 @@ begin
   process(clk_sys_i, rst_sys_i)
   begin
     if rst_sys_i = '1' then
-      spi_cs_sync <= '1';
+      cs_meta       <= '1';
+      spi_cs_sync   <= '1';
       spi_cs_sync_d <= '1';
       spi_cs_falling <= '0';
-      sck_sync    <= '0';
-      sck_sync_d  <= '0';
-      sck_rising  <= '0';
-      mosi_sync   <= '0';
-      mosi_sync_d <= '0';
+      
+      sck_meta      <= '0';
+      sck_sync      <= '0';
+      sck_sync_d    <= '0';
+      sck_rising    <= '0';
+      
+      mosi_meta     <= '0';
+      mosi_sync     <= '0';
     elsif rising_edge(clk_sys_i) then
+      -- 3-Stage Synchronizer for CS
+      cs_meta       <= spi_cs_n_i;
+      spi_cs_sync   <= cs_meta;
       spi_cs_sync_d <= spi_cs_sync;
-      spi_cs_sync   <= spi_cs_n_i;
+      
       if (spi_cs_sync_d = '1') and (spi_cs_sync = '0') then
         spi_cs_falling <= '1';
       else
         spi_cs_falling <= '0';
       end if;
-      sck_sync_d  <= sck_sync;
-      sck_sync    <= spi_sck_i;
-      mosi_sync_d <= mosi_sync;
-      mosi_sync   <= spi_mosi_i;
+      
+      -- 3-Stage Synchronizer for SCK
+      sck_meta      <= spi_sck_i;
+      sck_sync      <= sck_meta;
+      sck_sync_d    <= sck_sync;
+      
       if (sck_sync = '1') and (sck_sync_d = '0') then
         sck_rising <= '1';
       else
         sck_rising <= '0';
       end if;
-      if (sck_sync = '0') and (sck_sync_d = '1') then
-        sck_falling <= '1';
-      else
-        sck_falling <= '0';
-      end if;
+      
+      -- 3-Stage Synchronizer for MOSI (to match SCK latency)
+      mosi_meta     <= spi_mosi_i;
+      mosi_sync     <= mosi_meta;
+      -- We use mosi_sync (Stage 2) when sck_rising (Stage 2->3 transition) is detected
+      
+      -- Removed sck_falling generation as it is not used anymore
+      sck_falling <= '0'; 
     end if;
   end process;
 
@@ -505,8 +521,8 @@ begin
 
       else
         if sck_rising = '1' then
-          -- Bit von MOSI einlesen
-          shift_in_var(7 - spi_bit_cnt) := mosi_sync_d;
+          -- Bit von MOSI einlesen (using mosi_sync from Stage 2)
+          shift_in_var(7 - spi_bit_cnt) := mosi_sync;
           
           if spi_bit_cnt = 7 then
             spi_bit_cnt   <= 0;
@@ -568,15 +584,16 @@ begin
                       if txfifo_wr_full = '0' then
                           txfifo_wr_data <= shift_in_var;
                           next_wr_en   := '1';
-                          data_cnt_tx_var := data_cnt_tx_var + 1;
-                          -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
-                          if data_cnt_tx_var >= reg_tx_len then
-                            spi_resume_data <= '0';
-                            spi_state       <= SPI_IDLE;
-                            spi_transaction_done <= '1';
-                            else
-                            spi_resume_data <= '1';
-                          end if;
+                      end if;
+                      
+                      data_cnt_tx_var := data_cnt_tx_var + 1;
+                      -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
+                      if data_cnt_tx_var >= reg_tx_len then
+                        spi_resume_data <= '0';
+                        spi_state       <= SPI_IDLE;
+                        spi_transaction_done <= '1';
+                      else
+                        spi_resume_data <= '1';
                       end if;
                   else
                   
@@ -602,16 +619,17 @@ begin
                         if txfifo_wr_full = '0' then
                           txfifo_wr_data <= shift_in_var;
                           next_wr_en   := '1';
-                          data_cnt_tx_var := data_cnt_tx_var + 1;
-                          -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
-                          if data_cnt_tx_var >= reg_tx_len then
-                            spi_resume_data <= '0';
-                            spi_state       <= SPI_IDLE;
-                            spi_transaction_done <= '1';
-                            else
-                            spi_resume_data <= '1';
-                          end if;
-                      end if;
+                        end if;
+                        
+                        data_cnt_tx_var := data_cnt_tx_var + 1;
+                        -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
+                        if data_cnt_tx_var >= reg_tx_len then
+                          spi_resume_data <= '0';
+                          spi_state       <= SPI_IDLE;
+                          spi_transaction_done <= '1';
+                        else
+                          spi_resume_data <= '1';
+                        end if;
                       end if;
                   end case;
                   end if;
@@ -622,22 +640,20 @@ begin
                     if rxfifo_rd_empty = '0' then
                           next_shift_out := rxfifo_rd_data;
                           rxfifo_rd_en   <= '1';
-                          spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
-                          spi_transaction_done <= '0';
-                          -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
-                          if spi_rx_bytes_sent + 1 >= reg_rx_len_sys then
-                            spi_resume_data <= '0';
-                            spi_state       <= SPI_IDLE;
-                            spi_transaction_done <= '1';
-                            spi_rx_bytes_sent <= (others => '0');
-                            else
-                            spi_resume_data <= '1';
-                          end if;
-                          else
-                          spi_resume_data <= '0';
-                            spi_state       <= SPI_IDLE;
-                            spi_transaction_done <= '1';
-                            spi_rx_bytes_sent <= (others => '0');
+                    else
+                          next_shift_out := (others => '0');
+                    end if;
+                    
+                    spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
+                    spi_transaction_done <= '0';
+                    -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
+                    if spi_rx_bytes_sent + 1 >= reg_rx_len_sys then
+                      spi_resume_data <= '0';
+                      spi_state       <= SPI_IDLE;
+                      spi_transaction_done <= '1';
+                      spi_rx_bytes_sent <= (others => '0');
+                    else
+                      spi_resume_data <= '1';
                     end if;
                   else 
                   -- READ:
@@ -657,18 +673,21 @@ begin
                         if rxfifo_rd_empty = '0' then
                           next_shift_out := rxfifo_rd_data;
                           rxfifo_rd_en   <= '1';
-                          spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
-                          spi_transaction_done <= '0';
-                          -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
-                          -- Offset 1 weil reg_rx_len ist 1 indexiert
-                          if spi_rx_bytes_sent +1 >= reg_rx_len_sys then
-                            spi_resume_data <= '0';
-                            spi_state       <= SPI_IDLE;
-                            spi_transaction_done <= '1';
-                            spi_rx_bytes_sent <= (others => '0');
-                            else
-                            spi_resume_data <= '1';
-                          end if;
+                        else
+                          next_shift_out := (others => '0');
+                        end if;
+                        
+                        spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
+                        spi_transaction_done <= '0';
+                        -- Wenn alle erwarteten Bytes geschrieben, nach Abschluss zurück in Idle
+                        -- Offset 1 weil reg_rx_len ist 1 indexiert
+                        if spi_rx_bytes_sent +1 >= reg_rx_len_sys then
+                          spi_resume_data <= '0';
+                          spi_state       <= SPI_IDLE;
+                          spi_transaction_done <= '1';
+                          spi_rx_bytes_sent <= (others => '0');
+                        else
+                          spi_resume_data <= '1';
                         end if;
                       end if;
                   end case;

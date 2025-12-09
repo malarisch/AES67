@@ -178,9 +178,9 @@ BEGIN
 		clk2_duty_cycle => 50,
 		clk2_multiply_by => 1,
 		clk2_phase_shift => "0",
-		clk3_divide_by => 5,
+		clk3_divide_by => 1,
 		clk3_duty_cycle => 50,
-		clk3_multiply_by => 1,
+		clk3_multiply_by => 5,
 		clk3_phase_shift => "0",
 		clk4_divide_by => 50,
 		clk4_duty_cycle => 50,
@@ -277,7 +277,7 @@ END SYN;
 -- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE0 STRING "125.000000"
 -- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE1 STRING "100.000000"
 -- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE2 STRING "25.000000"
--- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE3 STRING "10.000000"
+-- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE3 STRING "250.000000"
 -- Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE4 STRING "1.000000"
 -- Retrieval info: PRIVATE: EXPLICIT_SWITCHOVER_COUNTER STRING "0"
 -- Retrieval info: PRIVATE: EXT_FEEDBACK_RADIO STRING "0"
@@ -318,12 +318,12 @@ END SYN;
 -- Retrieval info: PRIVATE: OUTPUT_FREQ0 STRING "100.00000000"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ1 STRING "100.00000000"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ2 STRING "100.00000000"
--- Retrieval info: PRIVATE: OUTPUT_FREQ3 STRING "100.00000000"
+-- Retrieval info: PRIVATE: OUTPUT_FREQ3 STRING "250.00000000"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ4 STRING "100.00000000"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE0 STRING "0"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE1 STRING "0"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE2 STRING "0"
--- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE3 STRING "0"
+-- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE3 STRING "1"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_MODE4 STRING "0"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_UNIT0 STRING "MHz"
 -- Retrieval info: PRIVATE: OUTPUT_FREQ_UNIT1 STRING "MHz"
@@ -398,9 +398,9 @@ END SYN;
 -- Retrieval info: CONSTANT: CLK2_DUTY_CYCLE NUMERIC "50"
 -- Retrieval info: CONSTANT: CLK2_MULTIPLY_BY NUMERIC "1"
 -- Retrieval info: CONSTANT: CLK2_PHASE_SHIFT STRING "0"
--- Retrieval info: CONSTANT: CLK3_DIVIDE_BY NUMERIC "5"
+-- Retrieval info: CONSTANT: CLK3_DIVIDE_BY NUMERIC "1"
 -- Retrieval info: CONSTANT: CLK3_DUTY_CYCLE NUMERIC "50"
--- Retrieval info: CONSTANT: CLK3_MULTIPLY_BY NUMERIC "1"
+-- Retrieval info: CONSTANT: CLK3_MULTIPLY_BY NUMERIC "5"
 -- Retrieval info: CONSTANT: CLK3_PHASE_SHIFT STRING "0"
 -- Retrieval info: CONSTANT: CLK4_DIVIDE_BY NUMERIC "50"
 -- Retrieval info: CONSTANT: CLK4_DUTY_CYCLE NUMERIC "50"

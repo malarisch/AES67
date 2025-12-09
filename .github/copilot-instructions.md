@@ -1,0 +1,44 @@
+# AES67 Project Instructions
+
+## Project Overview
+This is a hybrid hardware/firmware project implementing AES67 Audio over IP.
+- **FPGA (Altera/Intel):** Handles high-speed audio data path, Ethernet MAC, and RTP/UDP packet processing in pure logic.
+- **MCU (Zephyr RTOS):** Handles control plane, management, and standard network protocols (DHCP, ARP for management) via an SPI bridge to the FPGA.
+
+## Architecture & Boundaries
+- **Data Plane (FPGA):** Located in `FPGA/`. Implements Ethernet MAC, UDP, and Audio packet aggregation/disaggregation.
+- **Control Plane (MCU):** Located in `soc_firmware/`. Runs Zephyr RTOS.
+- **Bridge:** The MCU communicates with the FPGA via SPI.
+  - **Firmware Side:** `soc_firmware/app/drivers/eth_spi_basic/` implements a Zephyr Ethernet driver that sends/receives frames over SPI.
+  - **Hardware Side:** `FPGA/spi_ethernet_client.vhd` (or similar) implements the SPI slave interface.
+
+## Firmware Development (Zephyr)
+- **Root:** `soc_firmware/app`
+- **Build System:** Uses `west`.
+  - Build: `west build -b <board> app`
+  - Flash: `west flash`
+- **Configuration:**
+  - `prj.conf`: Kernel and subsystem configuration (Networking, Logging, Shell).
+  - `app.overlay` / `boards/*.overlay`: Device Tree modifications.
+- **Key Components:**
+  - `drivers/eth_spi_basic`: Custom driver presenting the SPI link as a standard Zephyr network interface (`eth0`).
+  - `src/main.c`: Application entry point.
+
+## Hardware Development (FPGA)
+- **Root:** `FPGA/`
+- **Toolchain:** Intel Quartus Prime.
+- **Key Modules:**
+  - `ethernet_packet_aggregator`: Handles audio packet construction.
+  - `spi_ethernet_client`: Interface to the MCU.
+
+## Critical Workflows
+1.  **Updating the Bridge:** If changing the SPI protocol, you must update BOTH the VHDL logic in `FPGA/` and the C driver in `soc_firmware/app/drivers/eth_spi_basic/`.
+2.  **Networking:** The MCU sees the network through the SPI driver. Standard Zephyr BSD socket API is used.
+3.  **Debugging:**
+    - Zephyr Shell is enabled (`CONFIG_SHELL=y`).
+    - Logging is enabled (`CONFIG_LOG=y`). Use `LOG_INF`, `LOG_ERR` in firmware.
+
+## Conventions
+- **Zephyr:** Follow standard Zephyr coding style and Device Tree conventions.
+- **FPGA:** VHDL/Verilog mixed. Prefer VHDL for new logic.
+- **Paths:** Always use absolute paths or paths relative to the workspace root when referencing files.
