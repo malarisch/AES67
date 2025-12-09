@@ -20,7 +20,7 @@
 ## PROGRAM "Quartus Prime"
 ## VERSION "Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
 
-## DATE    "Mon Nov 10 16:53:07 2025"
+## DATE    "Mon Dec  8 00:08:25 2025"
 
 ##
 ## DEVICE  "10CL025YU256I7G"
@@ -42,18 +42,13 @@ set_time_format -unit ns -decimal_places 3
 create_clock -name {altera_reserved_tck} -period 100.000 -waveform { 0.000 50.000 } [get_ports {altera_reserved_tck}]
 create_clock -name {c10_clk50m} -period 20.000 -waveform { 0.000 10.000 } [get_ports {c10_clk50m}]
 create_clock -name {gpio32} -period 325.520 -waveform { 0.000 162.760 } [get_ports {gpio32}]
+create_clock -name {gpio0_sck} -period 40.000 -waveform { 0.000 20.000 } [get_ports {gpio0}]
 
 
 #**************************************************************
 # Create Generated Clock
 #**************************************************************
 
-create_generated_clock -name {altpll_noeding:inst31|altpll:altpll_component|altpll_noeding_altpll:auto_generated|wire_pll1_clk[0]} -source [get_pins {inst31|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 5 -divide_by 2 -master_clock {c10_clk50m} [get_pins {inst31|altpll_component|auto_generated|pll1|clk[0]}] 
-create_generated_clock -name {altpll_noeding:inst31|altpll:altpll_component|altpll_noeding_altpll:auto_generated|wire_pll1_clk[1]} -source [get_pins {inst31|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 2 -master_clock {c10_clk50m} [get_pins {inst31|altpll_component|auto_generated|pll1|clk[1]}] 
-create_generated_clock -name {altpll_noeding:inst31|altpll:altpll_component|altpll_noeding_altpll:auto_generated|wire_pll1_clk[2]} -source [get_pins {inst31|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 1 -divide_by 2 -master_clock {c10_clk50m} [get_pins {inst31|altpll_component|auto_generated|pll1|clk[2]}] 
-create_generated_clock -name {altpll_noeding:inst31|altpll:altpll_component|altpll_noeding_altpll:auto_generated|wire_pll1_clk[3]} -source [get_pins {inst31|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 1 -divide_by 5 -master_clock {c10_clk50m} [get_pins {inst31|altpll_component|auto_generated|pll1|clk[3]}] 
-create_generated_clock -name {altpll_noeding:inst31|altpll:altpll_component|altpll_noeding_altpll:auto_generated|wire_pll1_clk[4]} -source [get_pins {inst31|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 1 -divide_by 50 -master_clock {c10_clk50m} [get_pins {inst31|altpll_component|auto_generated|pll1|clk[4]}] 
-create_generated_clock -name {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[0]} -source [get_pins {inst2|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 6 -divide_by 3125 -master_clock {c10_clk50m} [get_pins {inst2|altpll_component|auto_generated|pll1|clk[0]}] 
 create_generated_clock -name {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]} -source [get_pins {inst2|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 3 -divide_by 3125 -master_clock {c10_clk50m} [get_pins {inst2|altpll_component|auto_generated|pll1|clk[1]}] 
 
 
@@ -67,6 +62,34 @@ create_generated_clock -name {audioclks:inst2|altpll:altpll_component|audioclks_
 # Set Clock Uncertainty
 #**************************************************************
 
+set_clock_uncertainty -rise_from [get_clocks {gpio0_sck}] -rise_to [get_clocks {c10_clk50m}] -setup 0.070  
+set_clock_uncertainty -rise_from [get_clocks {gpio0_sck}] -rise_to [get_clocks {c10_clk50m}] -hold 0.090  
+set_clock_uncertainty -rise_from [get_clocks {gpio0_sck}] -fall_to [get_clocks {c10_clk50m}] -setup 0.070  
+set_clock_uncertainty -rise_from [get_clocks {gpio0_sck}] -fall_to [get_clocks {c10_clk50m}] -hold 0.090  
+set_clock_uncertainty -fall_from [get_clocks {gpio0_sck}] -rise_to [get_clocks {c10_clk50m}] -setup 0.070  
+set_clock_uncertainty -fall_from [get_clocks {gpio0_sck}] -rise_to [get_clocks {c10_clk50m}] -hold 0.090  
+set_clock_uncertainty -fall_from [get_clocks {gpio0_sck}] -fall_to [get_clocks {c10_clk50m}] -setup 0.070  
+set_clock_uncertainty -fall_from [get_clocks {gpio0_sck}] -fall_to [get_clocks {c10_clk50m}] -hold 0.090  
+set_clock_uncertainty -rise_from [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}] -rise_to [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}]  0.030  
+set_clock_uncertainty -rise_from [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}] -fall_to [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}]  0.030  
+set_clock_uncertainty -fall_from [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}] -rise_to [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}]  0.030  
+set_clock_uncertainty -fall_from [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}] -fall_to [get_clocks {audioclks:inst2|altpll:altpll_component|audioclks_altpll:auto_generated|wire_pll1_clk[1]}]  0.030  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -rise_to [get_clocks {c10_clk50m}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -rise_to [get_clocks {c10_clk50m}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -fall_to [get_clocks {c10_clk50m}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -fall_to [get_clocks {c10_clk50m}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -rise_to [get_clocks {c10_clk50m}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -rise_to [get_clocks {c10_clk50m}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -fall_to [get_clocks {c10_clk50m}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -fall_to [get_clocks {c10_clk50m}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {c10_clk50m}] -rise_to [get_clocks {c10_clk50m}]  0.100  
+set_clock_uncertainty -rise_from [get_clocks {c10_clk50m}] -fall_to [get_clocks {c10_clk50m}]  0.100  
+set_clock_uncertainty -fall_from [get_clocks {c10_clk50m}] -rise_to [get_clocks {c10_clk50m}]  0.100  
+set_clock_uncertainty -fall_from [get_clocks {c10_clk50m}] -fall_to [get_clocks {c10_clk50m}]  0.100  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {altera_reserved_tck}]  0.020  
 
 
 #**************************************************************
@@ -85,6 +108,7 @@ create_generated_clock -name {audioclks:inst2|altpll:altpll_component|audioclks_
 # Set Clock Groups
 #**************************************************************
 
+set_clock_groups -asynchronous -group [get_clocks {altera_reserved_tck}] 
 set_clock_groups -asynchronous -group [get_clocks {altera_reserved_tck}] 
 set_clock_groups -asynchronous -group [get_clocks {altera_reserved_tck}] 
 set_clock_groups -asynchronous -group [get_clocks {altera_reserved_tck}] 

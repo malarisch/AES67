@@ -15,6 +15,7 @@
 #include <zephyr/random/random.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/linker/sections.h>
 #include <stdbool.h>
 
 #include "eth_spi_basic.h"
@@ -43,37 +44,59 @@ LOG_MODULE_REGISTER(eth_spi_basic, CONFIG_ETHERNET_LOG_LEVEL);
 struct eth_spi_basic_data {
     struct net_if *iface;
     uint8_t mac_addr[6];
-    struct k_sem tx_sem;
     struct k_sem int_sem;
+    struct k_mutex spi_lock; /* Protects shared SPI buffers */
     struct gpio_callback gpio_cb;
     struct k_thread rx_thread;
+    struct k_thread tx_thread;
     bool use_interrupt;
-    uint8_t tx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE];
     uint8_t rx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE];
     struct k_work_delayable link_work;
     K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_SPI_BASIC_RX_STACK_SIZE);
+    K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_ETH_SPI_BASIC_RX_STACK_SIZE);
 };
 
 /* Device Konfiguration */
 struct eth_spi_basic_config {
     struct spi_dt_spec spi;
     struct gpio_dt_spec interrupt;
+    struct gpio_dt_spec cs_gpio;
+    bool has_cs_gpio;
     uint8_t full_duplex;
 };
 
 /* SPI Hilfsfunktionen */
 /* Globale TX/RX-Puffer, um Stack zu sparen und den ursprünglichen Burst-Stil beizubehalten. */
-static uint8_t spi_tx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE + 1];
-static uint8_t spi_rx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE + 1];
+/* STM32H7 requires 32-byte alignment for DMA buffers (D-Cache) */
+#define SPI_BUF_ALIGNMENT 32
+#define SPI_BUF_SIZE      ROUND_UP(ETH_SPI_BASIC_MAX_PKT_SIZE + 1, SPI_BUF_ALIGNMENT)
+
+/* TX Pipeline Configuration */
+#define TX_QUEUE_SIZE 3
+struct tx_msg {
+    uint8_t *buf;
+    size_t len;
+};
+
+static struct k_mem_slab tx_slab;
+static uint8_t __aligned(SPI_BUF_ALIGNMENT) __nocache tx_slab_buffer[TX_QUEUE_SIZE * SPI_BUF_SIZE];
+
+K_MSGQ_DEFINE(tx_queue, sizeof(struct tx_msg), TX_QUEUE_SIZE, 4);
+
+static uint8_t __aligned(SPI_BUF_ALIGNMENT) __nocache spi_tx_buf[SPI_BUF_SIZE];
+static uint8_t __aligned(SPI_BUF_ALIGNMENT) __nocache spi_rx_buf[SPI_BUF_SIZE];
 
 static int spi_basic_read_bytes(const struct device *dev, uint8_t addr,
                                 uint8_t *buf, size_t len)
 {
     const struct eth_spi_basic_config *cfg = dev->config;
+    struct eth_spi_basic_data *data = dev->data;
 
     if (len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
         return -EMSGSIZE;
     }
+
+    k_mutex_lock(&data->spi_lock, K_FOREVER);
 
     spi_tx_buf[0] = SPI_CMD_READ(addr & 0x7F);
     memset(&spi_tx_buf[1], 0, len);
@@ -99,6 +122,8 @@ static int spi_basic_read_bytes(const struct device *dev, uint8_t addr,
     if (ret == 0) {
         memcpy(buf, &spi_rx_buf[1], len); /* Byte 0 ist Echo des CMD */
     }
+    
+    k_mutex_unlock(&data->spi_lock);
     return ret;
 }
 
@@ -106,10 +131,13 @@ static int spi_basic_write_bytes(const struct device *dev, uint8_t addr,
                                  const uint8_t *buf, size_t len)
 {
     const struct eth_spi_basic_config *cfg = dev->config;
+    struct eth_spi_basic_data *data = dev->data;
 
     if (len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
         return -EMSGSIZE;
     }
+
+    k_mutex_lock(&data->spi_lock, K_FOREVER);
 
     spi_tx_buf[0] = SPI_CMD_WRITE(addr & 0x7F);
     memcpy(&spi_tx_buf[1], buf, len);
@@ -123,7 +151,10 @@ static int spi_basic_write_bytes(const struct device *dev, uint8_t addr,
         .count = 1,
     };
 
-    return spi_write_dt(&cfg->spi, &tx_set);
+    int ret = spi_write_dt(&cfg->spi, &tx_set);
+    
+    k_mutex_unlock(&data->spi_lock);
+    return ret;
 }
 
 static int spi_basic_read_reg(const struct device *dev, uint8_t addr, uint8_t *val)
@@ -149,74 +180,113 @@ static int spi_basic_read_len_status(const struct device *dev, uint8_t *len_l, u
         *len_h  = tmp[1];
         *status = tmp[2];
     }
-    //LOG_DBG("Read len_l=0x%02X len_h=0x%02X status=0x%02X", tmp[0], tmp[1], tmp[2]);
+    if (!(tmp[0] == 0 && tmp[1] == 0 && tmp[2] == 0)) {
+        LOG_DBG("Read len_l=0x%02X len_h=0x%02X status=0x%02X", tmp[0], tmp[1], tmp[2]);    
+    }
     return ret;
 }
 
 static int spi_basic_clear_rx(const struct device *dev)
 {
-    //LOG_DBG("clrrx");
+    LOG_DBG("clrrx");
     /* Writing bit0 toggles the clear line inside the FPGA */
     return spi_basic_write_reg(dev, REG_RX_STATUS, RX_STATUS_READY);
+}
+
+/* TX Thread - sendet Pakete aus der Queue */
+static void eth_spi_basic_tx_thread(void *p1, void *p2, void *p3)
+{
+    const struct device *dev = p1;
+    struct eth_spi_basic_data *data = dev->data;
+    const struct eth_spi_basic_config *cfg = dev->config;
+    struct tx_msg msg;
+    int ret;
+
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
+
+    while (1) {
+        /* Wait for packet in queue */
+        k_msgq_get(&tx_queue, &msg, K_FOREVER);
+
+        /* 1. Write TX Length */
+        uint8_t len_bytes[2] = { msg.len & 0xff, msg.len >> 8 };
+        ret = spi_basic_write_bytes(dev, REG_TX_LEN_L, len_bytes, sizeof(len_bytes));
+        if (ret) {
+            LOG_ERR("Failed to write TX length: %d", ret);
+            goto tx_done;
+        }
+
+        /* 2. Write Payload */
+        /* msg.buf is aligned. msg.buf[0] is CMD. msg.buf[1...] is Payload. */
+        msg.buf[0] = SPI_CMD_WRITE(REG_TX_WINDOW);
+        
+        struct spi_buf tx_buf_struct = {
+            .buf = msg.buf,
+            .len = msg.len + 1,
+        };
+        struct spi_buf_set tx_set = {
+            .buffers = &tx_buf_struct,
+            .count = 1,
+        };
+
+        k_mutex_lock(&data->spi_lock, K_FOREVER);
+        ret = spi_write_dt(&cfg->spi, &tx_set);
+        k_mutex_unlock(&data->spi_lock);
+
+        if (ret) {
+            LOG_ERR("Failed to write TX payload: %d", ret);
+            goto tx_done;
+        }
+
+        /* 3. Trigger TX */
+        /* Toggle TX start (write 0 then 1 to ensure a rising edge) */
+        (void)spi_basic_write_reg(dev, REG_TX_CTRL, 0x00);
+        ret = spi_basic_write_reg(dev, REG_TX_CTRL, 0x01);
+        if (ret) {
+            LOG_ERR("Failed to trigger TX: %d", ret);
+        }
+
+tx_done:
+        /* Free buffer back to slab */
+        k_mem_slab_free(&tx_slab, (void *)msg.buf);
+    }
 }
 
 /* Ethernet Packet senden */
 static int eth_spi_basic_tx(const struct device *dev, struct net_pkt *pkt)
 {
-    struct eth_spi_basic_data *data = dev->data;
     size_t pkt_len = net_pkt_get_len(pkt);
+    struct tx_msg msg;
     int ret;
     
     LOG_DBG("TX packet, len=%zu", pkt_len);
     
-    k_sem_take(&data->tx_sem, K_FOREVER);
-    
     if (pkt_len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
         LOG_ERR("Packet too large: %zu", pkt_len);
-        ret = -EMSGSIZE;
-        goto done;
+        return -EMSGSIZE;
     }
 
-    if (net_pkt_read(pkt, data->tx_buf, pkt_len) < 0) {
+    /* Allocate buffer from slab */
+    ret = k_mem_slab_alloc(&tx_slab, (void **)&msg.buf, K_NO_WAIT);
+    if (ret) {
+        LOG_ERR("TX queue full, dropping packet");
+        return -ENOMEM;
+    }
+
+    msg.len = pkt_len;
+
+    /* Copy payload to offset 1 (offset 0 is for CMD) */
+    if (net_pkt_read(pkt, &msg.buf[1], pkt_len) < 0) {
         LOG_ERR("Failed to read packet data");
-        ret = -EIO;
-        goto done;
+        k_mem_slab_free(&tx_slab, (void *)msg.buf);
+        return -EIO;
     }
 
-    /* Program TX length */
-    uint8_t len_bytes[2] = { pkt_len & 0xff, pkt_len >> 8 };
-    ret = spi_basic_write_bytes(dev, REG_TX_LEN_L, len_bytes, sizeof(len_bytes));
-    if (ret) {
-        LOG_ERR("Failed to write TX length: %d", ret);
-        goto done;
-    }
-    //for (size_t i = 0; i < pkt_len; i+=1) {
-    //        if (i % 16 == 0) {
-    //            printf("\n %04X ", i);
-    //        }
-    //        printf(" %d 0x%02X", i, data->tx_buf[i]);
-    //        if (i % 16 == 0) {
-    //            printf("\n");
-    //        }
-    //    }
-    //LOG_DBG("total packet %u bytes", pkt_len);
-    /* Push payload into TX window (auto-increment) */
-    ret = spi_basic_write_bytes(dev, REG_TX_WINDOW, data->tx_buf, pkt_len);
-    if (ret) {
-        LOG_ERR("Failed to write TX payload: %d", ret);
-        goto done;
-    }
-
-    /* Toggle TX start (write 0 then 1 to ensure a rising edge) */
-    (void)spi_basic_write_reg(dev, REG_TX_CTRL, 0x00);
-    ret = spi_basic_write_reg(dev, REG_TX_CTRL, 0x01);
-    if (ret) {
-        LOG_ERR("Failed to trigger TX: %d", ret);
-    }
+    /* Queue the message */
+    k_msgq_put(&tx_queue, &msg, K_NO_WAIT);
     
-done:
-    k_sem_give(&data->tx_sem);
-    return ret;
+    return 0;
 }
 
 /* RX Thread - empfängt Pakete */
@@ -260,6 +330,13 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
             spi_basic_clear_rx(dev);
             continue;
         }
+        
+       // for (size_t i = 0; i < pkt_len; i+=1) {
+       //     if (i % 16 == 0) {
+       //        printf("\n %04X ", i);
+       //     }
+       //         printf(" %02d 0x%02X", i, data->rx_buf[i]);
+       // }  
 
         /* Debug: Ziel-MAC prüfen */
         bool dst_broadcast = true;
@@ -314,13 +391,9 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
             spi_basic_clear_rx(dev);
             continue;
         }
-      //  for (size_t i = 0; i < pkt_len; i+=1) {
-      //      if (i % 16 == 0) {
-      //         printf("\n %04X ", i);
-      //      }
-      //      printf(" %02d 0x%02X", i, data->rx_buf[i]);
+        
       //      
-      //  }
+        
         //for (size_t i = 0; i < pkt_len; i+=8) {
         //    LOG_DBG("Packet %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X", i, data->rx_buf[i],
          //       i+1, data->rx_buf[i+1], i+2, data->rx_buf[i+2], i+3, data->rx_buf[i+3],
@@ -455,8 +528,11 @@ static int eth_spi_basic_init(const struct device *dev)
     }
     
     /* Semaphoren initialisieren */
-    k_sem_init(&data->tx_sem, 1, 1);
     k_sem_init(&data->int_sem, 0, 1);
+    k_mutex_init(&data->spi_lock);
+
+    /* Initialize TX Slab in nocache memory */
+    k_mem_slab_init(&tx_slab, tx_slab_buffer, SPI_BUF_SIZE, TX_QUEUE_SIZE);
 
     /* Link bring-up verzögert, damit Net-Stack vollständig steht. */
     k_work_init_delayable(&data->link_work, eth_spi_basic_link_work_handler);
@@ -478,6 +554,15 @@ static int eth_spi_basic_init(const struct device *dev)
                    K_PRIO_COOP(2), 0, K_NO_WAIT);
     
     k_thread_name_set(&data->rx_thread, "eth_spi_rx");
+
+    /* TX Thread starten */
+    k_thread_create(&data->tx_thread, data->tx_stack,
+                   CONFIG_ETH_SPI_BASIC_RX_STACK_SIZE,
+                   eth_spi_basic_tx_thread,
+                   (void *)dev, NULL, NULL,
+                   K_PRIO_COOP(2), 0, K_NO_WAIT);
+    
+    k_thread_name_set(&data->tx_thread, "eth_spi_tx");
     
     LOG_INF("SPI Ethernet initialized");
 
@@ -493,10 +578,12 @@ static int eth_spi_basic_init(const struct device *dev)
                                                                         \
     static const struct eth_spi_basic_config eth_spi_basic_config_##n = { \
         .spi = SPI_DT_SPEC_INST_GET(n,                                  \
-            SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_HOLD_ON_CS, \
+            SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,    \
             0),                                                         \
         .interrupt = GPIO_DT_SPEC_INST_GET(n, int_gpios),              \
         .full_duplex = DT_INST_PROP(n, full_duplex),                   \
+        .cs_gpio = GPIO_DT_SPEC_INST_GET_OR(n, cs_gpios, {0}),         \
+        .has_cs_gpio = DT_NODE_HAS_PROP(DT_DRV_INST(n), cs_gpios),     \
     };                                                                  \
                                                                         \
     ETH_NET_DEVICE_DT_INST_DEFINE(n,                                    \

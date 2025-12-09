@@ -13,6 +13,14 @@ properties:
     description: |
       GPIO pin connected to the interrupt output of the chip.
 
+  cs-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      Optional dedicated chip select GPIO for this device. Used when the
+      controller does not manage CS in hardware or when a separate GPIO
+      should be used.
+
   full-duplex:
     type: boolean
     description: |

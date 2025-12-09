@@ -237,6 +237,7 @@ architecture rtl of spi_ethernet_client is
   signal sck_sync       : std_ulogic := '0';
   signal sck_sync_d     : std_ulogic := '0';
   signal sck_rising     : std_ulogic := '0';
+  signal sck_falling    : std_ulogic := '0';
 
   --------------------------------------------------------------------
   -- Steuerregister
@@ -432,6 +433,11 @@ begin
       else
         sck_rising <= '0';
       end if;
+      if (sck_sync = '0') and (sck_sync_d = '1') then
+        sck_falling <= '1';
+      else
+        sck_falling <= '0';
+      end if;
     end if;
   end process;
 
@@ -495,8 +501,7 @@ begin
         if sck_rising = '1' then
           -- Bit von MOSI einlesen
           shift_in_var(7 - spi_bit_cnt) := spi_mosi_i;
-          -- MISO-Bit für die nächste SPI-Periode setzen (Mode 0: Master sampelt auf rising edge)
-          spi_miso_lat <= shift_out_var(7 - spi_bit_cnt);
+          
           if spi_bit_cnt = 7 then
             spi_bit_cnt   <= 0;
             rw_cmd        := spi_rw_n;
@@ -678,6 +683,10 @@ begin
             spi_bit_cnt <= spi_bit_cnt + 1;
             spi_shift_in  <= shift_in_var;
           end if;
+        end if;
+        
+        if sck_falling = '1' then
+             spi_miso_lat <= spi_shift_out(7 - spi_bit_cnt);
         end if;
       end if;
       -- Auch außerhalb Bitende den Zähler zurückschreiben
