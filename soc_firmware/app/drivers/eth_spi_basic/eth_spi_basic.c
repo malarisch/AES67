@@ -12,6 +12,8 @@
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_pkt.h>
+#include <zephyr/net/ptp_time.h>
+#include <zephyr/drivers/ptp_clock.h>
 #include <zephyr/random/random.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
@@ -33,6 +35,12 @@ LOG_MODULE_REGISTER(eth_spi_basic, CONFIG_ETHERNET_LOG_LEVEL);
 #define REG_RX_STATUS     0x22
 #define REG_RX_WINDOW     0x30  /* 0x30.. auto-increment */
 
+#define REG_PTP_TIME_L    0x40
+#define REG_PTP_TIME_H    0x41 /* ... 0x47 */
+#define REG_TX_TS_L       0x50
+#define REG_RX_TS_L       0x60
+#define REG_PTP_INC       0x70
+
 #define RX_STATUS_READY   BIT(0)
 #define RX_STATUS_OVF     BIT(1)
 
@@ -52,6 +60,7 @@ struct eth_spi_basic_data {
     bool use_interrupt;
     uint8_t rx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE];
     struct k_work_delayable link_work;
+    const struct device *ptp_clock;
     K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_SPI_BASIC_RX_STACK_SIZE);
     K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_ETH_SPI_BASIC_RX_STACK_SIZE);
 };
@@ -76,6 +85,7 @@ struct eth_spi_basic_config {
 struct tx_msg {
     uint8_t *buf;
     size_t len;
+    struct net_pkt *pkt;
 };
 
 static struct k_mem_slab tx_slab;
@@ -193,6 +203,92 @@ static int spi_basic_clear_rx(const struct device *dev)
     return spi_basic_write_reg(dev, REG_RX_STATUS, RX_STATUS_READY);
 }
 
+/* PTP Helper Functions */
+static int eth_spi_ptp_read_time(const struct device *dev, uint64_t *ns)
+{
+    uint8_t buf[8];
+    int ret = spi_basic_read_bytes(dev, REG_PTP_TIME_L, buf, 8);
+    if (ret == 0) {
+        *ns = 0;
+        for (int i = 0; i < 8; i++) {
+            *ns |= ((uint64_t)buf[i] << (i * 8));
+        }
+    }
+    return ret;
+}
+
+static int eth_spi_ptp_write_time(const struct device *dev, uint64_t ns)
+{
+    uint8_t buf[8];
+    for (int i = 0; i < 8; i++) {
+        buf[i] = (ns >> (i * 8)) & 0xFF;
+    }
+    return spi_basic_write_bytes(dev, REG_PTP_TIME_L, buf, 8);
+}
+
+/* PTP Clock API Implementation */
+static int eth_spi_ptp_set(const struct device *dev, struct net_ptp_time *tm)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    uint64_t ns = tm->second * NSEC_PER_SEC + tm->nanosecond;
+    return eth_spi_ptp_write_time(net_if_get_device(data->iface), ns);
+}
+
+static int eth_spi_ptp_get(const struct device *dev, struct net_ptp_time *tm)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    uint64_t ns;
+    int ret = eth_spi_ptp_read_time(net_if_get_device(data->iface), &ns);
+    if (ret == 0) {
+        tm->second = ns / NSEC_PER_SEC;
+        tm->nanosecond = ns % NSEC_PER_SEC;
+    }
+    return ret;
+}
+
+static int eth_spi_ptp_adjust(const struct device *dev, int increment)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    uint64_t ns;
+    int ret = eth_spi_ptp_read_time(net_if_get_device(data->iface), &ns);
+    if (ret == 0) {
+        if (increment > 0) {
+            ns += increment;
+        } else {
+            ns -= (-increment);
+        }
+        ret = eth_spi_ptp_write_time(net_if_get_device(data->iface), ns);
+    }
+    return ret;
+}
+
+static int eth_spi_ptp_rate_adjust(const struct device *dev, double ratio)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    /* Default increment is 10ns. ratio is e.g. 1.00001 */
+    /* We use 8.24 fixed point increment. */
+    /* Base increment = 10.0 */
+    /* New increment = 10.0 * ratio */
+    
+    double inc_f = 10.0 * ratio;
+    uint32_t inc_fixed = (uint32_t)(inc_f * (double)(1 << 24));
+    
+    uint8_t buf[4];
+    buf[0] = inc_fixed & 0xFF;
+    buf[1] = (inc_fixed >> 8) & 0xFF;
+    buf[2] = (inc_fixed >> 16) & 0xFF;
+    buf[3] = (inc_fixed >> 24) & 0xFF;
+    
+    return spi_basic_write_bytes(net_if_get_device(data->iface), REG_PTP_INC, buf, 4);
+}
+
+static const struct ptp_clock_driver_api eth_spi_ptp_api = {
+    .set = eth_spi_ptp_set,
+    .get = eth_spi_ptp_get,
+    .adjust = eth_spi_ptp_adjust,
+    .rate_adjust = eth_spi_ptp_rate_adjust,
+};
+
 /* TX Thread - sendet Pakete aus der Queue */
 static void eth_spi_basic_tx_thread(void *p1, void *p2, void *p3)
 {
@@ -246,10 +342,33 @@ static void eth_spi_basic_tx_thread(void *p1, void *p2, void *p3)
         if (ret) {
             LOG_ERR("Failed to trigger TX: %d", ret);
         }
+        
+        /* Timestamping */
+        if (msg.pkt && data->ptp_clock) {
+            /* Wait a bit for FPGA to latch timestamp (it happens on start pulse) */
+            /* Since we are in a thread, we can yield or busy wait. SPI access takes time anyway. */
+            /* Read TX Timestamp */
+            uint8_t ts_buf[8];
+            ret = spi_basic_read_bytes(dev, REG_TX_TS_L, ts_buf, 8);
+            if (ret == 0) {
+                uint64_t ns = 0;
+                for (int i = 0; i < 8; i++) {
+                    ns |= ((uint64_t)ts_buf[i] << (i * 8));
+                }
+                struct net_ptp_time ptp_ts;
+                ptp_ts.second = ns / NSEC_PER_SEC;
+                ptp_ts.nanosecond = ns % NSEC_PER_SEC;
+                net_pkt_set_timestamp(msg.pkt, &ptp_ts);
+                net_if_add_tx_timestamp(msg.pkt);
+            }
+        }
 
 tx_done:
         /* Free buffer back to slab */
         k_mem_slab_free(&tx_slab, (void *)msg.buf);
+        if (msg.pkt) {
+            net_pkt_unref(msg.pkt);
+        }
     }
 }
 
@@ -275,12 +394,25 @@ static int eth_spi_basic_tx(const struct device *dev, struct net_pkt *pkt)
     }
 
     msg.len = pkt_len;
+    msg.pkt = NULL;
 
     /* Copy payload to offset 1 (offset 0 is for CMD) */
     if (net_pkt_read(pkt, &msg.buf[1], pkt_len) < 0) {
         LOG_ERR("Failed to read packet data");
         k_mem_slab_free(&tx_slab, (void *)msg.buf);
         return -EIO;
+    }
+    
+    /* Check if timestamp is required */
+    /* We need to keep the packet if timestamping is enabled for this packet */
+    /* How to check? net_pkt_timestamp(pkt) returns the timestamp struct, but we need to know if we should capture it. */
+    /* Usually the stack sets a flag or callback. */
+    /* net_if_add_tx_timestamp checks if there is a callback. */
+    /* We can just ref it always if PTP is enabled, or check atomic flag on pkt? */
+    /* For simplicity, let's ref it. */
+    struct eth_spi_basic_data *data = dev->data;
+    if (data->ptp_clock) {
+         msg.pkt = net_pkt_ref(pkt);
     }
 
     /* Queue the message */
@@ -309,6 +441,18 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
             k_sleep(K_MSEC(5));
         }
 
+        /* DEBUG: Read FPGA internal state */
+        uint8_t dbg_status, dbg_cnt_l, dbg_cnt_h;
+        spi_basic_read_reg(dev, 0x78, &dbg_status);
+        spi_basic_read_reg(dev, 0x79, &dbg_cnt_l);
+        spi_basic_read_reg(dev, 0x7A, &dbg_cnt_h);
+        uint16_t dbg_cnt = ((uint16_t)dbg_cnt_h << 8) | dbg_cnt_l;
+        
+        if (dbg_cnt > 0 || (dbg_status & 1) == 0) {
+             LOG_DBG("FPGA Debug: Status=0x%02X (Empty=%d), RxByteCnt=%u", 
+                     dbg_status, (dbg_status & 1), dbg_cnt);
+        }
+
         if (spi_basic_read_len_status(dev, &len_l, &len_h, &status) || !(status & RX_STATUS_READY)) {
             if (status & RX_STATUS_OVF) {
                 LOG_WRN("RX status overflow without READY (status=0x%02X)", status);
@@ -331,12 +475,21 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
             continue;
         }
         
-       // for (size_t i = 0; i < pkt_len; i+=1) {
-       //     if (i % 16 == 0) {
-       //        printf("\n %04X ", i);
-       //     }
-       //         printf(" %02d 0x%02X", i, data->rx_buf[i]);
-       // }  
+        /* Read RX Timestamp */
+        struct net_ptp_time rx_ts = {0};
+        if (data->ptp_clock) {
+            uint8_t ts_buf[8];
+            if (spi_basic_read_bytes(dev, REG_RX_TS_L, ts_buf, 8) == 0) {
+                uint64_t ns = 0;
+                for (int i = 0; i < 8; i++) {
+                    ns |= ((uint64_t)ts_buf[i] << (i * 8));
+                }
+                rx_ts.second = ns / NSEC_PER_SEC;
+                rx_ts.nanosecond = ns % NSEC_PER_SEC;
+            }
+        }
+        
+        LOG_HEXDUMP_DBG(data->rx_buf, pkt_len, "RX Packet Payload");
 
         /* Debug: Ziel-MAC prüfen */
         bool dst_broadcast = true;
@@ -392,15 +545,10 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
             continue;
         }
         
-      //      
+        if (data->ptp_clock) {
+            net_pkt_set_timestamp(pkt, &rx_ts);
+        }
         
-        //for (size_t i = 0; i < pkt_len; i+=8) {
-        //    LOG_DBG("Packet %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X %d 0x%02X", i, data->rx_buf[i],
-         //       i+1, data->rx_buf[i+1], i+2, data->rx_buf[i+2], i+3, data->rx_buf[i+3],
-          //      i+4, data->rx_buf[i+4], i+5, data->rx_buf[i+5], i+6, data->rx_buf[i+6],
-           //     i+7, data->rx_buf[i+7]);
-        //}
-     //   printf("\n-- end -- total packet %u bytes\n", pkt_len);
         if (net_pkt_write(pkt, data->rx_buf, payload_len)) {
             LOG_ERR("RX buffer write failed");
             net_pkt_unref(pkt);
@@ -463,7 +611,13 @@ static void eth_spi_basic_iface_init(struct net_if *iface)
 static enum ethernet_hw_caps eth_spi_basic_get_capabilities(const struct device *dev)
 {
     ARG_UNUSED(dev);
-    return ETHERNET_LINK_10BASE | ETHERNET_LINK_100BASE;
+    return ETHERNET_LINK_10BASE | ETHERNET_LINK_100BASE | ETHERNET_PTP;
+}
+
+static const struct device *eth_spi_basic_get_ptp_clock(const struct device *dev)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    return data->ptp_clock;
 }
 
 static void eth_spi_basic_link_work_handler(struct k_work *work)
@@ -482,6 +636,7 @@ static const struct ethernet_api eth_spi_basic_api = {
     .iface_api.init = eth_spi_basic_iface_init,
     .get_capabilities = eth_spi_basic_get_capabilities,
     .send = eth_spi_basic_tx,
+    .get_ptp_clock = eth_spi_basic_get_ptp_clock,
 };
 
 /* Device Initialisierung */
@@ -572,9 +727,20 @@ static int eth_spi_basic_init(const struct device *dev)
     return 0;
 }
 
+/* PTP Device Definition */
+#define ETH_SPI_PTP_DEFINE(n) \
+    DEVICE_DEFINE(eth_spi_ptp_##n, "eth_spi_ptp_" #n, \
+                  NULL, NULL, \
+                  &eth_spi_basic_data_##n, NULL, \
+                  POST_KERNEL, CONFIG_ETH_INIT_PRIORITY, &eth_spi_ptp_api);
+
 /* Device Makro */
 #define ETH_SPI_BASIC_INIT(n)                                           \
     static struct eth_spi_basic_data eth_spi_basic_data_##n;            \
+    ETH_SPI_PTP_DEFINE(n)                                               \
+    static struct eth_spi_basic_data eth_spi_basic_data_##n = {         \
+        .ptp_clock = DEVICE_GET(eth_spi_ptp_##n),                       \
+    };                                                                  \
                                                                         \
     static const struct eth_spi_basic_config eth_spi_basic_config_##n = { \
         .spi = SPI_DT_SPEC_INST_GET(n,                                  \

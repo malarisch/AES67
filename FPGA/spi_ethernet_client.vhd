@@ -297,6 +297,35 @@ architecture rtl of spi_ethernet_client is
   signal spi_rx_bytes_sent   : unsigned(15 downto 0) := (others => '0');
 
   --------------------------------------------------------------------
+  -- PTP Signals
+  --------------------------------------------------------------------
+  signal ptp_time_current : unsigned(63 downto 0);
+  -- Default increment: 4ns (0x04000000) for 250MHz clock
+  -- Was 10ns (0x0A000000) which caused 2.5x drift
+  signal ptp_time_inc     : unsigned(31 downto 0) := x"04000000"; 
+  signal ptp_set_time     : std_ulogic := '0';
+  signal ptp_set_val      : unsigned(63 downto 0) := (others => '0');
+  
+  signal reg_ptp_time_l   : unsigned(31 downto 0) := (others => '0'); -- For readback snapshot
+  signal reg_ptp_time_h   : unsigned(31 downto 0) := (others => '0');
+  
+  signal reg_tx_ts        : unsigned(63 downto 0) := (others => '0');
+  signal reg_rx_ts        : unsigned(63 downto 0) := (others => '0');
+  
+  -- Cross-domain triggers
+  signal mac_rx_start_toggle : std_ulogic := '0';
+  signal mac_rx_start_sync1 : std_ulogic := '0';
+  signal mac_rx_start_sync2 : std_ulogic := '0';
+  signal mac_rx_start_sync3 : std_ulogic := '0';
+  
+  signal mac_tx_start_toggle : std_ulogic := '0';
+  signal mac_tx_start_sync1 : std_ulogic := '0';
+  signal mac_tx_start_sync2 : std_ulogic := '0';
+  signal mac_tx_start_sync3 : std_ulogic := '0';
+  
+  signal debug_rx_byte_cnt : unsigned(15 downto 0) := (others => '0');
+
+  --------------------------------------------------------------------
   -- MAC-TX-Steuerung
   --------------------------------------------------------------------
   signal mac_tx_active   : std_ulogic := '0';
@@ -323,6 +352,19 @@ architecture rtl of spi_ethernet_client is
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
 
 begin
+
+  --------------------------------------------------------------------
+  -- PTP Timer Instance
+  --------------------------------------------------------------------
+  ptp_timer_inst : entity work.ptp_timer
+    port map (
+      clk_i       => clk_sys_i,
+      rst_i       => rst_sys_i,
+      time_inc_i  => ptp_time_inc,
+      set_time_i  => ptp_set_time,
+      set_val_i   => ptp_set_val,
+      current_time_o => ptp_time_current
+    );
 
   --------------------------------------------------------------------
   -- TX-FIFO-Instanz
@@ -426,7 +468,6 @@ begin
       sck_meta      <= '0';
       sck_sync      <= '0';
       sck_sync_d    <= '0';
-      sck_rising    <= '0';
       
       mosi_meta     <= '0';
       mosi_sync     <= '0';
@@ -447,19 +488,50 @@ begin
       sck_sync      <= sck_meta;
       sck_sync_d    <= sck_sync;
       
-      if (sck_sync = '1') and (sck_sync_d = '0') then
-        sck_rising <= '1';
-      else
-        sck_rising <= '0';
-      end if;
+      -- sck_rising and sck_falling are now generated in the main SPI process
+      -- to avoid multiple driver errors.
       
       -- 3-Stage Synchronizer for MOSI (to match SCK latency)
       mosi_meta     <= spi_mosi_i;
       mosi_sync     <= mosi_meta;
       -- We use mosi_sync (Stage 2) when sck_rising (Stage 2->3 transition) is detected
       
-      -- Removed sck_falling generation as it is not used anymore
-      sck_falling <= '0'; 
+    end if;
+  end process;
+
+  --------------------------------------------------------------------
+  -- PTP Timestamp Capture (System Domain)
+  --------------------------------------------------------------------
+  process(clk_sys_i, rst_sys_i)
+  begin
+    if rst_sys_i = '1' then
+      mac_rx_start_sync1 <= '0';
+      mac_rx_start_sync2 <= '0';
+      mac_rx_start_sync3 <= '0';
+      mac_tx_start_sync1 <= '0';
+      mac_tx_start_sync2 <= '0';
+      mac_tx_start_sync3 <= '0';
+      reg_rx_ts <= (others => '0');
+      reg_tx_ts <= (others => '0');
+    elsif rising_edge(clk_sys_i) then
+      -- Sync RX Start Toggle
+      mac_rx_start_sync1 <= mac_rx_start_toggle;
+      mac_rx_start_sync2 <= mac_rx_start_sync1;
+      mac_rx_start_sync3 <= mac_rx_start_sync2;
+      
+      -- Edge detection (Toggle changed)
+      if mac_rx_start_sync2 /= mac_rx_start_sync3 then
+         reg_rx_ts <= ptp_time_current; -- Capture RX Timestamp
+      end if;
+      
+      -- Sync TX Start Toggle
+      mac_tx_start_sync1 <= mac_tx_start_toggle;
+      mac_tx_start_sync2 <= mac_tx_start_sync1;
+      mac_tx_start_sync3 <= mac_tx_start_sync2;
+      
+      if mac_tx_start_sync2 /= mac_tx_start_sync3 then
+         reg_tx_ts <= ptp_time_current; -- Capture TX Timestamp
+      end if;
     end if;
   end process;
 
@@ -509,15 +581,15 @@ begin
 
 
       if spi_cs_sync = '1' then
-        spi_state <= SPI_IDLE;
-        if spi_resume_data = '1' then
-          -- Weitermachen mit Datenübertragung
-          spi_state      <= SPI_DATA;
-          else
-            spi_transaction_done <= '0';
-        end if;
-        spi_bit_cnt <= 0;
-        spi_miso_lat <= '0';
+        spi_state       <= SPI_IDLE;
+        spi_resume_data <= '0'; -- Force reset of burst mode
+        spi_transaction_done <= '0';
+        spi_bit_cnt     <= 0;
+        spi_miso_lat    <= '0';
+        
+        -- Reset internal counters to avoid stale state
+        data_cnt_tx_var := (others => '0');
+        spi_rx_bytes_sent <= (others => '0');
 
       else
         if sck_rising = '1' then
@@ -556,9 +628,40 @@ begin
                       next_shift_out(0) := reg_rx_ready_sys;
                       next_shift_out(1) := reg_rx_overflow_sys;
                       next_shift_out(7 downto 2) := (others => '0');
+                    
+                    -- TX Timestamp Read (0x50..0x57)
+                    when "1010000" => next_shift_out := std_ulogic_vector(reg_tx_ts(7 downto 0));
+                    when "1010001" => next_shift_out := std_ulogic_vector(reg_tx_ts(15 downto 8));
+                    when "1010010" => next_shift_out := std_ulogic_vector(reg_tx_ts(23 downto 16));
+                    when "1010011" => next_shift_out := std_ulogic_vector(reg_tx_ts(31 downto 24));
+                    when "1010100" => next_shift_out := std_ulogic_vector(reg_tx_ts(39 downto 32));
+                    when "1010101" => next_shift_out := std_ulogic_vector(reg_tx_ts(47 downto 40));
+                    when "1010110" => next_shift_out := std_ulogic_vector(reg_tx_ts(55 downto 48));
+                    when "1010111" => next_shift_out := std_ulogic_vector(reg_tx_ts(63 downto 56));
+
+                    -- RX Timestamp Read (0x60..0x67)
+                    when "1100000" => next_shift_out := std_ulogic_vector(reg_rx_ts(7 downto 0));
+                    when "1100001" => next_shift_out := std_ulogic_vector(reg_rx_ts(15 downto 8));
+                    when "1100010" => next_shift_out := std_ulogic_vector(reg_rx_ts(23 downto 16));
+                    when "1100011" => next_shift_out := std_ulogic_vector(reg_rx_ts(31 downto 24));
+                    when "1100100" => next_shift_out := std_ulogic_vector(reg_rx_ts(39 downto 32));
+                    when "1100101" => next_shift_out := std_ulogic_vector(reg_rx_ts(47 downto 40));
+                    when "1100110" => next_shift_out := std_ulogic_vector(reg_rx_ts(55 downto 48));
+                    when "1100111" => next_shift_out := std_ulogic_vector(reg_rx_ts(63 downto 56));
+
+                    -- Debug Registers (0x78)
+                    when "1111000" => -- 0x78
+                        next_shift_out(0) := rxfifo_rd_empty;
+                        next_shift_out(1) := txfifo_wr_full;
+                        next_shift_out(7 downto 2) := (others => '0');
+                    when "1111001" => -- 0x79
+                        next_shift_out := std_ulogic_vector(debug_rx_byte_cnt(7 downto 0));
+                    when "1111010" => -- 0x7A
+                        next_shift_out := std_ulogic_vector(debug_rx_byte_cnt(15 downto 8));
                     when others =>
                       -- 0x30.. : RX-Datenfenster aus RX-FIFO (alles >= 0x30)
-                      if unsigned(next_addr) >= 16#30# then
+                      -- Exclude Debug Registers (0x70..0x7F) from FIFO read
+                      if unsigned(next_addr) >= 16#30# and unsigned(next_addr) < 16#70# then
                         if rxfifo_rd_empty = '0' then
                           is_first_byte := '1';
                           next_shift_out := rxfifo_rd_data;
@@ -614,8 +717,27 @@ begin
                       if shift_in_var(0) = '1' then
                         rx_clear_toggle_sys <= not rx_clear_toggle_sys;
                       end if;
+                    
+                    -- PTP Write
+                    when "1000000" => ptp_set_val(7 downto 0)   <= unsigned(shift_in_var);
+                    when "1000001" => ptp_set_val(15 downto 8)  <= unsigned(shift_in_var);
+                    when "1000010" => ptp_set_val(23 downto 16) <= unsigned(shift_in_var);
+                    when "1000011" => ptp_set_val(31 downto 24) <= unsigned(shift_in_var);
+                    when "1000100" => ptp_set_val(39 downto 32) <= unsigned(shift_in_var);
+                    when "1000101" => ptp_set_val(47 downto 40) <= unsigned(shift_in_var);
+                    when "1000110" => ptp_set_val(55 downto 48) <= unsigned(shift_in_var);
+                    when "1000111" => 
+                        ptp_set_val(63 downto 56) <= unsigned(shift_in_var);
+                        ptp_set_time <= '1'; -- Trigger load
+                    
+                    when "1110000" => ptp_time_inc(7 downto 0)   <= unsigned(shift_in_var);
+                    when "1110001" => ptp_time_inc(15 downto 8)  <= unsigned(shift_in_var);
+                    when "1110010" => ptp_time_inc(23 downto 16) <= unsigned(shift_in_var);
+                    when "1110011" => ptp_time_inc(31 downto 24) <= unsigned(shift_in_var);
+
                     when others =>
-                    if unsigned(next_addr) >= 16#10# then
+                    ptp_set_time <= '0'; -- Auto-clear strobe
+                    if unsigned(next_addr) >= 16#10# and unsigned(next_addr) < 16#20# then
                         if txfifo_wr_full = '0' then
                           txfifo_wr_data <= shift_in_var;
                           next_wr_en   := '1';
@@ -667,9 +789,40 @@ begin
                       next_shift_out(0) := reg_rx_ready_sys;
                       next_shift_out(1) := reg_rx_overflow_sys;
                       next_shift_out(7 downto 2) := (others => '0');
+
+                    -- TX Timestamp Read (0x50..0x57)
+                    when "1010000" => next_shift_out := std_ulogic_vector(reg_tx_ts(7 downto 0));
+                    when "1010001" => next_shift_out := std_ulogic_vector(reg_tx_ts(15 downto 8));
+                    when "1010010" => next_shift_out := std_ulogic_vector(reg_tx_ts(23 downto 16));
+                    when "1010011" => next_shift_out := std_ulogic_vector(reg_tx_ts(31 downto 24));
+                    when "1010100" => next_shift_out := std_ulogic_vector(reg_tx_ts(39 downto 32));
+                    when "1010101" => next_shift_out := std_ulogic_vector(reg_tx_ts(47 downto 40));
+                    when "1010110" => next_shift_out := std_ulogic_vector(reg_tx_ts(55 downto 48));
+                    when "1010111" => next_shift_out := std_ulogic_vector(reg_tx_ts(63 downto 56));
+
+                    -- RX Timestamp Read (0x60..0x67)
+                    when "1100000" => next_shift_out := std_ulogic_vector(reg_rx_ts(7 downto 0));
+                    when "1100001" => next_shift_out := std_ulogic_vector(reg_rx_ts(15 downto 8));
+                    when "1100010" => next_shift_out := std_ulogic_vector(reg_rx_ts(23 downto 16));
+                    when "1100011" => next_shift_out := std_ulogic_vector(reg_rx_ts(31 downto 24));
+                    when "1100100" => next_shift_out := std_ulogic_vector(reg_rx_ts(39 downto 32));
+                    when "1100101" => next_shift_out := std_ulogic_vector(reg_rx_ts(47 downto 40));
+                    when "1100110" => next_shift_out := std_ulogic_vector(reg_rx_ts(55 downto 48));
+                    when "1100111" => next_shift_out := std_ulogic_vector(reg_rx_ts(63 downto 56));
+
+                    -- Debug Registers (0x78)
+                    when "1111000" => -- 0x78
+                        next_shift_out(0) := rxfifo_rd_empty;
+                        next_shift_out(1) := txfifo_wr_full;
+                        next_shift_out(7 downto 2) := (others => '0');
+                    when "1111001" => -- 0x79
+                        next_shift_out := std_ulogic_vector(debug_rx_byte_cnt(7 downto 0));
+                    when "1111010" => -- 0x7A
+                        next_shift_out := std_ulogic_vector(debug_rx_byte_cnt(15 downto 8));
                     when others =>
                       -- 0x30.. : RX-Datenfenster aus RX-FIFO (alles >= 0x30)
-                      if unsigned(next_addr) >= 16#30# then
+                      -- Exclude Debug Registers (0x70..0x7F) from FIFO read
+                      if unsigned(next_addr) >= 16#30# and unsigned(next_addr) < 16#70# then
                         if rxfifo_rd_empty = '0' then
                           next_shift_out := rxfifo_rd_data;
                           rxfifo_rd_en   <= '1';
@@ -705,22 +858,30 @@ begin
             spi_shift_in  <= shift_in_var;
             spi_shift_out <= next_shift_out;
             
-            -- MISO Update on Rising Edge (Delayed)
-            -- This ensures data is ready well before the next Master Rising Edge
-            if spi_bit_cnt = 7 then
-               spi_miso_lat <= next_shift_out(7);
-            else
-               spi_miso_lat <= next_shift_out(7 - (spi_bit_cnt + 1));
-            end if;
           else
             spi_bit_cnt <= spi_bit_cnt + 1;
             spi_shift_in  <= shift_in_var;
-            -- MISO Update on Rising Edge (Delayed)
-            spi_miso_lat <= next_shift_out(7 - (spi_bit_cnt + 1));
           end if;
         end if;
         
-        -- Removed sck_falling update to avoid race condition at high speeds
+        sck_rising  <= sck_sync and not sck_sync_d;
+        sck_falling <= not sck_sync and sck_sync_d;
+        
+        -- MISO Update on Falling Edge (Standard SPI Mode 0 behavior)
+        -- Data is changed on falling edge, stable for next rising edge
+        if sck_falling = '1' then
+           if spi_bit_cnt = 0 then
+               -- Special case: We just finished Bit 7 (counter wrapped to 0 on rising edge)
+               -- So we output Bit 7 of the NEW byte
+               spi_miso_lat <= spi_shift_out(7);
+           else
+               -- Normal case: Output next bit
+               -- Current bit count is 1..7 (updated on previous rising edge)
+               -- We want to output Bit (7 - spi_bit_cnt)
+               spi_miso_lat <= spi_shift_out(7 - spi_bit_cnt);
+           end if;
+        end if;
+
       end if;
       -- Auch außerhalb Bitende den Zähler zurückschreiben
       spi_tx_data_count <= data_cnt_tx_var;
@@ -730,8 +891,8 @@ begin
   -- Treibt MISO stets aus dem aktuellen Shiftregister heraus.
   -- Mode 0: der Master sampelt auf rising edge, daher muss das Bit bereits
   -- vor der Flanke stabil sein.
-  --spi_miso_o <= spi_shift_out(7 - spi_bit_cnt);
-  spi_miso_o <= spi_miso_lat;
+  -- Tristate MISO when CS is high (inactive)
+  spi_miso_o <= spi_miso_lat when spi_cs_n_i = '0' else 'Z';
   --------------------------------------------------------------------
   -- TX-Start in MAC-TX-Clockdomain synchronisieren
   --------------------------------------------------------------------
@@ -798,6 +959,7 @@ begin
               sm_tx_ethernet <= s_Transmit;
               txfifo_rd_en <= '1';
               mac_tx_preamble_bytes_sent <= (others => '0');
+              mac_tx_start_toggle <= not mac_tx_start_toggle; -- Trigger Timestamp Capture
             
             end if;  
           end if;
@@ -902,6 +1064,10 @@ begin
       -- Start einer neuen RX-Session: zurücksetzen, aber Overflow markieren,
       -- falls vorher noch READY anlag.
       if (mac_rx_frame_i = '1') and (mac_rx_frame_d = '0') then
+        if reg_rx_ready = '0' then
+            mac_rx_start_toggle <= not mac_rx_start_toggle; -- Trigger Timestamp Capture
+        end if;
+
         len_next   := (others => '0');
         ready_next := '0';
         if reg_rx_ready = '1' then
@@ -916,6 +1082,7 @@ begin
       if ready_next = '0' then
 
       if (mac_rx_frame_i = '1') and (mac_rx_byte_rcv_i = '1') then
+        debug_rx_byte_cnt <= debug_rx_byte_cnt + 1;
         if rxfifo_wr_full = '0' then
           rxfifo_wr_data <= mac_rx_data_i;
           rxfifo_wr_en   <= '1';

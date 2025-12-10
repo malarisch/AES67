@@ -313,6 +313,7 @@ set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_n
 set_location_assignment PIN_R14 -to hbus_clk0_n
 set_global_assignment -name ALLOW_REGISTER_RETIMING ON
 set_global_assignment -name OPTIMIZATION_MODE BALANCED
+set_global_assignment -name VHDL_FILE ptp_timer.vhd
 set_global_assignment -name VHDL_FILE ethernet_packet_aggregator.vhd
 set_global_assignment -name BSF_FILE pll_systemclocks.bsf
 set_global_assignment -name VHDL_FILE spi_ethernet_client.vhd
@@ -363,271 +364,299 @@ set_global_assignment -name SIGNALTAP_FILE stp1.stp
 set_global_assignment -name QIP_FILE audioclks.qip
 set_global_assignment -name QIP_FILE sample_counter.qip
 set_global_assignment -name QIP_FILE pll_systemclocks.qip
-set_global_assignment -name SLD_NODE_CREATOR_ID 110 -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_ENTITY_NAME sld_signaltap -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[0] -to gpio0 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[1] -to gpio1 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[2] -to gpio2 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[3] -to gpio3 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[4] -to gpio4 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[5] -to gpio5 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[6] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|empty_reg" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[7] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|full_reg" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[8] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[9] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[10] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[11] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[12] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[13] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[14] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[15] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[16] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_en_i" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[17] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[18] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[19] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[20] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[21] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[22] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[23] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[24] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[25] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[26] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[27] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[28] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[9]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[0] -to gpio0 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[1] -to gpio1 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[2] -to gpio2 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[3] -to gpio3 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[4] -to gpio4 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[5] -to gpio5 -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[6] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|empty_reg" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[7] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|full_reg" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[8] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[9] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[10] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[11] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[12] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[13] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[14] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[15] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_data_o[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[16] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_en_i" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[17] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[18] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[19] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[20] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[21] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[22] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[23] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[24] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[25] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[26] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[27] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[28] -to "spi_ethernet_client:inst|async_fifo:rx_fifo_inst|rd_ptr_bin[9]" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334528" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=4096" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=4096" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=basic,1," -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ENABLE_ADVANCED_TRIGGER=0" -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_clk -to clk_250MHz -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[29] -to "spi_ethernet_client:inst|cs_meta" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[29] -to "spi_ethernet_client:inst|cs_meta" -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[30] -to "spi_ethernet_client:inst|reg_rx_overflow" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[31] -to "spi_ethernet_client:inst|reg_rx_overflow_sync_1" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[32] -to "spi_ethernet_client:inst|reg_rx_overflow_sync_2" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[33] -to "spi_ethernet_client:inst|reg_rx_overflow_sys" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[34] -to "spi_ethernet_client:inst|sck_meta" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[35] -to "spi_ethernet_client:inst|sck_rising" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[36] -to "spi_ethernet_client:inst|sck_sync" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[37] -to "spi_ethernet_client:inst|sck_sync_d" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[38] -to "spi_ethernet_client:inst|spi_addr[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[39] -to "spi_ethernet_client:inst|spi_addr[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[40] -to "spi_ethernet_client:inst|spi_addr[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[41] -to "spi_ethernet_client:inst|spi_addr[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[42] -to "spi_ethernet_client:inst|spi_addr[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[43] -to "spi_ethernet_client:inst|spi_addr[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[44] -to "spi_ethernet_client:inst|spi_addr[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[45] -to "spi_ethernet_client:inst|spi_bit_cnt[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[46] -to "spi_ethernet_client:inst|spi_bit_cnt[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[47] -to "spi_ethernet_client:inst|spi_bit_cnt[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[48] -to "spi_ethernet_client:inst|spi_cs_n_i" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[49] -to "spi_ethernet_client:inst|spi_cs_sync" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[50] -to "spi_ethernet_client:inst|spi_resume_data" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[51] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[52] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[53] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[54] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[12]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[55] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[13]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[56] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[14]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[57] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[15]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[58] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[59] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[60] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[61] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[62] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[63] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[64] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[65] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[66] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[9]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[67] -to "spi_ethernet_client:inst|spi_shift_in[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[68] -to "spi_ethernet_client:inst|spi_shift_in[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[69] -to "spi_ethernet_client:inst|spi_shift_in[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[70] -to "spi_ethernet_client:inst|spi_shift_in[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[71] -to "spi_ethernet_client:inst|spi_shift_in[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[72] -to "spi_ethernet_client:inst|spi_shift_in[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[73] -to "spi_ethernet_client:inst|spi_shift_in[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[74] -to "spi_ethernet_client:inst|spi_shift_in[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[75] -to "spi_ethernet_client:inst|spi_shift_out[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[76] -to "spi_ethernet_client:inst|spi_shift_out[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[77] -to "spi_ethernet_client:inst|spi_shift_out[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[78] -to "spi_ethernet_client:inst|spi_shift_out[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[79] -to "spi_ethernet_client:inst|spi_shift_out[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[80] -to "spi_ethernet_client:inst|spi_shift_out[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[81] -to "spi_ethernet_client:inst|spi_shift_out[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[82] -to "spi_ethernet_client:inst|spi_shift_out[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[83] -to "spi_ethernet_client:inst|spi_state.SPI_CMD" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[84] -to "spi_ethernet_client:inst|spi_state.SPI_DATA" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[85] -to "spi_ethernet_client:inst|spi_state.SPI_IDLE" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[86] -to "spi_ethernet_client:inst|spi_transaction_done" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[87] -to "spi_ethernet_client:inst|spi_tx_data_count[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[88] -to "spi_ethernet_client:inst|spi_tx_data_count[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[89] -to "spi_ethernet_client:inst|spi_tx_data_count[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[90] -to "spi_ethernet_client:inst|spi_tx_data_count[12]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[91] -to "spi_ethernet_client:inst|spi_tx_data_count[13]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[92] -to "spi_ethernet_client:inst|spi_tx_data_count[14]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[93] -to "spi_ethernet_client:inst|spi_tx_data_count[15]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[94] -to "spi_ethernet_client:inst|spi_tx_data_count[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[95] -to "spi_ethernet_client:inst|spi_tx_data_count[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[96] -to "spi_ethernet_client:inst|spi_tx_data_count[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[97] -to "spi_ethernet_client:inst|spi_tx_data_count[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[98] -to "spi_ethernet_client:inst|spi_tx_data_count[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[99] -to "spi_ethernet_client:inst|spi_tx_data_count[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[100] -to "spi_ethernet_client:inst|spi_tx_data_count[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[101] -to "spi_ethernet_client:inst|spi_tx_data_count[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[102] -to "spi_ethernet_client:inst|spi_tx_data_count[9]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[30] -to "spi_ethernet_client:inst|reg_rx_overflow" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[31] -to "spi_ethernet_client:inst|reg_rx_overflow_sync_1" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "spi_ethernet_client:inst|reg_rx_overflow_sync_2" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "spi_ethernet_client:inst|reg_rx_overflow_sys" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "spi_ethernet_client:inst|sck_meta" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "spi_ethernet_client:inst|sck_rising" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "spi_ethernet_client:inst|sck_sync" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "spi_ethernet_client:inst|sck_sync_d" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "spi_ethernet_client:inst|spi_addr[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "spi_ethernet_client:inst|spi_addr[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "spi_ethernet_client:inst|spi_addr[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "spi_ethernet_client:inst|spi_addr[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "spi_ethernet_client:inst|spi_addr[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "spi_ethernet_client:inst|spi_addr[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "spi_ethernet_client:inst|spi_addr[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "spi_ethernet_client:inst|spi_bit_cnt[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "spi_ethernet_client:inst|spi_bit_cnt[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "spi_ethernet_client:inst|spi_bit_cnt[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "spi_ethernet_client:inst|spi_cs_n_i" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "spi_ethernet_client:inst|spi_cs_sync" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "spi_ethernet_client:inst|spi_resume_data" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[53] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[54] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[12]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[55] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[13]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[56] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[14]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[57] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[15]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[58] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[59] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[60] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[61] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[62] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[63] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[64] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[65] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[66] -to "spi_ethernet_client:inst|spi_rx_bytes_sent[9]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[67] -to "spi_ethernet_client:inst|spi_shift_in[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[68] -to "spi_ethernet_client:inst|spi_shift_in[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[69] -to "spi_ethernet_client:inst|spi_shift_in[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[70] -to "spi_ethernet_client:inst|spi_shift_in[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[71] -to "spi_ethernet_client:inst|spi_shift_in[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[72] -to "spi_ethernet_client:inst|spi_shift_in[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[73] -to "spi_ethernet_client:inst|spi_shift_in[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[74] -to "spi_ethernet_client:inst|spi_shift_in[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[75] -to "spi_ethernet_client:inst|spi_shift_out[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[76] -to "spi_ethernet_client:inst|spi_shift_out[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[77] -to "spi_ethernet_client:inst|spi_shift_out[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[78] -to "spi_ethernet_client:inst|spi_shift_out[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[79] -to "spi_ethernet_client:inst|spi_shift_out[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[80] -to "spi_ethernet_client:inst|spi_shift_out[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[81] -to "spi_ethernet_client:inst|spi_shift_out[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[82] -to "spi_ethernet_client:inst|spi_shift_out[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[83] -to "spi_ethernet_client:inst|spi_state.SPI_CMD" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[84] -to "spi_ethernet_client:inst|spi_state.SPI_DATA" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[85] -to "spi_ethernet_client:inst|spi_state.SPI_IDLE" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[86] -to "spi_ethernet_client:inst|spi_transaction_done" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[87] -to "spi_ethernet_client:inst|spi_tx_data_count[0]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[88] -to "spi_ethernet_client:inst|spi_tx_data_count[10]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[89] -to "spi_ethernet_client:inst|spi_tx_data_count[11]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[90] -to "spi_ethernet_client:inst|spi_tx_data_count[12]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[91] -to "spi_ethernet_client:inst|spi_tx_data_count[13]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[92] -to "spi_ethernet_client:inst|spi_tx_data_count[14]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[93] -to "spi_ethernet_client:inst|spi_tx_data_count[15]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[94] -to "spi_ethernet_client:inst|spi_tx_data_count[1]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[95] -to "spi_ethernet_client:inst|spi_tx_data_count[2]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[96] -to "spi_ethernet_client:inst|spi_tx_data_count[3]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[97] -to "spi_ethernet_client:inst|spi_tx_data_count[4]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[98] -to "spi_ethernet_client:inst|spi_tx_data_count[5]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[99] -to "spi_ethernet_client:inst|spi_tx_data_count[6]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[100] -to "spi_ethernet_client:inst|spi_tx_data_count[7]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[101] -to "spi_ethernet_client:inst|spi_tx_data_count[8]" -section_id auto_signaltap_0
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[102] -to "spi_ethernet_client:inst|spi_tx_data_count[9]" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=103" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=103" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=103" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" -section_id auto_signaltap_0
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=335" -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_0|vcc -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_0|gnd -section_id auto_signaltap_0
+set_global_assignment -name SLD_NODE_CREATOR_ID 110 -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_ENTITY_NAME sld_signaltap -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_clk -to c10_clk50m -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334529" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=4096" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=4096" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=00000000000000000000000000" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=26" -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ENABLE_ADVANCED_TRIGGER=1" -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[0] -to "ethernet:inst4|link_up_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[1] -to "ethernet:inst4|mii_tx_clk_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[2] -to "ethernet:inst4|mii_tx_en_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[3] -to "ethernet:inst4|mii_tx_er_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[4] -to "ethernet:inst4|reset_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[5] -to "ethernet:inst4|reset_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[6] -to "ethernet:inst4|tx_busy_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[7] -to "ethernet:inst4|tx_byte_sent_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[8] -to "ethernet:inst4|tx_clock_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[9] -to "ethernet:inst4|tx_enable_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[10] -to "ethernet:inst4|tx_reset_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[11] -to "spi_ethernet_client:inst|mac_rx_byte_rcv_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[12] -to "spi_ethernet_client:inst|mac_rx_clock_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[13] -to "spi_ethernet_client:inst|mac_rx_data_i[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[14] -to "spi_ethernet_client:inst|mac_rx_data_i[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[15] -to "spi_ethernet_client:inst|mac_rx_data_i[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[16] -to "spi_ethernet_client:inst|mac_rx_data_i[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[17] -to "spi_ethernet_client:inst|mac_rx_data_i[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[18] -to "spi_ethernet_client:inst|mac_rx_data_i[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[19] -to "spi_ethernet_client:inst|mac_rx_data_i[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[20] -to "spi_ethernet_client:inst|mac_rx_data_i[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[0] -to "ethernet:inst4|link_up_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[1] -to "ethernet:inst4|mii_tx_clk_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[2] -to "ethernet:inst4|mii_tx_en_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[3] -to "ethernet:inst4|mii_tx_er_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[4] -to "ethernet:inst4|reset_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[5] -to "ethernet:inst4|reset_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[6] -to "ethernet:inst4|tx_busy_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[7] -to "ethernet:inst4|tx_byte_sent_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[8] -to "ethernet:inst4|tx_clock_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[9] -to "ethernet:inst4|tx_enable_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[10] -to "ethernet:inst4|tx_reset_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[11] -to "spi_ethernet_client:inst|mac_rx_byte_rcv_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[12] -to "spi_ethernet_client:inst|mac_rx_clock_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[13] -to "spi_ethernet_client:inst|mac_rx_data_i[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[14] -to "spi_ethernet_client:inst|mac_rx_data_i[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[15] -to "spi_ethernet_client:inst|mac_rx_data_i[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[16] -to "spi_ethernet_client:inst|mac_rx_data_i[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[17] -to "spi_ethernet_client:inst|mac_rx_data_i[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[18] -to "spi_ethernet_client:inst|mac_rx_data_i[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[19] -to "spi_ethernet_client:inst|mac_rx_data_i[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[20] -to "spi_ethernet_client:inst|mac_rx_data_i[7]" -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[21] -to "spi_ethernet_client:inst|mac_rx_frame_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[22] -to "spi_ethernet_client:inst|mac_tx_active" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[23] -to "spi_ethernet_client:inst|mac_tx_busy_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[24] -to "spi_ethernet_client:inst|mac_tx_byte_sent_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[25] -to "spi_ethernet_client:inst|mac_tx_data_o[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[26] -to "spi_ethernet_client:inst|mac_tx_data_o[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[27] -to "spi_ethernet_client:inst|mac_tx_data_o[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[28] -to "spi_ethernet_client:inst|mac_tx_data_o[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[29] -to "spi_ethernet_client:inst|mac_tx_data_o[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[30] -to "spi_ethernet_client:inst|mac_tx_data_o[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[31] -to "spi_ethernet_client:inst|mac_tx_data_o[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[32] -to "spi_ethernet_client:inst|mac_tx_data_o[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[33] -to "spi_ethernet_client:inst|mac_tx_enable_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[34] -to "spi_ethernet_client:inst|reg_rx_len[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[35] -to "spi_ethernet_client:inst|reg_rx_len[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[36] -to "spi_ethernet_client:inst|reg_rx_len[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[37] -to "spi_ethernet_client:inst|reg_rx_len[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[38] -to "spi_ethernet_client:inst|reg_rx_len[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[39] -to "spi_ethernet_client:inst|reg_rx_len[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[40] -to "spi_ethernet_client:inst|reg_rx_len[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[41] -to "spi_ethernet_client:inst|reg_rx_len[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[42] -to "spi_ethernet_client:inst|reg_rx_len[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[43] -to "spi_ethernet_client:inst|reg_rx_len[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[44] -to "spi_ethernet_client:inst|reg_rx_len[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[45] -to "spi_ethernet_client:inst|reg_rx_len[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[46] -to "spi_ethernet_client:inst|reg_rx_len[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[47] -to "spi_ethernet_client:inst|reg_rx_len[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[48] -to "spi_ethernet_client:inst|reg_rx_len[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[49] -to "spi_ethernet_client:inst|reg_rx_len[9]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[50] -to "spi_ethernet_client:inst|reg_rx_overflow" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[51] -to "spi_ethernet_client:inst|reg_rx_ready" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[52] -to "spi_ethernet_client:inst|reg_tx_len[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[53] -to "spi_ethernet_client:inst|reg_tx_len[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[54] -to "spi_ethernet_client:inst|reg_tx_len[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[55] -to "spi_ethernet_client:inst|reg_tx_len[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[56] -to "spi_ethernet_client:inst|reg_tx_len[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[57] -to "spi_ethernet_client:inst|reg_tx_len[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[58] -to "spi_ethernet_client:inst|reg_tx_len[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[59] -to "spi_ethernet_client:inst|reg_tx_len[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[60] -to "spi_ethernet_client:inst|reg_tx_len[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[61] -to "spi_ethernet_client:inst|reg_tx_len[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[62] -to "spi_ethernet_client:inst|reg_tx_len[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[63] -to "spi_ethernet_client:inst|reg_tx_len[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[64] -to "spi_ethernet_client:inst|reg_tx_len[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[65] -to "spi_ethernet_client:inst|reg_tx_len[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[66] -to "spi_ethernet_client:inst|reg_tx_len[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[67] -to "spi_ethernet_client:inst|reg_tx_len[9]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[68] -to "spi_ethernet_client:inst|rx_clear_mac_pulse" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[69] -to "spi_ethernet_client:inst|rxfifo_rd_en" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[70] -to "spi_ethernet_client:inst|rxfifo_wr_data[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[71] -to "spi_ethernet_client:inst|rxfifo_wr_data[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[72] -to "spi_ethernet_client:inst|rxfifo_wr_data[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[73] -to "spi_ethernet_client:inst|rxfifo_wr_data[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[74] -to "spi_ethernet_client:inst|rxfifo_wr_data[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[75] -to "spi_ethernet_client:inst|rxfifo_wr_data[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[76] -to "spi_ethernet_client:inst|rxfifo_wr_data[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[77] -to "spi_ethernet_client:inst|rxfifo_wr_data[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[78] -to "spi_ethernet_client:inst|rxfifo_wr_en" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[79] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_End" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[80] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_Idle" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[81] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_PrimeTx" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[82] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_Transmit" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[83] -to "spi_ethernet_client:inst|spi_addr[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[84] -to "spi_ethernet_client:inst|spi_addr[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[85] -to "spi_ethernet_client:inst|spi_addr[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[86] -to "spi_ethernet_client:inst|spi_addr[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[87] -to "spi_ethernet_client:inst|spi_addr[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[88] -to "spi_ethernet_client:inst|spi_addr[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[89] -to "spi_ethernet_client:inst|spi_addr[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[90] -to "spi_ethernet_client:inst|spi_bit_cnt[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[91] -to "spi_ethernet_client:inst|spi_bit_cnt[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[92] -to "spi_ethernet_client:inst|spi_bit_cnt[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[93] -to "spi_ethernet_client:inst|spi_shift_out[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[94] -to "spi_ethernet_client:inst|spi_shift_out[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[95] -to "spi_ethernet_client:inst|spi_shift_out[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[96] -to "spi_ethernet_client:inst|spi_shift_out[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[97] -to "spi_ethernet_client:inst|spi_shift_out[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[98] -to "spi_ethernet_client:inst|spi_shift_out[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[99] -to "spi_ethernet_client:inst|spi_shift_out[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[100] -to "spi_ethernet_client:inst|spi_shift_out[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[101] -to "spi_ethernet_client:inst|tx_byte_sent_count[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[102] -to "spi_ethernet_client:inst|tx_byte_sent_count[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[103] -to "spi_ethernet_client:inst|tx_byte_sent_count[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[104] -to "spi_ethernet_client:inst|tx_byte_sent_count[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[105] -to "spi_ethernet_client:inst|tx_byte_sent_count[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[106] -to "spi_ethernet_client:inst|tx_byte_sent_count[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[107] -to "spi_ethernet_client:inst|tx_byte_sent_count[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[108] -to "spi_ethernet_client:inst|tx_byte_sent_count[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[109] -to "spi_ethernet_client:inst|tx_byte_sent_count[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[110] -to "spi_ethernet_client:inst|tx_byte_sent_count[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[111] -to "spi_ethernet_client:inst|tx_byte_sent_count[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[112] -to "spi_ethernet_client:inst|tx_byte_sent_count[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[113] -to "spi_ethernet_client:inst|tx_byte_sent_count[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[114] -to "spi_ethernet_client:inst|tx_byte_sent_count[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[115] -to "spi_ethernet_client:inst|tx_byte_sent_count[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[116] -to "spi_ethernet_client:inst|tx_byte_sent_count[9]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[21] -to "spi_ethernet_client:inst|mac_rx_frame_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[22] -to "spi_ethernet_client:inst|mac_tx_active" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[23] -to "spi_ethernet_client:inst|mac_tx_busy_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[24] -to "spi_ethernet_client:inst|mac_tx_byte_sent_i" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[25] -to "spi_ethernet_client:inst|mac_tx_data_o[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[26] -to "spi_ethernet_client:inst|mac_tx_data_o[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[27] -to "spi_ethernet_client:inst|mac_tx_data_o[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[28] -to "spi_ethernet_client:inst|mac_tx_data_o[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[29] -to "spi_ethernet_client:inst|mac_tx_data_o[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[30] -to "spi_ethernet_client:inst|mac_tx_data_o[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[31] -to "spi_ethernet_client:inst|mac_tx_data_o[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "spi_ethernet_client:inst|mac_tx_data_o[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "spi_ethernet_client:inst|mac_tx_enable_o" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "spi_ethernet_client:inst|reg_rx_len[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "spi_ethernet_client:inst|reg_rx_len[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "spi_ethernet_client:inst|reg_rx_len[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "spi_ethernet_client:inst|reg_rx_len[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "spi_ethernet_client:inst|reg_rx_len[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "spi_ethernet_client:inst|reg_rx_len[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "spi_ethernet_client:inst|reg_rx_len[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "spi_ethernet_client:inst|reg_rx_len[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "spi_ethernet_client:inst|reg_rx_len[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "spi_ethernet_client:inst|reg_rx_len[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "spi_ethernet_client:inst|reg_rx_len[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "spi_ethernet_client:inst|reg_rx_len[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "spi_ethernet_client:inst|reg_rx_len[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "spi_ethernet_client:inst|reg_rx_len[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "spi_ethernet_client:inst|reg_rx_len[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "spi_ethernet_client:inst|reg_rx_len[9]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "spi_ethernet_client:inst|reg_rx_overflow" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "spi_ethernet_client:inst|reg_rx_ready" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "spi_ethernet_client:inst|reg_tx_len[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[53] -to "spi_ethernet_client:inst|reg_tx_len[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[54] -to "spi_ethernet_client:inst|reg_tx_len[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[55] -to "spi_ethernet_client:inst|reg_tx_len[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[56] -to "spi_ethernet_client:inst|reg_tx_len[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[57] -to "spi_ethernet_client:inst|reg_tx_len[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[58] -to "spi_ethernet_client:inst|reg_tx_len[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[59] -to "spi_ethernet_client:inst|reg_tx_len[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[60] -to "spi_ethernet_client:inst|reg_tx_len[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[61] -to "spi_ethernet_client:inst|reg_tx_len[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[62] -to "spi_ethernet_client:inst|reg_tx_len[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[63] -to "spi_ethernet_client:inst|reg_tx_len[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[64] -to "spi_ethernet_client:inst|reg_tx_len[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[65] -to "spi_ethernet_client:inst|reg_tx_len[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[66] -to "spi_ethernet_client:inst|reg_tx_len[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[67] -to "spi_ethernet_client:inst|reg_tx_len[9]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[68] -to "spi_ethernet_client:inst|rx_clear_mac_pulse" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[69] -to "spi_ethernet_client:inst|rxfifo_rd_en" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[70] -to "spi_ethernet_client:inst|rxfifo_wr_data[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[71] -to "spi_ethernet_client:inst|rxfifo_wr_data[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[72] -to "spi_ethernet_client:inst|rxfifo_wr_data[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[73] -to "spi_ethernet_client:inst|rxfifo_wr_data[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[74] -to "spi_ethernet_client:inst|rxfifo_wr_data[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[75] -to "spi_ethernet_client:inst|rxfifo_wr_data[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[76] -to "spi_ethernet_client:inst|rxfifo_wr_data[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[77] -to "spi_ethernet_client:inst|rxfifo_wr_data[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[78] -to "spi_ethernet_client:inst|rxfifo_wr_en" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[79] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_End" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[80] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_Idle" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[81] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_PrimeTx" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[82] -to "spi_ethernet_client:inst|sm_tx_ethernet.s_Transmit" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[83] -to "spi_ethernet_client:inst|spi_addr[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[84] -to "spi_ethernet_client:inst|spi_addr[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[85] -to "spi_ethernet_client:inst|spi_addr[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[86] -to "spi_ethernet_client:inst|spi_addr[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[87] -to "spi_ethernet_client:inst|spi_addr[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[88] -to "spi_ethernet_client:inst|spi_addr[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[89] -to "spi_ethernet_client:inst|spi_addr[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[90] -to "spi_ethernet_client:inst|spi_bit_cnt[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[91] -to "spi_ethernet_client:inst|spi_bit_cnt[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[92] -to "spi_ethernet_client:inst|spi_bit_cnt[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[93] -to "spi_ethernet_client:inst|spi_shift_out[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[94] -to "spi_ethernet_client:inst|spi_shift_out[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[95] -to "spi_ethernet_client:inst|spi_shift_out[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[96] -to "spi_ethernet_client:inst|spi_shift_out[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[97] -to "spi_ethernet_client:inst|spi_shift_out[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[98] -to "spi_ethernet_client:inst|spi_shift_out[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[99] -to "spi_ethernet_client:inst|spi_shift_out[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[100] -to "spi_ethernet_client:inst|spi_shift_out[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[101] -to "spi_ethernet_client:inst|tx_byte_sent_count[0]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[102] -to "spi_ethernet_client:inst|tx_byte_sent_count[10]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[103] -to "spi_ethernet_client:inst|tx_byte_sent_count[11]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[104] -to "spi_ethernet_client:inst|tx_byte_sent_count[12]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[105] -to "spi_ethernet_client:inst|tx_byte_sent_count[13]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[106] -to "spi_ethernet_client:inst|tx_byte_sent_count[14]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[107] -to "spi_ethernet_client:inst|tx_byte_sent_count[15]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[108] -to "spi_ethernet_client:inst|tx_byte_sent_count[1]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[109] -to "spi_ethernet_client:inst|tx_byte_sent_count[2]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[110] -to "spi_ethernet_client:inst|tx_byte_sent_count[3]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[111] -to "spi_ethernet_client:inst|tx_byte_sent_count[4]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[112] -to "spi_ethernet_client:inst|tx_byte_sent_count[5]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[113] -to "spi_ethernet_client:inst|tx_byte_sent_count[6]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[114] -to "spi_ethernet_client:inst|tx_byte_sent_count[7]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[115] -to "spi_ethernet_client:inst|tx_byte_sent_count[8]" -section_id auto_signaltap_1
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[116] -to "spi_ethernet_client:inst|tx_byte_sent_count[9]" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=117" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=117" -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=117" -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_1|gnd -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_1|vcc -section_id auto_signaltap_1
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=sld_reserved_FPGA_auto_signaltap_1_1_53a6," -section_id auto_signaltap_1
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

@@ -1,0 +1,14 @@
+{
+  "name": "dev_scripts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "ptp_lib_test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ptpv2": "^1.0.7"
+  }
+}
