@@ -85,6 +85,7 @@ struct {
     struct timespec t3; // Slave DelayReq Egress
     struct timespec t4; // Master DelayReq Ingress
     int64_t initial_offset_ns;
+    struct timespec initial_t2; // Initial Slave Sync Ingress
     int has_initial_offset;
 } slave_state;
 
@@ -188,7 +189,7 @@ void run_master() {
         memset(sync.originTimestamp, 0, sizeof(sync.originTimestamp));
         
         sendto(sock_evt, &sync, sizeof(sync), 0, (struct sockaddr*)&mcast_addr_evt, sizeof(mcast_addr_evt));
-        printf("[Master] Sent Sync Seq=%d\n", seq);
+        printf("[Primary] Sent Sync Seq=%d\n", seq);
 
         // 2. Send FollowUp (General Port)
         usleep(1000); // 1ms delay
@@ -197,7 +198,7 @@ void run_master() {
         timespec_to_ptp(&ts, follow.preciseOriginTimestamp);
         
         sendto(sock_gen, &follow, sizeof(follow), 0, (struct sockaddr*)&mcast_addr_gen, sizeof(mcast_addr_gen));
-        printf("[Master] Sent FollowUp Seq=%d Time=%ld.%09ld\n", seq, ts.tv_sec, ts.tv_nsec);
+        printf("[Primary] Sent FollowUp Seq=%d Time=%ld.%09ld\n", seq, ts.tv_sec, ts.tv_nsec);
 
         // Check for DelayReq (Non-blocking check would be better, but simple select here)
         fd_set fds;
@@ -217,7 +218,7 @@ void run_master() {
                     struct timespec rx_ts;
                     get_time(&rx_ts);
                     uint16_t req_seq = ntohs(h->sequenceId);
-                    printf("[Master] Received DelayReq Seq=%d from %s\n", req_seq, inet_ntoa(src_addr.sin_addr));
+                    printf("[Primary] Received DelayReq Seq=%d from %s\n", req_seq, inet_ntoa(src_addr.sin_addr));
 
                     // Send DelayResp
                     PTPDelayResp resp;
@@ -228,7 +229,7 @@ void run_master() {
 
                     // Send unicast back to requester
                     sendto(sock_gen, &resp, sizeof(resp), 0, (struct sockaddr*)&src_addr, addrlen);
-                    printf("[Master] Sent DelayResp Seq=%d\n", req_seq);
+                    printf("[Primary] Sent DelayResp Seq=%d\n", req_seq);
                 }
             }
         }
@@ -272,7 +273,7 @@ void run_slave() {
                     if (type == MSG_SYNC) {
                         slave_state.t2 = rx_ts;
                         slave_state.last_sync_seq = seq;
-                        // printf("[Slave] Rx Sync Seq=%d\n", seq);
+                        // printf("[Secondary] Rx Sync Seq=%d\n", seq);
                     } else if (type == MSG_DELAY_RESP) {
                          // Handle DelayResp on wrong port
                          PTPDelayResp *resp = (PTPDelayResp*)buf;
@@ -288,7 +289,7 @@ void run_slave() {
                          int64_t sm_diff = t4_ns - t3_ns;
                          double delay_ms = (double)(ms_diff + sm_diff) / 2.0 / 1000000.0;
                          
-                         printf("[Slave] Path Delay: %.3f ms\n", delay_ms);
+                         printf("[Secondary] Path Delay: %.3f ms\n", delay_ms);
                     }
                 }
             }
@@ -312,12 +313,22 @@ void run_slave() {
 
                             if (!slave_state.has_initial_offset) {
                                 slave_state.initial_offset_ns = offset_ns;
+                                slave_state.initial_t2 = slave_state.t2;
                                 slave_state.has_initial_offset = 1;
                             }
 
                             double drift_ms = (double)(offset_ns - slave_state.initial_offset_ns) / 1000000.0;
-                            printf("[Slave] Master Time: %ld.%09ld | Drift: %.3f ms\n", 
-                                slave_state.t1.tv_sec, slave_state.t1.tv_nsec, drift_ms);
+                            
+                            // Calculate PPM
+                            int64_t t2_ns_initial = (int64_t)slave_state.initial_t2.tv_sec * 1000000000LL + slave_state.initial_t2.tv_nsec;
+                            int64_t elapsed_ns = t2_ns - t2_ns_initial;
+                            double ppm = 0.0;
+                            if (elapsed_ns > 0) {
+                                ppm = ((double)(offset_ns - slave_state.initial_offset_ns) / (double)elapsed_ns) * 1000000.0;
+                            }
+
+                            printf("[Secondary] Main Time: %ld.%09ld | Drift: %.3f ms | PPM: %.2f\n", 
+                                slave_state.t1.tv_sec, slave_state.t1.tv_nsec, drift_ms, ppm);
                                 
                             // Send DelayReq occasionally (e.g. every 4th sync)
                             if (seq % 4 == 0) {
@@ -327,7 +338,7 @@ void run_slave() {
                                 
                                 get_time(&slave_state.t3);
                                 sendto(sock_evt, &req, sizeof(req), 0, (struct sockaddr*)&mcast_addr_evt, sizeof(mcast_addr_evt));
-                                printf("[Slave] Sent DelayReq Seq=%d\n", ntohs(req.header.sequenceId));
+                                printf("[Secondary] Sent DelayReq Seq=%d\n", ntohs(req.header.sequenceId));
                             }
                         }
                     } else if (type == MSG_DELAY_RESP) {
@@ -343,7 +354,7 @@ void run_slave() {
                          int64_t sm_diff = t4_ns - t3_ns;
                          double delay_ms = (double)(ms_diff + sm_diff) / 2.0 / 1000000.0;
                          
-                         printf("[Slave] Path Delay: %.3f ms\n", delay_ms);
+                         printf("[Secondary] Path Delay: %.3f ms\n", delay_ms);
                     }
                 }
             }
@@ -353,12 +364,12 @@ void run_slave() {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <interface_ip> <master|slave>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <interface_ip> <primary|secondary>\n", argv[0]);
         return 1;
     }
 
     strncpy(interface_ip, argv[1], INET_ADDRSTRLEN);
-    int is_master = (strcmp(argv[2], "master") == 0);
+    int is_master = (strcmp(argv[2], "primary") == 0);
 
     // Setup Sockets
     sock_evt = setup_socket(PTP_PORT_EVENT, interface_ip);
