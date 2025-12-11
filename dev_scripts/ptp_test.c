@@ -31,6 +31,7 @@
 #define FOLLOW_UP_LEN     44
 #define DELAY_REQ_LEN     44
 #define DELAY_RESP_LEN    54
+#define ANNOUNCE_LEN      64
 
 // --- Structs ---
 typedef struct __attribute__((packed)) {
@@ -69,6 +70,19 @@ typedef struct __attribute__((packed)) {
     uint16_t  receiveTimestamp[5];
     uint8_t   requestingPortIdentity[10];
 } PTPDelayResp;
+
+typedef struct __attribute__((packed)) {
+    PTPHeader header;
+    uint16_t  originTimestamp[5];
+    int16_t   currentUtcOffset;
+    uint8_t   reserved;
+    uint8_t   grandmasterPriority1;
+    uint8_t   grandmasterClockQuality[4];
+    uint8_t   grandmasterPriority2;
+    uint8_t   grandmasterIdentity[8];
+    uint16_t  stepsRemoved;
+    uint8_t   timeSource;
+} PTPAnnounce;
 
 // --- Globals ---
 int sock_evt, sock_gen;
@@ -179,6 +193,9 @@ void run_master() {
     printf("Starting PTP Master on %s...\n", interface_ip);
     
     while(1) {
+        struct timespec loop_start;
+        clock_gettime(CLOCK_MONOTONIC, &loop_start);
+
         struct timespec ts;
         get_time(&ts);
         uint16_t seq = sequence_id++;
@@ -200,37 +217,78 @@ void run_master() {
         sendto(sock_gen, &follow, sizeof(follow), 0, (struct sockaddr*)&mcast_addr_gen, sizeof(mcast_addr_gen));
         printf("[Primary] Sent FollowUp Seq=%d Time=%ld.%09ld\n", seq, ts.tv_sec, ts.tv_nsec);
 
-        // Check for DelayReq (Non-blocking check would be better, but simple select here)
-        fd_set fds;
-        struct timeval tv = {0, 900000}; // Wait remainder of second
-        FD_ZERO(&fds);
-        FD_SET(sock_evt, &fds);
+        // 3. Send Announce (General Port) - Every second (logMessageInterval = 0)
+        PTPAnnounce announce;
+        init_header(&announce.header, MSG_ANNOUNCE, ANNOUNCE_LEN, seq, 0x0000);
+        announce.header.logMessageInterval = 0; // 1 second
         
-        if (select(sock_evt + 1, &fds, NULL, NULL, &tv) > 0) {
-            uint8_t buf[1024];
-            struct sockaddr_in src_addr;
-            socklen_t addrlen = sizeof(src_addr);
-            int len = recvfrom(sock_evt, buf, sizeof(buf), 0, (struct sockaddr*)&src_addr, &addrlen);
+        memset(announce.originTimestamp, 0, sizeof(announce.originTimestamp));
+        timespec_to_ptp(&ts, announce.originTimestamp);
+        
+        announce.currentUtcOffset = htons(37); // Current UTC offset
+        announce.reserved = 0;
+        announce.grandmasterPriority1 = 128;
+        announce.grandmasterClockQuality[0] = 248; // Class
+        announce.grandmasterClockQuality[1] = 0xFE; // Accuracy
+        announce.grandmasterClockQuality[2] = 0xFF; // Variance
+        announce.grandmasterClockQuality[3] = 0xFF; // Variance
+        announce.grandmasterPriority2 = 128;
+        memcpy(announce.grandmasterIdentity, my_clock_id, 8);
+        announce.stepsRemoved = 0;
+        announce.timeSource = 0xA0; // Internal Oscillator
+
+        sendto(sock_gen, &announce, sizeof(announce), 0, (struct sockaddr*)&mcast_addr_gen, sizeof(mcast_addr_gen));
+        printf("[Primary] Sent Announce Seq=%d\n", seq);
+
+        // Handle DelayReqs for the rest of the second
+        while (1) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
             
-            if (len >= HEADER_LEN) {
-                PTPHeader *h = (PTPHeader*)buf;
-                if ((h->transportSpecific_msgType & 0x0F) == MSG_DELAY_REQ) {
-                    struct timespec rx_ts;
-                    get_time(&rx_ts);
-                    uint16_t req_seq = ntohs(h->sequenceId);
-                    printf("[Primary] Received DelayReq Seq=%d from %s\n", req_seq, inet_ntoa(src_addr.sin_addr));
+            long long elapsed_us = (now.tv_sec - loop_start.tv_sec) * 1000000LL + 
+                                   (now.tv_nsec - loop_start.tv_nsec) / 1000LL;
+            long long remaining_us = 1000000LL - elapsed_us; // 1 second interval
 
-                    // Send DelayResp
-                    PTPDelayResp resp;
-                    init_header(&resp.header, MSG_DELAY_RESP, DELAY_RESP_LEN, req_seq, 0);
-                    timespec_to_ptp(&rx_ts, resp.receiveTimestamp);
-                    memcpy(resp.requestingPortIdentity, h->clockIdentity, 8);
-                    memcpy(resp.requestingPortIdentity + 8, &h->sourcePortId, 2); // Actually portId is 2 bytes
+            if (remaining_us <= 0) break;
 
-                    // Send unicast back to requester
-                    sendto(sock_gen, &resp, sizeof(resp), 0, (struct sockaddr*)&src_addr, addrlen);
-                    printf("[Primary] Sent DelayResp Seq=%d\n", req_seq);
+            struct timeval tv;
+            tv.tv_sec = remaining_us / 1000000;
+            tv.tv_usec = remaining_us % 1000000;
+
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(sock_evt, &fds);
+            
+            int ret = select(sock_evt + 1, &fds, NULL, NULL, &tv);
+            
+            if (ret > 0) {
+                uint8_t buf[1024];
+                struct sockaddr_in src_addr;
+                socklen_t addrlen = sizeof(src_addr);
+                int len = recvfrom(sock_evt, buf, sizeof(buf), 0, (struct sockaddr*)&src_addr, &addrlen);
+                
+                if (len >= HEADER_LEN) {
+                    PTPHeader *h = (PTPHeader*)buf;
+                    if ((h->transportSpecific_msgType & 0x0F) == MSG_DELAY_REQ) {
+                        struct timespec rx_ts;
+                        get_time(&rx_ts);
+                        uint16_t req_seq = ntohs(h->sequenceId);
+                        printf("[Primary] Received DelayReq Seq=%d from %s\n", req_seq, inet_ntoa(src_addr.sin_addr));
+
+                        // Send DelayResp
+                        PTPDelayResp resp;
+                        init_header(&resp.header, MSG_DELAY_RESP, DELAY_RESP_LEN, req_seq, 0);
+                        timespec_to_ptp(&rx_ts, resp.receiveTimestamp);
+                        memcpy(resp.requestingPortIdentity, h->clockIdentity, 8);
+                        memcpy(resp.requestingPortIdentity + 8, &h->sourcePortId, 2); // Actually portId is 2 bytes
+
+                        // Send unicast back to requester
+                        sendto(sock_gen, &resp, sizeof(resp), 0, (struct sockaddr*)&src_addr, addrlen);
+                        printf("[Primary] Sent DelayResp Seq=%d\n", req_seq);
+                    }
                 }
+            } else {
+                break; // Timeout
             }
         }
     }
