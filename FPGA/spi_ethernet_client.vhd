@@ -44,7 +44,10 @@ entity spi_ethernet_client is
     mac_rx_frame_i        : in  std_ulogic;      -- rx_frame_o
     mac_rx_data_i         : in  t_ethernet_data; -- rx_data_o
     mac_rx_byte_rcv_i     : in  std_ulogic;      -- rx_byte_received_o
-    mac_rx_error_i        : in  std_ulogic       -- rx_error_o
+    mac_rx_error_i        : in  std_ulogic;      -- rx_error_o
+    
+    -- PTP Time Output (for Audio Clock Controller)
+    ptp_time_o            : out unsigned(63 downto 0)
   );
 end entity spi_ethernet_client;
 
@@ -144,7 +147,6 @@ architecture rtl of spi_ethernet_client is
   --------------------------------------------------------------------
   signal ptp_time_current : unsigned(63 downto 0);
   -- Default increment: 4ns (0x04000000) for 250MHz clock
-  -- Was 10ns (0x0A000000) which caused 2.5x drift
   signal ptp_time_inc     : unsigned(31 downto 0) := x"04000000"; 
   signal ptp_set_time     : std_ulogic := '0';
   signal ptp_set_val      : unsigned(63 downto 0) := (others => '0');
@@ -954,5 +956,8 @@ begin
   spi_int_n <= not (reg_rx_ready_sys or reg_rx_overflow_sys);
   rx_clear_mac_pulse <= rx_clear_sync_1 xor rx_clear_sync_2;
   spi_int_n_o <= spi_int_n;
+  
+  -- Output PTP Time
+  ptp_time_o <= ptp_time_current;
 
 end architecture rtl;

@@ -33,15 +33,49 @@
 //on the Quartus Prime software download page.
 
 module audioclks (
+	configupdate,
 	inclk0,
+	phasecounterselect,
+	phasestep,
+	phaseupdown,
+	scanclk,
+	scanclkena,
+	scandata,
 	c0,
 	c1,
-	locked);
+	c2,
+	locked,
+	phasedone,
+	scandataout,
+	scandone);
 
+	input	  configupdate;
 	input	  inclk0;
+	input	[2:0]  phasecounterselect;
+	input	  phasestep;
+	input	  phaseupdown;
+	input	  scanclk;
+	input	  scanclkena;
+	input	  scandata;
 	output	  c0;
 	output	  c1;
+	output	  c2;
 	output	  locked;
+	output	  phasedone;
+	output	  scandataout;
+	output	  scandone;
+`ifndef ALTERA_RESERVED_QIS
+// synopsys translate_off
+`endif
+	tri0	  configupdate;
+	tri0	[2:0]  phasecounterselect;
+	tri0	  phasestep;
+	tri0	  phaseupdown;
+	tri0	  scanclkena;
+	tri0	  scandata;
+`ifndef ALTERA_RESERVED_QIS
+// synopsys translate_on
+`endif
 
 endmodule
 
@@ -66,10 +100,13 @@ endmodule
 // Retrieval info: PRIVATE: DEVICE_SPEED_GRADE STRING "Any"
 // Retrieval info: PRIVATE: DIV_FACTOR0 NUMERIC "1"
 // Retrieval info: PRIVATE: DIV_FACTOR1 NUMERIC "1"
+// Retrieval info: PRIVATE: DIV_FACTOR2 NUMERIC "1"
 // Retrieval info: PRIVATE: DUTY_CYCLE0 STRING "50.00000000"
 // Retrieval info: PRIVATE: DUTY_CYCLE1 STRING "50.00000000"
-// Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE0 STRING "0.096000"
-// Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE1 STRING "0.048000"
+// Retrieval info: PRIVATE: DUTY_CYCLE2 STRING "50.00000000"
+// Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE0 STRING "12.288000"
+// Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE1 STRING "3.072000"
+// Retrieval info: PRIVATE: EFF_OUTPUT_FREQ_VALUE2 STRING "0.048000"
 // Retrieval info: PRIVATE: EXPLICIT_SWITCHOVER_COUNTER STRING "0"
 // Retrieval info: PRIVATE: EXT_FEEDBACK_RADIO STRING "0"
 // Retrieval info: PRIVATE: GLOCKED_COUNTER_EDIT_CHANGED STRING "1"
@@ -91,25 +128,33 @@ endmodule
 // Retrieval info: PRIVATE: LVDS_MODE_DATA_RATE_DIRTY NUMERIC "0"
 // Retrieval info: PRIVATE: LVDS_PHASE_SHIFT_UNIT0 STRING "deg"
 // Retrieval info: PRIVATE: LVDS_PHASE_SHIFT_UNIT1 STRING "deg"
+// Retrieval info: PRIVATE: LVDS_PHASE_SHIFT_UNIT2 STRING "ps"
 // Retrieval info: PRIVATE: MIG_DEVICE_SPEED_GRADE STRING "Any"
 // Retrieval info: PRIVATE: MIRROR_CLK0 STRING "0"
 // Retrieval info: PRIVATE: MIRROR_CLK1 STRING "0"
+// Retrieval info: PRIVATE: MIRROR_CLK2 STRING "0"
 // Retrieval info: PRIVATE: MULT_FACTOR0 NUMERIC "1"
 // Retrieval info: PRIVATE: MULT_FACTOR1 NUMERIC "1"
+// Retrieval info: PRIVATE: MULT_FACTOR2 NUMERIC "1"
 // Retrieval info: PRIVATE: NORMAL_MODE_RADIO STRING "1"
-// Retrieval info: PRIVATE: OUTPUT_FREQ0 STRING "0.09600000"
-// Retrieval info: PRIVATE: OUTPUT_FREQ1 STRING "0.04800000"
+// Retrieval info: PRIVATE: OUTPUT_FREQ0 STRING "12.28800000"
+// Retrieval info: PRIVATE: OUTPUT_FREQ1 STRING "3.07200000"
+// Retrieval info: PRIVATE: OUTPUT_FREQ2 STRING "0.04800000"
 // Retrieval info: PRIVATE: OUTPUT_FREQ_MODE0 STRING "1"
 // Retrieval info: PRIVATE: OUTPUT_FREQ_MODE1 STRING "1"
+// Retrieval info: PRIVATE: OUTPUT_FREQ_MODE2 STRING "1"
 // Retrieval info: PRIVATE: OUTPUT_FREQ_UNIT0 STRING "MHz"
 // Retrieval info: PRIVATE: OUTPUT_FREQ_UNIT1 STRING "MHz"
+// Retrieval info: PRIVATE: OUTPUT_FREQ_UNIT2 STRING "MHz"
 // Retrieval info: PRIVATE: PHASE_RECONFIG_FEATURE_ENABLED STRING "1"
-// Retrieval info: PRIVATE: PHASE_RECONFIG_INPUTS_CHECK STRING "0"
+// Retrieval info: PRIVATE: PHASE_RECONFIG_INPUTS_CHECK STRING "1"
 // Retrieval info: PRIVATE: PHASE_SHIFT0 STRING "0.00000000"
 // Retrieval info: PRIVATE: PHASE_SHIFT1 STRING "0.00000000"
+// Retrieval info: PRIVATE: PHASE_SHIFT2 STRING "0.00000000"
 // Retrieval info: PRIVATE: PHASE_SHIFT_STEP_ENABLED_CHECK STRING "0"
 // Retrieval info: PRIVATE: PHASE_SHIFT_UNIT0 STRING "deg"
 // Retrieval info: PRIVATE: PHASE_SHIFT_UNIT1 STRING "deg"
+// Retrieval info: PRIVATE: PHASE_SHIFT_UNIT2 STRING "ps"
 // Retrieval info: PRIVATE: PLL_ADVANCED_PARAM_CHECK STRING "0"
 // Retrieval info: PRIVATE: PLL_ARESET_CHECK STRING "0"
 // Retrieval info: PRIVATE: PLL_AUTOPLL_CHECK NUMERIC "1"
@@ -121,7 +166,7 @@ endmodule
 // Retrieval info: PRIVATE: PLL_TARGET_HARCOPY_CHECK NUMERIC "0"
 // Retrieval info: PRIVATE: PRIMARY_CLK_COMBO STRING "inclk0"
 // Retrieval info: PRIVATE: RECONFIG_FILE STRING "audioclks.mif"
-// Retrieval info: PRIVATE: SACN_INPUTS_CHECK STRING "0"
+// Retrieval info: PRIVATE: SACN_INPUTS_CHECK STRING "1"
 // Retrieval info: PRIVATE: SCAN_FEATURE_ENABLED STRING "1"
 // Retrieval info: PRIVATE: SELF_RESET_LOCK_LOSS STRING "0"
 // Retrieval info: PRIVATE: SHORT_SCAN_RADIO STRING "0"
@@ -133,25 +178,32 @@ endmodule
 // Retrieval info: PRIVATE: SRC_SYNCH_COMP_RADIO STRING "0"
 // Retrieval info: PRIVATE: STICKY_CLK0 STRING "1"
 // Retrieval info: PRIVATE: STICKY_CLK1 STRING "1"
+// Retrieval info: PRIVATE: STICKY_CLK2 STRING "1"
 // Retrieval info: PRIVATE: SWITCHOVER_COUNT_EDIT NUMERIC "1"
 // Retrieval info: PRIVATE: SWITCHOVER_FEATURE_ENABLED STRING "1"
 // Retrieval info: PRIVATE: SYNTH_WRAPPER_GEN_POSTFIX STRING "0"
 // Retrieval info: PRIVATE: USE_CLK0 STRING "1"
 // Retrieval info: PRIVATE: USE_CLK1 STRING "1"
+// Retrieval info: PRIVATE: USE_CLK2 STRING "1"
 // Retrieval info: PRIVATE: USE_CLKENA0 STRING "0"
 // Retrieval info: PRIVATE: USE_CLKENA1 STRING "0"
+// Retrieval info: PRIVATE: USE_CLKENA2 STRING "0"
 // Retrieval info: PRIVATE: USE_MIL_SPEED_GRADE NUMERIC "0"
 // Retrieval info: PRIVATE: ZERO_DELAY_RADIO STRING "0"
 // Retrieval info: LIBRARY: altera_mf altera_mf.altera_mf_components.all
 // Retrieval info: CONSTANT: BANDWIDTH_TYPE STRING "AUTO"
 // Retrieval info: CONSTANT: CLK0_DIVIDE_BY NUMERIC "3125"
 // Retrieval info: CONSTANT: CLK0_DUTY_CYCLE NUMERIC "50"
-// Retrieval info: CONSTANT: CLK0_MULTIPLY_BY NUMERIC "6"
+// Retrieval info: CONSTANT: CLK0_MULTIPLY_BY NUMERIC "768"
 // Retrieval info: CONSTANT: CLK0_PHASE_SHIFT STRING "0"
 // Retrieval info: CONSTANT: CLK1_DIVIDE_BY NUMERIC "3125"
 // Retrieval info: CONSTANT: CLK1_DUTY_CYCLE NUMERIC "50"
-// Retrieval info: CONSTANT: CLK1_MULTIPLY_BY NUMERIC "3"
+// Retrieval info: CONSTANT: CLK1_MULTIPLY_BY NUMERIC "192"
 // Retrieval info: CONSTANT: CLK1_PHASE_SHIFT STRING "0"
+// Retrieval info: CONSTANT: CLK2_DIVIDE_BY NUMERIC "3125"
+// Retrieval info: CONSTANT: CLK2_DUTY_CYCLE NUMERIC "50"
+// Retrieval info: CONSTANT: CLK2_MULTIPLY_BY NUMERIC "3"
+// Retrieval info: CONSTANT: CLK2_PHASE_SHIFT STRING "0"
 // Retrieval info: CONSTANT: COMPENSATE_CLOCK STRING "CLK0"
 // Retrieval info: CONSTANT: INCLK0_INPUT_FREQUENCY NUMERIC "20000"
 // Retrieval info: CONSTANT: INTENDED_DEVICE_FAMILY STRING "Cyclone 10 LP"
@@ -164,28 +216,28 @@ endmodule
 // Retrieval info: CONSTANT: PORT_CLKBAD1 STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_CLKLOSS STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_CLKSWITCH STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_CONFIGUPDATE STRING "PORT_UNUSED"
+// Retrieval info: CONSTANT: PORT_CONFIGUPDATE STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_FBIN STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_INCLK0 STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_INCLK1 STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_LOCKED STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_PFDENA STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_PHASECOUNTERSELECT STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_PHASEDONE STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_PHASESTEP STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_PHASEUPDOWN STRING "PORT_UNUSED"
+// Retrieval info: CONSTANT: PORT_PHASECOUNTERSELECT STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_PHASEDONE STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_PHASESTEP STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_PHASEUPDOWN STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_PLLENA STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_SCANACLR STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_SCANCLK STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_SCANCLKENA STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_SCANDATA STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_SCANDATAOUT STRING "PORT_UNUSED"
-// Retrieval info: CONSTANT: PORT_SCANDONE STRING "PORT_UNUSED"
+// Retrieval info: CONSTANT: PORT_SCANCLK STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_SCANCLKENA STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_SCANDATA STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_SCANDATAOUT STRING "PORT_USED"
+// Retrieval info: CONSTANT: PORT_SCANDONE STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_SCANREAD STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_SCANWRITE STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_clk0 STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_clk1 STRING "PORT_USED"
-// Retrieval info: CONSTANT: PORT_clk2 STRING "PORT_UNUSED"
+// Retrieval info: CONSTANT: PORT_clk2 STRING "PORT_USED"
 // Retrieval info: CONSTANT: PORT_clk3 STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_clk4 STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: PORT_clk5 STRING "PORT_UNUSED"
@@ -201,16 +253,40 @@ endmodule
 // Retrieval info: CONSTANT: PORT_extclk3 STRING "PORT_UNUSED"
 // Retrieval info: CONSTANT: SELF_RESET_ON_LOSS_LOCK STRING "OFF"
 // Retrieval info: CONSTANT: WIDTH_CLOCK NUMERIC "5"
+// Retrieval info: CONSTANT: WIDTH_PHASECOUNTERSELECT NUMERIC "3"
+// Retrieval info: CONSTANT: scan_chain_mif_file STRING "audioclks.mif"
 // Retrieval info: USED_PORT: @clk 0 0 5 0 OUTPUT_CLK_EXT VCC "@clk[4..0]"
 // Retrieval info: USED_PORT: c0 0 0 0 0 OUTPUT_CLK_EXT VCC "c0"
 // Retrieval info: USED_PORT: c1 0 0 0 0 OUTPUT_CLK_EXT VCC "c1"
+// Retrieval info: USED_PORT: c2 0 0 0 0 OUTPUT_CLK_EXT VCC "c2"
+// Retrieval info: USED_PORT: configupdate 0 0 0 0 INPUT GND "configupdate"
 // Retrieval info: USED_PORT: inclk0 0 0 0 0 INPUT_CLK_EXT GND "inclk0"
 // Retrieval info: USED_PORT: locked 0 0 0 0 OUTPUT GND "locked"
+// Retrieval info: USED_PORT: phasecounterselect 0 0 3 0 INPUT GND "phasecounterselect[2..0]"
+// Retrieval info: USED_PORT: phasedone 0 0 0 0 OUTPUT GND "phasedone"
+// Retrieval info: USED_PORT: phasestep 0 0 0 0 INPUT GND "phasestep"
+// Retrieval info: USED_PORT: phaseupdown 0 0 0 0 INPUT GND "phaseupdown"
+// Retrieval info: USED_PORT: scanclk 0 0 0 0 INPUT_CLK_EXT VCC "scanclk"
+// Retrieval info: USED_PORT: scanclkena 0 0 0 0 INPUT GND "scanclkena"
+// Retrieval info: USED_PORT: scandata 0 0 0 0 INPUT GND "scandata"
+// Retrieval info: USED_PORT: scandataout 0 0 0 0 OUTPUT VCC "scandataout"
+// Retrieval info: USED_PORT: scandone 0 0 0 0 OUTPUT VCC "scandone"
+// Retrieval info: CONNECT: @configupdate 0 0 0 0 configupdate 0 0 0 0
 // Retrieval info: CONNECT: @inclk 0 0 1 1 GND 0 0 0 0
 // Retrieval info: CONNECT: @inclk 0 0 1 0 inclk0 0 0 0 0
+// Retrieval info: CONNECT: @phasecounterselect 0 0 3 0 phasecounterselect 0 0 3 0
+// Retrieval info: CONNECT: @phasestep 0 0 0 0 phasestep 0 0 0 0
+// Retrieval info: CONNECT: @phaseupdown 0 0 0 0 phaseupdown 0 0 0 0
+// Retrieval info: CONNECT: @scanclk 0 0 0 0 scanclk 0 0 0 0
+// Retrieval info: CONNECT: @scanclkena 0 0 0 0 scanclkena 0 0 0 0
+// Retrieval info: CONNECT: @scandata 0 0 0 0 scandata 0 0 0 0
 // Retrieval info: CONNECT: c0 0 0 0 0 @clk 0 0 1 0
 // Retrieval info: CONNECT: c1 0 0 0 0 @clk 0 0 1 1
+// Retrieval info: CONNECT: c2 0 0 0 0 @clk 0 0 1 2
 // Retrieval info: CONNECT: locked 0 0 0 0 @locked 0 0 0 0
+// Retrieval info: CONNECT: phasedone 0 0 0 0 @phasedone 0 0 0 0
+// Retrieval info: CONNECT: scandataout 0 0 0 0 @scandataout 0 0 0 0
+// Retrieval info: CONNECT: scandone 0 0 0 0 @scandone 0 0 0 0
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks.v TRUE
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks.ppf TRUE
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks.inc FALSE
@@ -218,5 +294,6 @@ endmodule
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks.bsf TRUE
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks_inst.v FALSE
 // Retrieval info: GEN_FILE: TYPE_NORMAL audioclks_bb.v TRUE
+// Retrieval info: GEN_FILE: TYPE_NORMAL audioclks.mif TRUE
 // Retrieval info: LIB_FILE: altera_mf
 // Retrieval info: CBX_MODULE_PREFIX: ON

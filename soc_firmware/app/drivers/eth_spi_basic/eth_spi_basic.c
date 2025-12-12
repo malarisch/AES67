@@ -96,17 +96,15 @@ K_MSGQ_DEFINE(tx_queue, sizeof(struct tx_msg), TX_QUEUE_SIZE, 4);
 static uint8_t __aligned(SPI_BUF_ALIGNMENT) __nocache spi_tx_buf[SPI_BUF_SIZE];
 static uint8_t __aligned(SPI_BUF_ALIGNMENT) __nocache spi_rx_buf[SPI_BUF_SIZE];
 
-static int spi_basic_read_bytes(const struct device *dev, uint8_t addr,
+static int spi_basic_read_bytes_internal(const struct device *dev, uint8_t addr,
                                 uint8_t *buf, size_t len)
 {
     const struct eth_spi_basic_config *cfg = dev->config;
-    struct eth_spi_basic_data *data = dev->data;
+    /* Assumes mutex is already locked! */
 
     if (len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
         return -EMSGSIZE;
     }
-
-    k_mutex_lock(&data->spi_lock, K_FOREVER);
 
     spi_tx_buf[0] = SPI_CMD_READ(addr & 0x7F);
     memset(&spi_tx_buf[1], 0, len);
@@ -133,21 +131,18 @@ static int spi_basic_read_bytes(const struct device *dev, uint8_t addr,
         memcpy(buf, &spi_rx_buf[1], len); /* Byte 0 ist Echo des CMD */
     }
     
-    k_mutex_unlock(&data->spi_lock);
     return ret;
 }
 
-static int spi_basic_write_bytes(const struct device *dev, uint8_t addr,
+static int spi_basic_write_bytes_internal(const struct device *dev, uint8_t addr,
                                  const uint8_t *buf, size_t len)
 {
     const struct eth_spi_basic_config *cfg = dev->config;
-    struct eth_spi_basic_data *data = dev->data;
+    /* Assumes mutex is already locked! */
 
     if (len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
         return -EMSGSIZE;
     }
-
-    k_mutex_lock(&data->spi_lock, K_FOREVER);
 
     spi_tx_buf[0] = SPI_CMD_WRITE(addr & 0x7F);
     memcpy(&spi_tx_buf[1], buf, len);
@@ -161,8 +156,25 @@ static int spi_basic_write_bytes(const struct device *dev, uint8_t addr,
         .count = 1,
     };
 
-    int ret = spi_write_dt(&cfg->spi, &tx_set);
-    
+    return spi_write_dt(&cfg->spi, &tx_set);
+}
+
+static int spi_basic_read_bytes(const struct device *dev, uint8_t addr,
+                                uint8_t *buf, size_t len)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    k_mutex_lock(&data->spi_lock, K_FOREVER);
+    int ret = spi_basic_read_bytes_internal(dev, addr, buf, len);
+    k_mutex_unlock(&data->spi_lock);
+    return ret;
+}
+
+static int spi_basic_write_bytes(const struct device *dev, uint8_t addr,
+                                 const uint8_t *buf, size_t len)
+{
+    struct eth_spi_basic_data *data = dev->data;
+    k_mutex_lock(&data->spi_lock, K_FOREVER);
+    int ret = spi_basic_write_bytes_internal(dev, addr, buf, len);
     k_mutex_unlock(&data->spi_lock);
     return ret;
 }
@@ -179,29 +191,7 @@ static int spi_basic_write_reg(const struct device *dev, uint8_t addr, uint8_t v
     return spi_basic_write_bytes(dev, addr, &val, 1);
 }
 
-/* Lies RX_LEN_L, RX_LEN_H und RX_STATUS in einem CS-low-Burst (auto-increment im FPGA). */
-static int spi_basic_read_len_status(const struct device *dev, uint8_t *len_l, uint8_t *len_h, uint8_t *status)
-{
-    uint8_t tmp[3] = {0};
-    /* Start bei 0x20, drei Bytes: len_l, len_h, status */
-    int ret = spi_basic_read_bytes(dev, REG_RX_LEN_L, tmp, sizeof(tmp));
-    if (ret == 0) {
-        *len_l  = tmp[0];
-        *len_h  = tmp[1];
-        *status = tmp[2];
-    }
-    if (!(tmp[0] == 0 && tmp[1] == 0 && tmp[2] == 0)) {
-        LOG_DBG("Read len_l=0x%02X len_h=0x%02X status=0x%02X", tmp[0], tmp[1], tmp[2]);    
-    }
-    return ret;
-}
 
-static int spi_basic_clear_rx(const struct device *dev)
-{
-    LOG_DBG("clrrx");
-    /* Writing bit0 toggles the clear line inside the FPGA */
-    return spi_basic_write_reg(dev, REG_RX_STATUS, RX_STATUS_READY);
-}
 
 /* PTP Helper Functions */
 static int eth_spi_ptp_read_time(const struct device *dev, uint64_t *ns)
@@ -265,12 +255,12 @@ static int eth_spi_ptp_adjust(const struct device *dev, int increment)
 static int eth_spi_ptp_rate_adjust(const struct device *dev, double ratio)
 {
     struct eth_spi_basic_data *data = dev->data;
-    /* Default increment is 10ns. ratio is e.g. 1.00001 */
+    /* Default increment is 4ns (250 MHz). ratio is e.g. 1.00001 */
     /* We use 8.24 fixed point increment. */
-    /* Base increment = 10.0 */
-    /* New increment = 10.0 * ratio */
+    /* Base increment = 4.0 */
+    /* New increment = 4.0 * ratio */
     
-    double inc_f = 10.0 * ratio;
+    double inc_f = 4.0 * ratio;
     uint32_t inc_fixed = (uint32_t)(inc_f * (double)(1 << 24));
     
     uint8_t buf[4];
@@ -427,70 +417,91 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
     const struct device *dev = p1;
     struct eth_spi_basic_data *data = dev->data;
     struct net_pkt *pkt;
+    uint8_t status_buf[3];
     uint8_t status;
-    uint8_t len_l, len_h;
     uint16_t pkt_len;
+    int ret;
+    uint8_t clear_val = 0x01;
     
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
     
     while (1) {
+        /* DEBUG: Force polling to verify SPI functionality */
+        k_sleep(K_MSEC(1));
+        
+        /*
         if (data->use_interrupt) {
-            (void)k_sem_take(&data->int_sem, K_MSEC(50));
+            (void)k_sem_take(&data->int_sem, K_MSEC(10));
         } else {
-            k_sleep(K_MSEC(5));
+            k_sleep(K_MSEC(1));
+        }
+        */
+
+        /* OPTIMIZATION: Lock Mutex ONCE for the whole sequence */
+        /* LOG_INF("Locking mutex..."); */
+        k_mutex_lock(&data->spi_lock, K_FOREVER);
+        /* LOG_INF("Mutex locked"); */
+
+        /* 1. Read Length (L, H) and Status. Assumes REG_RX_LEN_L=0x20, contiguous */
+        ret = spi_basic_read_bytes_internal(dev, REG_RX_LEN_L, status_buf, 3);
+        if (ret < 0) {
+            /* LOG_ERR("SPI read failed: %d", ret); */
+            k_mutex_unlock(&data->spi_lock);
+            continue;
         }
 
-        /* DEBUG: Read FPGA internal state */
-        uint8_t dbg_status, dbg_cnt_l, dbg_cnt_h;
-        spi_basic_read_reg(dev, 0x78, &dbg_status);
-        spi_basic_read_reg(dev, 0x79, &dbg_cnt_l);
-        spi_basic_read_reg(dev, 0x7A, &dbg_cnt_h);
-        uint16_t dbg_cnt = ((uint16_t)dbg_cnt_h << 8) | dbg_cnt_l;
-        
-        if (dbg_cnt > 0 || (dbg_status & 1) == 0) {
-             LOG_DBG("FPGA Debug: Status=0x%02X (Empty=%d), RxByteCnt=%u", 
-                     dbg_status, (dbg_status & 1), dbg_cnt);
-        }
+        pkt_len = ((uint16_t)status_buf[0] | ((uint16_t)status_buf[1] << 8));
+        status = status_buf[2];
 
-        if (spi_basic_read_len_status(dev, &len_l, &len_h, &status) || !(status & RX_STATUS_READY)) {
+        if (!(status & RX_STATUS_READY)) {
             if (status & RX_STATUS_OVF) {
-                LOG_WRN("RX status overflow without READY (status=0x%02X)", status);
-                spi_basic_clear_rx(dev);
+                spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
             }
-            continue;
-        }
-        pkt_len = ((uint16_t)len_l | ((uint16_t)len_h << 8));
-        LOG_DBG("RX ready len=%u status=0x%02X", pkt_len, status);
-        //printf("\n-- start ---\nRX packet, len=%u\n", pkt_len);
-        if (pkt_len == 0 || pkt_len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
-            LOG_ERR("Invalid RX length %u", pkt_len);
-            spi_basic_clear_rx(dev);
+            k_mutex_unlock(&data->spi_lock);
             continue;
         }
 
-        if (spi_basic_read_bytes(dev, REG_RX_WINDOW, data->rx_buf, pkt_len)) {
-            LOG_ERR("RX payload read failed");
-            spi_basic_clear_rx(dev);
+        if (pkt_len == 0 || pkt_len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
+            spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+            k_mutex_unlock(&data->spi_lock);
+            continue;
+        }
+
+        /* 2. Read Payload */
+        /* Reads into data->rx_buf. Internal function handles the SPI transaction. */
+        /* Note: spi_basic_read_bytes_internal uses spi_rx_buf which is static/shared. 
+           We must copy out before next read if we used it. */
+        if (spi_basic_read_bytes_internal(dev, REG_RX_WINDOW, data->rx_buf, pkt_len)) {
+            spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+            k_mutex_unlock(&data->spi_lock);
             continue;
         }
         
-        /* Read RX Timestamp */
+        /* 3. Read RX Timestamp */
         struct net_ptp_time rx_ts = {0};
+        bool has_ts = false;
         if (data->ptp_clock) {
             uint8_t ts_buf[8];
-            if (spi_basic_read_bytes(dev, REG_RX_TS_L, ts_buf, 8) == 0) {
+            if (spi_basic_read_bytes_internal(dev, REG_RX_TS_L, ts_buf, 8) == 0) {
                 uint64_t ns = 0;
                 for (int i = 0; i < 8; i++) {
                     ns |= ((uint64_t)ts_buf[i] << (i * 8));
                 }
                 rx_ts.second = ns / NSEC_PER_SEC;
                 rx_ts.nanosecond = ns % NSEC_PER_SEC;
+                has_ts = true;
             }
         }
-        
-        LOG_HEXDUMP_DBG(data->rx_buf, pkt_len, "RX Packet Payload");
 
+        /* 4. Clear RX Ready (Early Clear) */
+        spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+
+        /* Unlock Mutex - SPI bus is free now */
+        k_mutex_unlock(&data->spi_lock);
+
+        /* 5. Process Packet (Outside Lock) */
+        
         /* Debug: Ziel-MAC prüfen */
         bool dst_broadcast = true;
         bool dst_match = true;
@@ -502,21 +513,13 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
                 dst_match = false;
             }
         }
-        uint16_t eth_type = ((uint16_t)data->rx_buf[12] << 8) | data->rx_buf[13];
+        /* uint16_t eth_type = ((uint16_t)data->rx_buf[12] << 8) | data->rx_buf[13]; */
         if (!dst_broadcast && !dst_match) {
-            LOG_DBG("RX dst mismatch %02x:%02x:%02x:%02x:%02x:%02x (mine %02x:%02x:%02x:%02x:%02x:%02x) type=0x%04X",
-                    data->rx_buf[0], data->rx_buf[1], data->rx_buf[2],
-                    data->rx_buf[3], data->rx_buf[4], data->rx_buf[5],
-                    data->mac_addr[0], data->mac_addr[1], data->mac_addr[2],
-                    data->mac_addr[3], data->mac_addr[4], data->mac_addr[5],
-                    eth_type);
             /* Manche Gegenstellen antworten auf die im MAC-Core konfigurierte Adresse.
              * Damit der Zephyr-Stack das Paket akzeptiert, schreibe die Zieladresse
              * auf unsere Interface-MAC um.
              */
             memcpy(data->rx_buf, data->mac_addr, 6);
-        } else {
-            LOG_DBG("RX dst %s type=0x%04X", dst_broadcast ? "broadcast" : "unicast", eth_type);
         }
 
         /* FPGA liefert das komplette Ethernet-Frame inkl. 4-Byte-FCS.
@@ -526,49 +529,35 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
         if (payload_len >= 4U) {
             payload_len -= 4U;
         } else {
-            LOG_ERR("RX length too small to strip FCS (%u)", payload_len);
-            spi_basic_clear_rx(dev);
             continue;
         }
         /* Filter offensichtlichen Müll: kleiner als Ethernet-Header */
         if (payload_len < 14U) {
-            LOG_WRN("RX frame too short (%u), dropping", payload_len);
-            spi_basic_clear_rx(dev);
             continue;
         }
 
         pkt = net_pkt_rx_alloc_with_buffer(data->iface, payload_len,
                                            AF_UNSPEC, 0, K_NO_WAIT);
         if (!pkt) {
-            LOG_ERR("net_pkt allocation failed");
-            spi_basic_clear_rx(dev);
             continue;
         }
         
-        if (data->ptp_clock) {
+        if (has_ts) {
             net_pkt_set_timestamp(pkt, &rx_ts);
         }
         
         if (net_pkt_write(pkt, data->rx_buf, payload_len)) {
-            LOG_ERR("RX buffer write failed");
             net_pkt_unref(pkt);
-            spi_basic_clear_rx(dev);
             continue;
         }
 
-        int ret = net_recv_data(data->iface, pkt);
-        if (ret < 0) {
-            LOG_ERR("RX deliver failed (%d)", ret);
+        if (net_recv_data(data->iface, pkt) < 0) {
             net_pkt_unref(pkt);
-        } else {
-            LOG_DBG("RX delivered len=%u", payload_len);
         }
 
         if (status & RX_STATUS_OVF) {
-            LOG_WRN("RX overflow flagged");
+            /* LOG_WRN("RX overflow flagged"); */
         }
-
-        spi_basic_clear_rx(dev);
     }
 }
 

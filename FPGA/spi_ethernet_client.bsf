@@ -146,16 +146,30 @@ on the Quartus Prime software download page.
 	(port
 		(pt 272 64)
 		(output)
-		(text "mac_tx_enable_o" (rect 0 0 71 12)(font "Arial" ))
-		(text "mac_tx_enable_o" (rect 180 59 251 71)(font "Arial" ))
+		(text "spi_transaction_done" (rect 0 0 83 12)(font "Arial" ))
+		(text "spi_transaction_done" (rect 168 59 251 71)(font "Arial" ))
 		(line (pt 272 64)(pt 256 64)(line_width 1))
 	)
 	(port
 		(pt 272 80)
 		(output)
+		(text "mac_tx_enable_o" (rect 0 0 71 12)(font "Arial" ))
+		(text "mac_tx_enable_o" (rect 180 75 251 87)(font "Arial" ))
+		(line (pt 272 80)(pt 256 80)(line_width 1))
+	)
+	(port
+		(pt 272 96)
+		(output)
 		(text "mac_tx_data_o[7..0]" (rect 0 0 83 12)(font "Arial" ))
-		(text "mac_tx_data_o[7..0]" (rect 168 75 251 87)(font "Arial" ))
-		(line (pt 272 80)(pt 256 80)(line_width 3))
+		(text "mac_tx_data_o[7..0]" (rect 168 91 251 103)(font "Arial" ))
+		(line (pt 272 96)(pt 256 96)(line_width 3))
+	)
+	(port
+		(pt 272 112)
+		(output)
+		(text "ptp_time_o[63..0]" (rect 0 0 69 12)(font "Arial" ))
+		(text "ptp_time_o[63..0]" (rect 182 107 251 119)(font "Arial" ))
+		(line (pt 272 112)(pt 256 112)(line_width 3))
 	)
 	(parameter
 		"TX_ADDR_WIDTH"

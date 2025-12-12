@@ -1,0 +1,93 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 2025  Altera Corporation. All rights reserved.
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and any partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, the Altera Quartus Prime License Agreement,
+the Altera IP License Agreement, or other applicable license
+agreement, including, without limitation, that your use is for
+the sole purpose of programming logic devices manufactured by
+Altera and sold by Altera or its authorized distributors.  Please
+refer to the Altera Software License Subscription Agreements 
+on the Quartus Prime software download page.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 264 160)
+	(text "audio_clock_controller" (rect 5 0 92 12)(font "Arial" ))
+	(text "inst" (rect 8 128 20 140)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "clk_sys_i" (rect 0 0 38 12)(font "Arial" ))
+		(text "clk_sys_i" (rect 21 27 59 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "rst_i" (rect 0 0 17 12)(font "Arial" ))
+		(text "rst_i" (rect 21 43 38 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "ptp_time_i[63..0]" (rect 0 0 66 12)(font "Arial" ))
+		(text "ptp_time_i[63..0]" (rect 21 59 87 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "mclk_i" (rect 0 0 25 12)(font "Arial" ))
+		(text "mclk_i" (rect 21 75 46 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 1))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "pll_phasedone_i" (rect 0 0 62 12)(font "Arial" ))
+		(text "pll_phasedone_i" (rect 21 91 83 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 1))
+	)
+	(port
+		(pt 248 32)
+		(output)
+		(text "pll_scanclk_o" (rect 0 0 53 12)(font "Arial" ))
+		(text "pll_scanclk_o" (rect 174 27 227 39)(font "Arial" ))
+		(line (pt 248 32)(pt 232 32)(line_width 1))
+	)
+	(port
+		(pt 248 48)
+		(output)
+		(text "pll_phaseupdown_o" (rect 0 0 76 12)(font "Arial" ))
+		(text "pll_phaseupdown_o" (rect 151 43 227 55)(font "Arial" ))
+		(line (pt 248 48)(pt 232 48)(line_width 1))
+	)
+	(port
+		(pt 248 64)
+		(output)
+		(text "pll_phasestep_o" (rect 0 0 63 12)(font "Arial" ))
+		(text "pll_phasestep_o" (rect 164 59 227 71)(font "Arial" ))
+		(line (pt 248 64)(pt 232 64)(line_width 1))
+	)
+	(port
+		(pt 248 80)
+		(output)
+		(text "pll_cnt_sel_o[2..0]" (rect 0 0 71 12)(font "Arial" ))
+		(text "pll_cnt_sel_o[2..0]" (rect 156 75 227 87)(font "Arial" ))
+		(line (pt 248 80)(pt 232 80)(line_width 3))
+	)
+	(drawing
+		(rectangle (rect 16 16 232 128)(line_width 1))
+	)
+)

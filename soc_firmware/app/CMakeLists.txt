@@ -16,6 +16,8 @@ set(CONFIG_BOOTLOADER_MCUBOOT y)
 #set(DOPENOCD_DEFAULT_PATH /home/wolff/openocd-esp32/openocd-esp32/share/openocd/scripts)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/lib)
+
 project(app)
 
 target_sources(app PRIVATE
