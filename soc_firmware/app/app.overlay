@@ -31,12 +31,18 @@
         /* Dedicated GPIO CS on D14/PB9 for this device */
         cs-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;
         /* IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3) */
-        int-gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;
+        /* Button Test: PC13 is User Button. Active High (Pressed=1). Needs Pull-Down to be 0 when idle. */
+        int-gpios = <&gpiob 1 (GPIO_ACTIVE_LOW)>;
         full-duplex;
         
         /* Optional: feste MAC Adresse */
         local-mac-address = [00 1c 23 17 4a cb];
     };
+};
+
+/* Disable user_button to prevent conflict on PC13 */
+&user_button {
+	status = "disabled";
 };
 
 &mac {

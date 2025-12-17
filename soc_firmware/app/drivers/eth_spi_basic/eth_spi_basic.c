@@ -16,9 +16,15 @@
 #include <zephyr/drivers/ptp_clock.h>
 #include <zephyr/random/random.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/linker/sections.h>
 #include <stdbool.h>
+
+/* STM32 EXTI low-level diagnostics */
+#include <stm32_ll_exti.h>
+#include <zephyr/drivers/interrupt_controller/gpio_intc_stm32.h>
 
 #include "eth_spi_basic.h"
 
@@ -58,6 +64,8 @@ struct eth_spi_basic_data {
     struct k_thread rx_thread;
     struct k_thread tx_thread;
     bool use_interrupt;
+    atomic_t irq_count;
+    atomic_t rx_wake_count;
     uint8_t rx_buf[ETH_SPI_BASIC_MAX_PKT_SIZE];
     struct k_work_delayable link_work;
     const struct device *ptp_clock;
@@ -416,6 +424,7 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
 {
     const struct device *dev = p1;
     struct eth_spi_basic_data *data = dev->data;
+    const struct eth_spi_basic_config *cfg = dev->config;
     struct net_pkt *pkt;
     uint8_t status_buf[3];
     uint8_t status;
@@ -427,80 +436,87 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
     ARG_UNUSED(p3);
     
     while (1) {
-        /* DEBUG: Force polling to verify SPI functionality */
-        k_sleep(K_MSEC(1));
-        
-        /*
+        /* Wait for an interrupt (or periodically wake as a safety net), then
+         * DRAIN all pending RX packets.
+         *
+         * Important for your IRQ semantics (mode 2): IRQ is asserted while RX
+         * is pending and only deasserts when we clear RX. That means we MUST
+         * drain until RX_STATUS_READY is 0 before going back to sleep,
+         * otherwise we can miss edges and throttle.
+         */
         if (data->use_interrupt) {
-            (void)k_sem_take(&data->int_sem, K_MSEC(10));
+            /* Wait for interrupt (Edge) */
+            k_sem_take(&data->int_sem, K_FOREVER);
+            (void)atomic_inc(&data->rx_wake_count);
         } else {
             k_sleep(K_MSEC(1));
         }
-        */
 
-        /* OPTIMIZATION: Lock Mutex ONCE for the whole sequence */
-        /* LOG_INF("Locking mutex..."); */
-        k_mutex_lock(&data->spi_lock, K_FOREVER);
-        /* LOG_INF("Mutex locked"); */
+        /* Loop while the line is active (Level) to handle missed edges or stuck lines */
+        bool first_pass = true;
+        /* Note: gpio_pin_get_dt returns logical level (1=Active). 
+         * For Button (Active High): 1=Pressed.
+         * For FPGA (Active Low): 1=Low (Asserted).
+         */
+        while (first_pass || (data->use_interrupt && gpio_pin_get_dt(&cfg->interrupt) == 1)) {
+            first_pass = false;
+            /* OPTIMIZATION: Lock Mutex ONCE for the SPI sequence */
+            k_mutex_lock(&data->spi_lock, K_FOREVER);
 
-        /* 1. Read Length (L, H) and Status. Assumes REG_RX_LEN_L=0x20, contiguous */
-        ret = spi_basic_read_bytes_internal(dev, REG_RX_LEN_L, status_buf, 3);
-        if (ret < 0) {
-            /* LOG_ERR("SPI read failed: %d", ret); */
-            k_mutex_unlock(&data->spi_lock);
-            continue;
-        }
-
-        pkt_len = ((uint16_t)status_buf[0] | ((uint16_t)status_buf[1] << 8));
-        status = status_buf[2];
-
-        if (!(status & RX_STATUS_READY)) {
-            if (status & RX_STATUS_OVF) {
-                spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+            /* 1. Read Length (L, H) and Status. Assumes REG_RX_LEN_L=0x20, contiguous */
+            ret = spi_basic_read_bytes_internal(dev, REG_RX_LEN_L, status_buf, 3);
+            if (ret < 0) {
+                k_mutex_unlock(&data->spi_lock);
+                break;
             }
-            k_mutex_unlock(&data->spi_lock);
-            continue;
-        }
 
-        if (pkt_len == 0 || pkt_len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
-            spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
-            k_mutex_unlock(&data->spi_lock);
-            continue;
-        }
+            pkt_len = ((uint16_t)status_buf[0] | ((uint16_t)status_buf[1] << 8));
+            status = status_buf[2];
 
-        /* 2. Read Payload */
-        /* Reads into data->rx_buf. Internal function handles the SPI transaction. */
-        /* Note: spi_basic_read_bytes_internal uses spi_rx_buf which is static/shared. 
-           We must copy out before next read if we used it. */
-        if (spi_basic_read_bytes_internal(dev, REG_RX_WINDOW, data->rx_buf, pkt_len)) {
-            spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
-            k_mutex_unlock(&data->spi_lock);
-            continue;
-        }
-        
-        /* 3. Read RX Timestamp */
-        struct net_ptp_time rx_ts = {0};
-        bool has_ts = false;
-        if (data->ptp_clock) {
-            uint8_t ts_buf[8];
-            if (spi_basic_read_bytes_internal(dev, REG_RX_TS_L, ts_buf, 8) == 0) {
-                uint64_t ns = 0;
-                for (int i = 0; i < 8; i++) {
-                    ns |= ((uint64_t)ts_buf[i] << (i * 8));
+            if (!(status & RX_STATUS_READY)) {
+                if (status & RX_STATUS_OVF) {
+                    spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
                 }
-                rx_ts.second = ns / NSEC_PER_SEC;
-                rx_ts.nanosecond = ns % NSEC_PER_SEC;
-                has_ts = true;
+                k_mutex_unlock(&data->spi_lock);
+                break; /* nothing more to drain */
             }
-        }
 
-        /* 4. Clear RX Ready (Early Clear) */
-        spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+            if (pkt_len == 0 || pkt_len > ETH_SPI_BASIC_MAX_PKT_SIZE) {
+                spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+                k_mutex_unlock(&data->spi_lock);
+                continue;
+            }
 
-        /* Unlock Mutex - SPI bus is free now */
-        k_mutex_unlock(&data->spi_lock);
+            /* 2. Read Payload */
+            if (spi_basic_read_bytes_internal(dev, REG_RX_WINDOW, data->rx_buf, pkt_len)) {
+                spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+                k_mutex_unlock(&data->spi_lock);
+                continue;
+            }
+            
+            /* 3. Read RX Timestamp */
+            struct net_ptp_time rx_ts = {0};
+            bool has_ts = false;
+            if (data->ptp_clock) {
+                uint8_t ts_buf[8];
+                if (spi_basic_read_bytes_internal(dev, REG_RX_TS_L, ts_buf, 8) == 0) {
+                    uint64_t ns = 0;
+                    for (int i = 0; i < 8; i++) {
+                        ns |= ((uint64_t)ts_buf[i] << (i * 8));
+                    }
+                    rx_ts.second = ns / NSEC_PER_SEC;
+                    rx_ts.nanosecond = ns % NSEC_PER_SEC;
+                    has_ts = true;
+                }
+            }
 
-        /* 5. Process Packet (Outside Lock) */
+            /* 4. Clear RX Ready (IRQ deasserts on clear in your design) */
+            spi_basic_write_bytes_internal(dev, REG_RX_STATUS, &clear_val, 1);
+
+            /* Unlock Mutex - SPI bus is free now */
+            k_mutex_unlock(&data->spi_lock);
+
+            /* 5. Process Packet (Outside Lock) */
         
         /* Debug: Ziel-MAC prüfen */
         bool dst_broadcast = true;
@@ -558,6 +574,10 @@ static void eth_spi_basic_rx_thread(void *p1, void *p2, void *p3)
         if (status & RX_STATUS_OVF) {
             /* LOG_WRN("RX overflow flagged"); */
         }
+
+            /* Continue draining in case another packet became ready before/after clear */
+        }
+        /* End of while(first_pass || ...) loop */
     }
 }
 
@@ -566,8 +586,14 @@ static void eth_spi_basic_gpio_callback(const struct device *port,
                                         struct gpio_callback *cb,
                                         gpio_port_pins_t pins)
 {
+//    printk("eth_spi_basic IRQ\n");
     struct eth_spi_basic_data *data = 
         CONTAINER_OF(cb, struct eth_spi_basic_data, gpio_cb);
+
+    ARG_UNUSED(port);
+    ARG_UNUSED(pins);
+
+    (void)atomic_inc(&data->irq_count);
     
     k_sem_give(&data->int_sem);
 }
@@ -640,6 +666,12 @@ static int eth_spi_basic_init(const struct device *dev)
         return -ENODEV;
     }
 
+    /* Semaphoren/Mutex initialisieren (must be ready before enabling IRQ) */
+    k_sem_init(&data->int_sem, 0, 1);
+    k_mutex_init(&data->spi_lock);
+    atomic_clear(&data->irq_count);
+    atomic_clear(&data->rx_wake_count);
+
     data->use_interrupt = false;
 
     if (cfg->interrupt.port) {
@@ -648,32 +680,53 @@ static int eth_spi_basic_init(const struct device *dev)
         } else {
             ret = gpio_pin_configure_dt(&cfg->interrupt, GPIO_INPUT);
             if (ret != 0) {
-                LOG_ERR("Failed to configure GPIO interrupt");
+                LOG_ERR("Failed to configure GPIO interrupt (%d)", ret);
                 return ret;
             }
+
+            /* Sanity-check: read the pin level immediately after configuring it.
+             * If this never changes even when you hard-drive the pin, we are
+             * very likely on the wrong physical pin / wrong mapping.
+             */
+            
+                int level_active = gpio_pin_get_dt(&cfg->interrupt);
+                int level_raw = gpio_pin_get_raw(cfg->interrupt.port, cfg->interrupt.pin);
+                printk("eth_spi_basic: IRQ %s pin %d dt_flags=0x%x level(active)=%d level(raw)=%d\n",
+                       cfg->interrupt.port->name,
+                       cfg->interrupt.pin,
+                       cfg->interrupt.dt_flags,
+                       level_active,
+                       level_raw);
+            
 
             gpio_init_callback(&data->gpio_cb, eth_spi_basic_gpio_callback,
                               BIT(cfg->interrupt.pin));
 
             ret = gpio_add_callback(cfg->interrupt.port, &data->gpio_cb);
             if (ret != 0) {
-                LOG_ERR("Failed to add GPIO callback");
+                LOG_ERR("Failed to add GPIO callback (%d)", ret);
                 return ret;
             }
+            printk("eth_spi_basic: gpio_add_callback ok\n");
 
+            /* Debug: trigger on both edges so we catch any transition while
+             * bringing up the EXTI/IRQ path.
+             */
             ret = gpio_pin_interrupt_configure_dt(&cfg->interrupt,
-                                                 GPIO_INT_EDGE_TO_ACTIVE);
+                                                 GPIO_INT_EDGE_BOTH);
             if (ret != 0) {
-                LOG_ERR("Failed to configure GPIO interrupt");
+                LOG_ERR("Failed to configure GPIO interrupt (%d)", ret);
                 return ret;
             }
+            printk("eth_spi_basic: gpio_pin_interrupt_configure_dt ok\n");
+
             data->use_interrupt = true;
+            LOG_INF("Using IRQ on %s pin %d (active %s)",
+                    cfg->interrupt.port->name,
+                    cfg->interrupt.pin,
+                    (cfg->interrupt.dt_flags & GPIO_ACTIVE_LOW) ? "low" : "high");
         }
     }
-    
-    /* Semaphoren initialisieren */
-    k_sem_init(&data->int_sem, 0, 1);
-    k_mutex_init(&data->spi_lock);
 
     /* Initialize TX Slab in nocache memory */
     k_mem_slab_init(&tx_slab, tx_slab_buffer, SPI_BUF_SIZE, TX_QUEUE_SIZE);

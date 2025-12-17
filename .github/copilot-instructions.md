@@ -42,3 +42,9 @@ This is a hybrid hardware/firmware project implementing AES67 Audio over IP.
 - **Zephyr:** Follow standard Zephyr coding style and Device Tree conventions.
 - **FPGA:** VHDL/Verilog mixed. Prefer VHDL for new logic.
 - **Paths:** Always use absolute paths or paths relative to the workspace root when referencing files.
+
+## Tool-backed verification (important)
+- When anything is unclear (APIs, driver behavior, board pinmux/DT, interrupt semantics), prefer using available tools to verify:
+  - Search/read the relevant source files in the workspace.
+  - Use upstream/online documentation via available web research tools.
+- Avoid “reasonable guesses” about complex functions (e.g., Zephyr GPIO/interrupt APIs, STM32 pinmux/EXTI behavior). Confirm with sources first.
