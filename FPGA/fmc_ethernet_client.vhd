@@ -18,7 +18,7 @@ entity fmc_ethernet_client is
 
     -- Simple asynchronous FMC-like bus
     fmc_addr_i  : in  std_ulogic_vector(6 downto 0);
-    fmc_data_io : inout std_ulogic_vector(15 downto 0);
+    fmc_data_io : inout std_ulogic_vector(7 downto 0);
     fmc_ne_n_i  : in  std_ulogic;
     fmc_noe_n_i : in  std_ulogic;
     fmc_nwe_n_i : in  std_ulogic;
@@ -52,6 +52,7 @@ architecture rtl of fmc_ethernet_client is
   signal reg_rx_overflow : std_ulogic := '0';
 
   signal rx_clear_toggle_sys : std_ulogic := '0';
+  signal rx_clear_toggle_sys_d : std_ulogic := '0'; -- Added for edge detection in SYS domain
   signal rx_clear_sync_1     : std_ulogic := '0';
   signal rx_clear_sync_2     : std_ulogic := '0';
   signal rx_clear_sys_pulse  : std_ulogic := '0';
@@ -94,7 +95,6 @@ architecture rtl of fmc_ethernet_client is
   signal tx_clear_mac_d      : std_ulogic := '0';
   signal tx_clear_mac_pulse  : std_ulogic := '0';
   signal mac_tx_preamble_bytes_sent : unsigned(3 downto 0) := (others => '0');
-  signal reg_tx_len_sys : unsigned(15 downto 0) := (others => '0');
 
   type t_tx_SM is (s_Idle, s_PrimeTx, s_Transmit, s_End);
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
@@ -102,18 +102,33 @@ architecture rtl of fmc_ethernet_client is
   -- RX bookkeeping
   signal mac_rx_frame_d : std_ulogic := '0';
   signal debug_rx_byte_cnt : unsigned(15 downto 0) := (others => '0');
-  signal rx_window_reset : std_ulogic := '0';
 
   -- FMC signals
-  signal fmc_data_out : std_ulogic_vector(15 downto 0) := (others => '0');
+  signal fmc_data_out : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_data_oe  : std_ulogic := '0';
-  signal fmc_data_in  : std_ulogic_vector(15 downto 0);
+  signal fmc_data_in  : std_ulogic_vector(7 downto 0);
   signal nwe_d        : std_ulogic := '1';
+  signal fmc_noe_n_d  : std_ulogic := '1';
+  signal fmc_nwe_n_d  : std_ulogic := '1';
+  signal fmc_ne_n_d   : std_ulogic := '1';
+  signal fmc_addr_d   : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_din_d    : std_ulogic_vector(7 downto 0) := (others => '0');
+
+  signal fmc_wr_addr_lat : unsigned(6 downto 0) := (others => '0');
+  signal fmc_wr_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_read_latched : std_ulogic := '0';
+  signal fmc_read_addr_lat : unsigned(6 downto 0) := (others => '0');
+  signal fmc_read_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
 
 begin
 
   fmc_data_in <= fmc_data_io;
-  fmc_data_io <= fmc_data_out when fmc_data_oe = '1' else (others => 'Z');
+  -- Drive data bus only when internal OE is asserted *and* external raw strobes
+  -- indicate a read cycle. This prevents stale data from a previous read from
+  -- appearing at the very beginning of the next read cycle.
+  fmc_data_io <= fmc_data_out
+    when (fmc_data_oe = '1') and (fmc_ne_n_i = '0') and (fmc_noe_n_i = '0') and (fmc_nwe_n_i = '1')
+    else (others => 'Z');
 
   --------------------------------------------------------------------
   -- TX-FIFO
@@ -166,16 +181,13 @@ begin
   begin
     if rst_sys_i = '1' then
       rx_clear_sys_pulse <= '0';
-      rx_clear_sync_1 <= '0';
-      rx_clear_sync_2 <= '0';
       reg_rx_len_sys      <= (others => '0');
       reg_rx_ready_sys    <= '0';
       reg_rx_overflow_sys <= '0';
-      reg_tx_len_sys      <= (others => '0');
     elsif rising_edge(clk_sys_i) then
-      rx_clear_sys_pulse <= rx_clear_toggle_sys xor rx_clear_sync_1;
-      rx_clear_sync_1 <= rx_clear_toggle_sys;
-      rx_clear_sync_2 <= rx_clear_sync_1;
+      rx_clear_sys_pulse <= rx_clear_toggle_sys xor rx_clear_toggle_sys_d;
+      rx_clear_toggle_sys_d <= rx_clear_toggle_sys;
+
       if rx_clear_sys_pulse = '1' then
         reg_rx_ready_sys    <= '0';
         reg_rx_overflow_sys <= '0';
@@ -186,11 +198,53 @@ begin
         reg_rx_len_sys      <= reg_rx_len;
       end if;
 
-      tx_clear_sys_pulse <= tx_clear_toggle_mac xor tx_clear_sync_sys_1;
       tx_clear_sync_sys_1 <= tx_clear_toggle_mac;
       tx_clear_sync_sys_2 <= tx_clear_sync_sys_1;
+      tx_clear_sys_pulse  <= tx_clear_sync_sys_1 xor tx_clear_sync_sys_2;
+    end if;
+  end process;
 
-      reg_tx_len_sys <= reg_tx_len;
+  --------------------------------------------------------------------
+  -- FMC signal synchronization into clk_sys_i domain
+  --------------------------------------------------------------------
+  process(clk_sys_i, rst_sys_i)
+  begin
+    if rst_sys_i = '1' then
+      fmc_ne_n_meta <= '1';
+      fmc_ne_n_sync <= '1';
+      fmc_noe_n_meta <= '1';
+      fmc_noe_n_sync <= '1';
+      fmc_nwe_n_meta <= '1';
+      fmc_nwe_n_sync <= '1';
+
+      fmc_addr_meta <= (others => '0');
+      fmc_addr_sync <= (others => '0');
+      fmc_addr_sync_d <= (others => '0');
+      fmc_din_meta  <= (others => '0');
+      fmc_din_sync  <= (others => '0');
+      fmc_din_sync_d <= (others => '0');
+
+      fmc_noe_n_sync_d <= '1';
+      fmc_nwe_n_sync_d <= '1';
+      nwe_d <= '1';
+    elsif rising_edge(clk_sys_i) then
+      fmc_ne_n_meta  <= fmc_ne_n_i;
+      fmc_ne_n_sync  <= fmc_ne_n_meta;
+      fmc_noe_n_meta <= fmc_noe_n_i;
+      fmc_noe_n_sync <= fmc_noe_n_meta;
+      fmc_nwe_n_meta <= fmc_nwe_n_i;
+      fmc_nwe_n_sync <= fmc_nwe_n_meta;
+
+      fmc_addr_meta <= fmc_addr_i;
+      fmc_addr_sync <= fmc_addr_meta;
+      fmc_addr_sync_d <= fmc_addr_sync;
+      fmc_din_meta  <= fmc_data_in;
+      fmc_din_sync  <= fmc_din_meta;
+      fmc_din_sync_d <= fmc_din_sync;
+
+      fmc_noe_n_sync_d <= fmc_noe_n_sync;
+      fmc_nwe_n_sync_d <= fmc_nwe_n_sync;
+      nwe_d <= fmc_nwe_n_sync_d;
     end if;
   end process;
 
@@ -199,7 +253,6 @@ begin
   --------------------------------------------------------------------
   process(clk_sys_i, rst_sys_i)
     variable addr_v  : unsigned(6 downto 0);
-    variable data_v  : std_ulogic_vector(7 downto 0);
   begin
     if rst_sys_i = '1' then
       txfifo_wr_en    <= '0';
@@ -211,66 +264,86 @@ begin
       spi_rx_bytes_sent <= (others => '0');
       fmc_data_out    <= (others => '0');
       fmc_data_oe     <= '0';
+      fmc_read_latched <= '0';
+      fmc_read_addr_lat <= (others => '0');
+      fmc_read_data_lat <= (others => '0');
     elsif rising_edge(clk_sys_i) then
       txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
+      fmc_data_out <= fmc_read_data_lat;
       fmc_data_oe  <= '0';
 
-      addr_v := unsigned(fmc_addr_i);
-      data_v := fmc_data_in(7 downto 0);
+      -- Drop read latch when NOE deasserts or chip deselects
+      if (fmc_noe_n_sync = '1') or (fmc_ne_n_sync = '1') then
+        fmc_read_latched <= '0';
+      end if;
 
-      -- Detect write strobe on rising edge of NWE
-      if (fmc_ne_n_i = '0') and (nwe_d = '0') and (fmc_nwe_n_i = '1') then
+      -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
+      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync = '0') then
+        fmc_wr_addr_lat <= unsigned(fmc_addr_sync_d);
+        fmc_wr_data_lat <= fmc_din_sync_d;
+      end if;
+
+      -- Detect end of write cycle on rising edge of synchronized NWE (one update per FMC write transaction).
+      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync_d = '0') and (fmc_nwe_n_sync = '1') then
+        addr_v := fmc_wr_addr_lat;
         case addr_v is
           when "0000000" =>  -- 0x00 TX_LEN low
-            reg_tx_len(7 downto 0) <= unsigned(data_v);
+            reg_tx_len(7 downto 0) <= unsigned(fmc_wr_data_lat);
             reg_tx_len_reset <= '1';
           when "0000001" =>  -- 0x01 TX_LEN high
-            reg_tx_len(15 downto 8) <= unsigned(data_v);
+            reg_tx_len(15 downto 8) <= unsigned(fmc_wr_data_lat);
             reg_tx_len_reset <= '1';
           when "0000010" =>  -- 0x02 TX_CTRL
-            reg_tx_start <= data_v(0);
+            reg_tx_start <= fmc_wr_data_lat(0);
           when "0100010" =>  -- 0x22 RX_STATUS clear
-            if data_v(0) = '1' then
+            if fmc_wr_data_lat(0) = '1' then
               rx_clear_toggle_sys <= not rx_clear_toggle_sys;
               spi_rx_bytes_sent   <= (others => '0');
             end if;
           when others =>
             if addr_v >= 16#10# and addr_v < 16#20# then
               if txfifo_wr_full = '0' then
-                txfifo_wr_data <= std_ulogic_vector(data_v);
+                txfifo_wr_data <= fmc_wr_data_lat;
                 txfifo_wr_en   <= '1';
               end if;
             end if;
         end case;
       end if;
 
-      -- Read path
-      if (fmc_ne_n_i = '0') and (fmc_noe_n_i = '0') then
-        fmc_data_oe <= '1';
-        fmc_data_out <= (others => '0');
+      -- Latch address and prepare read data on NOE falling edge (synchronized).
+      -- Address changes while NOE stays low are ignored until the next NOE high->low.
+      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync = '1') and (fmc_noe_n_sync_d = '1') and (fmc_noe_n_sync = '0') then
+        addr_v := unsigned(fmc_addr_sync_d);
+        fmc_read_addr_lat <= addr_v;
+        fmc_read_data_lat <= (others => '0');
         case addr_v is
-          when "0100000" => fmc_data_out(7 downto 0) <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
-          when "0100001" => fmc_data_out(7 downto 0) <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); --0x21
+          when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
+          when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
           when "0100010" => -- 0x22
-            fmc_data_out(0) <= reg_rx_ready_sys;
-            fmc_data_out(1) <= reg_rx_overflow_sys;
+            fmc_read_data_lat(0) <= reg_rx_ready_sys;
+            fmc_read_data_lat(1) <= reg_rx_overflow_sys;
           when others =>
             if addr_v >= 16#30# and addr_v < 16#40# then
               if rxfifo_rd_empty = '0' then
-                fmc_data_out(7 downto 0) <= rxfifo_rd_data;
+                fmc_read_data_lat <= rxfifo_rd_data;
                 rxfifo_rd_en <= '1';
                 spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
               end if;
             end if;
         end case;
+        fmc_read_latched <= '1';
+      end if;
+
+      -- Drive bus during read while latched and external strobes indicate read
+      if (fmc_read_latched = '1') and (fmc_ne_n_sync = '0') and (fmc_noe_n_sync = '0') and (fmc_nwe_n_sync = '1') then
+        fmc_data_out <= fmc_read_data_lat;
+        fmc_data_oe  <= '1';
       end if;
 
       if reg_tx_len_reset = '1' then
         reg_tx_len_reset <= '0';
       end if;
-
-      nwe_d <= fmc_nwe_n_i;
     end if;
   end process;
 
@@ -398,7 +471,6 @@ begin
       rx_clear_sync_1   <= '0';
       rx_clear_sync_2   <= '0';
       mac_rx_frame_d    <= '0';
-      rx_window_reset   <= '0';
     elsif rising_edge(mac_rx_clock_i) then
       rxfifo_wr_en <= '0';
       rx_clear_sync_1 <= rx_clear_toggle_sys;
@@ -413,9 +485,6 @@ begin
         len_next   := (others => '0');
         ready_next := '0';
         ovf_next   := '0';
-        rx_window_reset <= '1';
-      else
-        rx_window_reset <= '0';
       end if;
 
       if (mac_rx_frame_i = '1') and (mac_rx_frame_d = '0') then

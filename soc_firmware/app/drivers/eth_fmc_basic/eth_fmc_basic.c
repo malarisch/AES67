@@ -9,9 +9,35 @@
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/gpio.h>
 #include <string.h>
 
 LOG_MODULE_REGISTER(eth_fmc_basic, CONFIG_ETHERNET_LOG_LEVEL);
+
+/* FPGA Ready Pin */
+static const struct gpio_dt_spec fpga_ready = GPIO_DT_SPEC_GET(DT_NODELABEL(fpga_ready), gpios);
+
+bool fpga_ready_status = false;
+
+static bool is_fpga_ready(void)
+{
+	if (!gpio_is_ready_dt(&fpga_ready)) {
+		if (fpga_ready_status) {
+			fpga_ready_status = false;
+			LOG_ERR("FPGA got unavailable");
+
+		}
+		LOG_INF("FPGA is down");
+		return false;
+	}
+	if(!fpga_ready_status) {
+		LOG_INF("FPGA got up");
+		fpga_ready_status = true;
+	}
+	
+	
+	return gpio_pin_get_dt(&fpga_ready) > 0;
+}
 
 /* Register map identical to SPI bridge */
 #define REG_TX_LEN_L      0x00
@@ -27,7 +53,7 @@ LOG_MODULE_REGISTER(eth_fmc_basic, CONFIG_ETHERNET_LOG_LEVEL);
 #define RX_STATUS_READY   BIT(0)
 #define RX_STATUS_OVF     BIT(1)
 
-#define ETH_FMC_MAX_PKT_SIZE 1500
+#define ETH_FMC_MAX_PKT_SIZE 1518
 
 struct eth_fmc_basic_config {
 	uintptr_t base;
@@ -85,6 +111,12 @@ static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 	while (1) {
 		k_msgq_get(&tx_queue, &pkt, K_FOREVER);
 
+		if (!is_fpga_ready()) {
+			/* Drop packet if FPGA is not ready */
+			net_pkt_unref(pkt);
+			continue;
+		}
+
 		size_t len = net_pkt_get_len(pkt);
 		if (len > ETH_FMC_MAX_PKT_SIZE) {
 			LOG_ERR("TX too large: %zu", len);
@@ -98,6 +130,7 @@ static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 			net_pkt_unref(pkt);
 			continue;
 		}
+		LOG_INF("Sending Packet with lenght %u", len);
 
 		k_mutex_lock(&((struct eth_fmc_basic_data *)dev->data)->io_lock, K_FOREVER);
 		fmc_write8(cfg->base, REG_TX_LEN_L, len & 0xFF);
@@ -123,16 +156,22 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 	while (1) {
 		k_sleep(K_MSEC(CONFIG_ETH_FMC_POLL_INTERVAL_MS));
 
+		if (!is_fpga_ready()) {
+			continue;
+		}
+
 		k_mutex_lock(&data->io_lock, K_FOREVER);
 		uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 		uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 		uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
+		LOG_INF("Received Packet with length %02x %02x (Status %02x)", len_h, len_l, status);
 		if (!(status & RX_STATUS_READY)) {
 			k_mutex_unlock(&data->io_lock);
 			continue;
 		}
 
 		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
+		
 		if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
 			LOG_WRN("RX invalid len %u", pkt_len);
 			fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
@@ -233,6 +272,15 @@ static int eth_fmc_basic_init(const struct device *dev)
 {
 	struct eth_fmc_basic_data *data = dev->data;
 
+	LOG_INF("Initializing FMC Ethernet Bridge at 0x%lx", 
+		((const struct eth_fmc_basic_config *)dev->config)->base);
+
+	if (!gpio_is_ready_dt(&fpga_ready)) {
+		LOG_ERR("FPGA Ready GPIO not ready");
+		return -ENODEV;
+	}
+	gpio_pin_configure_dt(&fpga_ready, GPIO_INPUT);
+
 	k_mutex_init(&data->io_lock);
 	k_work_init_delayable(&data->link_work, eth_fmc_basic_link_work);
 
@@ -245,10 +293,11 @@ static int eth_fmc_basic_init(const struct device *dev)
 	k_thread_create(&data->tx_thread, data->tx_stack,
 			CONFIG_ETH_FMC_BASIC_RX_STACK_SIZE,
 			eth_fmc_basic_tx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_COOP(2), 0, K_NO_WAIT);
+			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
 	k_thread_name_set(&data->tx_thread, "eth_fmc_tx");
 
 	k_work_schedule(&data->link_work, K_MSEC(50));
+
 	return 0;
 }
 

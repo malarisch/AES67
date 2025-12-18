@@ -16,7 +16,7 @@ config ETH_FMC_BASE_ADDR
 
 config ETH_FMC_POLL_INTERVAL_MS
 	int "RX poll interval (ms)"
-	default 5
+	default 1000
 	help
 	  Polling interval for RX-ready status when no interrupt line is wired.
 

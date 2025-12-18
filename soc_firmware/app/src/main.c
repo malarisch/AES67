@@ -72,9 +72,11 @@ static int send_raw_frame(struct net_if *iface, uint8_t seq)
 int main(void)
 {
 	struct net_if *iface = net_if_get_default();
-	uint8_t seq = 0;
+	// uint8_t seq = 0;
 
 	LOG_INF("Starting raw Ethernet TX demo");
+
+	printk("MAIN: Starting loop\n");
 
     if (!iface) {
         LOG_ERR("No network interface found");
