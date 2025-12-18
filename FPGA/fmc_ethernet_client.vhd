@@ -108,17 +108,28 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_data_oe  : std_ulogic := '0';
   signal fmc_data_in  : std_ulogic_vector(7 downto 0);
   signal nwe_d        : std_ulogic := '1';
-  signal fmc_noe_n_d  : std_ulogic := '1';
-  signal fmc_nwe_n_d  : std_ulogic := '1';
-  signal fmc_ne_n_d   : std_ulogic := '1';
-  signal fmc_addr_d   : std_ulogic_vector(6 downto 0) := (others => '0');
-  signal fmc_din_d    : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_noe_n_sync_d : std_ulogic := '1';
+  signal fmc_nwe_n_sync_d : std_ulogic := '1';
+  signal fmc_ne_n_sync_d  : std_ulogic := '1';
+  signal fmc_ne_n_meta  : std_ulogic := '1';
+  signal fmc_ne_n_sync  : std_ulogic := '1';
+  signal fmc_noe_n_meta : std_ulogic := '1';
+  signal fmc_noe_n_sync : std_ulogic := '1';
+  signal fmc_nwe_n_meta : std_ulogic := '1';
+  signal fmc_nwe_n_sync : std_ulogic := '1';
+  signal fmc_addr_meta  : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_addr_sync  : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_addr_sync_d : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_din_meta   : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_din_sync   : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_din_sync_d : std_ulogic_vector(7 downto 0) := (others => '0');
 
   signal fmc_wr_addr_lat : unsigned(6 downto 0) := (others => '0');
   signal fmc_wr_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_read_latched : std_ulogic := '0';
   signal fmc_read_addr_lat : unsigned(6 downto 0) := (others => '0');
   signal fmc_read_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_ne_qual_low : std_ulogic := '0';
 
 begin
 
@@ -129,6 +140,9 @@ begin
   fmc_data_io <= fmc_data_out
     when (fmc_data_oe = '1') and (fmc_ne_n_i = '0') and (fmc_noe_n_i = '0') and (fmc_nwe_n_i = '1')
     else (others => 'Z');
+
+  -- Qualify NE low using both raw and synchronized versions to tolerate phase differences
+  fmc_ne_qual_low <= '1' when (fmc_ne_n_i = '0') or (fmc_ne_n_sync = '0') or (fmc_ne_n_sync_d = '0') else '0';
 
   --------------------------------------------------------------------
   -- TX-FIFO
@@ -212,10 +226,13 @@ begin
     if rst_sys_i = '1' then
       fmc_ne_n_meta <= '1';
       fmc_ne_n_sync <= '1';
+      fmc_ne_n_sync_d <= '1';
       fmc_noe_n_meta <= '1';
       fmc_noe_n_sync <= '1';
+      fmc_noe_n_sync_d <= '1';
       fmc_nwe_n_meta <= '1';
       fmc_nwe_n_sync <= '1';
+      fmc_nwe_n_sync_d <= '1';
 
       fmc_addr_meta <= (others => '0');
       fmc_addr_sync <= (others => '0');
@@ -224,27 +241,28 @@ begin
       fmc_din_sync  <= (others => '0');
       fmc_din_sync_d <= (others => '0');
 
-      fmc_noe_n_sync_d <= '1';
-      fmc_nwe_n_sync_d <= '1';
       nwe_d <= '1';
     elsif rising_edge(clk_sys_i) then
-      fmc_ne_n_meta  <= fmc_ne_n_i;
-      fmc_ne_n_sync  <= fmc_ne_n_meta;
+      fmc_ne_n_meta <= fmc_ne_n_i;
+      fmc_ne_n_sync <= fmc_ne_n_meta;
+      fmc_ne_n_sync_d <= fmc_ne_n_sync;
+
       fmc_noe_n_meta <= fmc_noe_n_i;
       fmc_noe_n_sync <= fmc_noe_n_meta;
+      fmc_noe_n_sync_d <= fmc_noe_n_sync;
+
       fmc_nwe_n_meta <= fmc_nwe_n_i;
       fmc_nwe_n_sync <= fmc_nwe_n_meta;
+      fmc_nwe_n_sync_d <= fmc_nwe_n_sync;
+      nwe_d <= fmc_nwe_n_sync_d;
 
       fmc_addr_meta <= fmc_addr_i;
       fmc_addr_sync <= fmc_addr_meta;
       fmc_addr_sync_d <= fmc_addr_sync;
+
       fmc_din_meta  <= fmc_data_in;
       fmc_din_sync  <= fmc_din_meta;
       fmc_din_sync_d <= fmc_din_sync;
-
-      fmc_noe_n_sync_d <= fmc_noe_n_sync;
-      fmc_nwe_n_sync_d <= fmc_nwe_n_sync;
-      nwe_d <= fmc_nwe_n_sync_d;
     end if;
   end process;
 
@@ -274,18 +292,20 @@ begin
       fmc_data_oe  <= '0';
 
       -- Drop read latch when NOE deasserts or chip deselects
-      if (fmc_noe_n_sync = '1') or (fmc_ne_n_sync = '1') then
+      if (fmc_noe_n_sync = '1') or ((fmc_ne_n_sync = '1') and (fmc_ne_n_sync_d = '1')) then
         fmc_read_latched <= '0';
       end if;
 
       -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
       if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync = '0') then
-        fmc_wr_addr_lat <= unsigned(fmc_addr_sync_d);
-        fmc_wr_data_lat <= fmc_din_sync_d;
+        -- Capture early (1-stage synced) address/data during NWE low to avoid missing
+        -- simultaneous NE/NWE assertions.
+        fmc_wr_addr_lat <= unsigned(fmc_addr_meta);
+        fmc_wr_data_lat <= fmc_din_meta;
       end if;
 
       -- Detect end of write cycle on rising edge of synchronized NWE (one update per FMC write transaction).
-      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync_d = '0') and (fmc_nwe_n_sync = '1') then
+      if (fmc_ne_n_sync = '0') and (nwe_d = '0') and (fmc_nwe_n_sync = '1') then
         addr_v := fmc_wr_addr_lat;
         case addr_v is
           when "0000000" =>  -- 0x00 TX_LEN low
@@ -311,10 +331,12 @@ begin
         end case;
       end if;
 
-      -- Latch address and prepare read data on NOE falling edge (synchronized).
-      -- Address changes while NOE stays low are ignored until the next NOE high->low.
-      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync = '1') and (fmc_noe_n_sync_d = '1') and (fmc_noe_n_sync = '0') then
-        addr_v := unsigned(fmc_addr_sync_d);
+      -- Latch address and prepare read data when NOE is low and not yet latched.
+      -- We still use the synchronized NOE level, but do not require a clean falling edge,
+      -- so a simultaneous NE/NOE assertion will still produce data in the next clk_sys_i.
+      if (fmc_read_latched = '0') and (fmc_ne_qual_low = '1') and (fmc_nwe_n_sync = '1') and (fmc_noe_n_sync = '0') then
+        -- Use the most recent address (1-stage synced) to handle NE/NOE asserting together.
+        addr_v := unsigned(fmc_addr_meta);
         fmc_read_addr_lat <= addr_v;
         fmc_read_data_lat <= (others => '0');
         case addr_v is
@@ -336,7 +358,7 @@ begin
       end if;
 
       -- Drive bus during read while latched and external strobes indicate read
-      if (fmc_read_latched = '1') and (fmc_ne_n_sync = '0') and (fmc_noe_n_sync = '0') and (fmc_nwe_n_sync = '1') then
+      if (fmc_read_latched = '1') and (fmc_ne_qual_low = '1') and (fmc_noe_n_sync = '0') and (fmc_nwe_n_sync = '1') then
         fmc_data_out <= fmc_read_data_lat;
         fmc_data_oe  <= '1';
       end if;

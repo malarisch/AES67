@@ -226,23 +226,6 @@ on the Quartus Prime software download page.
 )
 (pin
 	(input)
-	(rect 3384 56 3552 72)
-	(text "INPUT" (rect 125 0 153 10)(font "Arial" (font_size 6)))
-	(text "gpio[25]" (rect 5 0 49 11)(font "Arial" ))
-	(pt 168 8)
-	(drawing
-		(line (pt 84 12)(pt 109 12))
-		(line (pt 84 4)(pt 109 4))
-		(line (pt 113 8)(pt 168 8))
-		(line (pt 84 12)(pt 84 4))
-		(line (pt 109 4)(pt 113 8))
-		(line (pt 109 12)(pt 113 8))
-	)
-	(text "VCC" (rect 128 7 148 17)(font "Arial" (font_size 6)))
-	(annotation_block (location)(rect 3320 72 3384 88))
-)
-(pin
-	(input)
 	(rect 3584 32 3752 48)
 	(text "INPUT" (rect 125 0 153 10)(font "Arial" (font_size 6)))
 	(text "gpio[22..21]" (rect 5 0 66 13)(font "Intel Clear" ))
@@ -2772,6 +2755,23 @@ on the Quartus Prime software download page.
 	)
 	(annotation_block (parameter)(rect 3448 672 3672 712))
 )
+(symbol
+	(rect 3512 48 3544 80)
+	(text "GND" (rect 8 16 30 26)(font "Arial" (font_size 6)))
+	(text "inst" (rect 3 21 23 32)(font "Arial" )(invisible))
+	(port
+		(pt 16 0)
+		(output)
+		(text "1" (rect 18 0 25 11)(font "Courier New" (bold))(invisible))
+		(text "1" (rect 18 0 25 11)(font "Courier New" (bold))(invisible))
+		(line (pt 16 8)(pt 16 0))
+	)
+	(drawing
+		(line (pt 8 8)(pt 16 16))
+		(line (pt 16 16)(pt 24 8))
+		(line (pt 8 8)(pt 24 8))
+	)
+)
 (connector
 	(pt 2104 336)
 	(pt 2104 560)
@@ -4184,6 +4184,14 @@ on the Quartus Prime software download page.
 	(pt 3824 40)
 	(pt 3752 40)
 	(bus)
+)
+(connector
+	(pt 3552 48)
+	(pt 3552 64)
+)
+(connector
+	(pt 3552 48)
+	(pt 3528 48)
 )
 (junction (pt 1976 816))
 (junction (pt 1976 1048))
