@@ -51,12 +51,16 @@ architecture rtl of fmc_ethernet_client is
   signal reg_rx_ready    : std_ulogic := '0';
   signal reg_rx_overflow : std_ulogic := '0';
 
-  signal rx_clear_toggle_sys : std_ulogic := '0';
-  signal rx_clear_toggle_sys_d : std_ulogic := '0'; -- Added for edge detection in SYS domain
-  signal rx_clear_sync_1     : std_ulogic := '0';
-  signal rx_clear_sync_2     : std_ulogic := '0';
-  signal rx_clear_sys_pulse  : std_ulogic := '0';
-  signal rx_clear_mac_pulse  : std_ulogic := '0';
+  -- RX clear handshake
+  signal rx_clear_req_sys       : std_ulogic := '0';
+  signal rx_clear_ack_mac       : std_ulogic := '0';
+  signal rx_clear_ack_sync1_sys : std_ulogic := '0';
+  signal rx_clear_ack_sync2_sys : std_ulogic := '0';
+  signal rx_clear_sys_pulse     : std_ulogic := '0';
+  signal rx_clear_req_sync1_mac : std_ulogic := '0';
+  signal rx_clear_req_sync2_mac : std_ulogic := '0';
+  signal rx_clear_req_mac_d     : std_ulogic := '0';
+  signal rx_clear_mac_pulse     : std_ulogic := '0';
 
   signal reg_rx_len_sys      : unsigned(15 downto 0) := (others => '0');
   signal reg_rx_ready_sys    : std_ulogic := '0';
@@ -79,7 +83,7 @@ architecture rtl of fmc_ethernet_client is
   signal rxfifo_rd_en    : std_ulogic := '0';
   signal rxfifo_rd_data  : std_ulogic_vector(7 downto 0);
   signal rxfifo_rd_empty : std_ulogic;
-  signal spi_rx_bytes_sent   : unsigned(15 downto 0) := (others => '0');
+  signal fmc_rx_bytes_sent   : unsigned(15 downto 0) := (others => '0');
 
   -- MAC TX
   signal mac_tx_active   : std_ulogic := '0';
@@ -195,12 +199,16 @@ begin
   begin
     if rst_sys_i = '1' then
       rx_clear_sys_pulse <= '0';
+      rx_clear_ack_sync1_sys <= '0';
+      rx_clear_ack_sync2_sys <= '0';
       reg_rx_len_sys      <= (others => '0');
       reg_rx_ready_sys    <= '0';
       reg_rx_overflow_sys <= '0';
+
     elsif rising_edge(clk_sys_i) then
-      rx_clear_sys_pulse <= rx_clear_toggle_sys xor rx_clear_toggle_sys_d;
-      rx_clear_toggle_sys_d <= rx_clear_toggle_sys;
+      rx_clear_ack_sync1_sys <= rx_clear_ack_mac;
+      rx_clear_ack_sync2_sys <= rx_clear_ack_sync1_sys;
+      rx_clear_sys_pulse <= rx_clear_ack_sync1_sys and not rx_clear_ack_sync2_sys;
 
       if rx_clear_sys_pulse = '1' then
         reg_rx_ready_sys    <= '0';
@@ -278,8 +286,8 @@ begin
       reg_tx_len      <= (others => '0');
       reg_tx_start    <= '0';
       reg_tx_len_reset <= '0';
-      rx_clear_toggle_sys <= '0';
-      spi_rx_bytes_sent <= (others => '0');
+      rx_clear_req_sys   <= '0';
+      fmc_rx_bytes_sent <= (others => '0');
       fmc_data_out    <= (others => '0');
       fmc_data_oe     <= '0';
       fmc_read_latched <= '0';
@@ -290,24 +298,28 @@ begin
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
       fmc_data_oe  <= '0';
+      -- Clear request once MAC side acknowledged
+      if rx_clear_sys_pulse = '1' then
+        rx_clear_req_sys <= '0';
+      end if;
 
-      -- Drop read latch when NOE deasserts or chip deselects
-      if (fmc_noe_n_sync = '1') or ((fmc_ne_n_sync = '1') and (fmc_ne_n_sync_d = '1')) then
+      -- Drop read latch when NOE deasserts or chip deselects (raw levels to avoid phase races)
+      if (fmc_noe_n_i = '1') or (fmc_ne_n_i = '1') then
         fmc_read_latched <= '0';
       end if;
 
       -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
-      if (fmc_ne_n_sync = '0') and (fmc_nwe_n_sync = '0') then
+      if (fmc_ne_n_sync = '0') and (fmc_ne_n_sync_d = '1') then
         -- Capture early (1-stage synced) address/data during NWE low to avoid missing
         -- simultaneous NE/NWE assertions.
         fmc_wr_addr_lat <= unsigned(fmc_addr_meta);
         fmc_wr_data_lat <= fmc_din_meta;
       end if;
 
-      -- Detect end of write cycle on rising edge of synchronized NWE (one update per FMC write transaction).
-      if (fmc_ne_n_sync = '0') and (nwe_d = '0') and (fmc_nwe_n_sync = '1') then
-        addr_v := fmc_wr_addr_lat;
-        case addr_v is
+      -- Detect end of write cycle on falling edge of synchronized NWE (one update per FMC write transaction).
+      if (fmc_ne_n_sync = '0') and (nwe_d = '1') and (fmc_nwe_n_sync = '0') then
+        --addr_v := fmc_wr_addr_lat;
+        case fmc_wr_addr_lat is
           when "0000000" =>  -- 0x00 TX_LEN low
             reg_tx_len(7 downto 0) <= unsigned(fmc_wr_data_lat);
             reg_tx_len_reset <= '1';
@@ -318,8 +330,8 @@ begin
             reg_tx_start <= fmc_wr_data_lat(0);
           when "0100010" =>  -- 0x22 RX_STATUS clear
             if fmc_wr_data_lat(0) = '1' then
-              rx_clear_toggle_sys <= not rx_clear_toggle_sys;
-              spi_rx_bytes_sent   <= (others => '0');
+              rx_clear_req_sys <= '1';
+              fmc_rx_bytes_sent   <= (others => '0');
             end if;
           when others =>
             if addr_v >= 16#10# and addr_v < 16#20# then
@@ -350,7 +362,7 @@ begin
               if rxfifo_rd_empty = '0' then
                 fmc_read_data_lat <= rxfifo_rd_data;
                 rxfifo_rd_en <= '1';
-                spi_rx_bytes_sent <= spi_rx_bytes_sent + 1;
+                fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
               end if;
             end if;
         end case;
@@ -490,20 +502,26 @@ begin
       reg_rx_len        <= (others => '0');
       reg_rx_ready      <= '0';
       reg_rx_overflow   <= '0';
-      rx_clear_sync_1   <= '0';
-      rx_clear_sync_2   <= '0';
       mac_rx_frame_d    <= '0';
+      rx_clear_req_sync1_mac <= '0';
+      rx_clear_req_sync2_mac <= '0';
+      rx_clear_req_mac_d     <= '0';
+      rx_clear_ack_mac       <= '0';
+      rx_clear_mac_pulse     <= '0';
     elsif rising_edge(mac_rx_clock_i) then
       rxfifo_wr_en <= '0';
-      rx_clear_sync_1 <= rx_clear_toggle_sys;
-      rx_clear_sync_2 <= rx_clear_sync_1;
+      rx_clear_req_sync1_mac <= rx_clear_req_sys;
+      rx_clear_req_sync2_mac <= rx_clear_req_sync1_mac;
+      rx_clear_req_mac_d     <= rx_clear_req_sync2_mac;
+      rx_clear_mac_pulse     <= rx_clear_req_sync2_mac and not rx_clear_req_mac_d;
+      rx_clear_ack_mac       <= rx_clear_req_sync2_mac;
       mac_rx_frame_d  <= mac_rx_frame_i;
 
       len_next   := reg_rx_len;
       ready_next := reg_rx_ready;
       ovf_next   := reg_rx_overflow;
 
-      if rx_clear_sync_1 /= rx_clear_sync_2 then
+      if rx_clear_mac_pulse = '1' then
         len_next   := (others => '0');
         ready_next := '0';
         ovf_next   := '0';
@@ -544,7 +562,6 @@ begin
     end if;
   end process;
 
-  rx_clear_mac_pulse <= rx_clear_sync_1 xor rx_clear_sync_2;
   fmc_int_o <= reg_rx_ready_sys or reg_rx_overflow_sys;
 
 end architecture;

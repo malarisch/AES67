@@ -164,12 +164,19 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 		uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 		uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 		uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
-		LOG_INF("Received Packet with length %02x %02x (Status %02x)", len_h, len_l, status);
+		
 		if (!(status & RX_STATUS_READY)) {
+			if (status & RX_STATUS_OVF) {
+				LOG_WRN("RX overflow detected");
+				fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+			}
 			k_mutex_unlock(&data->io_lock);
+			
 			continue;
 		}
-
+		if (status & RX_STATUS_OVF) {
+			LOG_WRN("RX overflow detected");
+		}
 		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
 		
 		if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
@@ -178,10 +185,13 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 			k_mutex_unlock(&data->io_lock);
 			continue;
 		}
-
+		LOG_INF("RX valid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
 		uint8_t buf[ETH_FMC_MAX_PKT_SIZE + 4];
+		//LOG_DBG("Reading packet data from FMC");
 		fmc_read_block(cfg->base, REG_RX_WINDOW, buf, pkt_len);
+		//LOG_HEXDUMP_DBG(buf, pkt_len, "RX Packet Data");
 		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+		//LOG_DBG("Wrote RX_STATUS_READY (%02x) to REG_RX_STATUS (%02x)", RX_STATUS_READY, REG_RX_STATUS);
 		k_mutex_unlock(&data->io_lock);
 
 		/* Drop FCS */
@@ -287,7 +297,7 @@ static int eth_fmc_basic_init(const struct device *dev)
 	k_thread_create(&data->rx_thread, data->rx_stack,
 			CONFIG_ETH_FMC_BASIC_RX_STACK_SIZE,
 			eth_fmc_basic_rx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_COOP(2), 0, K_NO_WAIT);
+			K_PRIO_COOP(20), 0, K_NO_WAIT);
 	k_thread_name_set(&data->rx_thread, "eth_fmc_rx");
 
 	k_thread_create(&data->tx_thread, data->tx_stack,
