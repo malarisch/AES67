@@ -562,6 +562,6 @@ begin
     end if;
   end process;
 
-  fmc_int_o <= reg_rx_ready_sys or reg_rx_overflow_sys;
+  fmc_int_o <= reg_rx_ready or reg_rx_overflow_sys;
 
 end architecture;

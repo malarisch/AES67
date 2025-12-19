@@ -194,7 +194,7 @@ on the Quartus Prime software download page.
 	(input)
 	(rect 3592 -208 3760 -192)
 	(text "INPUT" (rect 125 0 153 10)(font "Arial" (font_size 6)))
-	(text "gpio[23]" (rect 5 0 47 13)(font "Intel Clear" ))
+	(text "gpio[23]" (rect 5 0 46 13)(font "Intel Clear" ))
 	(pt 168 8)
 	(drawing
 		(line (pt 84 12)(pt 109 12))
@@ -211,7 +211,7 @@ on the Quartus Prime software download page.
 	(input)
 	(rect 3584 16 3752 32)
 	(text "INPUT" (rect 125 0 153 10)(font "Arial" (font_size 6)))
-	(text "gpio[24]" (rect 5 0 50 11)(font "Arial" ))
+	(text "gpio[24]" (rect 5 0 49 11)(font "Arial" ))
 	(pt 168 8)
 	(drawing
 		(line (pt 84 12)(pt 109 12))
@@ -228,7 +228,7 @@ on the Quartus Prime software download page.
 	(input)
 	(rect 3584 32 3752 48)
 	(text "INPUT" (rect 125 0 153 10)(font "Arial" (font_size 6)))
-	(text "gpio[22..21]" (rect 5 0 66 13)(font "Intel Clear" ))
+	(text "gpio[22..21]" (rect 5 0 65 13)(font "Intel Clear" ))
 	(pt 168 8)
 	(drawing
 		(line (pt 84 12)(pt 109 12))
@@ -348,7 +348,7 @@ on the Quartus Prime software download page.
 	(output)
 	(rect 3584 72 3760 88)
 	(text "OUTPUT" (rect 137 0 175 10)(font "Arial" (font_size 6)))
-	(text "gpio[18]" (rect 5 0 50 11)(font "Arial" ))
+	(text "gpio[18]" (rect 5 0 49 11)(font "Arial" ))
 	(pt 176 8)
 	(drawing
 		(line (pt 176 8)(pt 124 8))
@@ -378,6 +378,23 @@ on the Quartus Prime software download page.
 		(line (pt 78 12)(pt 82 8))
 	)
 	(annotation_block (location)(rect 3024 304 3080 320))
+)
+(pin
+	(output)
+	(rect 3520 752 3696 768)
+	(text "OUTPUT" (rect 1 0 39 10)(font "Arial" (font_size 6)))
+	(text "gpio[30]" (rect 90 0 134 11)(font "Arial" ))
+	(pt 0 8)
+	(drawing
+		(line (pt 0 8)(pt 52 8))
+		(line (pt 52 4)(pt 78 4))
+		(line (pt 52 12)(pt 78 12))
+		(line (pt 52 12)(pt 52 4))
+		(line (pt 78 4)(pt 82 8))
+		(line (pt 82 8)(pt 78 12))
+		(line (pt 78 12)(pt 82 8))
+	)
+	(annotation_block (location)(rect 3696 768 3752 784))
 )
 (pin
 	(bidir)
@@ -2299,130 +2316,6 @@ on the Quartus Prime software download page.
 	)
 )
 (symbol
-	(rect 1696 528 1880 672)
-	(text "const_eth_config" (rect 5 0 94 11)(font "Arial" ))
-	(text "inst13" (rect 8 128 41 139)(font "Arial" ))
-	(port
-		(pt 184 32)
-		(output)
-		(text "mac_address[47..0]" (rect 0 0 106 11)(font "Arial" ))
-		(text "mac_address[47..0]" (rect 74 27 180 38)(font "Arial" ))
-		(line (pt 184 32)(pt 168 32)(line_width 3))
-	)
-	(port
-		(pt 184 48)
-		(output)
-		(text "ip_address[31..0]" (rect 0 0 93 11)(font "Arial" ))
-		(text "ip_address[31..0]" (rect 85 43 178 54)(font "Arial" ))
-		(line (pt 184 48)(pt 168 48)(line_width 3))
-	)
-	(port
-		(pt 184 64)
-		(output)
-		(text "dst_ip_address[31..0]" (rect 0 0 114 11)(font "Arial" ))
-		(text "dst_ip_address[31..0]" (rect 67 59 181 70)(font "Arial" ))
-		(line (pt 184 64)(pt 168 64)(line_width 3))
-	)
-	(port
-		(pt 184 80)
-		(output)
-		(text "src_udp_port[15..0]" (rect 0 0 103 11)(font "Arial" ))
-		(text "src_udp_port[15..0]" (rect 76 75 179 86)(font "Arial" ))
-		(line (pt 184 80)(pt 168 80)(line_width 3))
-	)
-	(port
-		(pt 184 96)
-		(output)
-		(text "dst_udp_port[15..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "dst_udp_port[15..0]" (rect 75 91 180 102)(font "Arial" ))
-		(line (pt 184 96)(pt 168 96)(line_width 3))
-	)
-	(parameter
-		"MAC0"
-		"0"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"MAC1"
-		"28"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"MAC2"
-		"35"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"MAC3"
-		"23"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"MAC4"
-		"74"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"MAC5"
-		"204"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"IP0"
-		"192"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"IP1"
-		"168"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"IP2"
-		"1"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"IP3"
-		"4"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"SrcPort"
-		"4023"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"DestIP0"
-		"192"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"DestIP1"
-		"168"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"DestIP2"
-		"1"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"DestIP3"
-		"2"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(parameter
-		"DestPort"
-		"4023"
-		""
-		(type "PARAMETER_UNSIGNED_DEC")	)
-	(drawing
-		(rectangle (rect 16 16 168 128))
-	)
-	(annotation_block (parameter)(rect 1696 280 1896 501))
-)
-(symbol
 	(rect 2312 2176 2360 2208)
 	(text "NOT" (rect 1 0 22 10)(font "Arial" (font_size 6)))
 	(text "inst26" (rect 3 21 33 32)(font "DejaVu Sans Condensed" ))
@@ -2716,21 +2609,21 @@ on the Quartus Prime software download page.
 		(pt 272 48)
 		(output)
 		(text "fmc_int_o" (rect 0 0 51 11)(font "Arial" ))
-		(text "fmc_int_o" (rect 208 43 251 54)(font "Arial" ))
+		(text "fmc_int_o" (rect 208 43 259 54)(font "Arial" ))
 		(line (pt 272 48)(pt 256 48))
 	)
 	(port
 		(pt 272 64)
 		(output)
 		(text "mac_tx_enable_o" (rect 0 0 92 11)(font "Arial" ))
-		(text "mac_tx_enable_o" (rect 174 59 251 70)(font "Arial" ))
+		(text "mac_tx_enable_o" (rect 174 59 266 70)(font "Arial" ))
 		(line (pt 272 64)(pt 256 64))
 	)
 	(port
 		(pt 272 80)
 		(output)
 		(text "mac_tx_data_o[7..0]" (rect 0 0 108 11)(font "Arial" ))
-		(text "mac_tx_data_o[7..0]" (rect 160 75 251 86)(font "Arial" ))
+		(text "mac_tx_data_o[7..0]" (rect 160 75 268 86)(font "Arial" ))
 		(line (pt 272 80)(pt 256 80)(line_width 3))
 	)
 	(port
@@ -2771,6 +2664,130 @@ on the Quartus Prime software download page.
 		(line (pt 16 16)(pt 24 8))
 		(line (pt 8 8)(pt 24 8))
 	)
+)
+(symbol
+	(rect 1696 528 1880 672)
+	(text "const_eth_config" (rect 5 0 94 11)(font "Arial" ))
+	(text "inst13" (rect 8 128 41 139)(font "Arial" ))
+	(port
+		(pt 184 32)
+		(output)
+		(text "mac_address[47..0]" (rect 0 0 106 11)(font "Arial" ))
+		(text "mac_address[47..0]" (rect 74 27 180 38)(font "Arial" ))
+		(line (pt 184 32)(pt 168 32)(line_width 3))
+	)
+	(port
+		(pt 184 48)
+		(output)
+		(text "ip_address[31..0]" (rect 0 0 93 11)(font "Arial" ))
+		(text "ip_address[31..0]" (rect 85 43 178 54)(font "Arial" ))
+		(line (pt 184 48)(pt 168 48)(line_width 3))
+	)
+	(port
+		(pt 184 64)
+		(output)
+		(text "dst_ip_address[31..0]" (rect 0 0 114 11)(font "Arial" ))
+		(text "dst_ip_address[31..0]" (rect 67 59 181 70)(font "Arial" ))
+		(line (pt 184 64)(pt 168 64)(line_width 3))
+	)
+	(port
+		(pt 184 80)
+		(output)
+		(text "src_udp_port[15..0]" (rect 0 0 103 11)(font "Arial" ))
+		(text "src_udp_port[15..0]" (rect 76 75 179 86)(font "Arial" ))
+		(line (pt 184 80)(pt 168 80)(line_width 3))
+	)
+	(port
+		(pt 184 96)
+		(output)
+		(text "dst_udp_port[15..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "dst_udp_port[15..0]" (rect 75 91 180 102)(font "Arial" ))
+		(line (pt 184 96)(pt 168 96)(line_width 3))
+	)
+	(parameter
+		"MAC0"
+		"02"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"MAC1"
+		"28"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"MAC2"
+		"35"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"MAC3"
+		"23"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"MAC4"
+		"74"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"MAC5"
+		"204"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"IP0"
+		"192"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"IP1"
+		"168"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"IP2"
+		"1"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"IP3"
+		"4"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"SrcPort"
+		"4023"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"DestIP0"
+		"192"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"DestIP1"
+		"168"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"DestIP2"
+		"1"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"DestIP3"
+		"2"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(parameter
+		"DestPort"
+		"4023"
+		""
+		(type "PARAMETER_UNSIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 168 128))
+	)
+	(annotation_block (parameter)(rect 1696 280 1896 501))
 )
 (connector
 	(pt 2104 336)
@@ -4192,6 +4209,10 @@ on the Quartus Prime software download page.
 (connector
 	(pt 3552 48)
 	(pt 3528 48)
+)
+(connector
+	(pt 3448 760)
+	(pt 3520 760)
 )
 (junction (pt 1976 816))
 (junction (pt 1976 1048))

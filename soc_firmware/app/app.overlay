@@ -93,7 +93,7 @@
 						  STM32_FMC_CONTINUOUS_CLOCK_SYNC_ONLY
 						  STM32_FMC_WRITE_FIFO_DISABLE
 						  STM32_FMC_PAGE_SIZE_NONE>;
-			st,timing = <4 2 8 0 16 17 STM32_FMC_ACCESS_MODE_A>;
+			st,timing = <4 2 8 0 8 17 STM32_FMC_ACCESS_MODE_A>;
 		};
 	};
 };
@@ -131,6 +131,10 @@
 		fpga_ready: fpga_ready {
 			gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
 			label = "FPGA Ready";
+		};
+		fpga_int: fpga_int {
+			gpios = <&gpiob 2 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Interrupt";
 		};
 	};
 };

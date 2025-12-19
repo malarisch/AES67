@@ -10,6 +10,7 @@
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/atomic.h>
 #include <string.h>
 
 LOG_MODULE_REGISTER(eth_fmc_basic, CONFIG_ETHERNET_LOG_LEVEL);
@@ -57,6 +58,7 @@ static bool is_fpga_ready(void)
 
 struct eth_fmc_basic_config {
 	uintptr_t base;
+	struct gpio_dt_spec interrupt;
 };
 
 struct eth_fmc_basic_data {
@@ -66,6 +68,11 @@ struct eth_fmc_basic_data {
 	struct k_thread tx_thread;
 	struct k_work_delayable link_work;
 	struct k_mutex io_lock;
+	struct k_sem int_sem;
+	struct gpio_callback gpio_cb;
+	bool use_interrupt;
+	atomic_t irq_count;
+	atomic_t rx_wake_count;
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_FMC_BASIC_RX_STACK_SIZE);
 	K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_ETH_FMC_BASIC_RX_STACK_SIZE);
 };
@@ -144,6 +151,21 @@ static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 	}
 }
 
+/* GPIO Interrupt Handler */
+static void eth_fmc_basic_gpio_callback(const struct device *port,
+                                        struct gpio_callback *cb,
+                                        gpio_port_pins_t pins)
+{
+    struct eth_fmc_basic_data *data = 
+        CONTAINER_OF(cb, struct eth_fmc_basic_data, gpio_cb);
+
+    ARG_UNUSED(port);
+    ARG_UNUSED(pins);
+
+    (void)atomic_inc(&data->irq_count);
+    k_sem_give(&data->int_sem);
+}
+
 /* RX path */
 static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 {
@@ -154,68 +176,78 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	while (1) {
-		k_sleep(K_MSEC(CONFIG_ETH_FMC_POLL_INTERVAL_MS));
+		if (data->use_interrupt) {
+			k_sem_take(&data->int_sem, K_FOREVER);
+			(void)atomic_inc(&data->rx_wake_count);
+		} else {
+			k_sleep(K_MSEC(CONFIG_ETH_FMC_POLL_INTERVAL_MS));
+		}
 
 		if (!is_fpga_ready()) {
 			continue;
 		}
 
-		k_mutex_lock(&data->io_lock, K_FOREVER);
-		uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
-		uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
-		uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
-		
-		if (!(status & RX_STATUS_READY)) {
+		/* Loop while interrupt pin is active or first pass */
+		bool first_pass = true;
+		while (first_pass || (data->use_interrupt && gpio_pin_get_dt(&cfg->interrupt) == 1)) {
+			first_pass = false;
+
+			k_mutex_lock(&data->io_lock, K_FOREVER);
+			uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
+			uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
+			uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
+			
+			if (!(status & RX_STATUS_READY)) {
+				if (status & RX_STATUS_OVF) {
+					LOG_WRN("RX overflow detected");
+					fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+				}
+				k_mutex_unlock(&data->io_lock);
+				break;
+			}
 			if (status & RX_STATUS_OVF) {
 				LOG_WRN("RX overflow detected");
-				fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
 			}
-			k_mutex_unlock(&data->io_lock);
+			uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
 			
-			continue;
-		}
-		if (status & RX_STATUS_OVF) {
-			LOG_WRN("RX overflow detected");
-		}
-		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
-		
-		if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
-			LOG_WRN("RX invalid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
+			if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
+				LOG_WRN("RX invalid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
+				fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+				k_mutex_unlock(&data->io_lock);
+				continue;
+			}
+			LOG_DBG("RX valid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
+			uint8_t buf[ETH_FMC_MAX_PKT_SIZE + 4];
+			//LOG_DBG("Reading packet data from FMC");
+			fmc_read_block(cfg->base, REG_RX_WINDOW, buf, pkt_len);
+			//LOG_HEXDUMP_DBG(buf, pkt_len, "RX Packet Data");
 			fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+			//LOG_DBG("Wrote RX_STATUS_READY (%02x) to REG_RX_STATUS (%02x)", RX_STATUS_READY, REG_RX_STATUS);
 			k_mutex_unlock(&data->io_lock);
-			continue;
-		}
-		LOG_DBG("RX valid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
-		uint8_t buf[ETH_FMC_MAX_PKT_SIZE + 4];
-		//LOG_DBG("Reading packet data from FMC");
-		fmc_read_block(cfg->base, REG_RX_WINDOW, buf, pkt_len);
-		//LOG_HEXDUMP_DBG(buf, pkt_len, "RX Packet Data");
-		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
-		//LOG_DBG("Wrote RX_STATUS_READY (%02x) to REG_RX_STATUS (%02x)", RX_STATUS_READY, REG_RX_STATUS);
-		k_mutex_unlock(&data->io_lock);
 
-		/* Drop FCS */
-		if (pkt_len >= 4) {
-			pkt_len -= 4;
-		}
+			/* Drop FCS */
+			if (pkt_len >= 4) {
+				pkt_len -= 4;
+			}
 
-		struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(data->iface, pkt_len,
-								   AF_UNSPEC, 0, K_NO_WAIT);
-		if (!pkt) {
-			LOG_ERR("rx alloc failed");
-			continue;
-		}
+			struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(data->iface, pkt_len,
+									AF_UNSPEC, 0, K_NO_WAIT);
+			if (!pkt) {
+				LOG_ERR("rx alloc failed");
+				continue;
+			}
 
-		if (net_pkt_write(pkt, buf, pkt_len)) {
-			LOG_ERR("rx write failed");
-			net_pkt_unref(pkt);
-			continue;
-		}
+			if (net_pkt_write(pkt, buf, pkt_len)) {
+				LOG_ERR("rx write failed");
+				net_pkt_unref(pkt);
+				continue;
+			}
 
-		int ret = net_recv_data(data->iface, pkt);
-		if (ret < 0) {
-			LOG_ERR("rx deliver err %d", ret);
-			net_pkt_unref(pkt);
+			int ret = net_recv_data(data->iface, pkt);
+			if (ret < 0) {
+				LOG_ERR("rx deliver err %d", ret);
+				net_pkt_unref(pkt);
+			}
 		}
 	}
 }
@@ -281,9 +313,11 @@ static const struct ethernet_api eth_fmc_basic_api = {
 static int eth_fmc_basic_init(const struct device *dev)
 {
 	struct eth_fmc_basic_data *data = dev->data;
+	const struct eth_fmc_basic_config *cfg = dev->config;
+	int ret;
 
 	LOG_INF("Initializing FMC Ethernet Bridge at 0x%lx", 
-		((const struct eth_fmc_basic_config *)dev->config)->base);
+		cfg->base);
 
 	if (!gpio_is_ready_dt(&fpga_ready)) {
 		LOG_ERR("FPGA Ready GPIO not ready");
@@ -292,6 +326,44 @@ static int eth_fmc_basic_init(const struct device *dev)
 	gpio_pin_configure_dt(&fpga_ready, GPIO_INPUT);
 
 	k_mutex_init(&data->io_lock);
+	k_sem_init(&data->int_sem, 0, 1);
+	atomic_clear(&data->irq_count);
+	atomic_clear(&data->rx_wake_count);
+	data->use_interrupt = false;
+
+	if (cfg->interrupt.port) {
+		if (!gpio_is_ready_dt(&cfg->interrupt)) {
+			LOG_WRN("GPIO interrupt not ready, falling back to polling");
+		} else {
+			ret = gpio_pin_configure_dt(&cfg->interrupt, GPIO_INPUT);
+			if (ret != 0) {
+				LOG_ERR("Failed to configure GPIO interrupt (%d)", ret);
+				return ret;
+			}
+
+			gpio_init_callback(&data->gpio_cb, eth_fmc_basic_gpio_callback,
+							  BIT(cfg->interrupt.pin));
+
+			ret = gpio_add_callback(cfg->interrupt.port, &data->gpio_cb);
+			if (ret != 0) {
+				LOG_ERR("Failed to add GPIO callback (%d)", ret);
+				return ret;
+			}
+
+			ret = gpio_pin_interrupt_configure_dt(&cfg->interrupt,
+												 GPIO_INT_EDGE_TO_ACTIVE);
+			if (ret != 0) {
+				LOG_ERR("Failed to configure GPIO interrupt (%d)", ret);
+				return ret;
+			}
+
+			data->use_interrupt = true;
+			LOG_INF("Using IRQ on %s pin %d",
+					cfg->interrupt.port->name,
+					cfg->interrupt.pin);
+		}
+	}
+
 	k_work_init_delayable(&data->link_work, eth_fmc_basic_link_work);
 
 	k_thread_create(&data->rx_thread, data->rx_stack,
@@ -315,6 +387,7 @@ static struct eth_fmc_basic_data eth_fmc_basic_data_0;
 
 static const struct eth_fmc_basic_config eth_fmc_basic_cfg_0 = {
 	.base = CONFIG_ETH_FMC_BASE_ADDR,
+	.interrupt = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(fpga_int), gpios, {0}),
 };
 
 ETH_NET_DEVICE_INIT(eth_fmc0, "eth_fmc0",

@@ -45,13 +45,11 @@ This is a hybrid hardware/firmware project implementing AES67 Audio over IP.
 - **FPGA:** VHDL/Verilog mixed. Prefer VHDL for new logic.
 - **Paths:** Always use absolute paths or paths relative to the workspace root when referencing files.
 
-<<<<<<< HEAD
 ## Tool-backed verification (important)
 - When anything is unclear (APIs, driver behavior, board pinmux/DT, interrupt semantics), prefer using available tools to verify:
   - Search/read the relevant source files in the workspace.
   - Use upstream/online documentation via available web research tools.
 - Avoid “reasonable guesses” about complex functions (e.g., Zephyr GPIO/interrupt APIs, STM32 pinmux/EXTI behavior). Confirm with sources first.
-=======
 ## Subsystem: FMC Ethernet Driver (`eth_fmc_basic`)
 
 ### Overview
@@ -93,4 +91,3 @@ The `eth_fmc_basic` driver enables the STM32H7 MCU to communicate with the FPGA-
 *   **Source:** `soc_firmware/app/drivers/eth_fmc_basic/eth_fmc_basic.c`
 *   **Kconfig:** `soc_firmware/app/drivers/eth_fmc_basic/Kconfig.fmc_basic`
 *   **Overlay:** `soc_firmware/app/app.overlay`
->>>>>>> origin/main
