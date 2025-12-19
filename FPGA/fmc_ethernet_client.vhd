@@ -317,26 +317,26 @@ begin
       end if;
 
       -- Detect end of write cycle on falling edge of synchronized NWE (one update per FMC write transaction).
-      if (fmc_ne_n_sync = '0') and (nwe_d = '1') and (fmc_nwe_n_sync = '0') then
+      if (fmc_ne_qual_low = '1') and (fmc_nwe_n_sync_d = '1') and (fmc_nwe_n_sync = '0') then
         --addr_v := fmc_wr_addr_lat;
         case fmc_wr_addr_lat is
           when "0000000" =>  -- 0x00 TX_LEN low
-            reg_tx_len(7 downto 0) <= unsigned(fmc_wr_data_lat);
+            reg_tx_len(7 downto 0) <= unsigned(fmc_din_meta);
             reg_tx_len_reset <= '1';
           when "0000001" =>  -- 0x01 TX_LEN high
-            reg_tx_len(15 downto 8) <= unsigned(fmc_wr_data_lat);
+            reg_tx_len(15 downto 8) <= unsigned(fmc_din_meta);
             reg_tx_len_reset <= '1';
           when "0000010" =>  -- 0x02 TX_CTRL
-            reg_tx_start <= fmc_wr_data_lat(0);
+            reg_tx_start <= fmc_din_meta(0);
           when "0100010" =>  -- 0x22 RX_STATUS clear
-            if fmc_wr_data_lat(0) = '1' then
+            if fmc_din_meta(0) = '1' then
               rx_clear_req_sys <= '1';
               fmc_rx_bytes_sent   <= (others => '0');
             end if;
           when others =>
-            if addr_v >= 16#10# and addr_v < 16#20# then
+            if fmc_wr_addr_lat >= 16#10# and fmc_wr_addr_lat < 16#20# then
               if txfifo_wr_full = '0' then
-                txfifo_wr_data <= fmc_wr_data_lat;
+                txfifo_wr_data <= fmc_din_meta;
                 txfifo_wr_en   <= '1';
               end if;
             end if;
@@ -346,19 +346,19 @@ begin
       -- Latch address and prepare read data when NOE is low and not yet latched.
       -- We still use the synchronized NOE level, but do not require a clean falling edge,
       -- so a simultaneous NE/NOE assertion will still produce data in the next clk_sys_i.
-      if (fmc_read_latched = '0') and (fmc_ne_qual_low = '1') and (fmc_nwe_n_sync = '1') and (fmc_noe_n_sync = '0') then
+      if (fmc_ne_qual_low = '1')and (fmc_noe_n_sync = '1') and (fmc_noe_n_meta = '0') then
         -- Use the most recent address (1-stage synced) to handle NE/NOE asserting together.
-        addr_v := unsigned(fmc_addr_meta);
-        fmc_read_addr_lat <= addr_v;
+        --addr_v := unsigned(fmc_addr_meta);
+        --fmc_read_addr_lat <= addr_v;
         fmc_read_data_lat <= (others => '0');
-        case addr_v is
+        case fmc_addr_meta is
           when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
           when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
           when "0100010" => -- 0x22
             fmc_read_data_lat(0) <= reg_rx_ready_sys;
             fmc_read_data_lat(1) <= reg_rx_overflow_sys;
           when others =>
-            if addr_v >= 16#30# and addr_v < 16#40# then
+            if unsigned(fmc_addr_meta) >= 16#30# and unsigned(fmc_addr_meta) < 16#40# then
               if rxfifo_rd_empty = '0' then
                 fmc_read_data_lat <= rxfifo_rd_data;
                 rxfifo_rd_en <= '1';

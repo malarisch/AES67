@@ -180,12 +180,12 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
 		
 		if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
-			LOG_WRN("RX invalid len %u", pkt_len);
+			LOG_WRN("RX invalid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
 			fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
 			k_mutex_unlock(&data->io_lock);
 			continue;
 		}
-		LOG_INF("RX valid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
+		LOG_DBG("RX valid len %u (low: %02x, high: %02x, status: %02x)", pkt_len, len_l, len_h, status);
 		uint8_t buf[ETH_FMC_MAX_PKT_SIZE + 4];
 		//LOG_DBG("Reading packet data from FMC");
 		fmc_read_block(cfg->base, REG_RX_WINDOW, buf, pkt_len);
