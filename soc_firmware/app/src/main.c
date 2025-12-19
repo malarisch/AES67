@@ -13,11 +13,13 @@
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-#define RAW_PAYLOAD_LEN 30
-#define SEND_INTERVAL_MS 100
+#define RAW_PAYLOAD_START_LEN 30
+#define RAW_PAYLOAD_MAX_LEN 1500
+#define SEND_INTERVAL_MS 1000
 
-static uint8_t payload[RAW_PAYLOAD_LEN];
-size_t frame_len = 30;
+/* Allocate worst-case payload so we never overflow when length ramps up. */
+static uint8_t payload[RAW_PAYLOAD_MAX_LEN];
+size_t frame_len = RAW_PAYLOAD_START_LEN;
 
 static int send_raw_frame(struct net_if *iface, uint8_t seq)
 {
@@ -44,10 +46,10 @@ static int send_raw_frame(struct net_if *iface, uint8_t seq)
 	
 
 	frame_len++;
-	if (frame_len >= 1500) {
-		frame_len = RAW_PAYLOAD_LEN;
+	if (frame_len >= RAW_PAYLOAD_MAX_LEN) {
+		frame_len = RAW_PAYLOAD_START_LEN;
 	}
-	for (size_t i = 15; i < frame_len; i++) {
+	for (size_t i = 15; i < frame_len && i < RAW_PAYLOAD_MAX_LEN; i++) {
 		payload[i] = seq;
 	}
 	struct net_pkt *pkt = net_pkt_alloc_with_buffer(iface, frame_len, AF_UNSPEC, 0, K_MSEC(100));
@@ -117,15 +119,26 @@ static int get_current_status(void)
 int main(void)
 {
 	struct net_if *iface = net_if_get_default();
-	uint8_t seq = 0;
+	// uint8_t seq = 0;
 
 	LOG_INF("Starting raw Ethernet TX demo");
+
+	printk("MAIN: Starting loop\n");
 
     if (!iface) {
         LOG_ERR("No network interface found");
         return -1;
     }
-
+	/*while (1) {
+		static uint8_t seq = 0;
+		if (send_raw_frame(iface, seq) == 0) {
+			LOG_INF("Sent raw Ethernet frame with seq %u and length %u", seq, frame_len);
+			seq++;
+		} else {
+			LOG_ERR("Failed to send raw Ethernet frame");
+		}
+		k_msleep(SEND_INTERVAL_MS);
+	}'*/
     LOG_INF("Starting DHCP...");
     net_dhcpv4_start(iface);
 

@@ -20,7 +20,8 @@ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/lib)
 
 project(app)
 
+add_subdirectory(drivers)
+
 target_sources(app PRIVATE
   src/main.c
-  drivers/eth_spi_basic/eth_spi_basic.c
 )

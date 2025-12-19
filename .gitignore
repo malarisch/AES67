@@ -47,3 +47,6 @@ db/
 .venv
 build/
 external/
+**/greybox_tmp/
+
+**/node_modules/
