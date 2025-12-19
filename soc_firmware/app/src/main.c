@@ -5,12 +5,6 @@
 #include <zephyr/sys/byteorder.h>
 #include <string.h>
 #include <zephyr/logging/log.h>
-
-
-#include "ptp/clock.h"
-#include "ptp/port.h"
-
-
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 #define RAW_PAYLOAD_START_LEN 30
@@ -77,45 +71,6 @@ static int send_raw_frame(struct net_if *iface, uint8_t seq)
 	return 0;
 }
 
-
-static int get_current_status(void)
-{
-	struct ptp_port *port;
-	sys_slist_t *ports_list = ptp_clock_ports_list();
-
-	if (!ports_list || sys_slist_len(ports_list) == 0) {
-		return -EINVAL;
-	}
-
-	port = CONTAINER_OF(sys_slist_peek_head(ports_list), struct ptp_port, node);
-
-	if (!port) {
-		return -EINVAL;
-	}
-
-	switch (ptp_port_state(port)) {
-	case PTP_PS_INITIALIZING:
-	case PTP_PS_FAULTY:
-	case PTP_PS_DISABLED:
-	case PTP_PS_LISTENING:
-	case PTP_PS_PRE_TIME_TRANSMITTER:
-	case PTP_PS_PASSIVE:
-	case PTP_PS_UNCALIBRATED:
-		printk("FAIL\n");
-		return 0;
-	case PTP_PS_TIME_RECEIVER:
-		printk("TIME RECEIVER\n");
-		return 2;
-	case PTP_PS_TIME_TRANSMITTER:
-	case PTP_PS_GRAND_MASTER:
-		printk("TIME TRANSMITTER\n");
-		return 1;
-	}
-
-	return -1;
-}
-
-
 int main(void)
 {
 	struct net_if *iface = net_if_get_default();
@@ -143,10 +98,6 @@ int main(void)
     net_dhcpv4_start(iface);
 
     LOG_INF("System ready");
-	while (true) {
-		printf("STATUS: %02d", get_current_status());
-		k_sleep(K_MSEC(1000));
-	}
     return 0;
 
 }

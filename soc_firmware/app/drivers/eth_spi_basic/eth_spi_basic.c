@@ -713,7 +713,7 @@ static int eth_spi_basic_init(const struct device *dev)
              * bringing up the EXTI/IRQ path.
              */
             ret = gpio_pin_interrupt_configure_dt(&cfg->interrupt,
-                                                 GPIO_INT_EDGE_BOTH);
+                                                 GPIO_INT_EDGE_TO_ACTIVE);
             if (ret != 0) {
                 LOG_ERR("Failed to configure GPIO interrupt (%d)", ret);
                 return ret;

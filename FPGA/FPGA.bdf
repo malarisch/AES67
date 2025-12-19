@@ -103,7 +103,7 @@ on the Quartus Prime software download page.
 		(line (pt 109 12)(pt 113 8))
 	)
 	(text "VCC" (rect 128 7 148 17)(font "Arial" (font_size 6)))
-	(annotation_block (location)(rect -232 616 -176 632))
+	(annotation_block (location)(rect 992 2120 1048 2136))
 )
 (pin
 	(input)
@@ -346,9 +346,9 @@ on the Quartus Prime software download page.
 )
 (pin
 	(output)
-	(rect 3600 -88 3776 -72)
+	(rect 3584 72 3760 88)
 	(text "OUTPUT" (rect 137 0 175 10)(font "Arial" (font_size 6)))
-	(text "gpio[5]" (rect 48 0 86 11)(font "Arial" ))
+	(text "gpio[18]" (rect 5 0 50 11)(font "Arial" ))
 	(pt 176 8)
 	(drawing
 		(line (pt 176 8)(pt 124 8))
@@ -360,7 +360,24 @@ on the Quartus Prime software download page.
 		(line (pt 98 12)(pt 94 8))
 	)
 	(flipy)
-	(annotation_block (location)(rect 3576 -88 3640 -72))
+	(annotation_block (location)(rect 3760 88 3816 104))
+)
+(pin
+	(output)
+	(rect 2848 288 3024 304)
+	(text "OUTPUT" (rect 1 0 39 10)(font "Arial" (font_size 6)))
+	(text "gpio[29]" (rect 90 0 134 11)(font "Arial" ))
+	(pt 0 8)
+	(drawing
+		(line (pt 0 8)(pt 52 8))
+		(line (pt 52 4)(pt 78 4))
+		(line (pt 52 12)(pt 78 12))
+		(line (pt 52 12)(pt 52 4))
+		(line (pt 78 4)(pt 82 8))
+		(line (pt 82 8)(pt 78 12))
+		(line (pt 78 12)(pt 82 8))
+	)
+	(annotation_block (location)(rect 3024 304 3080 320))
 )
 (pin
 	(bidir)
@@ -1748,6 +1765,73 @@ on the Quartus Prime software download page.
 	(annotation_block (parameter)(rect 1224 2216 1420 2242))
 )
 (symbol
+	(rect 160 120 432 280)
+	(text "audioclks" (rect 106 0 179 16)(font "Arial" (font_size 10)))
+	(text "inst2" (rect 8 145 35 156)(font "Arial" ))
+	(port
+		(pt 0 64)
+		(input)
+		(text "inclk0" (rect 0 0 38 13)(font "Arial" (font_size 8)))
+		(text "inclk0" (rect 4 52 42 65)(font "Arial" (font_size 8)))
+		(line (pt 0 64)(pt 48 64))
+	)
+	(port
+		(pt 272 64)
+		(output)
+		(text "c0" (rect 0 0 16 13)(font "Arial" (font_size 8)))
+		(text "c0" (rect 255 52 271 65)(font "Arial" (font_size 8)))
+	)
+	(port
+		(pt 272 80)
+		(output)
+		(text "c1" (rect 0 0 16 13)(font "Arial" (font_size 8)))
+		(text "c1" (rect 255 68 271 81)(font "Arial" (font_size 8)))
+	)
+	(port
+		(pt 272 96)
+		(output)
+		(text "locked" (rect 0 0 42 13)(font "Arial" (font_size 8)))
+		(text "locked" (rect 232 84 274 97)(font "Arial" (font_size 8)))
+	)
+	(drawing
+		(text "Cyclone 10 LP" (rect 186 147 262 158)(font "Arial" ))
+		(text "inclk0 frequency: 50.000 MHz" (rect 58 60 217 71)(font "Arial" ))
+		(text "Operation Mode: Normal" (rect 58 71 188 82)(font "Arial" ))
+		(text "Clk " (rect 59 89 79 100)(font "Arial" ))
+		(text "Ratio" (rect 85 89 113 100)(font "Arial" ))
+		(text "Ph (dg)" (rect 116 89 154 100)(font "Arial" ))
+		(text "DC (%)" (rect 152 89 189 100)(font "Arial" ))
+		(text "c0" (rect 62 101 74 112)(font "Arial" ))
+		(text "6/3125" (rect 80 101 117 112)(font "Arial" ))
+		(text "0.00" (rect 122 101 146 112)(font "Arial" ))
+		(text "50.00" (rect 155 101 185 112)(font "Arial" ))
+		(text "c1" (rect 62 113 74 124)(font "Arial" ))
+		(text "3/3125" (rect 80 113 117 124)(font "Arial" ))
+		(text "0.00" (rect 122 113 146 124)(font "Arial" ))
+		(text "50.00" (rect 155 113 185 124)(font "Arial" ))
+		(line (pt 0 0)(pt 273 0))
+		(line (pt 273 0)(pt 273 161))
+		(line (pt 0 161)(pt 273 161))
+		(line (pt 0 0)(pt 0 161))
+		(line (pt 56 87)(pt 185 87))
+		(line (pt 56 98)(pt 185 98))
+		(line (pt 56 110)(pt 185 110))
+		(line (pt 56 122)(pt 185 122))
+		(line (pt 56 87)(pt 56 122))
+		(line (pt 77 87)(pt 77 122)(line_width 3))
+		(line (pt 113 87)(pt 113 122)(line_width 3))
+		(line (pt 149 87)(pt 149 122)(line_width 3))
+		(line (pt 184 87)(pt 184 122))
+		(line (pt 48 48)(pt 223 48))
+		(line (pt 223 48)(pt 223 143))
+		(line (pt 48 143)(pt 223 143))
+		(line (pt 48 48)(pt 48 143))
+		(line (pt 271 64)(pt 223 64))
+		(line (pt 271 80)(pt 223 80))
+		(line (pt 271 96)(pt 223 96))
+	)
+)
+(symbol
 	(rect 2144 1472 2392 1968)
 	(text "udp_audio_packet" (rect 5 0 101 11)(font "Arial" ))
 	(text "inst23" (rect 8 480 41 491)(font "Arial" ))
@@ -2364,7 +2448,7 @@ on the Quartus Prime software download page.
 	)
 )
 (symbol
-	(rect 1200 472 1352 552)
+	(rect 544 168 696 248)
 	(text "clk_by_x" (rect 5 0 51 11)(font "Arial" ))
 	(text "inst5" (rect 8 64 31 75)(font "DejaVu Sans Condensed" ))
 	(port
@@ -2389,7 +2473,7 @@ on the Quartus Prime software download page.
 	(drawing
 		(rectangle (rect 16 16 136 64))
 	)
-	(annotation_block (parameter)(rect 1352 440 1538 466))
+	(annotation_block (parameter)(rect 696 136 882 162))
 )
 (symbol
 	(rect 1440 1864 1488 1896)
@@ -2510,6 +2594,182 @@ on the Quartus Prime software download page.
 		(line (pt 255 96)(pt 223 96))
 		(line (pt 255 112)(pt 223 112))
 		(line (pt 255 128)(pt 223 128))
+	)
+)
+(symbol
+	(rect 3176 712 3448 1016)
+	(text "fmc_ethernet_client" (rect 5 0 111 11)(font "Arial" ))
+	(text "inst8" (rect 8 288 35 299)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "clk_sys_i" (rect 0 0 46 11)(font "Arial" ))
+		(text "clk_sys_i" (rect 21 27 67 38)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "rst_sys_i" (rect 0 0 46 11)(font "Arial" ))
+		(text "rst_sys_i" (rect 21 43 67 54)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "fmc_addr_i[6..0]" (rect 0 0 87 11)(font "Arial" ))
+		(text "fmc_addr_i[6..0]" (rect 21 59 108 70)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "fmc_ne_n_i" (rect 0 0 59 11)(font "Arial" ))
+		(text "fmc_ne_n_i" (rect 21 75 80 86)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "fmc_noe_n_i" (rect 0 0 66 11)(font "Arial" ))
+		(text "fmc_noe_n_i" (rect 21 91 87 102)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "fmc_nwe_n_i" (rect 0 0 68 11)(font "Arial" ))
+		(text "fmc_nwe_n_i" (rect 21 107 89 118)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "mac_tx_clock_i" (rect 0 0 80 11)(font "Arial" ))
+		(text "mac_tx_clock_i" (rect 21 123 101 134)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "mac_tx_reset_i" (rect 0 0 79 11)(font "Arial" ))
+		(text "mac_tx_reset_i" (rect 21 139 100 150)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "mac_tx_byte_sent_i" (rect 0 0 105 11)(font "Arial" ))
+		(text "mac_tx_byte_sent_i" (rect 21 155 126 166)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "mac_tx_busy_i" (rect 0 0 77 11)(font "Arial" ))
+		(text "mac_tx_busy_i" (rect 21 171 98 182)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "mac_rx_clock_i" (rect 0 0 80 11)(font "Arial" ))
+		(text "mac_rx_clock_i" (rect 21 187 101 198)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "mac_rx_reset_i" (rect 0 0 80 11)(font "Arial" ))
+		(text "mac_rx_reset_i" (rect 21 203 101 214)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "mac_rx_frame_i" (rect 0 0 83 11)(font "Arial" ))
+		(text "mac_rx_frame_i" (rect 21 219 104 230)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224))
+	)
+	(port
+		(pt 0 240)
+		(input)
+		(text "mac_rx_data_i[7..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "mac_rx_data_i[7..0]" (rect 21 235 126 246)(font "Arial" ))
+		(line (pt 0 240)(pt 16 240)(line_width 3))
+	)
+	(port
+		(pt 0 256)
+		(input)
+		(text "mac_rx_byte_rcv_i" (rect 0 0 97 11)(font "Arial" ))
+		(text "mac_rx_byte_rcv_i" (rect 21 251 118 262)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256))
+	)
+	(port
+		(pt 0 272)
+		(input)
+		(text "mac_rx_error_i" (rect 0 0 79 11)(font "Arial" ))
+		(text "mac_rx_error_i" (rect 21 267 100 278)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272))
+	)
+	(port
+		(pt 272 48)
+		(output)
+		(text "fmc_int_o" (rect 0 0 51 11)(font "Arial" ))
+		(text "fmc_int_o" (rect 208 43 251 54)(font "Arial" ))
+		(line (pt 272 48)(pt 256 48))
+	)
+	(port
+		(pt 272 64)
+		(output)
+		(text "mac_tx_enable_o" (rect 0 0 92 11)(font "Arial" ))
+		(text "mac_tx_enable_o" (rect 174 59 251 70)(font "Arial" ))
+		(line (pt 272 64)(pt 256 64))
+	)
+	(port
+		(pt 272 80)
+		(output)
+		(text "mac_tx_data_o[7..0]" (rect 0 0 108 11)(font "Arial" ))
+		(text "mac_tx_data_o[7..0]" (rect 160 75 251 86)(font "Arial" ))
+		(line (pt 272 80)(pt 256 80)(line_width 3))
+	)
+	(port
+		(pt 272 32)
+		(bidir)
+		(text "fmc_data_io[7..0]" (rect 0 0 93 11)(font "Arial" ))
+		(text "fmc_data_io[7..0]" (rect 181 27 274 38)(font "Arial" ))
+		(line (pt 272 32)(pt 256 32)(line_width 3))
+	)
+	(parameter
+		"TX_ADDR_WIDTH"
+		"11"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"RX_ADDR_WIDTH"
+		"11"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 256 288))
+	)
+	(annotation_block (parameter)(rect 3448 672 3672 712))
+)
+(symbol
+	(rect 3512 48 3544 80)
+	(text "GND" (rect 8 16 30 26)(font "Arial" (font_size 6)))
+	(text "inst" (rect 3 21 23 32)(font "Arial" )(invisible))
+	(port
+		(pt 16 0)
+		(output)
+		(text "1" (rect 18 0 25 11)(font "Courier New" (bold))(invisible))
+		(text "1" (rect 18 0 25 11)(font "Courier New" (bold))(invisible))
+		(line (pt 16 8)(pt 16 0))
+	)
+	(drawing
+		(line (pt 8 8)(pt 16 16))
+		(line (pt 16 16)(pt 24 8))
+		(line (pt 8 8)(pt 24 8))
 	)
 )
 (connector
@@ -2738,6 +2998,11 @@ on the Quartus Prime software download page.
 	(pt 2624 264)
 )
 (connector
+	(text "powerGood" (rect 26 608 87 619)(font "Arial" ))
+	(pt 0 624)
+	(pt 88 624)
+)
+(connector
 	(text "clk_125MHz" (rect 322 408 385 419)(font "Arial" ))
 	(pt 296 424)
 	(pt 384 424)
@@ -2788,6 +3053,14 @@ on the Quartus Prime software download page.
 	(pt 1104 2144)
 )
 (connector
+	(pt 16 184)
+	(pt 160 184)
+)
+(connector
+	(pt 16 424)
+	(pt 16 184)
+)
+(connector
 	(text "clk96k" (rect 440 168 471 179)(font "DejaVu Sans Condensed" ))
 	(pt 376 184)
 	(pt 432 184)
@@ -2796,6 +3069,16 @@ on the Quartus Prime software download page.
 	(pt 1480 2096)
 	(pt 1536 2096)
 	(bus)
+)
+(connector
+	(text "bclk" (rect 1208 2080 1228 2091)(font "DejaVu Sans Condensed" ))
+	(pt 1192 2096)
+	(pt 1224 2096)
+)
+(connector
+	(text "lrclk" (rect 1190 2064 1210 2075)(font "DejaVu Sans Condensed" ))
+	(pt 1240 2080)
+	(pt 1160 2080)
 )
 (connector
 	(text "din" (rect 1232 2096 1247 2107)(font "DejaVu Sans Condensed" ))
@@ -2907,6 +3190,15 @@ on the Quartus Prime software download page.
 	(pt 1912 640)
 	(pt 1912 1584)
 	(bus)
+)
+(connector
+	(pt 16 424)
+	(pt 40 424)
+)
+(connector
+	(text "clk50m" (rect -35 408 0 419)(font "DejaVu Sans Condensed" ))
+	(pt -48 424)
+	(pt 16 424)
 )
 (connector
 	(pt 2648 232)
@@ -3189,6 +3481,11 @@ on the Quartus Prime software download page.
 	(pt 2000 1936)
 )
 (connector
+	(text "clk48k" (rect 1649 1936 1680 1947)(font "DejaVu Sans Condensed" ))
+	(pt 1760 1944)
+	(pt 1640 1944)
+)
+(connector
 	(pt 3776 568)
 	(pt 3720 568)
 )
@@ -3377,25 +3674,6 @@ on the Quartus Prime software download page.
 (connector
 	(pt 3080 496)
 	(pt 3096 496)
-)
-(connector
-	(text "mcu_tx_data[7..0]" (rect 3512 792 3599 803)(font "DejaVu Sans Condensed" ))
-	(pt 3560 808)
-	(pt 3448 808)
-	(bus)
-)
-(connector
-	(pt 3448 760)
-	(pt 3448 752)
-)
-(connector
-	(pt 3448 752)
-	(pt 3456 752)
-)
-(connector
-	(text "mcu_tx_enable" (rect 3480 776 3551 787)(font "DejaVu Sans Condensed" ))
-	(pt 3448 792)
-	(pt 3528 792)
 )
 (connector
 	(pt 2312 2144)
@@ -3720,6 +3998,16 @@ on the Quartus Prime software download page.
 	(pt 3448 616)
 )
 (connector
+	(text "clk48k" (rect 433 184 464 195)(font "DejaVu Sans Condensed" ))
+	(pt 432 200)
+	(pt 544 200)
+)
+(connector
+	(text "clk_1kHz" (rect 704 184 746 195)(font "DejaVu Sans Condensed" ))
+	(pt 696 200)
+	(pt 736 200)
+)
+(connector
 	(pt 1624 1888)
 	(pt 1616 1888)
 )
@@ -3760,6 +4048,151 @@ on the Quartus Prime software download page.
 	(pt 1976 1504)
 	(bus)
 )
+(connector
+	(pt 3176 792)
+	(pt 3080 792)
+)
+(connector
+	(pt 3176 808)
+	(pt 3080 808)
+)
+(connector
+	(pt 3176 824)
+	(pt 3080 824)
+)
+(connector
+	(text "mac_tx_clock" (rect 3112 824 3176 835)(font "DejaVu Sans Condensed" ))
+	(pt 3176 840)
+	(pt 3104 840)
+)
+(connector
+	(text "clk_250MHz" (rect 3079 728 3136 739)(font "DejaVu Sans Condensed" ))
+	(pt 3176 744)
+	(pt 3040 744)
+)
+(connector
+	(pt 2904 368)
+	(pt 2904 376)
+)
+(connector
+	(pt 2904 376)
+	(pt 2904 760)
+)
+(connector
+	(pt 2904 760)
+	(pt 3176 760)
+)
+(connector
+	(text "MII_RX_ERR" (rect 3760 -96 3819 -83)(font "Intel Clear" ))
+	(pt 3760 -80)
+	(pt 3832 -80)
+)
+(connector
+	(pt 3176 776)
+	(pt 3088 776)
+	(bus)
+)
+(connector
+	(pt 3456 792)
+	(pt 3456 824)
+	(bus)
+)
+(connector
+	(pt 3448 792)
+	(pt 3456 792)
+	(bus)
+)
+(connector
+	(text "mcu_tx_data[7..0]" (rect 3640 808 3727 819)(font "DejaVu Sans Condensed" ))
+	(pt 3456 824)
+	(pt 3688 824)
+	(bus)
+)
+(connector
+	(pt 3456 776)
+	(pt 3456 784)
+)
+(connector
+	(pt 3448 776)
+	(pt 3456 776)
+)
+(connector
+	(text "mcu_tx_enable" (rect 3608 768 3679 779)(font "DejaVu Sans Condensed" ))
+	(pt 3456 784)
+	(pt 3656 784)
+)
+(connector
+	(pt 3456 456)
+	(pt 3456 432)
+)
+(connector
+	(pt 3456 432)
+	(pt 3600 432)
+)
+(connector
+	(pt 3456 744)
+	(pt 3456 736)
+	(bus)
+)
+(connector
+	(pt 3448 744)
+	(pt 3456 744)
+	(bus)
+)
+(connector
+	(pt 3456 736)
+	(pt 3520 736)
+	(bus)
+)
+(connector
+	(pt 3552 64)
+	(pt 3832 64)
+)
+(connector
+	(pt 3480 -128)
+	(pt 3480 376)
+)
+(connector
+	(text "tx_online" (rect 2785 288 2828 299)(font "DejaVu Sans Condensed" ))
+	(pt 2848 296)
+	(pt 2768 296)
+)
+(connector
+	(pt 3824 32)
+	(pt 3824 24)
+)
+(connector
+	(pt 3832 32)
+	(pt 3824 32)
+)
+(connector
+	(text "rmii_crs" (rect 3864 8 3904 21)(font "Intel Clear" ))
+	(pt 3824 24)
+	(pt 3752 24)
+)
+(connector
+	(pt 3824 48)
+	(pt 3824 40)
+	(bus)
+)
+(connector
+	(pt 3832 48)
+	(pt 3824 48)
+	(bus)
+)
+(connector
+	(pt 3824 40)
+	(pt 3752 40)
+	(bus)
+)
+(connector
+	(pt 3552 48)
+	(pt 3552 64)
+)
+(connector
+	(pt 3552 48)
+	(pt 3528 48)
+)
 (junction (pt 1976 816))
 (junction (pt 1976 1048))
 (junction (pt 1960 832))
@@ -3778,9 +4211,6 @@ on the Quartus Prime software download page.
 (junction (pt 1920 1936))
 (junction (pt 1704 1896))
 (junction (pt 2904 376))
-(junction (pt 680 840))
-(junction (pt 992 712))
-(junction (pt 1176 624))
 (text "Use frame_rdy to do something with this data" (rect 4320 832 4617 845)(font "Arial" (font_size 8)))
 (text "Clock-Sources" (rect -240 336 -91 355)(font "Arial" (color 255 0 0)(font_size 12)(bold)))
 (text "Ethernet-Communication" (rect 1688 176 1954 195)(font "Arial" (color 255 0 0)(font_size 12)(bold)))
@@ -3800,5 +4230,5 @@ on the Quartus Prime software download page.
 (text "ICMP Response Sender" (rect 2208 1440 2357 1453)(font "Arial" (font_size 8)))
 (text "Here a 100byte frame is stored in RAM" (rect 4320 816 4572 829)(font "Arial" (font_size 8)))
 (text "UDP Audio-Sample-Sender" (rect 2192 1680 2364 1693)(font "Arial" (font_size 8)))
-(rectangle (rect -272 336 1328 1104)(color 0 0 255)(line_width 3))
+(rectangle (rect -248 328 408 1096)(color 0 0 255)(line_width 3))
 (rectangle (rect 1664 160 4688 1752)(color 0 0 255)(line_width 3))
