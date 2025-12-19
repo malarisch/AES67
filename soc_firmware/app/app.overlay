@@ -1,5 +1,5 @@
-
 #include <zephyr/dt-bindings/dma/stm32_dma.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 
 &dma1 {
 	status = "okay";
@@ -43,6 +43,88 @@
 	status = "disabled";
 };
 
+&fdcan1 {
+	status = "disabled";
+};
+
 &lpuart1 {
     status = "disabled";
+};
+
+/* Enable FMC bank 0 with a 16-bit bus on unused pins for the Ethernet FMC bridge */
+#include <zephyr/dt-bindings/memory-controller/stm32-fmc-nor-psram.h>
+
+&fmc {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <
+		&fmc_a0_pf0 &fmc_a1_pf1 &fmc_a2_pf2 &fmc_a3_pf3
+		&fmc_a4_pf4 &fmc_a5_pf5 &fmc_a6_pf12
+		&fmc_d0_pd14 &fmc_d1_pd15 &fmc_d2_pd0 &fmc_d3_pd1
+		&fmc_d4_pe7 &fmc_d5_pe8 &fmc_d6_pe9 &fmc_d7_pe10
+		&fmc_noe_pd4 &fmc_nwe_pd5 &fmc_ne1_pd7
+	>;
+
+	sram {
+		compatible = "st,stm32-fmc-nor-psram";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		eth_fmc: sram@1 {
+			reg = <0x0>; /* Bank 1 (NE1) */
+			st,control = <STM32_FMC_DATA_ADDRESS_MUX_DISABLE
+						  STM32_FMC_MEMORY_TYPE_SRAM
+						  STM32_FMC_NORSRAM_MEM_BUS_WIDTH_8
+						  STM32_FMC_BURST_ACCESS_MODE_DISABLE
+						  STM32_FMC_WAIT_SIGNAL_POLARITY_LOW
+						  STM32_FMC_WAIT_TIMING_BEFORE_WS
+						  STM32_FMC_WRITE_OPERATION_ENABLE
+						  STM32_FMC_WAIT_SIGNAL_DISABLE
+						  STM32_FMC_EXTENDED_MODE_DISABLE
+						  STM32_FMC_ASYNCHRONOUS_WAIT_DISABLE
+						  STM32_FMC_WRITE_BURST_DISABLE
+						  STM32_FMC_CONTINUOUS_CLOCK_SYNC_ONLY
+						  STM32_FMC_WRITE_FIFO_DISABLE
+						  STM32_FMC_PAGE_SIZE_NONE>;
+			st,timing = <4 2 8 0 16 17 STM32_FMC_ACCESS_MODE_A>;
+		};
+	};
+};
+
+&usart3 {
+	pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pd9>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/* 
+ * Define an MPU region for the FMC bank 1 (0x60000000).
+ * This is critical to prevent speculative access crashes on Cortex-M7
+ * when the FPGA is not driving the bus or before initialization.
+ * Attribute "IO" ensures Device memory semantics (no speculation, no cache).
+ */
+/ {
+	fmc_memory: memory@60000000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x60000000 0x10000>;
+		zephyr,memory-region = "FMC_ETH_MEM";
+		zephyr,memory-attr = <( DT_MEM_ARM(ATTR_MPU_IO) )>;
+	};
+};
+
+/ {
+	chosen {
+		zephyr,console = &usart3;
+		zephyr,shell-uart = &usart3;
+	};
+
+	fpga_ctrl {
+		compatible = "gpio-keys";
+		fpga_ready: fpga_ready {
+			gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Ready";
+		};
+	};
 };

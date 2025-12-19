@@ -1,5 +1,6 @@
 menu "Drivers"
 rsource "eth_spi_basic/Kconfig.spi_basic"
+rsource "eth_fmc_basic/Kconfig.fmc_basic"
 endmenu
 mainmenu "Networking packet socket sample application"
 

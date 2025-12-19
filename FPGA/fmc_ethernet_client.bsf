@@ -1,0 +1,181 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 2025  Altera Corporation. All rights reserved.
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and any partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, the Altera Quartus Prime License Agreement,
+the Altera IP License Agreement, or other applicable license
+agreement, including, without limitation, that your use is for
+the sole purpose of programming logic devices manufactured by
+Altera and sold by Altera or its authorized distributors.  Please
+refer to the Altera Software License Subscription Agreements 
+on the Quartus Prime software download page.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 288 320)
+	(text "fmc_ethernet_client" (rect 5 0 84 12)(font "Arial" ))
+	(text "inst" (rect 8 288 20 300)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "clk_sys_i" (rect 0 0 38 12)(font "Arial" ))
+		(text "clk_sys_i" (rect 21 27 59 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "rst_sys_i" (rect 0 0 38 12)(font "Arial" ))
+		(text "rst_sys_i" (rect 21 43 59 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "fmc_addr_i[6..0]" (rect 0 0 67 12)(font "Arial" ))
+		(text "fmc_addr_i[6..0]" (rect 21 59 88 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "fmc_ne_n_i" (rect 0 0 49 12)(font "Arial" ))
+		(text "fmc_ne_n_i" (rect 21 75 70 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 1))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "fmc_noe_n_i" (rect 0 0 54 12)(font "Arial" ))
+		(text "fmc_noe_n_i" (rect 21 91 75 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 1))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "fmc_nwe_n_i" (rect 0 0 55 12)(font "Arial" ))
+		(text "fmc_nwe_n_i" (rect 21 107 76 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 1))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "mac_tx_clock_i" (rect 0 0 63 12)(font "Arial" ))
+		(text "mac_tx_clock_i" (rect 21 123 84 135)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 1))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "mac_tx_reset_i" (rect 0 0 63 12)(font "Arial" ))
+		(text "mac_tx_reset_i" (rect 21 139 84 151)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 1))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "mac_tx_byte_sent_i" (rect 0 0 83 12)(font "Arial" ))
+		(text "mac_tx_byte_sent_i" (rect 21 155 104 167)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160)(line_width 1))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "mac_tx_busy_i" (rect 0 0 63 12)(font "Arial" ))
+		(text "mac_tx_busy_i" (rect 21 171 84 183)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176)(line_width 1))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "mac_rx_clock_i" (rect 0 0 64 12)(font "Arial" ))
+		(text "mac_rx_clock_i" (rect 21 187 85 199)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 1))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "mac_rx_reset_i" (rect 0 0 64 12)(font "Arial" ))
+		(text "mac_rx_reset_i" (rect 21 203 85 215)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208)(line_width 1))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "mac_rx_frame_i" (rect 0 0 69 12)(font "Arial" ))
+		(text "mac_rx_frame_i" (rect 21 219 90 231)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 1))
+	)
+	(port
+		(pt 0 240)
+		(input)
+		(text "mac_rx_data_i[7..0]" (rect 0 0 81 12)(font "Arial" ))
+		(text "mac_rx_data_i[7..0]" (rect 21 235 102 247)(font "Arial" ))
+		(line (pt 0 240)(pt 16 240)(line_width 3))
+	)
+	(port
+		(pt 0 256)
+		(input)
+		(text "mac_rx_byte_rcv_i" (rect 0 0 82 12)(font "Arial" ))
+		(text "mac_rx_byte_rcv_i" (rect 21 251 103 263)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 1))
+	)
+	(port
+		(pt 0 272)
+		(input)
+		(text "mac_rx_error_i" (rect 0 0 64 12)(font "Arial" ))
+		(text "mac_rx_error_i" (rect 21 267 85 279)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 1))
+	)
+	(port
+		(pt 272 48)
+		(output)
+		(text "fmc_int_o" (rect 0 0 41 12)(font "Arial" ))
+		(text "fmc_int_o" (rect 210 43 251 55)(font "Arial" ))
+		(line (pt 272 48)(pt 256 48)(line_width 1))
+	)
+	(port
+		(pt 272 64)
+		(output)
+		(text "mac_tx_enable_o" (rect 0 0 71 12)(font "Arial" ))
+		(text "mac_tx_enable_o" (rect 180 59 251 71)(font "Arial" ))
+		(line (pt 272 64)(pt 256 64)(line_width 1))
+	)
+	(port
+		(pt 272 80)
+		(output)
+		(text "mac_tx_data_o[7..0]" (rect 0 0 83 12)(font "Arial" ))
+		(text "mac_tx_data_o[7..0]" (rect 168 75 251 87)(font "Arial" ))
+		(line (pt 272 80)(pt 256 80)(line_width 3))
+	)
+	(port
+		(pt 272 32)
+		(bidir)
+		(text "fmc_data_io[7..0]" (rect 0 0 70 12)(font "Arial" ))
+		(text "fmc_data_io[7..0]" (rect 181 27 251 39)(font "Arial" ))
+		(line (pt 272 32)(pt 256 32)(line_width 3))
+	)
+	(parameter
+		"TX_ADDR_WIDTH"
+		"11"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"RX_ADDR_WIDTH"
+		"11"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 256 288)(line_width 1))
+	)
+	(annotation_block (parameter)(rect 288 -64 388 16))
+)

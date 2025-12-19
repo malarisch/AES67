@@ -18,7 +18,8 @@ set(CONFIG_BOOTLOADER_MCUBOOT y)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(app)
 
+add_subdirectory(drivers)
+
 target_sources(app PRIVATE
   src/main.c
-  drivers/eth_spi_basic/eth_spi_basic.c
 )

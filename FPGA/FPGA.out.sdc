@@ -20,7 +20,7 @@
 ## PROGRAM "Quartus Prime"
 ## VERSION "Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
 
-## DATE    "Mon Nov 10 16:36:08 2025"
+## DATE    "Thu Dec 18 18:02:50 2025"
 
 ##
 ## DEVICE  "10CL025YU256I7G"
@@ -39,14 +39,21 @@ set_time_format -unit ns -decimal_places 3
 # Create Clock
 #**************************************************************
 
+create_clock -name {altera_reserved_tck} -period 1.000 -waveform { 0.000 0.500 } [get_ports {altera_reserved_tck}]
 create_clock -name {c10_clk50m} -period 20.000 -waveform { 0.000 10.000 } [get_ports {c10_clk50m}]
-create_clock -name {altera_reserved_tck} -period 100.000 -waveform { 0.000 50.000 } [get_ports {altera_reserved_tck}]
+create_clock -name {clk_by_x:inst5|b} -period 1.000 -waveform { 0.000 0.500 } [get_registers {clk_by_x:inst5|b}]
+create_clock -name {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2} -period 1.000 -waveform { 0.000 0.500 } [get_registers {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]
+create_clock -name {gpio32} -period 1.000 -waveform { 0.000 0.500 } [get_ports {gpio32}]
 
 
 #**************************************************************
 # Create Generated Clock
 #**************************************************************
 
+create_generated_clock -name {inst6|altpll_component|auto_generated|pll1|clk[0]} -source [get_pins {inst6|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 5 -divide_by 2 -master_clock {c10_clk50m} [get_pins {inst6|altpll_component|auto_generated|pll1|clk[0]}] 
+create_generated_clock -name {inst6|altpll_component|auto_generated|pll1|clk[1]} -source [get_pins {inst6|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 2 -master_clock {c10_clk50m} [get_pins {inst6|altpll_component|auto_generated|pll1|clk[1]}] 
+create_generated_clock -name {inst6|altpll_component|auto_generated|pll1|clk[3]} -source [get_pins {inst6|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 5 -master_clock {c10_clk50m} [get_pins {inst6|altpll_component|auto_generated|pll1|clk[3]}] 
+create_generated_clock -name {inst2|altpll_component|auto_generated|pll1|clk[1]} -source [get_pins {inst2|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50/1 -multiply_by 3 -divide_by 3125 -master_clock {c10_clk50m} [get_pins {inst2|altpll_component|auto_generated|pll1|clk[1]}] 
 
 
 #**************************************************************
@@ -59,6 +66,134 @@ create_clock -name {altera_reserved_tck} -period 100.000 -waveform { 0.000 50.00
 # Set Clock Uncertainty
 #**************************************************************
 
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}]  0.030  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}]  0.030  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.070  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.070  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {clk_by_x:inst5|b}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {clk_by_x:inst5|b}] -hold 0.070  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {clk_by_x:inst5|b}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {clk_by_x:inst5|b}] -hold 0.070  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}]  0.030  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}]  0.030  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.070  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.070  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {clk_by_x:inst5|b}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {clk_by_x:inst5|b}] -hold 0.070  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {clk_by_x:inst5|b}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {clk_by_x:inst5|b}] -hold 0.070  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {altera_reserved_tck}] -setup 0.110  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {altera_reserved_tck}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {altera_reserved_tck}] -setup 0.110  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {altera_reserved_tck}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {altera_reserved_tck}] -setup 0.110  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -rise_to [get_clocks {altera_reserved_tck}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {altera_reserved_tck}] -setup 0.110  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -fall_to [get_clocks {altera_reserved_tck}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -rise_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -setup 0.100  
+set_clock_uncertainty -fall_from [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -hold 0.080  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {gpio32}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {gpio32}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.070  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.070  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -hold 0.100  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {clk_by_x:inst5|b}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {clk_by_x:inst5|b}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.070  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -setup 0.070  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst2|altpll_component|auto_generated|pll1|clk[1]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[0]}] -hold 0.100  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -rise_to [get_clocks {clk_by_x:inst5|b}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {clk_by_x:inst5|b}] -fall_to [get_clocks {clk_by_x:inst5|b}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.110  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -rise_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -setup 0.080  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {inst6|altpll_component|auto_generated|pll1|clk[3]}] -hold 0.110  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -rise_to [get_clocks {altera_reserved_tck}]  0.020  
+set_clock_uncertainty -fall_from [get_clocks {altera_reserved_tck}] -fall_to [get_clocks {altera_reserved_tck}]  0.020  
 
 
 #**************************************************************

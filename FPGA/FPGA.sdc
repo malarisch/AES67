@@ -42,10 +42,10 @@ set_time_format -unit ns -decimal_places 3
 create_clock -name {c10_clk50m} -period 20.000 -waveform { 0.000 10.000 } [get_ports {c10_clk50m}]
 create_clock -name {clk_by_x:inst5|b} -period 1.000 -waveform { 0.000 0.500 } [get_registers {clk_by_x:inst5|b}]
 create_clock -name {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2} -period 1.000 -waveform { 0.000 0.500 } [get_registers {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]
-create_clock -name {gpio10} -period 20.000 -waveform { 0.000 10.000 } [get_ports { gpio10 }]
+create_clock -name {pmod_d3} -period 20.000 -waveform { 0.000 10.000 } [get_ports { pmod_d3 }]
 create_clock -name {gpio32} -period 1.000 -waveform { 0.000 0.500 } [get_ports {gpio32}]
 create_clock -name {altera_reserved_tck} -period 1.000 -waveform { 0.000 0.500 } [get_ports {altera_reserved_tck}]
-create_clock -name {gpio0} -period 40.000 -waveform { 0.000 20.000 } [get_ports {gpio0}]
+#create_clock -name {gpio0} -period 40.000 -waveform { 0.000 20.000 } [get_ports {gpio0}]
 
 
 #**************************************************************

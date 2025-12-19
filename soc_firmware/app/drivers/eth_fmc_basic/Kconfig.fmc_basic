@@ -1,0 +1,29 @@
+menuconfig ETH_FMC_BASIC
+	bool "Parallel FMC Ethernet interface"
+	select NET_L2_ETHERNET
+	help
+	  Enables a simple FMC-connected Ethernet MAC bridge. This uses a
+	  memory-mapped register window compatible with the existing SPI
+	  Ethernet bridge but accessed via the STM32H7 FMC in bank 0.
+
+if ETH_FMC_BASIC
+
+config ETH_FMC_BASE_ADDR
+	hex "FMC base address for Ethernet peripheral"
+	default 0x60000000
+	help
+	  Base address of the FMC bank used for the Ethernet bridge.
+
+config ETH_FMC_POLL_INTERVAL_MS
+	int "RX poll interval (ms)"
+	default 1
+	help
+	  Polling interval for RX-ready status when no interrupt line is wired.
+
+config ETH_FMC_BASIC_RX_STACK_SIZE
+	int "RX/TX thread stack size"
+	default 1024
+	help
+	  Stack size for RX and TX worker threads.
+
+endif # ETH_FMC_BASIC
