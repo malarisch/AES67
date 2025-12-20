@@ -1,6 +1,44 @@
 #include <zephyr/dt-bindings/dma/stm32_dma.h>
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 
+/* Ensure SYSCLK/HCLK are configured for a fast AHB3 (FMC) clock. */
+&clk_hse {
+	hse-bypass;
+	clock-frequency = <8000000>;
+	status = "okay";
+};
+
+&pll {
+	div-m = <2>;
+	mul-n = <240>;
+	div-p = <2>;
+	div-q = <2>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&pll2 {
+	div-m = <4>;
+	mul-n = <120>;
+	div-p = <2>;
+	div-q = <3>;
+	div-r = <2>;
+	clocks = <&clk_hse>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <480000000>;
+	d1cpre = <1>;
+	hpre = <2>;
+	d1ppre = <2>;
+	d2ppre1 = <2>;
+	d2ppre2 = <2>;
+	d3ppre = <2>;
+};
+
 &dma1 {
 	status = "okay";
 };
@@ -13,10 +51,11 @@
 	status = "okay";
 };
 
+/*
 &spi1 {
     status = "okay";
     pinctrl-names = "default";
-    /* Nucleo-H753ZI SPI1 pinout */
+    // Nucleo-H753ZI SPI1 pinout
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pb5>;
     
     dmas = <&dmamux1 0 38 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
@@ -26,19 +65,19 @@
     eth0: spi-ethernet@0 {
         compatible = "vendor,spi-ethernet";
         reg = <0>;
-        /* Max SPI clock in Hz (25 MHz) */
+        // Max SPI clock in Hz (25 MHz)
         spi-max-frequency = <25000000>;
-        /* Dedicated GPIO CS on D14/PB9 for this device */
+        // Dedicated GPIO CS on D14/PB9 for this device
         cs-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;
-        /* IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3) */
-        /* Button Test: PC13 is User Button. Active High (Pressed=1). Needs Pull-Down to be 0 when idle. */
+        // IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3)
+        // Button Test: PC13 is User Button. Active High (Pressed=1). Needs Pull-Down to be 0 when idle.
         int-gpios = <&gpiob 1 (GPIO_ACTIVE_LOW)>;
         full-duplex;
         
-        /* Optional: feste MAC Adresse */
-        local-mac-address = [00 1c 23 17 4a cb];
+        
     };
 };
+*/
 
 /* Disable user_button to prevent conflict on PC13 */
 &user_button {
@@ -63,6 +102,7 @@
 &fmc {
 	status = "okay";
 	pinctrl-names = "default";
+	clocks = <&rcc STM32_CLOCK(AHB3, 12)>;  // Bit 12 = FMCEN
 	pinctrl-0 = <
 		&fmc_a0_pf0 &fmc_a1_pf1 &fmc_a2_pf2 &fmc_a3_pf3
 		&fmc_a4_pf4 &fmc_a5_pf5 &fmc_a6_pf12
@@ -93,7 +133,7 @@
 						  STM32_FMC_CONTINUOUS_CLOCK_SYNC_ONLY
 						  STM32_FMC_WRITE_FIFO_DISABLE
 						  STM32_FMC_PAGE_SIZE_NONE>;
-			st,timing = <4 2 8 0 4 9 STM32_FMC_ACCESS_MODE_A>;
+			st,timing = <2 1 8 0 3 9 STM32_FMC_ACCESS_MODE_A>;
 		};
 	};
 };

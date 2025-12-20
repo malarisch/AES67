@@ -148,7 +148,7 @@ static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 			net_pkt_unref(pkt);
 			continue;
 		}
-		LOG_INF("Sending Packet with lenght %u", len);
+		//LOG_INF("Sending Packet with lenght %u", len);
 
 		key = k_spin_lock(&data->lock);
 		fmc_write8(cfg->base, REG_TX_LEN_L, len & 0xFF);
@@ -167,6 +167,7 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
                                         struct gpio_callback *cb,
                                         gpio_port_pins_t pins)
 {
+	//printf("GPIO IRQ\n");
     struct eth_fmc_basic_data *data = 
         CONTAINER_OF(cb, struct eth_fmc_basic_data, gpio_cb);
 	const struct eth_fmc_basic_config *cfg = data->dev->config;
@@ -179,12 +180,13 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
 	
 	/* Read Status immediately to satisfy latency requirement */
 	uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
-	
-	if (status & RX_STATUS_READY) {
+	//printf("GPIO IRQ: STATUS 0x%02x\n", status);
+	if (status & RX_STATUS_READY ) {
+	//printf("GPIO IRQ: RX READY\n");
 		uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 		uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
-		
+		//printf("GPIO IRQ: RX LEN %u\n", pkt_len);
 		if (pkt_len <= ETH_FMC_MAX_PKT_SIZE + 4) {
 			/* Read Data in ISR to eliminate context switch latency gap */
 			fmc_read_block(cfg->base, REG_RX_WINDOW, data->rx_buf, pkt_len);
@@ -199,6 +201,12 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
 		
 		k_sem_give(&data->int_sem);
 	}
+	if (status & RX_STATUS_OVF) {
+		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+		LOG_WRN("RX overflow detected in ISR");
+		/* Clear overflow */
+		
+	}	
 	
 	k_spin_unlock(&data->lock, key);
 }
@@ -243,10 +251,12 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 				from_isr = true;
 			} else {
 				/* Polling or subsequent packet in burst */
+				//LOG_INF("Polling RX status, no cached Data");
 				uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 				uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 				status = fmc_read8(cfg->base, REG_RX_STATUS);
 				pkt_len = ((uint16_t)len_h << 8) | len_l;
+				//LOG_INF("Polled RX status 0x%02x, len %u (low: %02x, high: %02x)", status, pkt_len, len_l, len_h);
 			}
 			
 			if (!from_isr && !(status & RX_STATUS_READY)) {
@@ -355,6 +365,7 @@ static void eth_fmc_basic_link_work(struct k_work *work)
 		net_if_carrier_on(data->iface);
 		net_if_up(data->iface);
 	}
+	/* Clear RX status from overflows happening while booting up */
 }
 
 static const struct ethernet_api eth_fmc_basic_api = {
@@ -418,6 +429,8 @@ static int eth_fmc_basic_init(const struct device *dev)
 					cfg->interrupt.port->name,
 					cfg->interrupt.pin);
 		}
+		
+
 	}
 
 	k_work_init_delayable(&data->link_work, eth_fmc_basic_link_work);
@@ -431,11 +444,13 @@ static int eth_fmc_basic_init(const struct device *dev)
 	k_thread_create(&data->tx_thread, data->tx_stack,
 			CONFIG_ETH_FMC_BASIC_RX_STACK_SIZE,
 			eth_fmc_basic_tx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+			K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
 	k_thread_name_set(&data->tx_thread, "eth_fmc_tx");
 
 	k_work_schedule(&data->link_work, K_MSEC(50));
-
+		LOG_INF("Clearing RX status for Startup");
+		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+	
 	return 0;
 }
 

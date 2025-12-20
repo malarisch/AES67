@@ -135,10 +135,12 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_read_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_ne_qual_low : std_ulogic := '0';
 
+  signal fmc_start_int : std_ulogic := '0';
+  signal fmc_start_int_d : std_ulogic := '0';
+  signal fmc_start_pulse : std_ulogic := '0';
 
-  signal overflow_interrupt : std_ulogic := '0';
 begin
-
+  fmc_start_pulse <= fmc_start_int and not fmc_start_int_d;
   fmc_data_in <= fmc_data_io;
   -- Drive data bus only when internal OE is asserted *and* external raw strobes
   -- indicate a read cycle. This prevents stale data from a previous read from
@@ -228,10 +230,13 @@ begin
     end if;
   end process;
 
+
+
   --------------------------------------------------------------------
-  -- FMC signal synchronization into clk_sys_i domain
+  -- FMC bus handling (byte accesses, lower byte used)
   --------------------------------------------------------------------
   process(clk_sys_i, rst_sys_i)
+    variable addr_v  : unsigned(6 downto 0);
   begin
     if rst_sys_i = '1' then
       fmc_ne_n_meta <= '1';
@@ -252,7 +257,44 @@ begin
       fmc_din_sync_d <= (others => '0');
 
       nwe_d <= '1';
+
+
+      txfifo_wr_en    <= '0';
+      rxfifo_rd_en    <= '0';
+      reg_tx_len      <= (others => '0');
+      reg_tx_start    <= '0';
+      reg_tx_len_reset <= '0';
+      rx_clear_req_sys   <= '0';
+      fmc_rx_bytes_sent <= (others => '0');
+      fmc_data_out    <= (others => '0');
+      fmc_data_oe     <= '0';
+      fmc_read_latched <= '0';
+      fmc_read_addr_lat <= (others => '0');
+      fmc_read_data_lat <= (others => '0');
     elsif rising_edge(clk_sys_i) then
+      txfifo_wr_en <= '0';
+      rxfifo_rd_en <= '0';
+      --fmc_data_out <= fmc_read_data_lat;
+      fmc_data_oe  <= '0';
+      -- Clear request once MAC side acknowledged
+      if rx_clear_sys_pulse = '1' then
+        rx_clear_req_sys <= '0';
+      end if;
+
+      -- Drop read latch when NOE deasserts or chip deselects (raw levels to avoid phase races)
+      if (fmc_noe_n_i = '1') or (fmc_ne_n_i = '1') then
+        fmc_read_latched <= '0';
+      end if;
+
+      -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
+      if (fmc_ne_n_meta = '0') and (fmc_ne_n_sync = '1') then
+        -- Capture early (1-stage synced) address/data during NWE low to avoid missing
+        -- simultaneous NE/NWE assertions.
+        fmc_wr_addr_lat <= unsigned(fmc_addr_meta);
+        fmc_wr_data_lat <= fmc_din_meta;
+      end if;
+
+
       fmc_ne_n_meta <= fmc_ne_n_i;
       fmc_ne_n_sync <= fmc_ne_n_meta;
       fmc_ne_n_sync_d <= fmc_ne_n_sync;
@@ -273,49 +315,51 @@ begin
       fmc_din_meta  <= fmc_data_in;
       fmc_din_sync  <= fmc_din_meta;
       fmc_din_sync_d <= fmc_din_sync;
-    end if;
-  end process;
+      fmc_start_int_d <= fmc_start_int;
 
-  --------------------------------------------------------------------
-  -- FMC bus handling (byte accesses, lower byte used)
-  --------------------------------------------------------------------
-  process(clk_sys_i, rst_sys_i)
-    variable addr_v  : unsigned(6 downto 0);
-  begin
-    if rst_sys_i = '1' then
-      txfifo_wr_en    <= '0';
-      rxfifo_rd_en    <= '0';
-      reg_tx_len      <= (others => '0');
-      reg_tx_start    <= '0';
-      reg_tx_len_reset <= '0';
-      rx_clear_req_sys   <= '0';
-      fmc_rx_bytes_sent <= (others => '0');
-      fmc_data_out    <= (others => '0');
-      fmc_data_oe     <= '0';
-      fmc_read_latched <= '0';
-      fmc_read_addr_lat <= (others => '0');
-      fmc_read_data_lat <= (others => '0');
-    elsif rising_edge(clk_sys_i) then
-      txfifo_wr_en <= '0';
-      rxfifo_rd_en <= '0';
-      fmc_data_out <= fmc_read_data_lat;
-      fmc_data_oe  <= '0';
-      -- Clear request once MAC side acknowledged
-      if rx_clear_sys_pulse = '1' then
-        rx_clear_req_sys <= '0';
+      -- Detect start of read or write cycle
+      fmc_start_int <= '0';
+      
+      if (fmc_ne_n_meta = '0') then
+
+        if (fmc_noe_n_meta = '1') and (fmc_nwe_n_meta = '0') then
+          -- WRITE cycle active
+          fmc_start_int <= '1';
+        end if;
+        if (fmc_noe_n_meta = '0') and (fmc_nwe_n_meta = '1') then
+          -- READ cycle active
+          fmc_start_int <= '1';
+          if (fmc_start_int = '0') then
+            fmc_data_out    <= (others => '0');
+            -- Latch address at start of read cycle
+            --fmc_read_addr_lat <= unsigned(fmc_addr_meta);
+            case fmc_addr_meta is
+              when "0100000" => fmc_data_out <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
+              when "0100001" => fmc_data_out <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
+              when "0100010" => -- 0x22
+                fmc_data_out(0) <= reg_rx_ready_sys;
+                fmc_data_out(1) <= reg_rx_overflow_sys;
+              when others =>
+                if unsigned(fmc_addr_meta) >= 16#30# and unsigned(fmc_addr_meta) < 16#40# then
+                  if rxfifo_rd_empty = '0' then
+                    fmc_read_data_lat <= rxfifo_rd_data;
+                    rxfifo_rd_en <= '1';
+                    fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
+                  end if;
+                end if;
+            end case;
+            fmc_read_data_lat <= (others => '0');
+        
+            fmc_read_latched <= '1';
+          
+            fmc_data_oe  <= '1';
+          end if;
+        end if;
       end if;
-
-      -- Drop read latch when NOE deasserts or chip deselects (raw levels to avoid phase races)
-      if (fmc_noe_n_i = '1') or (fmc_ne_n_i = '1') then
-        fmc_read_latched <= '0';
-      end if;
-
-      -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
-      if (fmc_ne_n_sync = '0') and (fmc_ne_n_sync_d = '1') then
-        -- Capture early (1-stage synced) address/data during NWE low to avoid missing
-        -- simultaneous NE/NWE assertions.
-        fmc_wr_addr_lat <= unsigned(fmc_addr_meta);
-        fmc_wr_data_lat <= fmc_din_meta;
+            -- Drive bus during read while latched and external strobes indicate read
+      if (fmc_read_latched = '1') and (fmc_noe_n_i = '0') and (fmc_nwe_n_i = '1') then
+        --fmc_data_out <= fmc_read_data_lat;
+        fmc_data_oe  <= '1';
       end if;
 
       -- Detect end of write cycle on falling edge of synchronized NWE (one update per FMC write transaction).
@@ -334,13 +378,10 @@ begin
             if fmc_din_meta(0) = '1' then
               if not mac_rx_frame_d = '1' then
                 rx_clear_req_sys <= '1';
-                overflow_interrupt <= '0';
                 else
-                  overflow_interrupt <= reg_rx_overflow_sys;
                   -- Ignore clear request if MAC is still receiving a frame
                   
               end if;
-              --
               
               fmc_rx_bytes_sent   <= (others => '0');
             end if;
@@ -354,37 +395,8 @@ begin
         end case;
       end if;
 
-      -- Latch address and prepare read data when NOE is low and not yet latched.
-      -- We still use the synchronized NOE level, but do not require a clean falling edge,
-      -- so a simultaneous NE/NOE assertion will still produce data in the next clk_sys_i.
-      if (fmc_ne_qual_low = '1')and (fmc_noe_n_sync = '1') and (fmc_noe_n_meta = '0') then
-        -- Use the most recent address (1-stage synced) to handle NE/NOE asserting together.
-        --addr_v := unsigned(fmc_addr_meta);
-        --fmc_read_addr_lat <= addr_v;
-        fmc_read_data_lat <= (others => '0');
-        case fmc_addr_meta is
-          when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
-          when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
-          when "0100010" => -- 0x22
-            fmc_read_data_lat(0) <= reg_rx_ready_sys;
-            fmc_read_data_lat(1) <= reg_rx_overflow_sys;
-          when others =>
-            if unsigned(fmc_addr_meta) >= 16#30# and unsigned(fmc_addr_meta) < 16#40# then
-              if rxfifo_rd_empty = '0' then
-                fmc_read_data_lat <= rxfifo_rd_data;
-                rxfifo_rd_en <= '1';
-                fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
-              end if;
-            end if;
-        end case;
-        fmc_read_latched <= '1';
-      end if;
 
-      -- Drive bus during read while latched and external strobes indicate read
-      if (fmc_read_latched = '1') and (fmc_ne_qual_low = '1') and (fmc_noe_n_sync = '0') and (fmc_nwe_n_sync = '1') then
-        fmc_data_out <= fmc_read_data_lat;
-        fmc_data_oe  <= '1';
-      end if;
+
 
       if reg_tx_len_reset = '1' then
         reg_tx_len_reset <= '0';
@@ -539,7 +551,7 @@ begin
       end if;
 
       if (mac_rx_frame_i = '1') and (mac_rx_frame_d = '0') then
-        len_next   := (others => '0');
+        --len_next   := (others => '0');
         ready_next := '0';
         if reg_rx_ready = '1' then
           ovf_next := '1';
@@ -573,6 +585,6 @@ begin
     end if;
   end process;
 
-  fmc_int_o <= (reg_rx_ready xor reg_rx_overflow_sys )or overflow_interrupt;
-
+  fmc_int_o <= reg_rx_ready or reg_rx_overflow_sys;
+          
 end architecture;
