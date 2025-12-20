@@ -50,3 +50,4 @@ external/
 **/greybox_tmp/
 
 **/node_modules/
+*.stp
