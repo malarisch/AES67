@@ -4009,11 +4009,6 @@ on the Quartus Prime software download page.
 	(pt 3176 504)
 )
 (connector
-	(text "clk_125MHz" (rect 3090 344 3153 355)(font "Arial" ))
-	(pt 3080 360)
-	(pt 3176 360)
-)
-(connector
 	(pt 1960 1064)
 	(pt 1960 1520)
 	(bus)
@@ -4196,6 +4191,11 @@ on the Quartus Prime software download page.
 	(text "mac_tx_clock" (rect 3088 824 3152 835)(font "DejaVu Sans Condensed" ))
 	(pt 3056 840)
 	(pt 3176 840)
+)
+(connector
+	(text "clk_250MHz" (rect 3090 344 3153 355)(font "Arial" ))
+	(pt 3080 360)
+	(pt 3176 360)
 )
 (junction (pt 1976 816))
 (junction (pt 1976 1048))
