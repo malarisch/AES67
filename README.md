@@ -1,6 +1,8 @@
 # AES67
 
-This project is an attempt for a full AES67 Hardware/Embedded implementation. A FPGA and MCU is used, currently for the dev setup a Cyclone 10LP and STM32H753ZI. The STM32 uses Zephyr. A some boilerplate code was LLM generated. 
+This project is an attempt for a full AES67 Hardware/Embedded implementation. A FPGA and MCU is used, currently for the dev setup a Cyclone 10LP and STM32H753ZI. The STM32 uses Zephyr. Some boilerplate code was LLM generated. 
+
+For transparency, this is primarely a learning project for me. I have never worked with FPGAs before and the only embedded experiences I've had before were not more than attaching a temperature sensor to an ESP32.
 
 Roadmap:
 
