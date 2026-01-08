@@ -73,6 +73,13 @@ on the Quartus Prime software download page.
 		(text "wallclock_nanoseconds_o[31..0]" (rect 206 43 331 55)(font "Arial" ))
 		(line (pt 352 48)(pt 336 48)(line_width 3))
 	)
+	(port
+		(pt 352 64)
+		(output)
+		(text "second_pulse_o" (rect 0 0 64 12)(font "Arial" ))
+		(text "second_pulse_o" (rect 267 59 331 71)(font "Arial" ))
+		(line (pt 352 64)(pt 336 64)(line_width 1))
+	)
 	(parameter
 		"increment_interval"
 		"8"

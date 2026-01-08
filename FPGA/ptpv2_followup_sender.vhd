@@ -17,31 +17,33 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
 
-entity ptpv2_sync_followup_sender is
+entity ptpv2_followup_sender is
 	port
 	(
 		src_mac_address		: in std_logic_vector(47 downto 0);
 		src_ip_address			: in std_logic_vector(31 downto 0);
-		dst_mac_address		: in std_logic_vector(47 downto 0);
-		dst_ip_address			: in std_logic_vector(31 downto 0);
-		src_udp_port			: in std_logic_vector(15 downto 0);
-		dst_udp_port			: in std_logic_vector(15 downto 0);
 		frame_start				: in std_logic;
 		tx_clk					: in std_logic;
 		tx_busy					: in std_logic;
 		tx_byte_sent			: in std_logic;
+		sequence_id			: in unsigned(15 downto 0);
+
+		sync_tx_timestamp_seconds_i : in unsigned(31 downto 0);
+		sync_tx_timestamp_nanoseconds_i : in unsigned(31 downto 0);
 
 		tx_enable				: out std_logic := '0';  -- TX valid
 		tx_data					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
+        tx_ready_timestamp_seconds_o : out unsigned(31 downto 0);
+        tx_ready_timestamp_nanoseconds_o : out unsigned(31 downto 0);
 
         timestamp_seconds_i : in unsigned(31 downto 0);
         timestamp_nanoseconds_i : in unsigned(31 downto 0)
 	);
 end entity;
 
-architecture Behavioral of ptpv2_sync_followup_sender is
+architecture Behavioral of ptpv2_followup_sender is
 	-- Constants
-    constant PTP_EVENT_PORT            : integer := 319;
+    constant PTP_EVENT_PORT            : integer := 320;
 	constant MAC_HEADER_LENGTH			: integer := 14;
 	constant IP_HEADER_LENGTH			: integer := 5 * (32 / 8); -- Header length always 20 bytes (5 * 32 bit words)
 	constant UDP_PSEUDO_HEADER_LENGTH: integer := 8;
@@ -79,7 +81,6 @@ begin
 	begin
 		if (falling_edge(tx_clk)) then
 			zframe_start <= frame_start;
-
 			if ((frame_start = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
 				-- prepare begin of packet
 				packet_counter <= packet_counter + 1; -- increment packet counter
@@ -113,8 +114,8 @@ begin
 				udp_frame(15) <= x"00"; -- differentiated services (6-bits) | explicit congestion notification (2-bits)
 				udp_frame(16) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)(15 downto 8)); -- total length without MAC-header: entire packet size in bytes, including IP-header and payload-data. The minimum size is 46 bytes of user data (= 0x2e, header without data) and the maximum is 65,535 bytes
 				udp_frame(17) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)(7 downto 0)); -- 20 bytes IP-header + 8 bytes UDP-header + 18 bytes UDP-payload = 46 bytes = 0x002e
-				udp_frame(18) <= std_logic_vector(to_unsigned(packet_counter, 16))(15 downto 8);
-				udp_frame(19) <= std_logic_vector(to_unsigned(packet_counter, 16))(7 downto 0);
+				udp_frame(18) <= std_logic_vector(to_unsigned(packet_counter, 16)(15 downto 8));
+				udp_frame(19) <= std_logic_vector(to_unsigned(packet_counter, 16)(7 downto 0));
 				udp_frame(20) <= x"00"; -- flags (3-bits) | fragment offsets (13-bits)
 				udp_frame(21) <= x"00";
 				udp_frame(22) <= x"80"; -- time to live (0x80 = 128)
@@ -143,9 +144,9 @@ begin
 				udp_frame(40) <= x"00"; -- checksum (0 is a valid CRC-value to ignore it)
 				udp_frame(41) <= x"00";
 
-				-- UDP PAYLOAD (18 bytes)
-				udp_frame(42) <= x"00"; -- 0 majorSdoId + SyncMessage
-				udp_frame(43) <= b"00010010"; -- 1 minorVersionPTP + majorVersionPTP = 0001 0010b = version 2
+				-- UDP PAYLOAD (44 bytes)
+				udp_frame(42) <= x"08"; -- 0 majorSdoId + FollowUpMessage
+				udp_frame(43) <= x"02"; -- 1 majorVersionPTP = 0000 0010b = version 2
 				udp_frame(44) <= std_logic_vector(to_unsigned(UDP_PAYLOAD_LENGTH, 16)(15 downto 8)); -- 2 messageLength MSB
 				udp_frame(45) <= std_logic_vector(to_unsigned(UDP_PAYLOAD_LENGTH, 16)(7 downto 0)); -- 3 messageLength continued (44 bytes = 0x002c)
 				udp_frame(46) <= x"00"; -- 4 domainNumber
@@ -174,20 +175,20 @@ begin
                 udp_frame(69) <= src_mac_address(7 downto 0); -- 27 7 ClockIdentity
                 udp_frame(70) <= x"00"; -- 28 sourcePortId
                 udp_frame(71) <= x"01"; -- 29 sourcePortId
-                udp_frame(72) <= std_logic_vector(to_unsigned(packet_counter, 16))(15 downto 8); -- 30 sequenceId
-                udp_frame(73) <= std_logic_vector(to_unsigned(packet_counter, 16))(7 downto 0); -- 31 sequenceId
-                udp_frame(74) <= x"00"; -- 32 controlField
+				udp_frame(72) <= std_logic_vector(sequence_id(15 downto 8)); -- 30 sequenceId
+				udp_frame(73) <= std_logic_vector(sequence_id(7 downto 0)); -- 31 sequenceId
+                udp_frame(74) <= x"02"; -- 32 controlField -- 0x02 for FollowUpMessage
                 udp_frame(75) <= x"00"; -- 33 logMessageInterval
                 udp_frame(76) <= x"00"; -- 34 0 originTimestamp seconds
                 udp_frame(77) <= x"00"; -- 35 1 originTimestamp seconds
-                udp_frame(78) <= timestamp_seconds_i(31 downto 24); -- 36 2 originTimestamp seconds 
-                udp_frame(79) <= timestamp_seconds_i(23 downto 16); -- 37 3 originTimestamp seconds
-                udp_frame(80) <= timestamp_seconds_i(15 downto 8); -- 38 4 originTimestamp seconds
-                udp_frame(81) <= timestamp_seconds_i(7 downto 0); -- 39 5 originTimestamp seconds
-                udp_frame(82) <= timestamp_nanoseconds_i(31 downto 24); -- 40 0 originTimestamp nanoseconds
-                udp_frame(83) <= timestamp_nanoseconds_i(23 downto 16); -- 41 1 originTimestamp nanoseconds
-                udp_frame(84) <= timestamp_nanoseconds_i(15 downto 8); -- 42 2 originTimestamp nanoseconds
-                udp_frame(85) <= timestamp_nanoseconds_i(7 downto 0); -- 43 3 originTimestamp nanoseconds
+				udp_frame(78) <= std_logic_vector(sync_tx_timestamp_seconds_i(31 downto 24)); -- 36 2 originTimestamp seconds 
+				udp_frame(79) <= std_logic_vector(sync_tx_timestamp_seconds_i(23 downto 16)); -- 37 3 originTimestamp seconds
+				udp_frame(80) <= std_logic_vector(sync_tx_timestamp_seconds_i(15 downto 8)); -- 38 4 originTimestamp seconds
+				udp_frame(81) <= std_logic_vector(sync_tx_timestamp_seconds_i(7 downto 0)); -- 39 5 originTimestamp seconds
+				udp_frame(82) <= std_logic_vector(sync_tx_timestamp_nanoseconds_i(31 downto 24)); -- 40 0 originTimestamp nanoseconds
+				udp_frame(83) <= std_logic_vector(sync_tx_timestamp_nanoseconds_i(23 downto 16)); -- 41 1 originTimestamp nanoseconds
+				udp_frame(84) <= std_logic_vector(sync_tx_timestamp_nanoseconds_i(15 downto 8)); -- 42 2 originTimestamp nanoseconds
+				udp_frame(85) <= std_logic_vector(sync_tx_timestamp_nanoseconds_i(7 downto 0)); -- 43 3 originTimestamp nanoseconds
                 
 
 				checksum_tmp                <= (others => '0');
@@ -269,7 +270,8 @@ begin
 			elsif (s_SM_Ethernet = s_End) then
 				tx_enable <= '0';
 				tx_data <= "00000000";
-
+                tx_ready_timestamp_nanoseconds_o <= timestamp_nanoseconds_i;
+                tx_ready_timestamp_seconds_o <= timestamp_seconds_i;
 				s_SM_Ethernet <= s_Idle;
 			end if;
 		end if;
