@@ -18,6 +18,7 @@ entity ptpv2_parser is
 
         send_delay_resp_o         : out std_logic;
 
+
         sequence_id_o              : out std_logic_vector(15 downto 0)
         
     );
@@ -27,6 +28,8 @@ architecture Behavioral of ptpv2_parser is
     type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
     signal byte_counter   : integer range 0 to 1500 := 0;
+
+    signal delay_resp_tx_en_reg : std_logic := '0';
 
     signal parse_ptp_packet_reg : std_logic := '0';
 
@@ -176,9 +179,6 @@ begin
                         rx_timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i;
                         sequence_id_o <= ptp_sequence_id;
                         send_delay_resp_o <= '1';
-                        s_SM_PtpParser <= s_Done;
-                        
-
                     end if;
                 elsif ptp_message_type = x"02" then
                     -- Pdelay_Req Message
@@ -189,7 +189,6 @@ begin
                 elsif ptp_message_type = x"08" then
                     -- Follow_Up Message
                     -- Handle Follow_Up message processing here
-                    
                 elsif ptp_message_type = x"09" then
                     -- Delay_resp Message
                     -- Handle Delay_resp message processing here
@@ -208,6 +207,9 @@ begin
                 else
                     -- Unknown Message Type
                 end if;
+                
+                -- WICHTIG: Immer zu s_Done wechseln nach der Interpretation
+                s_SM_PtpParser <= s_Done;
 
             elsif (s_SM_PtpParser = s_Done) then
                 -- done parsing
