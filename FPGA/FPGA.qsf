@@ -450,23 +450,19 @@ set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTI
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_5
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_5
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_5
@@ -518,69 +514,75 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[27] -t
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[28] -to "ptpv2_controller:inst34|sequence_id_i[8]" -section_id auto_signaltap_5
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[29] -to "ptpv2_controller:inst34|sequence_id_i[9]" -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[30] -to "ptpv2_controller:inst34|tx_en_i" -section_id auto_signaltap_5
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[31] -to "ptpv2_controller:inst34|tx_en_i_reg" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[32] -to "ptpv2_sender:inst35|byte_counter[0]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[33] -to "ptpv2_sender:inst35|byte_counter[10]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[34] -to "ptpv2_sender:inst35|byte_counter[1]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[35] -to "ptpv2_sender:inst35|byte_counter[2]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[36] -to "ptpv2_sender:inst35|byte_counter[3]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[37] -to "ptpv2_sender:inst35|byte_counter[4]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[38] -to "ptpv2_sender:inst35|byte_counter[5]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[39] -to "ptpv2_sender:inst35|byte_counter[6]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[40] -to "ptpv2_sender:inst35|byte_counter[7]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[41] -to "ptpv2_sender:inst35|byte_counter[8]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[42] -to "ptpv2_sender:inst35|byte_counter[9]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[43] -to "ptpv2_sender:inst35|frame_start" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[44] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_CalcChecksum" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[45] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_End" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[46] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Idle" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[47] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Start" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[48] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Transmit" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[49] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Wait" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[50] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_WaitChecksum" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[51] -to "ptpv2_sender:inst35|tx_busy" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[52] -to "ptpv2_sender:inst35|tx_byte_sent" -section_id auto_signaltap_5
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[30] -to "ptpv2_controller:inst34|tx_en_i" -section_id auto_signaltap_5
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[31] -to "ptpv2_controller:inst34|tx_en_i_reg" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "ptpv2_sender:inst35|byte_counter[0]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "ptpv2_sender:inst35|byte_counter[10]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "ptpv2_sender:inst35|byte_counter[1]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "ptpv2_sender:inst35|byte_counter[2]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "ptpv2_sender:inst35|byte_counter[3]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "ptpv2_sender:inst35|byte_counter[4]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "ptpv2_sender:inst35|byte_counter[5]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "ptpv2_sender:inst35|byte_counter[6]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "ptpv2_sender:inst35|byte_counter[7]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "ptpv2_sender:inst35|byte_counter[8]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "ptpv2_sender:inst35|byte_counter[9]" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "ptpv2_sender:inst35|frame_start" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_CalcChecksum" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_End" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Idle" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Start" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Transmit" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Wait" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_WaitChecksum" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "ptpv2_sender:inst35|tx_busy" -section_id auto_signaltap_5
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "ptpv2_sender:inst35|tx_byte_sent" -section_id auto_signaltap_5
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=53" -section_id auto_signaltap_5
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=53" -section_id auto_signaltap_5
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=53" -section_id auto_signaltap_5
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" -section_id auto_signaltap_5
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=186" -section_id auto_signaltap_5
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=8192" -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=8192" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[32] -to "ptpv2_controller:inst34|tx_en_i_sync" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[33] -to "ptpv2_sender:inst35|byte_counter[0]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[34] -to "ptpv2_sender:inst35|byte_counter[10]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[35] -to "ptpv2_sender:inst35|byte_counter[1]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[36] -to "ptpv2_sender:inst35|byte_counter[2]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[37] -to "ptpv2_sender:inst35|byte_counter[3]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[38] -to "ptpv2_sender:inst35|byte_counter[4]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[39] -to "ptpv2_sender:inst35|byte_counter[5]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[40] -to "ptpv2_sender:inst35|byte_counter[6]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[41] -to "ptpv2_sender:inst35|byte_counter[7]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[42] -to "ptpv2_sender:inst35|byte_counter[8]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[43] -to "ptpv2_sender:inst35|byte_counter[9]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[44] -to "ptpv2_sender:inst35|frame_start" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[45] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_CalcChecksum" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[46] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_End" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[47] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Idle" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[48] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Start" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[49] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Transmit" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[50] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Wait" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[51] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_WaitChecksum" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[52] -to "ptpv2_sender:inst35|tx_busy" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[53] -to "ptpv2_sender:inst35|tx_byte_sent" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "ptpv2_controller:inst34|tx_en_i_sync" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "ptpv2_sender:inst35|byte_counter[0]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "ptpv2_sender:inst35|byte_counter[10]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "ptpv2_sender:inst35|byte_counter[1]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "ptpv2_sender:inst35|byte_counter[2]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "ptpv2_sender:inst35|byte_counter[3]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "ptpv2_sender:inst35|byte_counter[4]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "ptpv2_sender:inst35|byte_counter[5]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "ptpv2_sender:inst35|byte_counter[6]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "ptpv2_sender:inst35|byte_counter[7]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "ptpv2_sender:inst35|byte_counter[8]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "ptpv2_sender:inst35|byte_counter[9]" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "ptpv2_sender:inst35|frame_start" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_CalcChecksum" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_End" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Idle" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Start" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Transmit" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_Wait" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "ptpv2_sender:inst35|s_SM_Ethernet.s_WaitChecksum" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "ptpv2_sender:inst35|tx_busy" -section_id auto_signaltap_5
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[53] -to "ptpv2_sender:inst35|tx_byte_sent" -section_id auto_signaltap_5
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=54" -section_id auto_signaltap_5
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=54" -section_id auto_signaltap_5
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=54" -section_id auto_signaltap_5
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" -section_id auto_signaltap_5
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=189" -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_5|vcc -section_id auto_signaltap_5
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_5|gnd -section_id auto_signaltap_5
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

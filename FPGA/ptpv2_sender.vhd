@@ -111,44 +111,33 @@ architecture Behavioral of ptpv2_sender is
 
 	signal zframe_start	: std_logic;
 begin
+	-- Combinatorial logic for message type decoding (must be immediate, not clocked)
+	current_message_type <= get_message_type(message_type_i);
+	
+	with current_message_type select real_udp_payload_length <=
+		44 when t_Sync,
+		44 when t_Delay_Req,
+		54 when t_Pdelay_Req,
+		54 when t_Pdelay_Resp,
+		44 when t_Follow_Up,
+		54 when t_Delay_Resp,
+		64 when t_Announce,
+		54 when t_Pdelay_Follow_Up,
+		44 when others;
+	
+	with current_message_type select tx_port_319_i <=
+		'1' when t_Sync,
+		'1' when t_Delay_Req,
+		'1' when t_Pdelay_Req,
+		'1' when t_Pdelay_Resp,
+		'0' when others;  -- Follow_Up, Delay_Resp, Announce, Pdelay_Follow_Up use port 320
+	
+	real_packet_length <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length;
+
 	process (tx_clk)
 		variable Word: std_logic_vector(15 downto 0);
 		variable udpWord: std_logic_vector(15 downto 0);
 	begin
-        current_message_type <= get_message_type(message_type_i);
-        case current_message_type is
-            when t_Sync =>
-                real_udp_payload_length <= 44;
-                tx_port_319_i <= '1';
-            when t_Delay_Req =>
-                real_udp_payload_length <= 44;
-                tx_port_319_i <= '1';
-            when t_Pdelay_Req =>
-                real_udp_payload_length <= 54;
-                tx_port_319_i <= '1';
-            when t_Pdelay_Resp =>
-                real_udp_payload_length <= 54;
-                tx_port_319_i <= '1';
-        
-        
-        -- Now all PTP event messages are sent to port 320
-            when t_Follow_Up =>
-                real_udp_payload_length <= 44;
-                tx_port_319_i <= '0';
-            when t_Delay_Resp =>
-                real_udp_payload_length <= 54;
-                tx_port_319_i <= '0';
-            when t_Announce =>
-                real_udp_payload_length <= 64;
-                tx_port_319_i <= '0';
-            when t_Pdelay_Follow_Up =>
-                real_udp_payload_length <= 54;
-                tx_port_319_i <= '0';
-            when others =>
-                real_udp_payload_length <= 44;
-                tx_port_319_i <= '0';
-        end case;
-            real_packet_length <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length;
 		if (falling_edge(tx_clk)) then
 			zframe_start <= frame_start;
 			if ((frame_start = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then

@@ -35,8 +35,10 @@ entity ptpv2_controller is
     signal leader_state : t_state_leader := s_Idle;
 
     signal sequence_id_reg : unsigned(15 downto 0) := (others => '0');
-    signal tx_en_i_reg : std_logic := '0';
-    signal tx_en_i_sync : std_logic := '0';
+    signal tx_en_i_reg : std_logic := '0';      -- CDC Stage 1
+    signal tx_en_i_sync : std_logic := '0';     -- CDC Stage 2 (synchronized)
+    signal tx_en_i_prev : std_logic := '0';     -- Stage 3 for edge detection
+    signal tx_started : std_logic := '0';       -- Flag: have we seen tx_en go high?
 
     signal is_leader : std_logic := '0';
     signal second_pulse_i_reg : std_logic := '0';
@@ -68,13 +70,16 @@ begin
             timestamp_seconds_o     <= (others => '0');
             timestamp_nanoseconds_o <= (others => '0');
         elsif rising_edge(clk) then
-            tx_en_i_reg <= tx_en_i;
-            tx_en_i_sync <= tx_en_i_reg;
+            -- Two-stage synchronizer for CDC
+            tx_en_i_reg <= tx_en_i;       -- Stage 1 (may be metastable)
+            tx_en_i_sync <= tx_en_i_reg;  -- Stage 2 (stable/synchronized)
+            tx_en_i_prev <= tx_en_i_sync; -- Stage 3 (for edge detection)
+            
             second_pulse_i_reg <= second_pulse_i;
             send_delay_resp_in_reg <= send_delay_resp_in;
 
-
-            if (tx_en_i_reg = '0' and tx_en_i = '1') then
+            -- Detect rising edge on SYNCHRONIZED signal only (tx_en going high = sender acknowledged)
+            if (tx_en_i_sync = '1' and tx_en_i_prev = '0') then
                 frame_start_o <= '0';
             end if;
 
@@ -99,7 +104,6 @@ begin
                         end if;
 
                     when s_Send_Sync =>
-                        
                         tx_message_type_o <= "0000";
                         frame_start_o <= '1';
                         sequence_id_reg <= sequence_id_reg + 1;
@@ -109,10 +113,14 @@ begin
                         timestamp_seconds_o <= wallclock_seconds_i;
 
                     when s_Wait_for_Sync_Ready =>
-                        
-                        if (tx_en_i_sync = '1' and tx_en_i_reg = '0') then
+                        -- Track if sender has started (tx_en went high)
+                        if (tx_en_i_sync = '1') then
+                            tx_started <= '1';
+                        end if;
+                        -- Only transition when sender has started AND finished
+                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                            tx_started <= '0';
                             leader_state <= s_Send_Follow_Up;
-                            frame_start_o <= '0';
                             timestamp_nanoseconds_o <= tx_ready_timestamp_nanoseconds_i;
                             timestamp_seconds_o <= tx_ready_timestamp_seconds_i;
                         end if;
@@ -120,12 +128,17 @@ begin
                     when s_Send_Follow_Up =>
                         tx_message_type_o <= x"8";
                         frame_start_o <= '1';
-                        
                         sequence_id_o <= sequence_id_reg;
                         leader_state <= s_Wait_for_Follow_Up_Ready;
                         
                     when s_Wait_for_Follow_Up_Ready =>
-                        if (tx_en_i_sync = '1' and tx_en_i_reg = '0') then
+                        -- Track if sender has started (tx_en went high)
+                        if (tx_en_i_sync = '1') then
+                            tx_started <= '1';
+                        end if;
+                        
+                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                            tx_started <= '0';
                             leader_state <= s_Idle;
                         end if;
                         
@@ -135,15 +148,20 @@ begin
                         sequence_id_o <= sequence_id_i_reg;
                         request_port_identity_o <= request_port_identity_i_reg;
                         leader_state <= s_Wait_for_Delay_Resp_Ready;
-                        timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i_reg; -- output the rx timestamps received from the parser
+                        timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i_reg;
                         timestamp_seconds_o <= rx_timestamp_seconds_i_reg;
 
                     when s_Wait_for_Delay_Resp_Ready =>
-                        if (tx_en_i_sync = '1' and tx_en_i_reg = '0') then
+                        -- Track if sender has started (tx_en went high)
+                        if (tx_en_i_sync = '1') then
+                            tx_started <= '1';
+                        end if;
+                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                            tx_started <= '0';
                             leader_state <= s_Idle;
                         end if;
                     when others =>
-                        null;
+                        leader_state <= s_Idle; 
 
                 end case;
                 if (send_delay_resp_in_reg = '0' and send_delay_resp_in = '1') then
@@ -158,7 +176,10 @@ begin
 
             else
                 -- Follower logic
-
+                -- Reset state machine when not leader
+                leader_state <= s_Idle;
+                frame_start_o <= '0';
+                send_delay_resp <= '0';
             end if;
 
 
