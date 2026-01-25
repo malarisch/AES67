@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<deploy
+ date="2026.01.25.15:14:59"
+ outputDirectory="/home/wolff/AES67/FPGA/miirmii/">
+ <perimeter>
+  <parameter
+     name="AUTO_GENERATION_ID"
+     type="Integer"
+     defaultValue="0"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_UNIQUE_ID"
+     type="String"
+     defaultValue=""
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_DEVICE_FAMILY"
+     type="String"
+     defaultValue="Cyclone 10 LP"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_DEVICE"
+     type="String"
+     defaultValue="10CL025YU256I7G"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_DEVICE_SPEEDGRADE"
+     type="String"
+     defaultValue="7"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_CLOCK_SINK_CLOCK_RATE"
+     type="Long"
+     defaultValue="-1"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_CLOCK_SINK_CLOCK_DOMAIN"
+     type="Integer"
+     defaultValue="-1"
+     onHdl="0"
+     affectsHdl="1" />
+  <parameter
+     name="AUTO_CLOCK_SINK_RESET_DOMAIN"
+     type="Integer"
+     defaultValue="-1"
+     onHdl="0"
+     affectsHdl="1" />
+  <interface name="MACSPEED" kind="conduit" start="0">
+   <property name="associatedClock" value="" />
+   <property name="associatedReset" value="" />
+   <port name="ena_10" direction="input" role="ena_10" width="1" />
+  </interface>
+  <interface name="clock_sink" kind="clock" start="0">
+   <property name="clockRate" value="0" />
+   <property name="externallyDriven" value="false" />
+   <property name="ptfSchematicName" value="" />
+   <port name="RefClk" direction="input" role="clk" width="1" />
+  </interface>
+  <interface name="mii_interface" kind="conduit" start="0">
+   <property name="associatedClock" value="" />
+   <property name="associatedReset" value="" />
+   <port name="m_tx_en" direction="input" role="mii_tx_en" width="1" />
+   <port name="m_tx_d" direction="input" role="mii_tx_d" width="4" />
+   <port name="m_tx_err" direction="input" role="mii_tx_err" width="1" />
+   <port name="m_rx_en" direction="output" role="mii_rx_dv" width="1" />
+   <port name="m_rx_d" direction="output" role="mii_rx_d" width="4" />
+   <port name="m_rx_err" direction="output" role="mii_rx_err" width="1" />
+   <port name="m_rx_crs" direction="output" role="mii_crs" width="1" />
+   <port name="m_rx_col" direction="output" role="mii_col" width="1" />
+  </interface>
+  <interface name="pcs_mac_rx_clock_connection" kind="clock" start="1">
+   <property name="associatedDirectClock" value="" />
+   <property name="clockRate" value="0" />
+   <property name="clockRateKnown" value="false" />
+   <property name="externallyDriven" value="false" />
+   <property name="ptfSchematicName" value="" />
+   <port name="rx_clk" direction="output" role="clk" width="1" />
+  </interface>
+  <interface name="pcs_mac_tx_clock_connection" kind="clock" start="1">
+   <property name="associatedDirectClock" value="" />
+   <property name="clockRate" value="0" />
+   <property name="clockRateKnown" value="false" />
+   <property name="externallyDriven" value="false" />
+   <property name="ptfSchematicName" value="" />
+   <port name="tx_clk" direction="output" role="clk" width="1" />
+  </interface>
+  <interface name="reset_sink" kind="reset" start="0">
+   <property name="associatedClock" value="clock_sink" />
+   <property name="synchronousEdges" value="DEASSERT" />
+   <port name="Rstn" direction="input" role="reset_n" width="1" />
+  </interface>
+  <interface name="rmii_interface" kind="conduit" start="0">
+   <property name="associatedClock" value="" />
+   <property name="associatedReset" value="" />
+   <port name="rmii_crs_dv" direction="input" role="crs" width="1" />
+   <port name="rmii_rx_d" direction="input" role="rxdata" width="2" />
+   <port name="rmii_rx_err" direction="input" role="rxerror" width="1" />
+   <port name="rmii_tx_en" direction="output" role="txenable" width="1" />
+   <port name="rmii_tx_d" direction="output" role="txdata" width="2" />
+  </interface>
+ </perimeter>
+ <entity
+   path=""
+   parameterizationKey="miirmii:1.0:AUTO_CLOCK_SINK_CLOCK_DOMAIN=-1,AUTO_CLOCK_SINK_CLOCK_RATE=-1,AUTO_CLOCK_SINK_RESET_DOMAIN=-1,AUTO_DEVICE=10CL025YU256I7G,AUTO_DEVICE_FAMILY=Cyclone 10 LP,AUTO_DEVICE_SPEEDGRADE=7,AUTO_GENERATION_ID=1769350499,AUTO_UNIQUE_ID=(altera_fpga_mii2rmii:25.1:MAC_SPEED=true,MBPS=true,RX_FIXED_THROUGHPUT=true)"
+   instancePathKey="miirmii"
+   kind="miirmii"
+   version="1.0"
+   name="miirmii">
+  <parameter name="AUTO_GENERATION_ID" value="1769350499" />
+  <parameter name="AUTO_DEVICE" value="10CL025YU256I7G" />
+  <parameter name="AUTO_DEVICE_FAMILY" value="Cyclone 10 LP" />
+  <parameter name="AUTO_CLOCK_SINK_CLOCK_DOMAIN" value="-1" />
+  <parameter name="AUTO_CLOCK_SINK_RESET_DOMAIN" value="-1" />
+  <parameter name="AUTO_UNIQUE_ID" value="" />
+  <parameter name="AUTO_CLOCK_SINK_CLOCK_RATE" value="-1" />
+  <parameter name="AUTO_DEVICE_SPEEDGRADE" value="7" />
+  <generatedFiles>
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/miirmii.vhd"
+       type="VHDL" />
+  </generatedFiles>
+  <childGeneratedFiles>
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/intel_fpga_mii2rmii.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/clkdiv10.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/clkdiv2.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/intel_fpga_mii2rmii.sdc"
+       type="SDC"
+       attributes="" />
+  </childGeneratedFiles>
+  <sourceFiles>
+   <file path="/home/wolff/AES67/FPGA/miirmii.qsys" />
+  </sourceFiles>
+  <childSourceFiles>
+   <file
+       path="/home/wolff/altera_lite/25.1std/ip/altera/intel_fpga_mii2rmii/intel_fpga_mii2rmii_hw.tcl" />
+  </childSourceFiles>
+  <messages>
+   <message level="Debug" culprit="miirmii">queue size: 0 starting:miirmii "miirmii"</message>
+   <message level="Progress" culprit="min"></message>
+   <message level="Progress" culprit="max"></message>
+   <message level="Progress" culprit="current"></message>
+   <message level="Progress" culprit="current"></message>
+   <message level="Debug">Transform: CustomInstructionTransform</message>
+   <message level="Debug">No custom instruction connections, skipping transform </message>
+   <message level="Debug" culprit="merlin_custom_instruction_transform"><![CDATA[After transform: <b>1</b> modules, <b>0</b> connections]]></message>
+   <message level="Debug">Transform: MMTransform</message>
+   <message level="Debug">Transform: InterruptMapperTransform</message>
+   <message level="Debug">Transform: InterruptSyncTransform</message>
+   <message level="Debug">Transform: InterruptFanoutTransform</message>
+   <message level="Debug">Transform: AvalonStreamingTransform</message>
+   <message level="Debug">Transform: ResetAdaptation</message>
+   <message level="Debug" culprit="miirmii"><![CDATA["<b>miirmii</b>" reuses <b>altera_fpga_mii2rmii</b> "<b>submodules/intel_fpga_mii2rmii</b>"]]></message>
+   <message level="Debug" culprit="miirmii">queue size: 0 starting:altera_fpga_mii2rmii "submodules/intel_fpga_mii2rmii"</message>
+   <message level="Info" culprit="fpga_mii2rmii_0"><![CDATA["<b>miirmii</b>" instantiated <b>altera_fpga_mii2rmii</b> "<b>fpga_mii2rmii_0</b>"]]></message>
+  </messages>
+ </entity>
+ <entity
+   path="submodules/"
+   parameterizationKey="altera_fpga_mii2rmii:25.1:MAC_SPEED=true,MBPS=true,RX_FIXED_THROUGHPUT=true"
+   instancePathKey="miirmii:.:fpga_mii2rmii_0"
+   kind="altera_fpga_mii2rmii"
+   version="25.1"
+   name="intel_fpga_mii2rmii">
+  <parameter name="RX_FIXED_THROUGHPUT" value="true" />
+  <parameter name="MAC_SPEED" value="true" />
+  <parameter name="MBPS" value="true" />
+  <generatedFiles>
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/intel_fpga_mii2rmii.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/clkdiv10.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/clkdiv2.sv"
+       type="SYSTEM_VERILOG"
+       attributes="" />
+   <file
+       path="/home/wolff/AES67/FPGA/miirmii/synthesis/submodules/intel_fpga_mii2rmii.sdc"
+       type="SDC"
+       attributes="" />
+  </generatedFiles>
+  <childGeneratedFiles/>
+  <sourceFiles>
+   <file
+       path="/home/wolff/altera_lite/25.1std/ip/altera/intel_fpga_mii2rmii/intel_fpga_mii2rmii_hw.tcl" />
+  </sourceFiles>
+  <childSourceFiles/>
+  <instantiator instantiator="miirmii" as="fpga_mii2rmii_0" />
+  <messages>
+   <message level="Debug" culprit="miirmii">queue size: 0 starting:altera_fpga_mii2rmii "submodules/intel_fpga_mii2rmii"</message>
+   <message level="Info" culprit="fpga_mii2rmii_0"><![CDATA["<b>miirmii</b>" instantiated <b>altera_fpga_mii2rmii</b> "<b>fpga_mii2rmii_0</b>"]]></message>
+  </messages>
+ </entity>
+</deploy>

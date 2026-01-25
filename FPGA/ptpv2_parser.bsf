@@ -1,0 +1,114 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 2025  Altera Corporation. All rights reserved.
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and any partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, the Altera Quartus Prime License Agreement,
+the Altera IP License Agreement, or other applicable license
+agreement, including, without limitation, that your use is for
+the sole purpose of programming logic devices manufactured by
+Altera and sold by Altera or its authorized distributors.  Please
+refer to the Altera Software License Subscription Agreements 
+on the Quartus Prime software download page.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 408 160)
+	(text "ptpv2_parser" (rect 5 0 59 12)(font "Arial" ))
+	(text "inst" (rect 8 128 20 140)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "clk" (rect 0 0 10 12)(font "Arial" ))
+		(text "clk" (rect 21 27 31 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "ram_data[7..0]" (rect 0 0 59 12)(font "Arial" ))
+		(text "ram_data[7..0]" (rect 21 43 80 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 3))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "parse_ptp_packet" (rect 0 0 71 12)(font "Arial" ))
+		(text "parse_ptp_packet" (rect 21 59 92 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 1))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "is_leader" (rect 0 0 35 12)(font "Arial" ))
+		(text "is_leader" (rect 21 75 56 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 1))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "rx_timestamp_seconds_i[31..0]" (rect 0 0 125 12)(font "Arial" ))
+		(text "rx_timestamp_seconds_i[31..0]" (rect 21 91 146 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 3))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "rx_timestamp_nanoseconds_i[31..0]" (rect 0 0 143 12)(font "Arial" ))
+		(text "rx_timestamp_nanoseconds_i[31..0]" (rect 21 107 164 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 392 32)
+		(output)
+		(text "ram_read_address[10..0]" (rect 0 0 101 12)(font "Arial" ))
+		(text "ram_read_address[10..0]" (rect 270 27 371 39)(font "Arial" ))
+		(line (pt 392 32)(pt 376 32)(line_width 3))
+	)
+	(port
+		(pt 392 48)
+		(output)
+		(text "rx_timestamp_seconds_o[31..0]" (rect 0 0 128 12)(font "Arial" ))
+		(text "rx_timestamp_seconds_o[31..0]" (rect 243 43 371 55)(font "Arial" ))
+		(line (pt 392 48)(pt 376 48)(line_width 3))
+	)
+	(port
+		(pt 392 64)
+		(output)
+		(text "rx_timestamp_nanoseconds_o[31..0]" (rect 0 0 147 12)(font "Arial" ))
+		(text "rx_timestamp_nanoseconds_o[31..0]" (rect 224 59 371 71)(font "Arial" ))
+		(line (pt 392 64)(pt 376 64)(line_width 3))
+	)
+	(port
+		(pt 392 80)
+		(output)
+		(text "rx_follower_identity_o[79..0]" (rect 0 0 112 12)(font "Arial" ))
+		(text "rx_follower_identity_o[79..0]" (rect 259 75 371 87)(font "Arial" ))
+		(line (pt 392 80)(pt 376 80)(line_width 3))
+	)
+	(port
+		(pt 392 96)
+		(output)
+		(text "send_delay_resp_o" (rect 0 0 80 12)(font "Arial" ))
+		(text "send_delay_resp_o" (rect 291 91 371 103)(font "Arial" ))
+		(line (pt 392 96)(pt 376 96)(line_width 1))
+	)
+	(port
+		(pt 392 112)
+		(output)
+		(text "sequence_id_o[15..0]" (rect 0 0 83 12)(font "Arial" ))
+		(text "sequence_id_o[15..0]" (rect 288 107 371 119)(font "Arial" ))
+		(line (pt 392 112)(pt 376 112)(line_width 3))
+	)
+	(drawing
+		(rectangle (rect 16 16 376 128)(line_width 1))
+	)
+)

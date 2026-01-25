@@ -101,7 +101,7 @@
  <module
    name="fpga_mii2rmii_0"
    kind="altera_fpga_mii2rmii"
-   version="24.1"
+   version="25.1"
    enabled="1"
    autoexport="1">
   <parameter name="MAC_SPEED" value="true" />
