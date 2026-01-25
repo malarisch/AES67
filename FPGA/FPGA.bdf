@@ -3316,9 +3316,9 @@ on the Quartus Prime software download page.
 	)
 )
 (symbol
-	(rect 3088 1584 3480 1728)
+	(rect 3088 1584 3480 1760)
 	(text "ptpv2_parser" (rect 5 0 75 11)(font "Arial" ))
-	(text "inst14" (rect 8 128 41 139)(font "Arial" ))
+	(text "inst14" (rect 8 160 41 171)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -3360,6 +3360,13 @@ on the Quartus Prime software download page.
 		(text "rx_timestamp_nanoseconds_i[31..0]" (rect 0 0 192 11)(font "Arial" ))
 		(text "rx_timestamp_nanoseconds_i[31..0]" (rect 21 107 213 118)(font "Arial" ))
 		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "reset_n" (rect 0 0 40 11)(font "Arial" ))
+		(text "reset_n" (rect 21 123 61 134)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128))
 	)
 	(port
 		(pt 392 32)
@@ -3404,7 +3411,7 @@ on the Quartus Prime software download page.
 		(line (pt 392 112)(pt 376 112)(line_width 3))
 	)
 	(drawing
-		(rectangle (rect 16 16 376 128))
+		(rectangle (rect 16 16 376 160))
 	)
 )
 (connector
@@ -5329,6 +5336,11 @@ on the Quartus Prime software download page.
 	(pt 4288 1600)
 	(pt 4232 1600)
 	(bus)
+)
+(connector
+	(text "powerGood" (rect 3016 1696 3071 1707)(font "DejaVu Sans Condensed" ))
+	(pt 3088 1712)
+	(pt 3008 1712)
 )
 (junction (pt 1976 816))
 (junction (pt 1976 1048))

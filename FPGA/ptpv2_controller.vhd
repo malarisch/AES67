@@ -111,6 +111,7 @@ begin
                         leader_state <= s_Wait_for_Sync_Ready;
                         timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
                         timestamp_seconds_o <= wallclock_seconds_i;
+                        tx_started <= '0'; -- Reset flag for new transaction
 
                     when s_Wait_for_Sync_Ready =>
                         -- Track if sender has started (tx_en went high)
@@ -130,6 +131,7 @@ begin
                         frame_start_o <= '1';
                         sequence_id_o <= sequence_id_reg;
                         leader_state <= s_Wait_for_Follow_Up_Ready;
+                        tx_started <= '0'; -- Reset flag for new transaction
                         
                     when s_Wait_for_Follow_Up_Ready =>
                         -- Track if sender has started (tx_en went high)
@@ -150,6 +152,7 @@ begin
                         leader_state <= s_Wait_for_Delay_Resp_Ready;
                         timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i_reg;
                         timestamp_seconds_o <= rx_timestamp_seconds_i_reg;
+                        tx_started <= '0'; -- Reset flag for new transaction
 
                     when s_Wait_for_Delay_Resp_Ready =>
                         -- Track if sender has started (tx_en went high)

@@ -19,8 +19,8 @@ entity ptpv2_parser is
         send_delay_resp_o         : out std_logic;
 
 
-        sequence_id_o              : out std_logic_vector(15 downto 0)
-        
+        sequence_id_o              : out std_logic_vector(15 downto 0);
+        reset_n             : in std_logic
     );
 end entity;
 
@@ -49,9 +49,15 @@ architecture Behavioral of ptpv2_parser is
     signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
 
 begin
-    process(clk)
+    process(clk, reset_n)
     begin
-        if rising_edge(clk) then
+        if reset_n = '0' then
+            s_SM_PtpParser <= s_Idle;
+            byte_counter <= 0;
+            parse_ptp_packet_reg <= '0';
+            send_delay_resp_o <= '0';
+            ram_read_address <= (others => '0');
+        elsif rising_edge(clk) then
             parse_ptp_packet_reg <= parse_ptp_packet;
             send_delay_resp_o <= '0';
 
@@ -165,48 +171,51 @@ begin
 
 
             elsif (s_SM_PtpParser = s_Interpret_Packet) then
-                -- interpret the PTPv2 packet based on message type
-                if ptp_message_type = x"00" then
-                    -- Sync Message
-                    -- Handle Sync message processing here
-                elsif ptp_message_type = x"01" then
-                    -- Delay_Req Message
-                    -- Handle Delay_Req message processing here
-                    if is_leader = '1' then
-                        -- Prepare Delay_Resp message
-                        rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
-                        rx_timestamp_seconds_o <= rx_timestamp_seconds_i;
-                        rx_timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i;
-                        sequence_id_o <= ptp_sequence_id;
-                        send_delay_resp_o <= '1';
-                    end if;
-                elsif ptp_message_type = x"02" then
-                    -- Pdelay_Req Message
-                    -- Handle Pdelay_Req message processing here
-                elsif ptp_message_type = x"03" then
-                    -- Pdelay_Resp Message
-                    -- Handle Pdelay_Resp message processing here
-                elsif ptp_message_type = x"08" then
-                    -- Follow_Up Message
-                    -- Handle Follow_Up message processing here
-                elsif ptp_message_type = x"09" then
-                    -- Delay_resp Message
-                    -- Handle Delay_resp message processing here
-                elsif ptp_message_type = x"0A" then
-                    -- Pdelay_Resp_Follow_Up Message
-                    -- Handle Pdelay_Resp_Follow_Up message processing here
-                elsif ptp_message_type = x"0B" then
-                    -- Announce Message
-                    -- Handle Announce message processing here
-                elsif ptp_message_type = x"0C" then
-                    -- Signaling Message
-                    -- Handle Signaling message processing here
-                elsif ptp_message_type = x"0D" then
-                    -- Management Message
-                    -- Handle Management message processing here
-                else
-                    -- Unknown Message Type
-                end if;
+                -- interpret the PTPv2 packet based on message type (lower 4 bits only!)
+                -- PTP Byte 0: [ majorSdoId (4 bit) | messageType (4 bit) ]
+                case ptp_message_type(3 downto 0) is
+                    when x"0" =>
+                        -- Sync Message
+                        -- Handle Sync message processing here
+                        null;
+                    when x"1" =>
+                        -- Delay_Req Message
+                        if is_leader = '1' then
+                            -- Prepare Delay_Resp message
+                            rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
+                            rx_timestamp_seconds_o <= rx_timestamp_seconds_i;
+                            rx_timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i;
+                            sequence_id_o <= ptp_sequence_id;
+                            send_delay_resp_o <= '1';
+                        end if;
+                    when x"2" =>
+                        -- Pdelay_Req Message
+                        null;
+                    when x"3" =>
+                        -- Pdelay_Resp Message
+                        null;
+                    when x"8" =>
+                        -- Follow_Up Message
+                        null;
+                    when x"9" =>
+                        -- Delay_resp Message
+                        null;
+                    when x"A" =>
+                        -- Pdelay_Resp_Follow_Up Message
+                        null;
+                    when x"B" =>
+                        -- Announce Message
+                        null;
+                    when x"C" =>
+                        -- Signaling Message
+                        null;
+                    when x"D" =>
+                        -- Management Message
+                        null;
+                    when others =>
+                        -- Unknown Message Type
+                        null;
+                end case;
                 
                 -- WICHTIG: Immer zu s_Done wechseln nach der Interpretation
                 s_SM_PtpParser <= s_Done;
@@ -214,6 +223,10 @@ begin
             elsif (s_SM_PtpParser = s_Done) then
                 -- done parsing
                 s_SM_PtpParser <= s_Idle;
+            else
+                -- Safety: recover from undefined state
+                s_SM_PtpParser <= s_Idle;
+                byte_counter <= 0;
             end if;
         end if;
     end process;
