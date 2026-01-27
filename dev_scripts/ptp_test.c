@@ -94,10 +94,13 @@ char interface_ip[INET_ADDRSTRLEN];
 // Slave State
 struct {
     uint16_t last_sync_seq;
-    struct timespec t1; // Master Sync Time
+    uint16_t last_delay_req_seq;
+    struct timespec t1; // Master Sync Time (from FollowUp)
     struct timespec t2; // Slave Sync Ingress
     struct timespec t3; // Slave DelayReq Egress
-    struct timespec t4; // Master DelayReq Ingress
+    struct timespec t4; // Master DelayReq Ingress (from DelayResp)
+    int64_t path_delay_ns;
+    int has_path_delay;
     int64_t initial_offset_ns;
     struct timespec initial_t2; // Initial Slave Sync Ingress
     int has_initial_offset;
@@ -212,7 +215,9 @@ void run_master() {
         usleep(1000); // 1ms delay
         PTPFollowUp follow;
         init_header(&follow.header, MSG_FOLLOW_UP, FOLLOW_UP_LEN, seq, 0x0000);
-        timespec_to_ptp(&ts, follow.preciseOriginTimestamp);
+        uint16_t ts_buf[5];
+        timespec_to_ptp(&ts, ts_buf);
+        memcpy(follow.preciseOriginTimestamp, ts_buf, sizeof(ts_buf));
         
         sendto(sock_gen, &follow, sizeof(follow), 0, (struct sockaddr*)&mcast_addr_gen, sizeof(mcast_addr_gen));
         printf("[Primary] Sent FollowUp Seq=%d Time=%ld.%09ld\n", seq, ts.tv_sec, ts.tv_nsec);
@@ -223,7 +228,9 @@ void run_master() {
         announce.header.logMessageInterval = 0; // 1 second
         
         memset(announce.originTimestamp, 0, sizeof(announce.originTimestamp));
-        timespec_to_ptp(&ts, announce.originTimestamp);
+        uint16_t announce_ts_buf[5];
+        timespec_to_ptp(&ts, announce_ts_buf);
+        memcpy(announce.originTimestamp, announce_ts_buf, sizeof(announce_ts_buf));
         
         announce.currentUtcOffset = htons(37); // Current UTC offset
         announce.reserved = 0;
@@ -278,7 +285,9 @@ void run_master() {
                         // Send DelayResp
                         PTPDelayResp resp;
                         init_header(&resp.header, MSG_DELAY_RESP, DELAY_RESP_LEN, req_seq, 0);
-                        timespec_to_ptp(&rx_ts, resp.receiveTimestamp);
+                        uint16_t resp_ts_buf[5];
+                        timespec_to_ptp(&rx_ts, resp_ts_buf);
+                        memcpy(resp.receiveTimestamp, resp_ts_buf, sizeof(resp_ts_buf));
                         memcpy(resp.requestingPortIdentity, h->clockIdentity, 8);
                         memcpy(resp.requestingPortIdentity + 8, &h->sourcePortId, 2); // Actually portId is 2 bytes
 
@@ -299,7 +308,10 @@ void run_master() {
 void run_slave() {
     printf("Starting PTP Slave on %s...\n", interface_ip);
     slave_state.last_sync_seq = -1;
+    slave_state.last_delay_req_seq = -1;
     slave_state.has_initial_offset = 0;
+    slave_state.has_path_delay = 0;
+    slave_state.path_delay_ns = 0;
 
     fd_set fds;
     while(1) {
@@ -332,22 +344,6 @@ void run_slave() {
                         slave_state.t2 = rx_ts;
                         slave_state.last_sync_seq = seq;
                         // printf("[Secondary] Rx Sync Seq=%d\n", seq);
-                    } else if (type == MSG_DELAY_RESP) {
-                         // Handle DelayResp on wrong port
-                         PTPDelayResp *resp = (PTPDelayResp*)buf;
-                         ptp_to_timespec(resp->receiveTimestamp, &slave_state.t4);
-                         
-                         // Calculate Delay
-                         int64_t t1_ns = (int64_t)slave_state.t1.tv_sec * 1000000000LL + slave_state.t1.tv_nsec;
-                         int64_t t2_ns = (int64_t)slave_state.t2.tv_sec * 1000000000LL + slave_state.t2.tv_nsec;
-                         int64_t t3_ns = (int64_t)slave_state.t3.tv_sec * 1000000000LL + slave_state.t3.tv_nsec;
-                         int64_t t4_ns = (int64_t)slave_state.t4.tv_sec * 1000000000LL + slave_state.t4.tv_nsec;
-                         
-                         int64_t ms_diff = t2_ns - t1_ns;
-                         int64_t sm_diff = t4_ns - t3_ns;
-                         double delay_ms = (double)(ms_diff + sm_diff) / 2.0 / 1000000.0;
-                         
-                         printf("[Secondary] Path Delay: %.3f ms\n", delay_ms);
                     }
                 }
             }
@@ -363,11 +359,17 @@ void run_slave() {
                     if (type == MSG_FOLLOW_UP) {
                         if (seq == slave_state.last_sync_seq) {
                             PTPFollowUp *fu = (PTPFollowUp*)buf;
-                            ptp_to_timespec(fu->preciseOriginTimestamp, &slave_state.t1);
+                            uint16_t fu_ts_buf[5];
+                            memcpy(fu_ts_buf, fu->preciseOriginTimestamp, sizeof(fu_ts_buf));
+                            ptp_to_timespec(fu_ts_buf, &slave_state.t1);
                             
                             int64_t t1_ns = (int64_t)slave_state.t1.tv_sec * 1000000000LL + slave_state.t1.tv_nsec;
                             int64_t t2_ns = (int64_t)slave_state.t2.tv_sec * 1000000000LL + slave_state.t2.tv_nsec;
-                            int64_t offset_ns = t2_ns - t1_ns;
+                            
+                            // Correct offset calculation: offset = (t2 - t1) - path_delay
+                            // Without path delay measurement yet, we estimate offset as (t2 - t1)
+                            int64_t raw_offset_ns = t2_ns - t1_ns;
+                            int64_t offset_ns = raw_offset_ns - slave_state.path_delay_ns;
 
                             if (!slave_state.has_initial_offset) {
                                 slave_state.initial_offset_ns = offset_ns;
@@ -375,9 +377,10 @@ void run_slave() {
                                 slave_state.has_initial_offset = 1;
                             }
 
+                            double offset_ms = (double)offset_ns / 1000000.0;
                             double drift_ms = (double)(offset_ns - slave_state.initial_offset_ns) / 1000000.0;
                             
-                            // Calculate PPM
+                            // Calculate PPM (frequency drift)
                             int64_t t2_ns_initial = (int64_t)slave_state.initial_t2.tv_sec * 1000000000LL + slave_state.initial_t2.tv_nsec;
                             int64_t elapsed_ns = t2_ns - t2_ns_initial;
                             double ppm = 0.0;
@@ -385,34 +388,65 @@ void run_slave() {
                                 ppm = ((double)(offset_ns - slave_state.initial_offset_ns) / (double)elapsed_ns) * 1000000.0;
                             }
 
-                            printf("[Secondary] Main Time: %ld.%09ld | Drift: %.3f ms | PPM: %.2f\n", 
-                                slave_state.t1.tv_sec, slave_state.t1.tv_nsec, drift_ms, ppm);
+                            printf("[Secondary] Primary Time: %ld.%09ld | Offset: %.3f ms | Drift: %.3f ms | PPM: %.2f\n", 
+                                slave_state.t1.tv_sec, slave_state.t1.tv_nsec, offset_ms, drift_ms, ppm);
                                 
                             // Send DelayReq occasionally (e.g. every 4th sync)
                             if (seq % 4 == 0) {
                                 PTPDelayReq req;
-                                init_header(&req.header, MSG_DELAY_REQ, DELAY_REQ_LEN, sequence_id++, 0);
+                                uint16_t delay_req_seq = sequence_id++;
+                                init_header(&req.header, MSG_DELAY_REQ, DELAY_REQ_LEN, delay_req_seq, 0);
                                 memset(req.originTimestamp, 0, sizeof(req.originTimestamp));
                                 
-                                get_time(&slave_state.t3);
+                                // Note: Ideally t3 should be captured via HW timestamping
+                                // For SW timestamping, capture as close to sendto() as possible
                                 sendto(sock_evt, &req, sizeof(req), 0, (struct sockaddr*)&mcast_addr_evt, sizeof(mcast_addr_evt));
-                                printf("[Secondary] Sent DelayReq Seq=%d\n", ntohs(req.header.sequenceId));
+                                get_time(&slave_state.t3); // Capture egress time after send
+                                slave_state.last_delay_req_seq = delay_req_seq;
+                                printf("[Secondary] Sent DelayReq Seq=%d\n", delay_req_seq);
                             }
                         }
                     } else if (type == MSG_DELAY_RESP) {
                          PTPDelayResp *resp = (PTPDelayResp*)buf;
-                         ptp_to_timespec(resp->receiveTimestamp, &slave_state.t4);
+                         
+                         // Validate this DelayResp is for our DelayReq
+                         if (seq != slave_state.last_delay_req_seq) {
+                             printf("[Secondary] Ignoring DelayResp Seq=%d (expected %d)\n", 
+                                    seq, slave_state.last_delay_req_seq);
+                             continue;
+                         }
+                         
+                         // Verify requestingPortIdentity matches our clock
+                         if (memcmp(resp->requestingPortIdentity, my_clock_id, 8) != 0) {
+                             printf("[Secondary] Ignoring DelayResp - not for our clock\n");
+                             continue;
+                         }
+                         
+                         uint16_t resp_ts_buf[5];
+                         memcpy(resp_ts_buf, resp->receiveTimestamp, sizeof(resp_ts_buf));
+                         ptp_to_timespec(resp_ts_buf, &slave_state.t4);
                          
                          int64_t t1_ns = (int64_t)slave_state.t1.tv_sec * 1000000000LL + slave_state.t1.tv_nsec;
                          int64_t t2_ns = (int64_t)slave_state.t2.tv_sec * 1000000000LL + slave_state.t2.tv_nsec;
                          int64_t t3_ns = (int64_t)slave_state.t3.tv_sec * 1000000000LL + slave_state.t3.tv_nsec;
                          int64_t t4_ns = (int64_t)slave_state.t4.tv_sec * 1000000000LL + slave_state.t4.tv_nsec;
                          
-                         int64_t ms_diff = t2_ns - t1_ns;
-                         int64_t sm_diff = t4_ns - t3_ns;
-                         double delay_ms = (double)(ms_diff + sm_diff) / 2.0 / 1000000.0;
+                         // Correct PTP path delay formula:
+                         // path_delay = ((t4 - t1) - (t3 - t2)) / 2
+                         // Which is equivalent to: ((t2 - t1) + (t4 - t3)) / 2
+                         // But the first form is more intuitive:
+                         // - (t4 - t1) is total round-trip time from master's perspective
+                         // - (t3 - t2) is time the message spent at slave
+                         int64_t round_trip = (t4_ns - t1_ns);
+                         int64_t slave_residence = (t3_ns - t2_ns);
+                         slave_state.path_delay_ns = (round_trip - slave_residence) / 2;
+                         slave_state.has_path_delay = 1;
                          
-                         printf("[Secondary] Path Delay: %.3f ms\n", delay_ms);
+                         double delay_ms = (double)slave_state.path_delay_ns / 1000000.0;
+                         printf("[Secondary] Path Delay: %.3f ms (t4-t1=%.3fms, t3-t2=%.3fms)\n", 
+                                delay_ms, 
+                                (double)round_trip / 1000000.0,
+                                (double)slave_residence / 1000000.0);
                     }
                 }
             }
