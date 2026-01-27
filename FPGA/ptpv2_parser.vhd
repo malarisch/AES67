@@ -60,22 +60,36 @@ architecture Behavioral of ptpv2_parser is
     signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
 
 begin
-    process(clk, reset_n)
+    -- ============================================================
+    -- CDC Synchronization Process (separate from main state machine)
+    -- This ensures proper timing analysis and prevents race conditions
+    -- ============================================================
+    cdc_sync_proc: process(clk, reset_n)
+    begin
+        if reset_n = '0' then
+            parse_ptp_packet_meta <= '0';
+            parse_ptp_packet_sync <= '0';
+            parse_ptp_packet_prev <= '0';
+        elsif rising_edge(clk) then
+            -- 2-stage synchronizer for parse_ptp_packet
+            parse_ptp_packet_meta <= parse_ptp_packet;
+            parse_ptp_packet_sync <= parse_ptp_packet_meta;
+            parse_ptp_packet_prev <= parse_ptp_packet_sync;  -- for edge detection
+        end if;
+    end process cdc_sync_proc;
+
+    -- ============================================================
+    -- Main State Machine Process
+    -- Uses only synchronized signals from CDC process
+    -- ============================================================
+    main_proc: process(clk, reset_n)
     begin
         if reset_n = '0' then
             s_SM_PtpParser <= s_Idle;
             byte_counter <= 0;
-            parse_ptp_packet_meta <= '0';
-            parse_ptp_packet_sync <= '0';
-            parse_ptp_packet_prev <= '0';
             send_delay_resp_o <= '0';
             ram_read_address <= (others => '0');
         elsif rising_edge(clk) then
-            -- CDC synchronizer for parse_ptp_packet (from MAC RX clock domain)
-            parse_ptp_packet_meta <= parse_ptp_packet;
-            parse_ptp_packet_sync <= parse_ptp_packet_meta;
-            parse_ptp_packet_prev <= parse_ptp_packet_sync;  -- for edge detection
-            
             send_delay_resp_o <= '0';
 
 
@@ -239,14 +253,16 @@ begin
                 s_SM_PtpParser <= s_Done;
 
             elsif (s_SM_PtpParser = s_Done) then
-                -- done parsing
-                s_SM_PtpParser <= s_Idle;
+                -- Wait for parse_ptp_packet to go LOW before returning to Idle
+                -- This prevents re-triggering on the same packet
+                if (parse_ptp_packet_sync = '0') then
+                    s_SM_PtpParser <= s_Idle;
+                end if;
             else
                 -- Safety: recover from undefined state
                 s_SM_PtpParser <= s_Idle;
                 byte_counter <= 0;
             end if;
         end if;
-    end process;
+    end process main_proc;
 end Behavioral;
-            

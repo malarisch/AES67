@@ -28,11 +28,15 @@ entity ptpv2_controller is
         is_leader_override_i   : in  std_logic;
 
         tx_en_i: in  std_logic;
-        request_port_identity_i : in std_logic_vector(79 downto 0)
+        request_port_identity_i : in std_logic_vector(79 downto 0);
+        
+        -- Debug output
+        is_leader_o : out std_logic
     );
     type t_state_leader is (s_Idle, 
                             s_Send_Sync, s_Wait_for_Sync_Ack, s_Wait_for_Sync_Done, s_Latch_Sync_Timestamp,
                             s_Send_Follow_Up, s_Wait_for_Follow_Up_Ack, s_Wait_for_Follow_Up_Done, 
+                            s_Send_Announce, s_Wait_for_Announce_Ack, s_Wait_for_Announce_Done,
                             s_Send_Delay_Resp, s_Wait_for_Delay_Resp_Ack, s_Wait_for_Delay_Resp_Done);
 
     signal leader_state : t_state_leader := s_Idle;
@@ -69,11 +73,15 @@ entity ptpv2_controller is
     attribute PRESERVE of tx_en_i_sync : signal is true;
     attribute PRESERVE of tx_ready_ts_sec_meta : signal is true;
     attribute PRESERVE of tx_ready_ts_nsec_meta : signal is true;
+    attribute PRESERVE of is_leader : signal is true;
 
 
     end entity;
 architecture Behavioral of ptpv2_controller is
 begin
+    -- Debug output
+    is_leader_o <= is_leader;
+    
     -- ============================================================
     -- CDC Synchronization Process (2-stage synchronizers)
     -- ONLY for signals crossing from TX clock domain (mac_tx_clock)
@@ -114,11 +122,8 @@ begin
             second_pulse_i_reg <= second_pulse_i;
             send_delay_resp_in_reg <= send_delay_resp_in;
 
-            -- Detect rising edge on TX_EN (from sender, CDC synchronized)
-            -- Clear frame_start when sender acknowledges
-            if (tx_en_i_sync = '1' and tx_en_i_prev = '0') then
-                frame_start_o <= '0';
-            end if;
+            -- NOTE: frame_start_o is managed by the state machine only
+            -- Do NOT clear it here based on tx_en - the state machine handles this
 
             -- PTPv2 controller logic
             if (is_leader_override_i = '1') then
@@ -199,6 +204,30 @@ begin
                         end if;
 
                     when s_Wait_for_Follow_Up_Done =>
+                        leader_state <= s_Send_Announce;
+
+                    -- ========================================
+                    -- ANNOUNCE MESSAGE SEQUENCE
+                    -- ========================================
+                    when s_Send_Announce =>
+                        tx_message_type_o <= x"B";  -- Announce message type
+                        sequence_id_o <= sequence_id_reg;
+                        frame_start_o <= '1';
+                        tx_started <= '0';
+                        leader_state <= s_Wait_for_Announce_Ack;
+
+                    when s_Wait_for_Announce_Ack =>
+                        -- Must see tx_en go from 0->1 (rising edge)
+                        if (tx_en_i_prev = '0' and tx_en_i_sync = '1') then
+                            tx_started <= '1';
+                            frame_start_o <= '0';
+                        end if;
+                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                            tx_started <= '0';
+                            leader_state <= s_Wait_for_Announce_Done;
+                        end if;
+
+                    when s_Wait_for_Announce_Done =>
                         leader_state <= s_Idle;
                         
                     -- ========================================

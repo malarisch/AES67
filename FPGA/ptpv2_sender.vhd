@@ -348,7 +348,32 @@ begin
                     udp_frame(93) <= std_logic_vector(req_port_id_sync(23 downto 16)); -- 51 7 requestingPortIdentity
                     udp_frame(94) <= std_logic_vector(req_port_id_sync(15 downto 8)); -- 52 8 requestingPortNumber
                     udp_frame(95) <= std_logic_vector(req_port_id_sync(7 downto 0)); -- 53 9 requestingPortNumber
-                end if;
+                elsif (current_message_type = t_Announce) then
+					-- Announce message has no timestamp, so pad with zeros
+					udp_frame(86) <= x"00"; --current UTC Offset
+					udp_frame(87) <= x"25"; --current UTC Offset
+					udp_frame(88) <= x"00"; -- reserved
+					udp_frame(89) <= x"80"; -- grandmasterPriority1
+					udp_frame(90) <= x"F8"; --- clockQuality.clockClass
+					udp_frame(91) <= x"FE"; -- clockQuality.clockAccuracy
+					udp_frame(92) <= x"FF"; -- clockQuality.offsetScaledLogVariance MSB
+					udp_frame(93) <= x"FF"; -- clockQuality.offsetScaledLogVariance LSB
+					udp_frame(94) <= x"80"; -- grandmasterPriority2
+
+                	udp_frame(95) <= src_mac_address(47 downto 40) xor x"02"; -- 20 0 ClockIdentity
+                	udp_frame(96) <= src_mac_address(39 downto 32); -- 21 1 ClockIdentity
+                	udp_frame(97) <= src_mac_address(31 downto 24); -- 22 2 ClockIdentity
+                	udp_frame(98) <= x"FF"; -- 23 3 ClockIdentity
+                	udp_frame(99) <= x"FE"; -- 24 4 ClockIdentity
+                	udp_frame(100) <= src_mac_address(23 downto 16); -- 25 5 ClockIdentity
+                	udp_frame(101) <= src_mac_address(15 downto 8); -- 26 6 ClockIdentity
+                	udp_frame(102) <= src_mac_address(7 downto 0); -- 27 7 ClockIdentity
+                	
+					udp_frame(103) <= x"00"; -- stepsRemoved MSB
+					udp_frame(104) <= x"00"; -- stepsRemoved LSB
+
+					udp_frame(105) <= x"A0"; -- timeSource
+				end if;
 				
                 
 
