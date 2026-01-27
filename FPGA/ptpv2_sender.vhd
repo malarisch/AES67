@@ -110,9 +110,75 @@ architecture Behavioral of ptpv2_sender is
 	signal udp_frame		: t_ethernet_frame;
 
 	signal zframe_start	: std_logic;
+
+	-- ============================================================
+	-- CDC (Clock Domain Crossing) Synchronizers
+	-- All input signals from 250MHz domain need 2-stage sync
+	-- ============================================================
+	
+	-- Frame start CDC (single bit - 2-stage synchronizer)
+	signal frame_start_meta    : std_logic := '0';
+	signal frame_start_sync    : std_logic := '0';
+	
+	-- Message type CDC (4-bit bus - synchronized with frame_start)
+	signal message_type_meta   : std_logic_vector(3 downto 0) := (others => '0');
+	signal message_type_sync   : std_logic_vector(3 downto 0) := (others => '0');
+	
+	-- Sequence ID CDC (16-bit bus - synchronized with frame_start)
+	signal sequence_id_meta    : unsigned(15 downto 0) := (others => '0');
+	signal sequence_id_sync    : unsigned(15 downto 0) := (others => '0');
+	
+	-- Timestamp seconds CDC (32-bit bus - synchronized with frame_start)
+	signal timestamp_sec_meta  : unsigned(31 downto 0) := (others => '0');
+	signal timestamp_sec_sync  : unsigned(31 downto 0) := (others => '0');
+	
+	-- Timestamp nanoseconds CDC (32-bit bus - synchronized with frame_start)
+	signal timestamp_nsec_meta : unsigned(31 downto 0) := (others => '0');
+	signal timestamp_nsec_sync : unsigned(31 downto 0) := (others => '0');
+	
+	-- Request port identity CDC (80-bit bus - synchronized with frame_start)
+	signal req_port_id_meta    : std_logic_vector(79 downto 0) := (others => '0');
+	signal req_port_id_sync    : std_logic_vector(79 downto 0) := (others => '0');
+
+	-- Prevent register optimization/merging for metastability registers
+	attribute PRESERVE : boolean;
+	attribute PRESERVE of frame_start_meta : signal is true;
+	attribute PRESERVE of frame_start_sync : signal is true;
+	attribute PRESERVE of message_type_meta : signal is true;
+	attribute PRESERVE of sequence_id_meta : signal is true;
+	attribute PRESERVE of timestamp_sec_meta : signal is true;
+	attribute PRESERVE of timestamp_nsec_meta : signal is true;
+	attribute PRESERVE of req_port_id_meta : signal is true;
+
 begin
+	-- ============================================================
+	-- CDC Synchronization Process
+	-- Multi-bit signals are safe because they are qualified by frame_start
+	-- (held stable when frame_start is asserted in source domain)
+	-- ============================================================
+	cdc_sync_proc: process(tx_clk)
+	begin
+		if rising_edge(tx_clk) then
+			-- Stage 1 (metastable)
+			frame_start_meta    <= frame_start;
+			message_type_meta   <= message_type_i;
+			sequence_id_meta    <= sequence_id;
+			timestamp_sec_meta  <= timestamp_seconds_i;
+			timestamp_nsec_meta <= timestamp_nanoseconds_i;
+			req_port_id_meta    <= request_port_identity;
+			
+			-- Stage 2 (stable)
+			frame_start_sync    <= frame_start_meta;
+			message_type_sync   <= message_type_meta;
+			sequence_id_sync    <= sequence_id_meta;
+			timestamp_sec_sync  <= timestamp_sec_meta;
+			timestamp_nsec_sync <= timestamp_nsec_meta;
+			req_port_id_sync    <= req_port_id_meta;
+		end if;
+	end process cdc_sync_proc;
 	-- Combinatorial logic for message type decoding (must be immediate, not clocked)
-	current_message_type <= get_message_type(message_type_i);
+	-- Uses synchronized signal for CDC safety
+	current_message_type <= get_message_type(message_type_sync);
 	
 	with current_message_type select real_udp_payload_length <=
 		44 when t_Sync,
@@ -139,8 +205,8 @@ begin
 		variable udpWord: std_logic_vector(15 downto 0);
 	begin
 		if (falling_edge(tx_clk)) then
-			zframe_start <= frame_start;
-			if ((frame_start = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
+			zframe_start <= frame_start_sync;
+			if ((frame_start_sync = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
 				-- prepare begin of packet
 				packet_counter <= packet_counter + 1; -- increment packet counter
 				tx_enable <= '0';
@@ -213,7 +279,7 @@ begin
 				udp_frame(41) <= x"00";
 
 				-- UDP PAYLOAD (44 bytes)
-				udp_frame(42) <= x"0" & message_type_i; -- 0 majorSdoId + MessageType (Mapping is as in protocol specification!!!)
+				udp_frame(42) <= x"0" & message_type_sync; -- 0 majorSdoId + MessageType (Mapping is as in protocol specification!!!)
 				udp_frame(43) <= x"02"; -- 1 majorVersionPTP = 0000 0010b = version 2
 				udp_frame(44) <= std_logic_vector(to_unsigned(real_udp_payload_length, 16)(15 downto 8)); -- 2 messageLength MSB
 				udp_frame(45) <= std_logic_vector(to_unsigned(real_udp_payload_length, 16)(7 downto 0)); -- 3 messageLength continued (44 bytes = 0x002c)
@@ -243,8 +309,8 @@ begin
                 udp_frame(69) <= src_mac_address(7 downto 0); -- 27 7 ClockIdentity
                 udp_frame(70) <= x"00"; -- 28 sourcePortId
                 udp_frame(71) <= x"01"; -- 29 sourcePortId
-				udp_frame(72) <= std_logic_vector(sequence_id(15 downto 8)); -- 30 sequenceId
-				udp_frame(73) <= std_logic_vector(sequence_id(7 downto 0)); -- 31 sequenceId
+				udp_frame(72) <= std_logic_vector(sequence_id_sync(15 downto 8)); -- 30 sequenceId
+				udp_frame(73) <= std_logic_vector(sequence_id_sync(7 downto 0)); -- 31 sequenceId
                 case current_message_type is
                     when t_Sync =>
                         udp_frame(74) <= x"00"; -- 32 controlField
@@ -263,25 +329,25 @@ begin
                 udp_frame(75) <= x"00"; -- 33 logMessageInterval
                 udp_frame(76) <= x"00"; -- 34 0 originTimestamp seconds
                 udp_frame(77) <= x"00"; -- 35 1 originTimestamp seconds
-				udp_frame(78) <= std_logic_vector(timestamp_seconds_i(31 downto 24)); -- 36 2 originTimestamp seconds 
-				udp_frame(79) <= std_logic_vector(timestamp_seconds_i(23 downto 16)); -- 37 3 originTimestamp seconds
-				udp_frame(80) <= std_logic_vector(timestamp_seconds_i(15 downto 8)); -- 38 4 originTimestamp seconds
-				udp_frame(81) <= std_logic_vector(timestamp_seconds_i(7 downto 0)); -- 39 5 originTimestamp seconds
-				udp_frame(82) <= std_logic_vector(timestamp_nanoseconds_i(31 downto 24)); -- 40 0 originTimestamp nanoseconds
-				udp_frame(83) <= std_logic_vector(timestamp_nanoseconds_i(23 downto 16)); -- 41 1 originTimestamp nanoseconds
-				udp_frame(84) <= std_logic_vector(timestamp_nanoseconds_i(15 downto 8)); -- 42 2 originTimestamp nanoseconds
-				udp_frame(85) <= std_logic_vector(timestamp_nanoseconds_i(7 downto 0)); -- 43 3 originTimestamp nanoseconds
+				udp_frame(78) <= std_logic_vector(timestamp_sec_sync(31 downto 24)); -- 36 2 originTimestamp seconds 
+				udp_frame(79) <= std_logic_vector(timestamp_sec_sync(23 downto 16)); -- 37 3 originTimestamp seconds
+				udp_frame(80) <= std_logic_vector(timestamp_sec_sync(15 downto 8)); -- 38 4 originTimestamp seconds
+				udp_frame(81) <= std_logic_vector(timestamp_sec_sync(7 downto 0)); -- 39 5 originTimestamp seconds
+				udp_frame(82) <= std_logic_vector(timestamp_nsec_sync(31 downto 24)); -- 40 0 originTimestamp nanoseconds
+				udp_frame(83) <= std_logic_vector(timestamp_nsec_sync(23 downto 16)); -- 41 1 originTimestamp nanoseconds
+				udp_frame(84) <= std_logic_vector(timestamp_nsec_sync(15 downto 8)); -- 42 2 originTimestamp nanoseconds
+				udp_frame(85) <= std_logic_vector(timestamp_nsec_sync(7 downto 0)); -- 43 3 originTimestamp nanoseconds
                 if (current_message_type = t_Delay_Resp) then
-                    udp_frame(86) <= std_logic_vector(request_port_identity(79 downto 72)); -- 44 0 requestingPortIdentity
-                    udp_frame(87) <= std_logic_vector(request_port_identity(71 downto 64)); -- 45 1 requestingPortIdentity
-                    udp_frame(88) <= std_logic_vector(request_port_identity(63 downto 56)); -- 46 2 requestingPortIdentity
-                    udp_frame(89) <= std_logic_vector(request_port_identity(55 downto 48)); -- 47 3 requestingPortIdentity
-                    udp_frame(90) <= std_logic_vector(request_port_identity(47 downto 40)); -- 48 4 requestingPortIdentity
-                    udp_frame(91) <= std_logic_vector(request_port_identity(39 downto 32)); -- 49 5 requestingPortIdentity
-                    udp_frame(92) <= std_logic_vector(request_port_identity(31 downto 24)); -- 50 6 requestingPortIdentity
-                    udp_frame(93) <= std_logic_vector(request_port_identity(23 downto 16)); -- 51 7 requestingPortIdentity
-                    udp_frame(94) <= std_logic_vector(request_port_identity(15 downto 8)); -- 52 8 requestingPortNumber
-                    udp_frame(95) <= std_logic_vector(request_port_identity(7 downto 0)); -- 53 9 requestingPortNumber
+                    udp_frame(86) <= std_logic_vector(req_port_id_sync(79 downto 72)); -- 44 0 requestingPortIdentity
+                    udp_frame(87) <= std_logic_vector(req_port_id_sync(71 downto 64)); -- 45 1 requestingPortIdentity
+                    udp_frame(88) <= std_logic_vector(req_port_id_sync(63 downto 56)); -- 46 2 requestingPortIdentity
+                    udp_frame(89) <= std_logic_vector(req_port_id_sync(55 downto 48)); -- 47 3 requestingPortIdentity
+                    udp_frame(90) <= std_logic_vector(req_port_id_sync(47 downto 40)); -- 48 4 requestingPortIdentity
+                    udp_frame(91) <= std_logic_vector(req_port_id_sync(39 downto 32)); -- 49 5 requestingPortIdentity
+                    udp_frame(92) <= std_logic_vector(req_port_id_sync(31 downto 24)); -- 50 6 requestingPortIdentity
+                    udp_frame(93) <= std_logic_vector(req_port_id_sync(23 downto 16)); -- 51 7 requestingPortIdentity
+                    udp_frame(94) <= std_logic_vector(req_port_id_sync(15 downto 8)); -- 52 8 requestingPortNumber
+                    udp_frame(95) <= std_logic_vector(req_port_id_sync(7 downto 0)); -- 53 9 requestingPortNumber
                 end if;
 				
                 
@@ -365,8 +431,8 @@ begin
 			elsif (s_SM_Ethernet = s_End) then
 				tx_enable <= '0';
 				tx_data <= "00000000";
-                tx_ready_timestamp_nanoseconds_o <= timestamp_nanoseconds_i;
-                tx_ready_timestamp_seconds_o <= timestamp_seconds_i;
+                tx_ready_timestamp_nanoseconds_o <= timestamp_nsec_sync;
+                tx_ready_timestamp_seconds_o <= timestamp_sec_sync;
 				s_SM_Ethernet <= s_Idle;
 			end if;
 		end if;

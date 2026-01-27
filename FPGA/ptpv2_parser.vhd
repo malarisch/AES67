@@ -31,7 +31,18 @@ architecture Behavioral of ptpv2_parser is
 
     signal delay_resp_tx_en_reg : std_logic := '0';
 
-    signal parse_ptp_packet_reg : std_logic := '0';
+    -- ============================================================
+    -- CDC (Clock Domain Crossing) Synchronizers
+    -- parse_ptp_packet comes from ethernet_packet_parser (MAC RX clock domain)
+    -- ============================================================
+    signal parse_ptp_packet_meta : std_logic := '0';
+    signal parse_ptp_packet_sync : std_logic := '0';
+    signal parse_ptp_packet_prev : std_logic := '0';  -- for edge detection
+
+    -- Prevent register optimization/merging for metastability registers
+    attribute PRESERVE : boolean;
+    attribute PRESERVE of parse_ptp_packet_meta : signal is true;
+    attribute PRESERVE of parse_ptp_packet_sync : signal is true;
 
     signal udp_port: std_logic_vector(15 downto 0);
     signal udp_length: std_logic_vector(15 downto 0);
@@ -54,16 +65,23 @@ begin
         if reset_n = '0' then
             s_SM_PtpParser <= s_Idle;
             byte_counter <= 0;
-            parse_ptp_packet_reg <= '0';
+            parse_ptp_packet_meta <= '0';
+            parse_ptp_packet_sync <= '0';
+            parse_ptp_packet_prev <= '0';
             send_delay_resp_o <= '0';
             ram_read_address <= (others => '0');
         elsif rising_edge(clk) then
-            parse_ptp_packet_reg <= parse_ptp_packet;
+            -- CDC synchronizer for parse_ptp_packet (from MAC RX clock domain)
+            parse_ptp_packet_meta <= parse_ptp_packet;
+            parse_ptp_packet_sync <= parse_ptp_packet_meta;
+            parse_ptp_packet_prev <= parse_ptp_packet_sync;  -- for edge detection
+            
             send_delay_resp_o <= '0';
 
 
             if (s_SM_PtpParser = s_Idle) then
-                if (parse_ptp_packet_reg = '0' and parse_ptp_packet = '1') then
+                -- Detect rising edge on SYNCHRONIZED signal
+                if (parse_ptp_packet_prev = '0' and parse_ptp_packet_sync = '1') then
                     -- start parsing PTPv2 packet
                     byte_counter <= 0;
                     ram_read_address <= to_unsigned(0, 11);
