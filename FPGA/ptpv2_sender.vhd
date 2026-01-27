@@ -170,7 +170,7 @@ begin
 
 				-- IP HEADER (20 bytes)
 				udp_frame(14) <= x"45"; -- b14 = version (4-bit) | internet header length (4-bit) [Version 4 and header length of 0x05 = 20 bytes]
-				udp_frame(15) <= x"00"; -- differentiated services (6-bits) | explicit congestion notification (2-bits)
+				udp_frame(15) <= b"10111000"; -- differentiated services (6-bits) | explicit congestion notification (2-bits) -> DSCP=0x2e (Expedited Forwarding)
 				udp_frame(16) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length, 16)(15 downto 8)); -- total length without MAC-header: entire packet size in bytes, including IP-header and payload-data. The minimum size is 46 bytes of user data (= 0x2e, header without data) and the maximum is 65,535 bytes
 				udp_frame(17) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length, 16)(7 downto 0)); -- 20 bytes IP-header + 8 bytes UDP-header + 18 bytes UDP-payload = 46 bytes = 0x002e
 				udp_frame(18) <= std_logic_vector(to_unsigned(packet_counter, 16)(15 downto 8));
