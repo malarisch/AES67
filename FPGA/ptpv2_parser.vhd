@@ -33,7 +33,12 @@ entity ptpv2_parser is
         -- PTP calculation outputs
         mean_path_delay_ns_o       : out signed(63 downto 0);  -- Mean path delay in nanoseconds (signed for negative values)
         offset_from_master_ns_o    : out signed(63 downto 0);  -- Offset from master in nanoseconds (signed)
-        ptp_calc_valid_o           : out std_logic              -- Pulse when calculation is complete
+        ptp_calc_valid_o           : out std_logic;              -- Pulse when calculation is complete
+
+        clock_set_o            : out std_logic;
+        clock_configured_o   : out std_logic;
+        clock_configure_timestamp_seconds_o     : out std_logic_vector(47 downto 0);
+        clock_configure_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0)
 
     );
 end entity;
@@ -43,8 +48,8 @@ architecture Behavioral of ptpv2_parser is
     -- EUI-64 Clock Identity from MAC address (IEEE 1588)
     -- Format: MAC[47:24] with bit 1 flipped (U/L bit) | 0xFFFE | MAC[23:0] | PortNumber(0x0001)
     -- Total: 80 bits = 64-bit clockIdentity + 16-bit portNumber
-    constant my_clock_id : std_logic_vector(79 downto 0) := 
-        (src_mac_address(47 downto 40) xor x"02") & src_mac_address(39 downto 24) & x"FFFE" & src_mac_address(23 downto 0) & x"0001";
+    -- NOTE: This must be a signal (not constant) because src_mac_address is a port input
+    signal my_clock_id : std_logic_vector(79 downto 0);
     
     -- Constant: 1 second in nanoseconds
     constant ONE_SECOND_NS : signed(63 downto 0) := to_signed(1_000_000_000, 64);
@@ -57,23 +62,38 @@ architecture Behavioral of ptpv2_parser is
 
     -- ============================================================
     -- PTP Calculation Function
-    -- Converts seconds + nanoseconds timestamp to total nanoseconds (signed 64-bit)
+    -- Calculate time difference between two timestamps in nanoseconds
+    -- Uses relative calculation to avoid overflow with large absolute times
+    -- Result = (sec_a - sec_b) * 1e9 + (ns_a - ns_b)
     -- ============================================================
-    function timestamp_to_ns(
-        seconds     : std_logic_vector(47 downto 0);
-        nanoseconds : std_logic_vector(31 downto 0)
+    function timestamp_diff_ns(
+        sec_a  : std_logic_vector(47 downto 0);
+        ns_a   : std_logic_vector(31 downto 0);
+        sec_b  : std_logic_vector(47 downto 0);
+        ns_b   : std_logic_vector(31 downto 0)
     ) return signed is
-        variable sec_ns  : signed(63 downto 0);
-        variable nsec    : signed(63 downto 0);
+        variable sec_diff    : signed(47 downto 0);
+        variable ns_diff     : signed(32 downto 0);  -- Extra bit for sign
+        variable sec_as_ns   : signed(63 downto 0);
         variable mult_result : signed(127 downto 0);
+        variable result      : signed(63 downto 0);
     begin
-        -- Convert seconds to nanoseconds (seconds * 1e9)
-        -- Multiplication produces 128-bit result, resize to 64-bit
-        mult_result := resize(signed('0' & seconds), 64) * ONE_SECOND_NS;
-        sec_ns := mult_result(63 downto 0);
-        -- Add nanoseconds portion
-        nsec := resize(signed('0' & nanoseconds), 64);
-        return sec_ns + nsec;
+        -- Calculate seconds difference (small number, typically 0 or 1)
+        sec_diff := signed(sec_a) - signed(sec_b);
+        
+        -- Calculate nanoseconds difference
+        ns_diff := resize(signed('0' & ns_a), 33) - resize(signed('0' & ns_b), 33);
+        
+        -- Convert seconds difference to nanoseconds
+        -- sec_diff is small (typically -1, 0, or 1), so result fits in 64 bits
+        -- But VHDL multiplication produces 128 bits, so we need to slice
+        mult_result := resize(sec_diff, 64) * ONE_SECOND_NS;
+        sec_as_ns := mult_result(63 downto 0);
+        
+        -- Total difference
+        result := sec_as_ns + resize(ns_diff, 64);
+        
+        return result;
     end function;
 
     -- ============================================================
@@ -98,7 +118,8 @@ architecture Behavioral of ptpv2_parser is
     attribute PRESERVE of parse_ptp_packet_meta : signal is true;
     attribute PRESERVE of parse_ptp_packet_sync : signal is true;
 
-    
+    signal clock_configured: std_logic := '0';
+
 
     signal udp_port: std_logic_vector(15 downto 0);
     signal udp_length: std_logic_vector(15 downto 0);
@@ -170,12 +191,22 @@ architecture Behavioral of ptpv2_parser is
 
 begin
     -- ============================================================
+    -- Generate Clock Identity from MAC address (concurrent assignment)
+    -- EUI-64 format: OUI[23:0] with U/L bit flipped | 0xFFFE | NIC[23:0] | Port 1
+    -- ============================================================
+    my_clock_id <= (src_mac_address(47 downto 40) xor x"02") & 
+                   src_mac_address(39 downto 24) & 
+                   x"FFFE" & 
+                   src_mac_address(23 downto 0) & 
+                   x"0001";
+
+    -- ============================================================
     -- CDC Synchronization Process (separate from main state machine)
     -- This ensures proper timing analysis and prevents race conditions
     -- ============================================================
 
 
-    
+    clock_configured_o <= clock_configured;
     cdc_sync_proc: process(clk, reset_n)
 
     begin
@@ -200,11 +231,7 @@ begin
         variable requesting_port_identity: std_logic_vector(79 downto 0);
         variable message_length: integer := 85;
         
-        -- Variables for PTP calculation
-        variable t1_total : signed(63 downto 0);
-        variable t2_total : signed(63 downto 0);
-        variable t3_total : signed(63 downto 0);
-        variable t4_total : signed(63 downto 0);
+        -- Variables for PTP calculation (deltas only, no absolute times)
         variable delta_master_to_slave : signed(63 downto 0);  -- t2 - t1
         variable delta_slave_to_master : signed(63 downto 0);  -- t4 - t3
     begin
@@ -227,10 +254,16 @@ begin
             stored_t3_nanoseconds <= (others => '0');
             stored_t4_seconds <= (others => '0');
             stored_t4_nanoseconds <= (others => '0');
+
+            clock_configure_timestamp_nanoseconds_o <= (others => '0');
+            clock_configure_timestamp_seconds_o <= (others => '0');
+            clock_configured <= '0';
+            clock_set_o <= '0';
         elsif rising_edge(clk) then
             send_delay_resp_o <= '0';
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
+            clock_set_o <= '0';
             
             -- Capture T3 timestamp when valid
             if (t3_valid_i = '1') then
@@ -432,30 +465,56 @@ begin
                                 stored_t4_seconds <= ptp_origin_timestamp_seconds;
                                 stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                 
-                                -- ============================================
-                                -- Calculate Mean Path Delay and Offset
-                                -- Formula: 
-                                --   mean_path_delay = ((t2 - t1) + (t4 - t3)) / 2
-                                --   offset = ((t2 - t1) - (t4 - t3)) / 2
-                                -- ============================================
-                                
-                                -- Convert all timestamps to nanoseconds
-                                t1_total := timestamp_to_ns(stored_t1_seconds, stored_t1_nanoseconds);
-                                t2_total := timestamp_to_ns(stored_t2_seconds, stored_t2_nanoseconds);
-                                t3_total := timestamp_to_ns(stored_t3_seconds, stored_t3_nanoseconds);
-                                t4_total := timestamp_to_ns(ptp_origin_timestamp_seconds, ptp_origin_timestamp_nanoseconds);
-                                
-                                -- Calculate deltas
-                                delta_master_to_slave := t2_total - t1_total;
-                                delta_slave_to_master := t4_total - t3_total;
-                                
-                                -- Mean path delay = ((t2-t1) + (t4-t3)) / 2
-                                mean_path_delay_ns_o <= shift_right(delta_master_to_slave + delta_slave_to_master, 1);
-                                
-                                -- Offset from master = ((t2-t1) - (t4-t3)) / 2
-                                offset_from_master_ns_o <= shift_right(delta_master_to_slave - delta_slave_to_master, 1);
-                                
-                                ptp_calc_valid_o <= '1';
+                                if (clock_configured = '0') then
+                                    -- First sync: Set clock to master time and wait for next full cycle
+                                    clock_set_o <= '1';
+                                    clock_configured <= '1';
+                                    clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
+                                    clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
+                                    
+                                    -- IMPORTANT: Invalidate all timestamps!
+                                    -- After clock set, old t1/t2/t3 are meaningless
+                                    -- We need a fresh PTP cycle with the new clock base
+                                    active_sequence_id := (others => '1');  -- Force mismatch until new Sync
+                                    stored_t1_seconds <= (others => '0');
+                                    stored_t1_nanoseconds <= (others => '0');
+                                    stored_t2_seconds <= (others => '0');
+                                    stored_t2_nanoseconds <= (others => '0');
+                                    stored_t3_seconds <= (others => '0');
+                                    stored_t3_nanoseconds <= (others => '0');
+                                    
+                                else
+                                    -- ============================================
+                                    -- Calculate Mean Path Delay and Offset
+                                    -- Formula: 
+                                    --   mean_path_delay = ((t2 - t1) + (t4 - t3)) / 2
+                                    --   offset = ((t2 - t1) - (t4 - t3)) / 2
+                                    -- 
+                                    -- Using timestamp_diff_ns to avoid overflow with
+                                    -- large absolute timestamps (Unix time ~1.7 billion seconds)
+                                    -- ============================================
+                                    
+                                    -- Calculate deltas directly using difference function
+                                    -- delta_master_to_slave = t2 - t1
+                                    delta_master_to_slave := timestamp_diff_ns(
+                                        stored_t2_seconds, stored_t2_nanoseconds,
+                                        stored_t1_seconds, stored_t1_nanoseconds
+                                    );
+                                    
+                                    -- delta_slave_to_master = t4 - t3
+                                    delta_slave_to_master := timestamp_diff_ns(
+                                        ptp_origin_timestamp_seconds, ptp_origin_timestamp_nanoseconds,
+                                        stored_t3_seconds, stored_t3_nanoseconds
+                                    );
+                                    
+                                    -- Mean path delay = ((t2-t1) + (t4-t3)) / 2
+                                    mean_path_delay_ns_o <= shift_right(delta_master_to_slave + delta_slave_to_master, 1);
+                                    
+                                    -- Offset from master = ((t2-t1) - (t4-t3)) / 2
+                                    offset_from_master_ns_o <= shift_right(delta_master_to_slave - delta_slave_to_master, 1);
+                                    
+                                    ptp_calc_valid_o <= '1';
+                                end if;
                             end if;
                         end if;
                         null;
