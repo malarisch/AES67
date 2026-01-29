@@ -40,7 +40,12 @@ end entity;
 
 architecture Behavioral of ptpv2_parser is
 
-    constant my_clock_id : std_logic_vector(79 downto 0) := src_mac_address(47 downto 40) xor x"02" & src_mac_address(39 downto 24) & x"FFFE" & src_mac_address(23 downto 0) & x"0001";    
+    -- EUI-64 Clock Identity from MAC address (IEEE 1588)
+    -- Format: MAC[47:24] with bit 1 flipped (U/L bit) | 0xFFFE | MAC[23:0] | PortNumber(0x0001)
+    -- Total: 80 bits = 64-bit clockIdentity + 16-bit portNumber
+    constant my_clock_id : std_logic_vector(79 downto 0) := 
+        (src_mac_address(47 downto 40) xor x"02") & src_mac_address(39 downto 24) & x"FFFE" & src_mac_address(23 downto 0) & x"0001";
+    
     -- Constant: 1 second in nanoseconds
     constant ONE_SECOND_NS : signed(63 downto 0) := to_signed(1_000_000_000, 64);
     
@@ -121,6 +126,10 @@ architecture Behavioral of ptpv2_parser is
     signal stored_t3_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
     signal stored_t4_seconds     : std_logic_vector(47 downto 0) := (others => '0');
     signal stored_t4_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    
+    -- Latched RX timestamp - captured immediately when packet parsing starts
+    signal latched_rx_timestamp_seconds     : std_logic_vector(47 downto 0) := (others => '0');
+    signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
 
 
         attribute PRESERVE of stored_t1_nanoseconds : signal is true;
@@ -237,6 +246,11 @@ begin
                     ram_read_address <= to_unsigned(0, 11);
                     s_SM_PtpParser <= s_ReadHeader;
                     message_length := 85; -- default length
+                    
+                    -- CRITICAL: Latch RX timestamp immediately when packet arrives!
+                    -- This timestamp will be used as T2 if this is a Sync message
+                    latched_rx_timestamp_seconds <= rx_timestamp_seconds_i;
+                    latched_rx_timestamp_nanoseconds <= rx_timestamp_nanoseconds_i;
                 end if;
 
             elsif (s_SM_PtpParser = s_ReadHeader) then
@@ -376,17 +390,16 @@ begin
                         -- Handle Sync message processing here
                         if (is_leader = '0') then
                             active_sequence_id := ptp_sequence_id;
-                            -- T2: RX timestamp when Sync was received
-                            stored_t2_seconds <= rx_timestamp_seconds_i;
-                            stored_t2_nanoseconds <= rx_timestamp_nanoseconds_i;
+                            stored_t2_seconds <= latched_rx_timestamp_seconds;
+                            stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
                         end if;
                     when x"1" =>
                         -- Delay_Req Message
                         if is_leader = '1' then
                             -- Prepare Delay_Resp message
                             rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
-                            rx_timestamp_seconds_o <= rx_timestamp_seconds_i;
-                            rx_timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i;
+                            rx_timestamp_seconds_o <= latched_rx_timestamp_seconds;
+                            rx_timestamp_nanoseconds_o <= latched_rx_timestamp_nanoseconds;
                             sequence_id_o <= ptp_sequence_id;
                             send_delay_resp_o <= '1';
                         end if;
@@ -413,7 +426,8 @@ begin
                         -- Delay_resp Message
                         if (is_leader = '0') then
                             -- Handle Delay_Resp message processing here
-                            if ptp_sequence_id = active_sequence_id then -- and requesting_port_identity = my_clock_id 
+                            -- Check sequence ID AND that this response is for US (our clock identity)
+                            if ptp_sequence_id = active_sequence_id and requesting_port_identity = my_clock_id then
                                 -- T4: Origin timestamp from Delay_Resp (when Master received Delay_Req)
                                 stored_t4_seconds <= ptp_origin_timestamp_seconds;
                                 stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
