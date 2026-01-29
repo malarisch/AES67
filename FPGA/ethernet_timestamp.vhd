@@ -7,9 +7,9 @@ entity ethernet_timestamp is
         clk			: in std_logic;
         reset_n			: in std_logic;
         
-        wallclock_seconds_i : in unsigned(31 downto 0);
+        wallclock_seconds_i : in unsigned(47 downto 0);
         wallclock_nanoseconds_i : in unsigned(31 downto 0);
-        timestamp_seconds_o	: out unsigned(31 downto 0);
+        timestamp_seconds_o	: out unsigned(47 downto 0);
         timestamp_nanoseconds_o : out unsigned(31 downto 0);
         
         timestamp_set_i : in std_logic
@@ -18,7 +18,7 @@ entity ethernet_timestamp is
     );
 end ethernet_timestamp;
 architecture Behavioral of ethernet_timestamp is
-    signal timestamp_sec_reg : unsigned(31 downto 0) := (others => '0');
+    signal timestamp_sec_reg : unsigned(47 downto 0) := (others => '0');
     signal timestamp_nsec_reg : unsigned(31 downto 0) := (others => '0');
 begin
     process(clk, reset_n)

@@ -4,18 +4,18 @@ use ieee.numeric_std.all;
 
 entity wallclock is
     generic(
-        -- nanoseconds added per clock tick (250 MHz -> 4 ns)
-        increment_interval : natural := 4
+        -- nanoseconds added per clock tick (125 MHz -> 8 ns)
+        increment_interval : natural := 8
     );
     port(
         clk                     : in  std_logic;
         reset_n                 : in  std_logic;
 
-        wallclock_seconds_o     : out unsigned(31 downto 0);
+        wallclock_seconds_o     : out unsigned(47 downto 0);
         wallclock_nanoseconds_o : out unsigned(31 downto 0);
 
         wallclock_set_i         : in  std_logic;
-        wallclock_seconds_i     : in  unsigned(31 downto 0);
+        wallclock_seconds_i     : in  unsigned(47 downto 0);
         wallclock_nanoseconds_i : in  unsigned(31 downto 0);
 
         second_pulse_o          : out std_logic
@@ -24,12 +24,12 @@ end wallclock;
 
 architecture Behavioral of wallclock is
     constant NS_PER_SEC : unsigned(31 downto 0) := to_unsigned(1_000_000_000, 32);
-    constant INC_NS     : unsigned(3 downto 0)  := to_unsigned(8, 4);  -- 250 MHz -> 4ns
+    
     
 begin
     process(clk, reset_n)
         variable new_nsec : integer range 0 to 1_000_500_000;
-        variable new_sec : unsigned(31 downto 0);
+        variable new_sec : unsigned(47 downto 0);
     begin
         if reset_n = '0' then
             second_pulse_o     <= '0';

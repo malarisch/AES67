@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 424 288)
+	(rect 16 16 424 320)
 	(text "ptpv2_controller" (rect 5 0 68 12)(font "Arial" ))
-	(text "inst" (rect 8 256 20 268)(font "Arial" ))
+	(text "inst" (rect 8 288 20 300)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -41,8 +41,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 64)
 		(input)
-		(text "wallclock_seconds_i[31..0]" (rect 0 0 102 12)(font "Arial" ))
-		(text "wallclock_seconds_i[31..0]" (rect 21 59 123 71)(font "Arial" ))
+		(text "wallclock_seconds_i[47..0]" (rect 0 0 105 12)(font "Arial" ))
+		(text "wallclock_seconds_i[47..0]" (rect 21 59 126 71)(font "Arial" ))
 		(line (pt 0 64)(pt 16 64)(line_width 3))
 	)
 	(port
@@ -55,8 +55,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 96)
 		(input)
-		(text "tx_ready_timestamp_seconds_i[31..0]" (rect 0 0 153 12)(font "Arial" ))
-		(text "tx_ready_timestamp_seconds_i[31..0]" (rect 21 91 174 103)(font "Arial" ))
+		(text "tx_ready_timestamp_seconds_i[47..0]" (rect 0 0 155 12)(font "Arial" ))
+		(text "tx_ready_timestamp_seconds_i[47..0]" (rect 21 91 176 103)(font "Arial" ))
 		(line (pt 0 96)(pt 16 96)(line_width 3))
 	)
 	(port
@@ -69,8 +69,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 128)
 		(input)
-		(text "rx_timestamp_seconds_i[31..0]" (rect 0 0 125 12)(font "Arial" ))
-		(text "rx_timestamp_seconds_i[31..0]" (rect 21 123 146 135)(font "Arial" ))
+		(text "rx_timestamp_seconds_i[47..0]" (rect 0 0 127 12)(font "Arial" ))
+		(text "rx_timestamp_seconds_i[47..0]" (rect 21 123 148 135)(font "Arial" ))
 		(line (pt 0 128)(pt 16 128)(line_width 3))
 	)
 	(port
@@ -123,6 +123,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 240)(pt 16 240)(line_width 3))
 	)
 	(port
+		(pt 0 256)
+		(input)
+		(text "send_delay_req_i" (rect 0 0 71 12)(font "Arial" ))
+		(text "send_delay_req_i" (rect 21 251 92 263)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 1))
+	)
+	(port
 		(pt 408 32)
 		(output)
 		(text "tx_message_type_o[3..0]" (rect 0 0 103 12)(font "Arial" ))
@@ -153,8 +160,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 408 96)
 		(output)
-		(text "timestamp_seconds_o[31..0]" (rect 0 0 114 12)(font "Arial" ))
-		(text "timestamp_seconds_o[31..0]" (rect 273 91 387 103)(font "Arial" ))
+		(text "timestamp_seconds_o[47..0]" (rect 0 0 116 12)(font "Arial" ))
+		(text "timestamp_seconds_o[47..0]" (rect 271 91 387 103)(font "Arial" ))
 		(line (pt 408 96)(pt 392 96)(line_width 3))
 	)
 	(port
@@ -164,7 +171,14 @@ on the Quartus Prime software download page.
 		(text "timestamp_nanoseconds_o[31..0]" (rect 254 107 387 119)(font "Arial" ))
 		(line (pt 408 112)(pt 392 112)(line_width 3))
 	)
+	(port
+		(pt 408 128)
+		(output)
+		(text "t3_valid_o" (rect 0 0 41 12)(font "Arial" ))
+		(text "t3_valid_o" (rect 346 123 387 135)(font "Arial" ))
+		(line (pt 408 128)(pt 392 128)(line_width 1))
+	)
 	(drawing
-		(rectangle (rect 16 16 392 256)(line_width 1))
+		(rectangle (rect 16 16 392 288)(line_width 1))
 	)
 )

@@ -48,8 +48,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 80)
 		(input)
-		(text "wallclock_seconds_i[31..0]" (rect 0 0 102 12)(font "Arial" ))
-		(text "wallclock_seconds_i[31..0]" (rect 21 75 123 87)(font "Arial" ))
+		(text "wallclock_seconds_i[47..0]" (rect 0 0 105 12)(font "Arial" ))
+		(text "wallclock_seconds_i[47..0]" (rect 21 75 126 87)(font "Arial" ))
 		(line (pt 0 80)(pt 16 80)(line_width 3))
 	)
 	(port
@@ -62,8 +62,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 352 32)
 		(output)
-		(text "wallclock_seconds_o[31..0]" (rect 0 0 106 12)(font "Arial" ))
-		(text "wallclock_seconds_o[31..0]" (rect 225 27 331 39)(font "Arial" ))
+		(text "wallclock_seconds_o[47..0]" (rect 0 0 108 12)(font "Arial" ))
+		(text "wallclock_seconds_o[47..0]" (rect 223 27 331 39)(font "Arial" ))
 		(line (pt 352 32)(pt 336 32)(line_width 3))
 	)
 	(port

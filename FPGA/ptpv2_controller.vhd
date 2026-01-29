@@ -10,13 +10,13 @@ entity ptpv2_controller is
         sequence_id_o       : out unsigned(15 downto 0);
         frame_start_o       : out std_logic;
         request_port_identity_o : out std_logic_vector(79 downto 0);
-        wallclock_seconds_i     : in  unsigned(31 downto 0);
+        wallclock_seconds_i     : in  unsigned(47 downto 0);
         wallclock_nanoseconds_i : in  unsigned(31 downto 0);
-        tx_ready_timestamp_seconds_i     : in  unsigned(31 downto 0);
+        tx_ready_timestamp_seconds_i     : in  unsigned(47 downto 0);
         tx_ready_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
-        timestamp_seconds_o         : out unsigned(31 downto 0);
+        timestamp_seconds_o         : out unsigned(47 downto 0);
         timestamp_nanoseconds_o     : out unsigned(31 downto 0);
-        rx_timestamp_seconds_i     : in  unsigned(31 downto 0);
+        rx_timestamp_seconds_i     : in  unsigned(47 downto 0);
         rx_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
 
 
@@ -30,8 +30,9 @@ entity ptpv2_controller is
         tx_en_i: in  std_logic;
         request_port_identity_i : in std_logic_vector(79 downto 0);
         
-        -- Debug output
-        is_leader_o : out std_logic
+        
+        send_delay_req_i: in std_logic;
+        t3_valid_o: out std_logic
     );
     type t_state_leader is (s_Idle, 
                             s_Send_Sync, s_Wait_for_Sync_Ack, s_Wait_for_Sync_Done, s_Latch_Sync_Timestamp,
@@ -39,7 +40,13 @@ entity ptpv2_controller is
                             s_Send_Announce, s_Wait_for_Announce_Ack, s_Wait_for_Announce_Done,
                             s_Send_Delay_Resp, s_Wait_for_Delay_Resp_Ack, s_Wait_for_Delay_Resp_Done);
 
+    type t_state_follower is (f_Idle,
+                              
+                              f_Send_Delay_Req, f_Wait_for_Delay_Req_Ack, f_Wait_for_Delay_Req_Done);
+
     signal leader_state : t_state_leader := s_Idle;
+
+    signal follower_state : t_state_follower := f_Idle;
 
     signal sequence_id_reg : unsigned(15 downto 0) := (others => '0');
     signal tx_started : std_logic := '0';       -- Flag: have we seen tx_en go high?
@@ -51,19 +58,20 @@ entity ptpv2_controller is
     signal request_port_identity_i_latched : std_logic_vector(79 downto 0) := (others => '0');
     signal send_delay_resp : std_logic := '0';
     signal rx_timestamp_nanoseconds_i_latched : unsigned(31 downto 0) := (others => '0');
-    signal rx_timestamp_seconds_i_latched : unsigned(31 downto 0) := (others => '0');
+    signal rx_timestamp_seconds_i_latched : unsigned(47 downto 0) := (others => '0');
+
+    signal send_delay_req_i_reg : std_logic := '0';  -- Edge detection for same clock domain
 
     -- ============================================================
     -- CDC (Clock Domain Crossing) Synchronizers
     -- ONLY for signals from TX clock domain (ptpv2_sender runs on mac_tx_clock)
-    -- Parser signals are in SAME clock domain - no CDC needed!
     -- ============================================================
     signal tx_en_i_meta                     : std_logic := '0';
     signal tx_en_i_sync                     : std_logic := '0';
     signal tx_en_i_prev                     : std_logic := '0';  -- for edge detection
     
-    signal tx_ready_ts_sec_meta             : unsigned(31 downto 0) := (others => '0');
-    signal tx_ready_ts_sec_sync             : unsigned(31 downto 0) := (others => '0');
+    signal tx_ready_ts_sec_meta             : unsigned(47 downto 0) := (others => '0');
+    signal tx_ready_ts_sec_sync             : unsigned(47 downto 0) := (others => '0');
     signal tx_ready_ts_nsec_meta            : unsigned(31 downto 0) := (others => '0');
     signal tx_ready_ts_nsec_sync            : unsigned(31 downto 0) := (others => '0');
 
@@ -79,8 +87,7 @@ entity ptpv2_controller is
     end entity;
 architecture Behavioral of ptpv2_controller is
 begin
-    -- Debug output
-    is_leader_o <= is_leader;
+
     
     -- ============================================================
     -- CDC Synchronization Process (2-stage synchronizers)
@@ -117,6 +124,8 @@ begin
             send_delay_resp         <= '0';
             timestamp_seconds_o     <= (others => '0');
             timestamp_nanoseconds_o <= (others => '0');
+            follower_state         <= f_Idle;
+            t3_valid_o              <= '0';
         elsif rising_edge(clk) then
             -- Edge detection registers (same clock domain - no CDC needed)
             second_pulse_i_reg <= second_pulse_i;
@@ -270,13 +279,56 @@ begin
                     rx_timestamp_nanoseconds_i_latched <= rx_timestamp_nanoseconds_i;
                     rx_timestamp_seconds_i_latched <= rx_timestamp_seconds_i;
                 end if;
-
+                follower_state <= f_Idle;  -- Ensure follower state machine is reset
             else
                 -- Follower logic - reset state machine when not leader
                 leader_state <= s_Idle;
-                frame_start_o <= '0';
+                
                 send_delay_resp <= '0';
-                tx_started <= '0';
+                t3_valid_o <= '0';
+
+                case follower_state is
+                    when f_Idle =>
+                        -- Check for delay_req request
+                        if (send_delay_req_i_reg = '0' and send_delay_req_i = '1') then
+                            follower_state <= f_Send_Delay_Req;
+                        else
+                            send_delay_req_i_reg <= send_delay_req_i;
+                        end if;
+
+                    when f_Send_Delay_Req =>
+                        tx_message_type_o <= "0001";
+                        
+                        sequence_id_o <= sequence_id_i;
+                        timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
+                        timestamp_seconds_o <= wallclock_seconds_i;
+                        frame_start_o <= '1';
+                        tx_started <= '0';
+                        follower_state <= f_Wait_for_Delay_Req_Ack;
+
+                    when f_Wait_for_Delay_Req_Ack =>
+                        -- Must see tx_en go from 0->1 (rising edge)
+                        if (tx_en_i_prev = '0' and tx_en_i_sync = '1') then
+                            tx_started <= '1';
+                            frame_start_o <= '0';
+                        end if;
+                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                            tx_started <= '0';
+                            follower_state <= f_Wait_for_Delay_Req_Done;
+
+                            timestamp_nanoseconds_o <= tx_ready_ts_nsec_sync;
+                            timestamp_seconds_o <= tx_ready_ts_sec_sync;
+                        end if;
+
+                    when f_Wait_for_Delay_Req_Done =>
+                        -- Extra cycle for CDC timestamp to settle
+                        follower_state <= f_Idle;
+                        t3_valid_o <= '1';
+
+                    when others =>
+                        follower_state <= f_Idle;
+
+                end case;
             end if;
 
         end if;

@@ -76,8 +76,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 144)
 		(input)
-		(text "timestamp_seconds_i[31..0]" (rect 0 0 110 12)(font "Arial" ))
-		(text "timestamp_seconds_i[31..0]" (rect 21 139 131 151)(font "Arial" ))
+		(text "timestamp_seconds_i[47..0]" (rect 0 0 113 12)(font "Arial" ))
+		(text "timestamp_seconds_i[47..0]" (rect 21 139 134 151)(font "Arial" ))
 		(line (pt 0 144)(pt 16 144)(line_width 3))
 	)
 	(port
@@ -118,8 +118,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 408 64)
 		(output)
-		(text "tx_ready_timestamp_seconds_o[31..0]" (rect 0 0 156 12)(font "Arial" ))
-		(text "tx_ready_timestamp_seconds_o[31..0]" (rect 231 59 387 71)(font "Arial" ))
+		(text "tx_ready_timestamp_seconds_o[47..0]" (rect 0 0 159 12)(font "Arial" ))
+		(text "tx_ready_timestamp_seconds_o[47..0]" (rect 228 59 387 71)(font "Arial" ))
 		(line (pt 408 64)(pt 392 64)(line_width 3))
 	)
 	(port

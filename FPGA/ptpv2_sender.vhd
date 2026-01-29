@@ -28,7 +28,7 @@ entity ptpv2_sender is
 		tx_byte_sent			: in std_logic;
 		sequence_id			: in unsigned(15 downto 0);
 
-		timestamp_seconds_i : in unsigned(31 downto 0);
+		timestamp_seconds_i : in unsigned(47 downto 0);
 		timestamp_nanoseconds_i : in unsigned(31 downto 0);
 
 		request_port_identity : in std_logic_vector(79 downto 0);
@@ -39,7 +39,7 @@ entity ptpv2_sender is
 
         message_type_i : in std_logic_vector(3 downto 0) := "0000";
 
-        tx_ready_timestamp_seconds_o : out unsigned(31 downto 0);
+        tx_ready_timestamp_seconds_o : out unsigned(47 downto 0);
         tx_ready_timestamp_nanoseconds_o : out unsigned(31 downto 0)
 	);
 end entity;
@@ -129,8 +129,8 @@ architecture Behavioral of ptpv2_sender is
 	signal sequence_id_sync    : unsigned(15 downto 0) := (others => '0');
 	
 	-- Timestamp seconds CDC (32-bit bus - synchronized with frame_start)
-	signal timestamp_sec_meta  : unsigned(31 downto 0) := (others => '0');
-	signal timestamp_sec_sync  : unsigned(31 downto 0) := (others => '0');
+	signal timestamp_sec_meta  : unsigned(47 downto 0) := (others => '0');
+	signal timestamp_sec_sync  : unsigned(47 downto 0) := (others => '0');
 	
 	-- Timestamp nanoseconds CDC (32-bit bus - synchronized with frame_start)
 	signal timestamp_nsec_meta : unsigned(31 downto 0) := (others => '0');
@@ -327,8 +327,8 @@ begin
                         -- TODO: Later add 0x04 for management messagess
                 end case;
                 udp_frame(75) <= x"00"; -- 33 logMessageInterval
-                udp_frame(76) <= x"00"; -- 34 0 originTimestamp seconds
-                udp_frame(77) <= x"00"; -- 35 1 originTimestamp seconds
+                udp_frame(76) <= std_logic_vector(timestamp_sec_sync(47 downto 40)); -- 34 0 originTimestamp seconds
+                udp_frame(77) <= std_logic_vector(timestamp_sec_sync(39 downto 32)); -- 35 1 originTimestamp seconds
 				udp_frame(78) <= std_logic_vector(timestamp_sec_sync(31 downto 24)); -- 36 2 originTimestamp seconds 
 				udp_frame(79) <= std_logic_vector(timestamp_sec_sync(23 downto 16)); -- 37 3 originTimestamp seconds
 				udp_frame(80) <= std_logic_vector(timestamp_sec_sync(15 downto 8)); -- 38 4 originTimestamp seconds
