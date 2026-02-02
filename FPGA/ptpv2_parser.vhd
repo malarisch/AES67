@@ -51,8 +51,12 @@ architecture Behavioral of ptpv2_parser is
     -- NOTE: This must be a signal (not constant) because src_mac_address is a port input
     signal my_clock_id : std_logic_vector(79 downto 0);
     
-    -- Constant: 1 second in nanoseconds
-    constant ONE_SECOND_NS : signed(63 downto 0) := to_signed(1_000_000_000, 64);
+    -- Constants for seconds-to-nanoseconds conversion (NO DSP multiplication!)
+    -- Use lookup table approach since sec_diff is typically -2 to +2
+    constant ONE_SECOND_NS_POS  : signed(63 downto 0) := to_signed( 1_000_000_000, 64);
+    constant TWO_SECONDS_NS_POS : signed(63 downto 0) := to_signed( 2_000_000_000, 64);
+    constant ONE_SECOND_NS_NEG  : signed(63 downto 0) := to_signed(-1_000_000_000, 64);
+    constant TWO_SECONDS_NS_NEG : signed(63 downto 0) := to_signed(-2_000_000_000, 64);
     
     type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
@@ -61,9 +65,9 @@ architecture Behavioral of ptpv2_parser is
     signal delay_resp_tx_en_reg : std_logic := '0';
 
     -- ============================================================
-    -- PTP Calculation Function
+    -- PTP Calculation Function (DSP-FREE VERSION)
     -- Calculate time difference between two timestamps in nanoseconds
-    -- Uses relative calculation to avoid overflow with large absolute times
+    -- Uses lookup table for sec*1e9 since diff is typically -2..+2
     -- Result = (sec_a - sec_b) * 1e9 + (ns_a - ns_b)
     -- ============================================================
     function timestamp_diff_ns(
@@ -75,22 +79,34 @@ architecture Behavioral of ptpv2_parser is
         variable sec_diff    : signed(47 downto 0);
         variable ns_diff     : signed(32 downto 0);  -- Extra bit for sign
         variable sec_as_ns   : signed(63 downto 0);
-        variable mult_result : signed(127 downto 0);
         variable result      : signed(63 downto 0);
     begin
-        -- Calculate seconds difference (small number, typically 0 or 1)
+        -- Calculate seconds difference (small number, typically -2 to +2)
         sec_diff := signed(sec_a) - signed(sec_b);
         
-        -- Calculate nanoseconds difference
+        -- Calculate nanoseconds difference  
         ns_diff := resize(signed('0' & ns_a), 33) - resize(signed('0' & ns_b), 33);
         
-        -- Convert seconds difference to nanoseconds
-        -- sec_diff is small (typically -1, 0, or 1), so result fits in 64 bits
-        -- But VHDL multiplication produces 128 bits, so we need to slice
-        mult_result := resize(sec_diff, 64) * ONE_SECOND_NS;
-        sec_as_ns := mult_result(63 downto 0);
+        -- Convert seconds difference to nanoseconds using LOOKUP TABLE
+        -- This uses pure combinational logic (MUX) instead of DSP multiplier!
+        -- PTP packets arrive within seconds of each other, so diff is small
+        case to_integer(sec_diff(2 downto 0)) is  -- Only check lower 3 bits
+            when  0 => sec_as_ns := (others => '0');
+            when  1 => sec_as_ns := ONE_SECOND_NS_POS;
+            when  2 => sec_as_ns := TWO_SECONDS_NS_POS;
+            when -1 | 7 => sec_as_ns := ONE_SECOND_NS_NEG;  -- 7 = -1 in 3-bit two's complement
+            when -2 | 6 => sec_as_ns := TWO_SECONDS_NS_NEG;  -- 6 = -2 in 3-bit two's complement
+            when others => 
+                -- Fallback for unexpected large differences (should not happen in PTP)
+                -- Clamp to ±2 seconds to avoid overflow without DSP
+                if sec_diff(47) = '1' then  -- negative
+                    sec_as_ns := TWO_SECONDS_NS_NEG;
+                else
+                    sec_as_ns := TWO_SECONDS_NS_POS;
+                end if;
+        end case;
         
-        -- Total difference
+        -- Total difference = seconds_as_ns + nanoseconds_diff
         result := sec_as_ns + resize(ns_diff, 64);
         
         return result;
