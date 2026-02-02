@@ -25,22 +25,23 @@ entity ptpv2_servo is
         -- PI controller gains
         -- Effective Kp = KP_GAIN / 2^GAIN_SHIFT
         -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2)
-        -- WARNING: Values too high cause oscillation!
-        KP_GAIN : integer := 8;    -- Proportional gain numerator
-        KI_GAIN : integer := 2;    -- Integral gain numerator  
-        GAIN_SHIFT : integer := 7; -- Divide gains by 128 (Kp=0.0625, Ki=0.002)
+        -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
+        -- freq_correction acts for full second, so Kp=1 means 100% correction = oscillation
+        KP_GAIN : integer := 24;   -- Proportional gain numerator → Kp = 0.375
+        KI_GAIN : integer := 4;    -- Integral gain numerator → Ki = 0.016
+        GAIN_SHIFT : integer := 6; -- Divide gains by 64
         
         -- Filter coefficient for offset (exponential moving average)
-        -- alpha = 1/2^FILTER_SHIFT. Higher = more smoothing, slower response
-        FILTER_SHIFT : integer := 2;  -- alpha = 1/8 (more smoothing)
+        -- No filter needed if Kp is properly tuned
+        FILTER_SHIFT : integer := 1;  -- alpha = 0.5 (light filtering)
         
         -- Warmup: ignore first N samples to let filter settle
-        WARMUP_SAMPLES : integer := 8;
+        WARMUP_SAMPLES : integer := 1;  -- Quick start
         
         -- Lock thresholds
-        LOCK_THRESHOLD_NS   : integer := 1000;   -- Consider locked if offset < 1µs
-        UNLOCK_THRESHOLD_NS : integer := 10000;  -- Unlock if offset > 10µs
-        LOCK_COUNT_THRESHOLD : integer := 8      -- Need 8 consecutive good measurements
+        LOCK_THRESHOLD_NS   : integer := 500;    -- Consider locked if offset < 500ns
+        UNLOCK_THRESHOLD_NS : integer := 5000;   -- Unlock if offset > 5µs
+        LOCK_COUNT_THRESHOLD : integer := 2      -- Need only 2 consecutive good measurements
     );
     port(
         clk                 : in  std_logic;
@@ -84,8 +85,9 @@ architecture Behavioral of ptpv2_servo is
     -- Sanity check: reject obviously invalid measurements (> 1s)
     constant MAX_VALID_OFFSET : signed(63 downto 0) := to_signed(1_000_000_000, 64);  -- 1s
     
-    -- Phase jump threshold: if offset > 10ms, do phase jump instead of frequency correction
-    constant PHASE_JUMP_THRESHOLD : signed(63 downto 0) := to_signed(10_000_000, 64);  -- 10ms
+    -- Phase jump threshold: if offset > this, do phase jump instead of frequency correction
+    -- Set low enough to quickly correct initial offset from parser (~100µs)
+    constant PHASE_JUMP_THRESHOLD : signed(63 downto 0) := to_signed(10_000, 64);  -- 10µs (was 10ms!)
     
     -- Phase jump output registers
     signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
