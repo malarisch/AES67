@@ -2515,14 +2515,14 @@ on the Quartus Prime software download page.
 		(pt 360 32)
 		(output)
 		(text "timestamp_seconds_o[47..0]" (rect 0 0 153 11)(font "Arial" ))
-		(text "timestamp_seconds_o[47..0]" (rect 210 27 339 38)(font "Arial" ))
+		(text "timestamp_seconds_o[47..0]" (rect 210 27 363 38)(font "Arial" ))
 		(line (pt 360 32)(pt 344 32)(line_width 3))
 	)
 	(port
 		(pt 360 48)
 		(output)
 		(text "timestamp_nanoseconds_o[31..0]" (rect 0 0 180 11)(font "Arial" ))
-		(text "timestamp_nanoseconds_o[31..0]" (rect 187 43 339 54)(font "Arial" ))
+		(text "timestamp_nanoseconds_o[31..0]" (rect 187 43 367 54)(font "Arial" ))
 		(line (pt 360 48)(pt 344 48)(line_width 3))
 	)
 	(drawing
@@ -2642,49 +2642,49 @@ on the Quartus Prime software download page.
 		(pt 408 32)
 		(output)
 		(text "tx_message_type_o[3..0]" (rect 0 0 133 11)(font "Arial" ))
-		(text "tx_message_type_o[3..0]" (rect 275 27 387 38)(font "Arial" ))
+		(text "tx_message_type_o[3..0]" (rect 275 27 408 38)(font "Arial" ))
 		(line (pt 408 32)(pt 392 32)(line_width 3))
 	)
 	(port
 		(pt 408 48)
 		(output)
 		(text "sequence_id_o[15..0]" (rect 0 0 113 11)(font "Arial" ))
-		(text "sequence_id_o[15..0]" (rect 292 43 387 54)(font "Arial" ))
+		(text "sequence_id_o[15..0]" (rect 292 43 405 54)(font "Arial" ))
 		(line (pt 408 48)(pt 392 48)(line_width 3))
 	)
 	(port
 		(pt 408 64)
 		(output)
 		(text "frame_start_o" (rect 0 0 74 11)(font "Arial" ))
-		(text "frame_start_o" (rect 325 59 387 70)(font "Arial" ))
+		(text "frame_start_o" (rect 325 59 399 70)(font "Arial" ))
 		(line (pt 408 64)(pt 392 64))
 	)
 	(port
 		(pt 408 80)
 		(output)
 		(text "request_port_identity_o[79..0]" (rect 0 0 160 11)(font "Arial" ))
-		(text "request_port_identity_o[79..0]" (rect 252 75 387 86)(font "Arial" ))
+		(text "request_port_identity_o[79..0]" (rect 252 75 412 86)(font "Arial" ))
 		(line (pt 408 80)(pt 392 80)(line_width 3))
 	)
 	(port
 		(pt 408 96)
 		(output)
 		(text "timestamp_seconds_o[47..0]" (rect 0 0 153 11)(font "Arial" ))
-		(text "timestamp_seconds_o[47..0]" (rect 258 91 387 102)(font "Arial" ))
+		(text "timestamp_seconds_o[47..0]" (rect 258 91 411 102)(font "Arial" ))
 		(line (pt 408 96)(pt 392 96)(line_width 3))
 	)
 	(port
 		(pt 408 112)
 		(output)
 		(text "timestamp_nanoseconds_o[31..0]" (rect 0 0 180 11)(font "Arial" ))
-		(text "timestamp_nanoseconds_o[31..0]" (rect 235 107 387 118)(font "Arial" ))
+		(text "timestamp_nanoseconds_o[31..0]" (rect 235 107 415 118)(font "Arial" ))
 		(line (pt 408 112)(pt 392 112)(line_width 3))
 	)
 	(port
 		(pt 408 128)
 		(output)
 		(text "t3_valid_o" (rect 0 0 54 11)(font "Arial" ))
-		(text "t3_valid_o" (rect 342 123 387 134)(font "Arial" ))
+		(text "t3_valid_o" (rect 342 123 396 134)(font "Arial" ))
 		(line (pt 408 128)(pt 392 128))
 	)
 	(drawing
@@ -2776,28 +2776,28 @@ on the Quartus Prime software download page.
 		(pt 408 32)
 		(output)
 		(text "tx_enable" (rect 0 0 51 11)(font "Arial" ))
-		(text "tx_enable" (rect 344 27 387 38)(font "Arial" ))
+		(text "tx_enable" (rect 344 27 395 38)(font "Arial" ))
 		(line (pt 408 32)(pt 392 32))
 	)
 	(port
 		(pt 408 48)
 		(output)
 		(text "tx_data[7..0]" (rect 0 0 68 11)(font "Arial" ))
-		(text "tx_data[7..0]" (rect 330 43 387 54)(font "Arial" ))
+		(text "tx_data[7..0]" (rect 330 43 398 54)(font "Arial" ))
 		(line (pt 408 48)(pt 392 48)(line_width 3))
 	)
 	(port
 		(pt 408 64)
 		(output)
 		(text "tx_ready_timestamp_seconds_o[47..0]" (rect 0 0 205 11)(font "Arial" ))
-		(text "tx_ready_timestamp_seconds_o[47..0]" (rect 214 59 387 70)(font "Arial" ))
+		(text "tx_ready_timestamp_seconds_o[47..0]" (rect 214 59 419 70)(font "Arial" ))
 		(line (pt 408 64)(pt 392 64)(line_width 3))
 	)
 	(port
 		(pt 408 80)
 		(output)
 		(text "tx_ready_timestamp_nanoseconds_o[31..0]" (rect 0 0 231 11)(font "Arial" ))
-		(text "tx_ready_timestamp_nanoseconds_o[31..0]" (rect 192 75 387 86)(font "Arial" ))
+		(text "tx_ready_timestamp_nanoseconds_o[31..0]" (rect 192 75 423 86)(font "Arial" ))
 		(line (pt 408 80)(pt 392 80)(line_width 3))
 	)
 	(drawing
@@ -2906,98 +2906,98 @@ on the Quartus Prime software download page.
 		(pt 448 32)
 		(output)
 		(text "ram_read_address[10..0]" (rect 0 0 133 11)(font "Arial" ))
-		(text "ram_read_address[10..0]" (rect 315 27 427 38)(font "Arial" ))
+		(text "ram_read_address[10..0]" (rect 315 27 448 38)(font "Arial" ))
 		(line (pt 448 32)(pt 432 32)(line_width 3))
 	)
 	(port
 		(pt 448 48)
 		(output)
 		(text "rx_timestamp_seconds_o[47..0]" (rect 0 0 169 11)(font "Arial" ))
-		(text "rx_timestamp_seconds_o[47..0]" (rect 284 43 427 54)(font "Arial" ))
+		(text "rx_timestamp_seconds_o[47..0]" (rect 284 43 453 54)(font "Arial" ))
 		(line (pt 448 48)(pt 432 48)(line_width 3))
 	)
 	(port
 		(pt 448 64)
 		(output)
 		(text "rx_timestamp_nanoseconds_o[31..0]" (rect 0 0 195 11)(font "Arial" ))
-		(text "rx_timestamp_nanoseconds_o[31..0]" (rect 262 59 427 70)(font "Arial" ))
+		(text "rx_timestamp_nanoseconds_o[31..0]" (rect 262 59 457 70)(font "Arial" ))
 		(line (pt 448 64)(pt 432 64)(line_width 3))
 	)
 	(port
 		(pt 448 80)
 		(output)
 		(text "rx_follower_identity_o[79..0]" (rect 0 0 151 11)(font "Arial" ))
-		(text "rx_follower_identity_o[79..0]" (rect 300 75 427 86)(font "Arial" ))
+		(text "rx_follower_identity_o[79..0]" (rect 300 75 451 86)(font "Arial" ))
 		(line (pt 448 80)(pt 432 80)(line_width 3))
 	)
 	(port
 		(pt 448 96)
 		(output)
 		(text "send_delay_resp_o" (rect 0 0 100 11)(font "Arial" ))
-		(text "send_delay_resp_o" (rect 343 91 427 102)(font "Arial" ))
+		(text "send_delay_resp_o" (rect 343 91 443 102)(font "Arial" ))
 		(line (pt 448 96)(pt 432 96))
 	)
 	(port
 		(pt 448 112)
 		(output)
 		(text "sequence_id_o[15..0]" (rect 0 0 113 11)(font "Arial" ))
-		(text "sequence_id_o[15..0]" (rect 332 107 427 118)(font "Arial" ))
+		(text "sequence_id_o[15..0]" (rect 332 107 445 118)(font "Arial" ))
 		(line (pt 448 112)(pt 432 112)(line_width 3))
 	)
 	(port
 		(pt 448 128)
 		(output)
 		(text "send_delay_req_o" (rect 0 0 95 11)(font "Arial" ))
-		(text "send_delay_req_o" (rect 347 123 427 134)(font "Arial" ))
+		(text "send_delay_req_o" (rect 347 123 442 134)(font "Arial" ))
 		(line (pt 448 128)(pt 432 128))
 	)
 	(port
 		(pt 448 144)
 		(output)
 		(text "mean_path_delay_ns_o[63..0]" (rect 0 0 159 11)(font "Arial" ))
-		(text "mean_path_delay_ns_o[63..0]" (rect 293 139 427 150)(font "Arial" ))
+		(text "mean_path_delay_ns_o[63..0]" (rect 293 139 452 150)(font "Arial" ))
 		(line (pt 448 144)(pt 432 144)(line_width 3))
 	)
 	(port
 		(pt 448 160)
 		(output)
 		(text "offset_from_master_ns_o[63..0]" (rect 0 0 167 11)(font "Arial" ))
-		(text "offset_from_master_ns_o[63..0]" (rect 286 155 427 166)(font "Arial" ))
+		(text "offset_from_master_ns_o[63..0]" (rect 286 155 453 166)(font "Arial" ))
 		(line (pt 448 160)(pt 432 160)(line_width 3))
 	)
 	(port
 		(pt 448 176)
 		(output)
 		(text "ptp_calc_valid_o" (rect 0 0 87 11)(font "Arial" ))
-		(text "ptp_calc_valid_o" (rect 354 171 427 182)(font "Arial" ))
+		(text "ptp_calc_valid_o" (rect 354 171 441 182)(font "Arial" ))
 		(line (pt 448 176)(pt 432 176))
 	)
 	(port
 		(pt 448 192)
 		(output)
 		(text "clock_set_o" (rect 0 0 61 11)(font "Arial" ))
-		(text "clock_set_o" (rect 376 187 427 198)(font "Arial" ))
+		(text "clock_set_o" (rect 376 187 437 198)(font "Arial" ))
 		(line (pt 448 192)(pt 432 192))
 	)
 	(port
 		(pt 448 208)
 		(output)
 		(text "clock_configured_o" (rect 0 0 101 11)(font "Arial" ))
-		(text "clock_configured_o" (rect 342 203 427 214)(font "Arial" ))
+		(text "clock_configured_o" (rect 342 203 443 214)(font "Arial" ))
 		(line (pt 448 208)(pt 432 208))
 	)
 	(port
 		(pt 448 224)
 		(output)
 		(text "clock_configure_timestamp_seconds_o[47..0]" (rect 0 0 241 11)(font "Arial" ))
-		(text "clock_configure_timestamp_seconds_o[47..0]" (rect 223 219 427 230)(font "Arial" ))
+		(text "clock_configure_timestamp_seconds_o[47..0]" (rect 223 219 464 230)(font "Arial" ))
 		(line (pt 448 224)(pt 432 224)(line_width 3))
 	)
 	(port
 		(pt 448 240)
 		(output)
 		(text "clock_configure_timestamp_nanoseconds_o[31..0]" (rect 0 0 267 11)(font "Arial" ))
-		(text "clock_configure_timestamp_nanoseconds_o[31..0]" (rect 201 235 427 246)(font "Arial" ))
+		(text "clock_configure_timestamp_nanoseconds_o[31..0]" (rect 201 235 468 246)(font "Arial" ))
 		(line (pt 448 240)(pt 432 240)(line_width 3))
 	)
 	(drawing
@@ -3176,50 +3176,9 @@ on the Quartus Prime software download page.
 		(text "integral_o[63..0]" (rect 217 107 305 118)(font "Arial" ))
 		(line (pt 312 112)(pt 296 112)(line_width 3))
 	)
-	(parameter
-		"KP_GAIN"
-		"8"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"KI_GAIN"
-		"1"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"GAIN_SHIFT"
-		"8"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"FILTER_SHIFT"
-		"3"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"WARMUP_SAMPLES"
-		"8"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"LOCK_THRESHOLD_NS"
-		"1000"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"UNLOCK_THRESHOLD_NS"
-		"10000"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"LOCK_COUNT_THRESHOLD"
-		"4"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
 		(rectangle (rect 16 16 296 128))
 	)
-	(annotation_block (parameter)(rect 2696 1280 2972 1397))
 )
 (connector
 	(pt 2104 336)

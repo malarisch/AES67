@@ -422,6 +422,7 @@ begin
                         -- Sync Message
                         -- Handle Sync message processing here
                         if (is_leader = '0') then
+                            
                             active_sequence_id := ptp_sequence_id;
                             stored_t2_seconds <= latched_rx_timestamp_seconds;
                             stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
@@ -447,6 +448,13 @@ begin
                         if (is_leader = '0') then
                             -- Handle Follow_Up message processing here
                             if ptp_sequence_id = active_sequence_id then
+                                if (clock_configured = '0') then
+                                    -- First sync: Set clock to master time and wait for next full cycle
+                                    clock_set_o <= '1';
+                                    clock_configured <= '1';
+                                    clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
+                                    clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
+                                end if;
                                 -- T1: Origin timestamp from Follow_Up (when Master sent Sync)
                                 stored_t1_seconds <= ptp_origin_timestamp_seconds;
                                 stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
@@ -465,25 +473,10 @@ begin
                                 stored_t4_seconds <= ptp_origin_timestamp_seconds;
                                 stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                 
-                                if (clock_configured = '0') then
-                                    -- First sync: Set clock to master time and wait for next full cycle
-                                    clock_set_o <= '1';
-                                    clock_configured <= '1';
-                                    clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
-                                    clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
+
+   
                                     
-                                    -- IMPORTANT: Invalidate all timestamps!
-                                    -- After clock set, old t1/t2/t3 are meaningless
-                                    -- We need a fresh PTP cycle with the new clock base
-                                    active_sequence_id := (others => '1');  -- Force mismatch until new Sync
-                                    stored_t1_seconds <= (others => '0');
-                                    stored_t1_nanoseconds <= (others => '0');
-                                    stored_t2_seconds <= (others => '0');
-                                    stored_t2_nanoseconds <= (others => '0');
-                                    stored_t3_seconds <= (others => '0');
-                                    stored_t3_nanoseconds <= (others => '0');
-                                    
-                                else
+
                                     -- ============================================
                                     -- Calculate Mean Path Delay and Offset
                                     -- Formula: 
@@ -514,7 +507,7 @@ begin
                                     offset_from_master_ns_o <= shift_right(delta_master_to_slave - delta_slave_to_master, 1);
                                     
                                     ptp_calc_valid_o <= '1';
-                                end if;
+
                             end if;
                         end if;
                         null;

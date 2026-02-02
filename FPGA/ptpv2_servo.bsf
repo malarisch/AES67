@@ -102,18 +102,13 @@ on the Quartus Prime software download page.
 		(line (pt 312 112)(pt 296 112)(line_width 3))
 	)
 	(parameter
-		"KP_GAIN"
-		"8"
+		"SYNC_INTERVAL_NS"
+		"1000000000"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
-		"KI_GAIN"
-		"1"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"GAIN_SHIFT"
-		"6"
+		"FF_CORR_SHIFT"
+		"3"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
@@ -123,7 +118,7 @@ on the Quartus Prime software download page.
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"WARMUP_SAMPLES"
-		"4"
+		"2"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter

@@ -27,12 +27,12 @@ entity ptpv2_servo is
         -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2)
         -- WARNING: Values too high cause oscillation!
         KP_GAIN : integer := 8;    -- Proportional gain numerator
-        KI_GAIN : integer := 1;    -- Integral gain numerator  
+        KI_GAIN : integer := 2;    -- Integral gain numerator  
         GAIN_SHIFT : integer := 7; -- Divide gains by 128 (Kp=0.0625, Ki=0.002)
         
         -- Filter coefficient for offset (exponential moving average)
         -- alpha = 1/2^FILTER_SHIFT. Higher = more smoothing, slower response
-        FILTER_SHIFT : integer := 4;  -- alpha = 1/16 (more smoothing)
+        FILTER_SHIFT : integer := 2;  -- alpha = 1/8 (more smoothing)
         
         -- Warmup: ignore first N samples to let filter settle
         WARMUP_SAMPLES : integer := 8;
