@@ -23,17 +23,20 @@ use ieee.numeric_std.all;
 entity ptpv2_servo is
     generic(
         -- PI controller gains
+        -- todo: tune a bit better, oscillates a bit currently (-70 to +70 ns max)
+
+
         -- Effective Kp = KP_GAIN / 2^GAIN_SHIFT
         -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2)
         -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
         -- freq_correction acts for full second, so Kp=1 means 100% correction = oscillation
-        KP_GAIN : integer := 24;   -- Proportional gain numerator → Kp = 0.375
-        KI_GAIN : integer := 4;    -- Integral gain numerator → Ki = 0.016
-        GAIN_SHIFT : integer := 6; -- Divide gains by 64
+        KP_GAIN : integer := 17;   -- Proportional gain numerator 
+        KI_GAIN : integer := 4;    -- Integral gain numerator
+        GAIN_SHIFT : integer := 6; -- Divide gains
         
         -- Filter coefficient for offset (exponential moving average)
         -- No filter needed if Kp is properly tuned
-        FILTER_SHIFT : integer := 1;  -- alpha = 0.5 (light filtering)
+        FILTER_SHIFT : integer := 1;  -- alpha
         
         -- Warmup: ignore first N samples to let filter settle
         WARMUP_SAMPLES : integer := 1;  -- Quick start
@@ -213,9 +216,18 @@ begin
                             proportional := -shift_right(mult_result, GAIN_SHIFT);
                             
                             -- Integral term: Accumulate filtered offset (also inverted)
-                            -- With anti-windup: limit to ±1 billion PPB (±1000 PPM)
-                            if integral_sum > to_signed(-1_000_000_000, 64) and 
-                               integral_sum < to_signed(1_000_000_000, 64) then
+                            -- Anti-windup: limit to ±500000 PPB (same as output limit!)
+                            -- This prevents integrator from winding up beyond useful range
+                            if integral_sum > to_signed(-500_000, 64) and 
+                               integral_sum < to_signed(500_000, 64) then
+                                mult_result := scaled_offset * to_signed(KI_GAIN, 32);
+                                integral_sum <= integral_sum - shift_right(mult_result, GAIN_SHIFT + 2);
+                            elsif integral_sum >= to_signed(500_000, 64) and scaled_offset > 0 then
+                                -- At positive limit but offset is positive, let it decrease
+                                mult_result := scaled_offset * to_signed(KI_GAIN, 32);
+                                integral_sum <= integral_sum - shift_right(mult_result, GAIN_SHIFT + 2);
+                            elsif integral_sum <= to_signed(-500_000, 64) and scaled_offset < 0 then
+                                -- At negative limit but offset is negative, let it increase
                                 mult_result := scaled_offset * to_signed(KI_GAIN, 32);
                                 integral_sum <= integral_sum - shift_right(mult_result, GAIN_SHIFT + 2);
                             end if;
