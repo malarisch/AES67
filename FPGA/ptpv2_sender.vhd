@@ -221,7 +221,11 @@ begin
 				udp_frame(2) <= x"5e";
 				udp_frame(3) <= x"00";
 				udp_frame(4) <= x"01";
-				udp_frame(5) <= x"81"; -- standard PTP-multicast MAC-address LSB for 224.0.1.129
+				if (current_message_type = t_Pdelay_Req) or (current_message_type = t_Pdelay_Resp) or (current_message_type = t_Pdelay_Follow_Up) then
+				    udp_frame(5) <= x"6b"; -- standard Pdelay MAC-address LSB for 224.0.0.107
+				else
+					udp_frame(5) <= x"81"; -- standard PTP-multicast MAC-address LSB for 224.0.1.129
+				end if;
 
 				udp_frame(6) <= src_mac_address(47 downto 40); -- MSB contains typical left side of MAC
 				udp_frame(7) <= src_mac_address(39 downto 32);
@@ -256,8 +260,11 @@ begin
 				udp_frame(30) <= x"E0"; -- 224
 				udp_frame(31) <= x"00"; -- 0
 				udp_frame(32) <= x"01"; -- 1
-				udp_frame(33) <= x"81"; -- 129
-				
+				if (current_message_type = t_Pdelay_Req) or (current_message_type = t_Pdelay_Resp) or (current_message_type = t_Pdelay_Follow_Up) then
+					udp_frame(33) <= x"6b"; -- 107
+				else				
+					udp_frame(33) <= x"81"; -- 129
+				end if;
 
 				-- UDP HEADER (8 bytes)
 				udp_frame(34) <= x"01";
@@ -321,8 +328,14 @@ begin
                             
                     when t_Delay_Resp =>
                         udp_frame(74) <= x"03";
+					when t_Pdelay_Req =>
+						udp_frame(74) <= x"05"; -- 32 controlField
+					when t_Pdelay_Follow_Up =>
+						udp_frame(74) <= x"05"; -- 32 controlField
+					when t_Pdelay_Resp =>
+						udp_frame(74) <= x"05"; -- 32 controlField
                     when others =>
-                        udp_frame(74) <= x"05"; -- 32 controlField -- 0x02 for Delay_Req, Sync, Follow_Up, Announce
+                        udp_frame(74) <= x"02"; -- 32 controlField -- 0x02 for Delay_Req, Sync, Follow_Up, Announce
 
                         -- TODO: Later add 0x04 for management messagess
                 end case;
@@ -337,7 +350,7 @@ begin
 				udp_frame(83) <= std_logic_vector(timestamp_nsec_sync(23 downto 16)); -- 41 1 originTimestamp nanoseconds
 				udp_frame(84) <= std_logic_vector(timestamp_nsec_sync(15 downto 8)); -- 42 2 originTimestamp nanoseconds
 				udp_frame(85) <= std_logic_vector(timestamp_nsec_sync(7 downto 0)); -- 43 3 originTimestamp nanoseconds
-                if (current_message_type = t_Delay_Resp) then
+                if (current_message_type = t_Delay_Resp or current_message_type = t_Pdelay_Resp) then
                     udp_frame(86) <= std_logic_vector(req_port_id_sync(79 downto 72)); -- 44 0 requestingPortIdentity
                     udp_frame(87) <= std_logic_vector(req_port_id_sync(71 downto 64)); -- 45 1 requestingPortIdentity
                     udp_frame(88) <= std_logic_vector(req_port_id_sync(63 downto 56)); -- 46 2 requestingPortIdentity

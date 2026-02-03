@@ -44,9 +44,18 @@ entity ptpv2_controller is
                               
                               f_Send_Delay_Req, f_Wait_for_Delay_Req_Ack, f_Wait_for_Delay_Req_Done);
 
+    type t_state_p2p_delay is (p2p_Idle,
+                                 p2p_Send_Pdelay_Req, p2p_Wait_for_Pdelay_Req_Ack, p2p_Wait_for_Pdelay_Req_Done,
+                                 p2p_Send_Pdelay_Resp, p2p_Wait_for_Pdelay_Resp_Ack, p2p_Wait_for_Pdelay_Resp_Done,
+                                 p2p_Send_Pdelay_Follow_Up, p2p_Wait_for_Pdelay_Follow_Up_Ack, p2p_Wait_for_Pdelay_Follow_Up_Done);
+                                 
+    type t_state_controller is (c_Idle, c_Leader, c_Follower, c_Leader_Lost, c_Run_BMC);
+
     signal leader_state : t_state_leader := s_Idle;
 
     signal follower_state : t_state_follower := f_Idle;
+    signal p2p_state: t_state_p2p_delay := p2p_Idle;
+    signal c_state: t_state_controller := c_Idle;
 
     signal sequence_id_reg : unsigned(15 downto 0) := (others => '0');
     signal tx_started : std_logic := '0';       -- Flag: have we seen tx_en go high?
@@ -140,6 +149,74 @@ begin
             else
                 is_leader <= '0';
             end if;
+
+            case c_state is
+                when c_Idle =>
+                    if (is_leader_override_i = '1') then
+                        c_state <= c_Leader;
+                    else 
+                        c_state <= c_Run_BMC;
+                    end if;
+
+                when c_Leader =>
+                    -- Leader state
+                    c_state <= c_Leader;  -- Stay in leader state
+                    is_leader <= '1';
+
+                when c_Follower =>
+                    -- Follower state
+                    c_state <= c_Follower;  -- Stay in follower state
+                    is_leader <= '0';
+
+                when c_Leader_Lost =>
+                    -- Lost leadership - transition to follower
+                    c_state <= c_Run_BMC;
+
+                when c_Run_BMC =>
+                    -- Run Best Master Clock algorithm (not implemented here)
+                    c_state <= c_Idle;
+
+                when others =>
+                    c_state <= c_Idle;
+            end case;
+
+
+            case p2p_state is
+                when p2p_Idle =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Idle;
+                when p2p_Send_Pdelay_Req =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Idle;
+                when p2p_Wait_for_Pdelay_Req_Ack =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Idle;
+                when p2p_Wait_for_Pdelay_Req_Done =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Idle;
+                when p2p_Send_Pdelay_Resp =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Wait_for_Pdelay_Resp_Ack;
+                when p2p_Wait_for_Pdelay_Resp_Ack =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Wait_for_Pdelay_Resp_Done;
+                when p2p_Wait_for_Pdelay_Resp_Done =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Send_Pdelay_Follow_Up;
+                when p2p_Send_Pdelay_Follow_Up =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Wait_for_Pdelay_Follow_Up_Ack;
+                when p2p_Wait_for_Pdelay_Follow_Up_Ack =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Wait_for_Pdelay_Follow_Up_Done;
+                when p2p_Wait_for_Pdelay_Follow_Up_Done =>
+                    -- P2P delay mechanism not implemented yet
+                    p2p_state <= p2p_Idle;
+                when others =>
+                    p2p_state <= p2p_Idle;
+            end case;
+
+
 
             if (is_leader = '1') then
                 -- Leader logic - simple state machine

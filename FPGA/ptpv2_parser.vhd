@@ -152,6 +152,17 @@ architecture Behavioral of ptpv2_parser is
     signal ptp_origin_timestamp_seconds: std_logic_vector(47 downto 0);
     signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
 
+    signal ptp_announce_current_utc_offset: std_logic_vector(15 downto 0);
+    signal ptp_announce_grandmaster_priority1: std_logic_vector(7 downto 0);
+    signal ptp_announce_grandmaster_priority2: std_logic_vector(7 downto 0);
+    signal ptp_announce_grandmaster_clockClass: std_logic_vector(7 downto 0);
+    signal ptp_announce_grandmaster_clockAccuracy: std_logic_vector(7 downto 0);
+    signal ptp_announce_grandmaster_offset_scaled_log_variance: std_logic_vector(15 downto 0);
+    signal ptp_announce_steps_removed: std_logic_vector(15 downto 0);
+    signal ptp_announce_time_source: std_logic_vector(7 downto 0);
+    signal ptp_clock_identity: std_logic_vector(63 downto 0);
+    
+
     -- ============================================================
     -- PTP Timestamp Storage (as signals for use with procedure)
     -- ============================================================
@@ -417,6 +428,52 @@ begin
                             requesting_port_identity(15 downto 8) := ram_data;
                         when 95 =>
                             requesting_port_identity(7 downto 0) := ram_data;
+                        when others =>
+                            null;
+                    end case;
+                end if;
+                if (get_message_type(ptp_message_type(3 downto 0)) = t_Announce) then
+                    -- Announce message additional fields
+                    message_length := 105; -- Announce messages are longer
+                    case byte_counter is
+                        when 86 =>
+                            ptp_announce_current_utc_offset(15 downto 8) <= ram_data;
+                        when 87 =>
+                            ptp_announce_current_utc_offset(7 downto 0) <= ram_data;
+                        when 89 =>
+                            ptp_announce_grandmaster_priority1(7 downto 0) <= ram_data;
+                        when 90 =>
+                            ptp_announce_grandmaster_clockClass(7 downto 0) <= ram_data;
+                        when 91 =>
+                            ptp_announce_grandmaster_clockAccuracy(7 downto 0) <= ram_data;
+                        when 92 =>
+                            ptp_announce_grandmaster_offset_scaled_log_variance(15 downto 8) <= ram_data;
+                        when 93 =>
+                            ptp_announce_grandmaster_offset_scaled_log_variance(7 downto 0) <= ram_data;
+                        when 94 =>
+                            ptp_announce_grandmaster_priority2(7 downto 0) <= ram_data;
+                        when 95 =>
+                            ptp_clock_identity(63 downto 56) <= ram_data;
+                        when 96 =>
+                            ptp_clock_identity(55 downto 48) <= ram_data;
+                        when 97 =>
+                            ptp_clock_identity(47 downto 40) <= ram_data;
+                        when 98 =>
+                            ptp_clock_identity(39 downto 32) <= ram_data;
+                        when 99 =>
+                            ptp_clock_identity(31 downto 24) <= ram_data;
+                        when 100 =>
+                            ptp_clock_identity(23 downto 16) <= ram_data;
+                        when 101 =>
+                            ptp_clock_identity(15 downto 8) <= ram_data;
+                        when 102 =>
+                            ptp_clock_identity(7 downto 0) <= ram_data;
+                        when 103 =>
+                            ptp_announce_steps_removed(15 downto 8) <= ram_data;
+                        when 104 =>
+                            ptp_announce_steps_removed(7 downto 0) <= ram_data;
+                        when 105 =>
+                            ptp_announce_time_source(7 downto 0) <= ram_data;
                         when others =>
                             null;
                     end case;

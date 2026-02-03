@@ -90,7 +90,7 @@ architecture Behavioral of ptpv2_servo is
     
     -- Phase jump threshold: if offset > this, do phase jump instead of frequency correction
     -- Set low enough to quickly correct initial offset from parser (~100µs)
-    constant PHASE_JUMP_THRESHOLD : signed(63 downto 0) := to_signed(10_000, 64);  -- 10µs (was 10ms!)
+    constant PHASE_JUMP_THRESHOLD : signed(63 downto 0) := to_signed(100_000, 64);  -- 10µs (was 10ms!)
     
     -- Phase jump output registers
     signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
