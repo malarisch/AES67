@@ -173,6 +173,20 @@ set_clock_groups -asynchronous -group [get_clocks {altera_reserved_tck}]
 # Set False Path
 #**************************************************************
 
+# ============================================================
+# PTPv2 CDC False Paths
+# These paths cross clock domains and use proper synchronizers.
+# The timing analyzer should not try to meet timing on these paths.
+# ============================================================
+
+# TX timestamp CDC: from MAC TX clock to system clock
+# These signals are sampled only when tx_en falling edge indicates stable data
+set_false_path -from [get_registers {*ptpv2_sender*tx_ready_timestamp*}] -to [get_registers {*ptpv2_controller*tx_ready_ts*}]
+set_false_path -from [get_registers {*ptpv2_sender*tx_en*}] -to [get_registers {*ptpv2_controller*tx_en_i_meta*}]
+
+# Parse PTP packet signal CDC: from ethernet_packet_parser to ptpv2_parser
+set_false_path -to [get_registers {*ptpv2_parser*parse_ptp_packet_meta*}]
+
 
 
 #**************************************************************

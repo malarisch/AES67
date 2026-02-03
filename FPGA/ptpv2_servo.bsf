@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 328 160)
+	(rect 16 16 344 192)
 	(text "ptpv2_servo" (rect 5 0 56 12)(font "Arial" ))
-	(text "inst" (rect 8 128 20 140)(font "Arial" ))
+	(text "inst" (rect 8 160 20 172)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -60,84 +60,122 @@ on the Quartus Prime software download page.
 		(line (pt 0 96)(pt 16 96)(line_width 1))
 	)
 	(port
-		(pt 312 32)
+		(pt 0 112)
+		(input)
+		(text "log_msg_interval_i[7..0]" (rect 0 0 95 12)(font "Arial" ))
+		(text "log_msg_interval_i[7..0]" (rect 21 107 116 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "log_msg_interval_valid_i" (rect 0 0 99 12)(font "Arial" ))
+		(text "log_msg_interval_valid_i" (rect 21 123 120 135)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 1))
+	)
+	(port
+		(pt 328 32)
 		(output)
 		(text "freq_correction_o[31..0]" (rect 0 0 95 12)(font "Arial" ))
-		(text "freq_correction_o[31..0]" (rect 196 27 291 39)(font "Arial" ))
-		(line (pt 312 32)(pt 296 32)(line_width 3))
+		(text "freq_correction_o[31..0]" (rect 212 27 307 39)(font "Arial" ))
+		(line (pt 328 32)(pt 312 32)(line_width 3))
 	)
 	(port
-		(pt 312 48)
+		(pt 328 48)
 		(output)
 		(text "phase_jump_o[31..0]" (rect 0 0 82 12)(font "Arial" ))
-		(text "phase_jump_o[31..0]" (rect 209 43 291 55)(font "Arial" ))
-		(line (pt 312 48)(pt 296 48)(line_width 3))
+		(text "phase_jump_o[31..0]" (rect 225 43 307 55)(font "Arial" ))
+		(line (pt 328 48)(pt 312 48)(line_width 3))
 	)
 	(port
-		(pt 312 64)
+		(pt 328 64)
 		(output)
 		(text "phase_jump_valid_o" (rect 0 0 82 12)(font "Arial" ))
-		(text "phase_jump_valid_o" (rect 209 59 291 71)(font "Arial" ))
-		(line (pt 312 64)(pt 296 64)(line_width 1))
+		(text "phase_jump_valid_o" (rect 225 59 307 71)(font "Arial" ))
+		(line (pt 328 64)(pt 312 64)(line_width 1))
 	)
 	(port
-		(pt 312 80)
+		(pt 328 80)
 		(output)
 		(text "locked_o" (rect 0 0 35 12)(font "Arial" ))
-		(text "locked_o" (rect 256 75 291 87)(font "Arial" ))
-		(line (pt 312 80)(pt 296 80)(line_width 1))
+		(text "locked_o" (rect 272 75 307 87)(font "Arial" ))
+		(line (pt 328 80)(pt 312 80)(line_width 1))
 	)
 	(port
-		(pt 312 96)
+		(pt 328 96)
+		(output)
+		(text "sync_timeout_o" (rect 0 0 64 12)(font "Arial" ))
+		(text "sync_timeout_o" (rect 243 91 307 103)(font "Arial" ))
+		(line (pt 328 96)(pt 312 96)(line_width 1))
+	)
+	(port
+		(pt 328 112)
 		(output)
 		(text "filtered_offset_o[63..0]" (rect 0 0 90 12)(font "Arial" ))
-		(text "filtered_offset_o[63..0]" (rect 201 91 291 103)(font "Arial" ))
-		(line (pt 312 96)(pt 296 96)(line_width 3))
+		(text "filtered_offset_o[63..0]" (rect 217 107 307 119)(font "Arial" ))
+		(line (pt 328 112)(pt 312 112)(line_width 3))
 	)
 	(port
-		(pt 312 112)
+		(pt 328 128)
 		(output)
 		(text "integral_o[63..0]" (rect 0 0 62 12)(font "Arial" ))
-		(text "integral_o[63..0]" (rect 229 107 291 119)(font "Arial" ))
-		(line (pt 312 112)(pt 296 112)(line_width 3))
+		(text "integral_o[63..0]" (rect 245 123 307 135)(font "Arial" ))
+		(line (pt 328 128)(pt 312 128)(line_width 3))
+	)
+	(port
+		(pt 328 144)
+		(output)
+		(text "effective_gain_shift_o[3..0]" (rect 0 0 109 12)(font "Arial" ))
+		(text "effective_gain_shift_o[3..0]" (rect 198 139 307 151)(font "Arial" ))
+		(line (pt 328 144)(pt 312 144)(line_width 3))
 	)
 	(parameter
-		"SYNC_INTERVAL_NS"
-		"1000000000"
+		"KP_GAIN"
+		"17"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
-		"FF_CORR_SHIFT"
-		"3"
+		"KI_GAIN"
+		"4"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"GAIN_SHIFT"
+		"6"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"FILTER_SHIFT"
-		"3"
+		"1"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"WARMUP_SAMPLES"
-		"2"
+		"1"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"LOCK_THRESHOLD_NS"
-		"1000"
+		"500"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"UNLOCK_THRESHOLD_NS"
-		"10000"
+		"5000"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"LOCK_COUNT_THRESHOLD"
-		"8"
+		"2"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"CLOCK_FREQ_HZ"
+		"125000000"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
-		(rectangle (rect 16 16 296 128)(line_width 1))
+		(rectangle (rect 16 16 312 160)(line_width 1))
 	)
-	(annotation_block (parameter)(rect 328 -64 428 16))
+	(annotation_block (parameter)(rect 344 -64 444 16))
 )

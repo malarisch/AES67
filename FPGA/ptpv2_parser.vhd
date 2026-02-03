@@ -33,7 +33,9 @@ entity ptpv2_parser is
         -- PTP calculation outputs
         mean_path_delay_ns_o       : out signed(63 downto 0);  -- Mean path delay in nanoseconds (signed for negative values)
         offset_from_master_ns_o    : out signed(63 downto 0);  -- Offset from master in nanoseconds (signed)
-        ptp_calc_valid_o           : out std_logic;              -- Pulse when calculation is complete
+        ptp_calc_valid_o           : out std_logic;            -- Pulse when calculation is complete
+        log_msg_interval_o         : out signed(7 downto 0);   -- PTP logMessageInterval from last Sync/Follow_Up
+        log_msg_interval_valid_o   : out std_logic;            -- Pulse when log_msg_interval is updated (from Follow_Up)
 
         clock_set_o            : out std_logic;
         clock_configured_o   : out std_logic;
@@ -58,11 +60,36 @@ architecture Behavioral of ptpv2_parser is
     constant ONE_SECOND_NS_NEG  : signed(63 downto 0) := to_signed(-1_000_000_000, 64);
     constant TWO_SECONDS_NS_NEG : signed(63 downto 0) := to_signed(-2_000_000_000, 64);
     
-    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_Stage2, s_Calc_Stage3, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
     signal byte_counter   : integer range 0 to 1500 := 0;
 
     signal delay_resp_tx_en_reg : std_logic := '0';
+
+    -- ============================================================
+    -- PIPELINED PTP Calculation Registers
+    -- The original implementation had ALL calculations in one clock cycle,
+    -- causing timing violations and random "garbage" values.
+    -- 
+    -- Pipeline stages:
+    --   Stage 1: Latch all 4 timestamps into calc registers
+    --   Stage 2: Calculate deltas (T2-T1) and (T4-T3) 
+    --   Stage 3 (in s_Done): Calculate mean and offset, output result
+    -- ============================================================
+    
+    -- Stage 1: Latched timestamps for calculation (prevents input changes during calc)
+    signal calc_t1_sec  : std_logic_vector(47 downto 0) := (others => '0');
+    signal calc_t1_nsec : std_logic_vector(31 downto 0) := (others => '0');
+    signal calc_t2_sec  : std_logic_vector(47 downto 0) := (others => '0');
+    signal calc_t2_nsec : std_logic_vector(31 downto 0) := (others => '0');
+    signal calc_t3_sec  : std_logic_vector(47 downto 0) := (others => '0');
+    signal calc_t3_nsec : std_logic_vector(31 downto 0) := (others => '0');
+    signal calc_t4_sec  : std_logic_vector(47 downto 0) := (others => '0');
+    signal calc_t4_nsec : std_logic_vector(31 downto 0) := (others => '0');
+    
+    -- Stage 2: Intermediate delta results (registered)
+    signal delta_m2s_reg : signed(63 downto 0) := (others => '0');  -- T2 - T1
+    signal delta_s2m_reg : signed(63 downto 0) := (others => '0');  -- T4 - T3
 
     -- ============================================================
     -- PTP Calculation Function (DSP-FREE VERSION)
@@ -149,6 +176,7 @@ architecture Behavioral of ptpv2_parser is
     signal ptp_sequence_id: std_logic_vector(15 downto 0);
     signal ptp_control_field: std_logic_vector(7 downto 0);
     signal ptp_log_msg_interval: std_logic_vector(7 downto 0);
+    signal ptp_version: std_logic_vector(3 downto 0);  -- PTP version (lower 4 bits of byte 1)
     signal ptp_origin_timestamp_seconds: std_logic_vector(47 downto 0);
     signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
 
@@ -258,9 +286,8 @@ begin
         variable requesting_port_identity: std_logic_vector(79 downto 0);
         variable message_length: integer := 85;
         
-        -- Variables for PTP calculation (deltas only, no absolute times)
-        variable delta_master_to_slave : signed(63 downto 0);  -- t2 - t1
-        variable delta_slave_to_master : signed(63 downto 0);  -- t4 - t3
+        -- NOTE: delta_master_to_slave and delta_slave_to_master are now 
+        -- SIGNALS (delta_m2s_reg, delta_s2m_reg) for proper pipelining
     begin
         if reset_n = '0' then
             s_SM_PtpParser <= s_Idle;
@@ -271,6 +298,8 @@ begin
             ptp_calc_valid_o <= '0';
             mean_path_delay_ns_o <= (others => '0');
             offset_from_master_ns_o <= (others => '0');
+            log_msg_interval_o <= (others => '0');
+            log_msg_interval_valid_o <= '0';
 
             active_sequence_id := (others => '0');
             stored_t1_seconds <= (others => '0');
@@ -282,6 +311,18 @@ begin
             stored_t4_seconds <= (others => '0');
             stored_t4_nanoseconds <= (others => '0');
 
+            -- Pipeline calculation registers
+            calc_t1_sec <= (others => '0');
+            calc_t1_nsec <= (others => '0');
+            calc_t2_sec <= (others => '0');
+            calc_t2_nsec <= (others => '0');
+            calc_t3_sec <= (others => '0');
+            calc_t3_nsec <= (others => '0');
+            calc_t4_sec <= (others => '0');
+            calc_t4_nsec <= (others => '0');
+            delta_m2s_reg <= (others => '0');
+            delta_s2m_reg <= (others => '0');
+
             clock_configure_timestamp_nanoseconds_o <= (others => '0');
             clock_configure_timestamp_seconds_o <= (others => '0');
             clock_configured <= '0';
@@ -290,9 +331,13 @@ begin
             send_delay_resp_o <= '0';
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
+            log_msg_interval_valid_o <= '0';
             clock_set_o <= '0';
             
             -- Capture T3 timestamp when valid
+            -- NOTE: t3_valid_i acts as a handshake signal from ptpv2_controller.
+            -- It pulses HIGH only AFTER the timestamp has been synchronized
+            -- across the clock domain, so we can safely sample here.
             if (t3_valid_i = '1') then
                 stored_t3_seconds <= tx_timestamp_seconds_i;
                 stored_t3_nanoseconds <= tx_timestamp_nanoseconds_i;
@@ -325,7 +370,9 @@ begin
                     when 39 =>
                         udp_length(7 downto 0) <= ram_data; -- UDP Length
                     when 42 =>
-                        ptp_message_type(7 downto 0) <= ram_data; -- PTP Message Type
+                        ptp_message_type(7 downto 0) <= ram_data; -- PTP Byte 0: majorSdoId(4) | messageType(4)
+                    when 43 =>
+                        ptp_version <= ram_data(3 downto 0); -- PTP Byte 1: reserved(4) | versionPTP(4)
                     when 44 =>
                         ptp_message_length(15 downto 8) <= ram_data; -- PTP Message Length
                     when 45 =>
@@ -488,55 +535,74 @@ begin
 
 
             elsif (s_SM_PtpParser = s_Interpret_Packet) then
-                -- interpret the PTPv2 packet based on message type (lower 4 bits only!)
-                -- PTP Byte 0: [ majorSdoId (4 bit) | messageType (4 bit) ]
-                case ptp_message_type(3 downto 0) is
-                    when x"0" =>
-                        -- Sync Message
-                        -- Handle Sync message processing here
-                        if (is_leader = '0') then
-                            
-                            active_sequence_id := ptp_sequence_id;
-                            stored_t2_seconds <= latched_rx_timestamp_seconds;
-                            stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
-                        end if;
-                    when x"1" =>
-                        -- Delay_Req Message
-                        if is_leader = '1' then
-                            -- Prepare Delay_Resp message
-                            rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
-                            rx_timestamp_seconds_o <= latched_rx_timestamp_seconds;
-                            rx_timestamp_nanoseconds_o <= latched_rx_timestamp_nanoseconds;
-                            sequence_id_o <= ptp_sequence_id;
-                            send_delay_resp_o <= '1';
-                        end if;
-                    when x"2" =>
-                        -- Pdelay_Req Message
-                        null;
-                    when x"3" =>
-                        -- Pdelay_Resp Message
-                        null;
-                    when x"8" =>
-                        -- Follow_Up Message
-                        if (is_leader = '0') then
-                            -- Handle Follow_Up message processing here
-                            if ptp_sequence_id = active_sequence_id then
-                                if (clock_configured = '0') then
-                                    -- First sync: Set clock to master time and wait for next full cycle
-                                    clock_set_o <= '1';
-                                    clock_configured <= '1';
-                                    clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
-                                    clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
-                                end if;
-                                -- T1: Origin timestamp from Follow_Up (when Master sent Sync)
-                                stored_t1_seconds <= ptp_origin_timestamp_seconds;
-                                stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
-                                sequence_id_o <= ptp_sequence_id;
-                                send_delay_req_o <= '1';
+                -- ============================================
+                -- VERSION CHECK: Only accept PTPv2 packets!
+                -- PTPv1 uses same ports/multicast but different header format
+                -- ============================================
+                if ptp_version /= x"2" then
+                    -- Not PTPv2 - discard packet silently
+                    s_SM_PtpParser <= s_Done;
+                else
+                    -- interpret the PTPv2 packet based on message type (lower 4 bits only!)
+                    -- PTP Byte 0: [ majorSdoId (4 bit) | messageType (4 bit) ]
+                    case ptp_message_type(3 downto 0) is
+                        when x"0" =>
+                            -- Sync Message
+                            -- Handle Sync message processing here
+                            if (is_leader = '0') then
+                                active_sequence_id := ptp_sequence_id;
+                                stored_t2_seconds <= latched_rx_timestamp_seconds;
+                                stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
                             end if;
-                        end if;
-                        null;
-                    when x"9" =>
+                            s_SM_PtpParser <= s_Done;
+                            
+                        when x"1" =>
+                            -- Delay_Req Message
+                            if is_leader = '1' then
+                                -- Prepare Delay_Resp message
+                                rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
+                                rx_timestamp_seconds_o <= latched_rx_timestamp_seconds;
+                                rx_timestamp_nanoseconds_o <= latched_rx_timestamp_nanoseconds;
+                                sequence_id_o <= ptp_sequence_id;
+                                send_delay_resp_o <= '1';
+                            end if;
+                            s_SM_PtpParser <= s_Done;
+                            
+                        when x"2" =>
+                            -- Pdelay_Req Message
+                            s_SM_PtpParser <= s_Done;
+                            
+                        when x"3" =>
+                            -- Pdelay_Resp Message
+                            s_SM_PtpParser <= s_Done;
+                            
+                        when x"8" =>
+                            -- Follow_Up Message
+                            if (is_leader = '0') then
+                                -- Always update log_msg_interval from Follow_Up - this is the master's sync rate
+                                -- Do this BEFORE sequence ID check so we track the rate even if we miss packets
+                                log_msg_interval_o <= signed(ptp_log_msg_interval);
+                                log_msg_interval_valid_o <= '1';
+                            
+                                -- Handle Follow_Up message processing here
+                                if ptp_sequence_id = active_sequence_id then
+                                    if (clock_configured = '0') then
+                                        -- First sync: Set clock to master time and wait for next full cycle
+                                        clock_set_o <= '1';
+                                        clock_configured <= '1';
+                                        clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
+                                        clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
+                                    end if;
+                                    -- T1: Origin timestamp from Follow_Up (when Master sent Sync)
+                                    stored_t1_seconds <= ptp_origin_timestamp_seconds;
+                                    stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
+                                    sequence_id_o <= ptp_sequence_id;
+                                    send_delay_req_o <= '1';
+                                end if;
+                            end if;
+                            s_SM_PtpParser <= s_Done;
+                            
+                        when x"9" =>
                         -- Delay_resp Message
                         if (is_leader = '0') then
                             -- Handle Delay_Resp message processing here
@@ -546,62 +612,87 @@ begin
                                 stored_t4_seconds <= ptp_origin_timestamp_seconds;
                                 stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                 
-
-   
-                                    
-
-                                    -- ============================================
-                                    -- Calculate Mean Path Delay and Offset
-                                    -- Formula: 
-                                    --   mean_path_delay = ((t2 - t1) + (t4 - t3)) / 2
-                                    --   offset = ((t2 - t1) - (t4 - t3)) / 2
-                                    -- 
-                                    -- Using timestamp_diff_ns to avoid overflow with
-                                    -- large absolute timestamps (Unix time ~1.7 billion seconds)
-                                    -- ============================================
-                                    
-                                    -- Calculate deltas directly using difference function
-                                    -- delta_master_to_slave = t2 - t1
-                                    delta_master_to_slave := timestamp_diff_ns(
-                                        stored_t2_seconds, stored_t2_nanoseconds,
-                                        stored_t1_seconds, stored_t1_nanoseconds
-                                    );
-                                    
-                                    -- delta_slave_to_master = t4 - t3
-                                    delta_slave_to_master := timestamp_diff_ns(
-                                        ptp_origin_timestamp_seconds, ptp_origin_timestamp_nanoseconds,
-                                        stored_t3_seconds, stored_t3_nanoseconds
-                                    );
-                                    
-                                    -- Mean path delay = ((t2-t1) + (t4-t3)) / 2
-                                    mean_path_delay_ns_o <= shift_right(delta_master_to_slave + delta_slave_to_master, 1);
-                                    
-                                    -- Offset from master = ((t2-t1) - (t4-t3)) / 2
-                                    offset_from_master_ns_o <= shift_right(delta_master_to_slave - delta_slave_to_master, 1);
-                                    
-                                    ptp_calc_valid_o <= '1';
-
+                                -- ============================================
+                                -- PIPELINED CALCULATION - Stage 1
+                                -- Latch all timestamps into calculation registers
+                                -- This prevents any input changes during the calculation
+                                -- ============================================
+                                calc_t1_sec  <= stored_t1_seconds;
+                                calc_t1_nsec <= stored_t1_nanoseconds;
+                                calc_t2_sec  <= stored_t2_seconds;
+                                calc_t2_nsec <= stored_t2_nanoseconds;
+                                calc_t3_sec  <= stored_t3_seconds;
+                                calc_t3_nsec <= stored_t3_nanoseconds;
+                                calc_t4_sec  <= ptp_origin_timestamp_seconds;
+                                calc_t4_nsec <= ptp_origin_timestamp_nanoseconds;
+                                
+                                -- Go to calculation pipeline
+                                s_SM_PtpParser <= s_Calc_Stage1;
+                            else
+                                -- Sequence ID or port identity mismatch - skip calculation
+                                s_SM_PtpParser <= s_Done;
                             end if;
+                        else
+                            -- We are leader, not follower - skip calculation
+                            s_SM_PtpParser <= s_Done;
                         end if;
-                        null;
                     when x"A" =>
                         -- Pdelay_Resp_Follow_Up Message
-                        null;
+                        s_SM_PtpParser <= s_Done;
                     when x"B" =>
                         -- Announce Message
-                        null;
+                        s_SM_PtpParser <= s_Done;
                     when x"C" =>
                         -- Signaling Message
-                        null;
+                        s_SM_PtpParser <= s_Done;
                     when x"D" =>
                         -- Management Message
-                        null;
+                        s_SM_PtpParser <= s_Done;
                     when others =>
                         -- Unknown Message Type
-                        null;
-                end case;
+                        s_SM_PtpParser <= s_Done;
+                    end case;
+                    
+                end if;  -- ptp_version = x"2" check
+
+            elsif (s_SM_PtpParser = s_Calc_Stage1) then
+                -- ============================================
+                -- PIPELINED CALCULATION - Stage 1
+                -- Calculate delta_master_to_slave = T2 - T1
+                -- Register result for next stage
+                -- ============================================
+                delta_m2s_reg <= timestamp_diff_ns(
+                    calc_t2_sec, calc_t2_nsec,
+                    calc_t1_sec, calc_t1_nsec
+                );
+                s_SM_PtpParser <= s_Calc_Stage2;
                 
-                -- WICHTIG: Immer zu s_Done wechseln nach der Interpretation
+            elsif (s_SM_PtpParser = s_Calc_Stage2) then
+                -- ============================================
+                -- PIPELINED CALCULATION - Stage 2
+                -- Calculate delta_slave_to_master = T4 - T3
+                -- Register result for next stage
+                -- ============================================
+                delta_s2m_reg <= timestamp_diff_ns(
+                    calc_t4_sec, calc_t4_nsec,
+                    calc_t3_sec, calc_t3_nsec
+                );
+                s_SM_PtpParser <= s_Calc_Stage3;
+
+            elsif (s_SM_PtpParser = s_Calc_Stage3) then
+                -- ============================================
+                -- PIPELINED CALCULATION - Stage 3
+                -- Final calculation using REGISTERED deltas
+                -- This is now a simple add/sub and shift - fast!
+                -- ============================================
+                
+                -- Mean path delay = ((t2-t1) + (t4-t3)) / 2
+                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg, 1);
+                
+                -- Offset from master = ((t2-t1) - (t4-t3)) / 2
+                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
+                
+                ptp_calc_valid_o <= '1';
                 s_SM_PtpParser <= s_Done;
 
             elsif (s_SM_PtpParser = s_Done) then

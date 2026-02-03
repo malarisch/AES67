@@ -79,17 +79,17 @@ entity ptpv2_controller is
     signal tx_en_i_sync                     : std_logic := '0';
     signal tx_en_i_prev                     : std_logic := '0';  -- for edge detection
     
-    signal tx_ready_ts_sec_meta             : unsigned(47 downto 0) := (others => '0');
+    -- NOTE: tx_ready_ts_*_meta removed - we use handshake-based CDC now
+    -- Timestamps are only sampled when tx_en falling edge indicates stable data
     signal tx_ready_ts_sec_sync             : unsigned(47 downto 0) := (others => '0');
-    signal tx_ready_ts_nsec_meta            : unsigned(31 downto 0) := (others => '0');
     signal tx_ready_ts_nsec_sync            : unsigned(31 downto 0) := (others => '0');
 
     -- Prevent register optimization/merging for metastability registers
     attribute PRESERVE : boolean;
     attribute PRESERVE of tx_en_i_meta : signal is true;
     attribute PRESERVE of tx_en_i_sync : signal is true;
-    attribute PRESERVE of tx_ready_ts_sec_meta : signal is true;
-    attribute PRESERVE of tx_ready_ts_nsec_meta : signal is true;
+    attribute PRESERVE of tx_ready_ts_sec_sync : signal is true;
+    attribute PRESERVE of tx_ready_ts_nsec_sync : signal is true;
     attribute PRESERVE of is_leader : signal is true;
 
 
@@ -101,6 +101,11 @@ begin
     -- ============================================================
     -- CDC Synchronization Process (2-stage synchronizers)
     -- ONLY for signals crossing from TX clock domain (mac_tx_clock)
+    -- 
+    -- CRITICAL FIX: Multi-bit timestamps cannot use simple 2FF sync!
+    -- The tx_en falling edge indicates data is stable - use this as
+    -- a handshake signal. Only sample timestamps when tx_en transitions
+    -- from high to low (transmission complete, timestamp valid).
     -- ============================================================
     cdc_sync_proc: process(clk)
     begin
@@ -110,10 +115,14 @@ begin
             tx_en_i_sync            <= tx_en_i_meta;
             tx_en_i_prev            <= tx_en_i_sync;  -- Stage 3 for edge detection
             
-            tx_ready_ts_sec_meta    <= tx_ready_timestamp_seconds_i;
-            tx_ready_ts_sec_sync    <= tx_ready_ts_sec_meta;
-            tx_ready_ts_nsec_meta   <= tx_ready_timestamp_nanoseconds_i;
-            tx_ready_ts_nsec_sync   <= tx_ready_ts_nsec_meta;
+            -- CRITICAL: Only latch timestamps on falling edge of tx_en!
+            -- At this point the TX side has finished and timestamps are stable.
+            -- This implements a proper handshake-based CDC for multi-bit data.
+            if (tx_en_i_prev = '1' and tx_en_i_sync = '0') then
+                -- Falling edge: TX complete, timestamps are now stable
+                tx_ready_ts_sec_sync    <= tx_ready_timestamp_seconds_i;
+                tx_ready_ts_nsec_sync   <= tx_ready_timestamp_nanoseconds_i;
+            end if;
         end if;
     end process cdc_sync_proc;
 
