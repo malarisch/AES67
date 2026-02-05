@@ -34,13 +34,13 @@ entity ptpv2_servo is
         -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2) / 2^(-log_msg_interval)
         -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
         -- freq_correction acts for full second, so Kp=1 means 100% correction = oscillation
-        KP_GAIN : integer := 17;   -- Proportional gain numerator 
+        KP_GAIN : integer := 15;   -- Proportional gain numerator 
         KI_GAIN : integer := 4;    -- Integral gain numerator
         GAIN_SHIFT : integer := 6; -- Divide gains (base shift for 1 Hz)
         
         -- Filter coefficient for offset (exponential moving average)
         -- No filter needed if Kp is properly tuned
-        FILTER_SHIFT : integer := 1;  -- alpha
+        FILTER_SHIFT : integer := 0;  -- alpha
         
         -- Warmup: ignore first N samples to let filter settle
         WARMUP_SAMPLES : integer := 1;  -- Quick start
@@ -77,7 +77,10 @@ entity ptpv2_servo is
         -- Debug outputs
         filtered_offset_o    : out signed(63 downto 0);
         integral_o           : out signed(63 downto 0);
-        effective_gain_shift_o : out integer range 0 to 15  -- Debug: actual gain shift used
+        effective_gain_shift_o : out integer range 0 to 15;  -- Debug: actual gain shift used
+        median_offset_o      : out signed(63 downto 0);      -- Debug: median-filtered offset
+        median_delay_o       : out signed(63 downto 0);      -- Debug: median-filtered path delay
+        median_valid_o       : out std_logic                 -- Debug: median filter has enough samples
     );
 end entity;
 
@@ -106,6 +109,23 @@ architecture Behavioral of ptpv2_servo is
     signal current_log_interval : signed(7 downto 0) := (others => '0');
     signal effective_gain_shift : integer range 0 to 15 := GAIN_SHIFT;
     
+    -- ============================================
+    -- Median filter for outlier rejection (5 samples)
+    -- ============================================
+    constant MEDIAN_SIZE : integer := 5;
+    type sample_buffer_t is array(0 to MEDIAN_SIZE-1) of signed(63 downto 0);
+    
+    -- Sample buffers (circular)
+    signal offset_buffer      : sample_buffer_t := (others => (others => '0'));
+    signal delay_buffer       : sample_buffer_t := (others => (others => '0'));
+    signal buffer_write_idx   : integer range 0 to MEDIAN_SIZE-1 := 0;
+    signal buffer_fill_count  : integer range 0 to MEDIAN_SIZE := 0;
+    
+    -- Median-filtered values
+    signal median_offset      : signed(63 downto 0) := (others => '0');
+    signal median_delay       : signed(63 downto 0) := (others => '0');
+    signal median_valid       : std_logic := '0';
+    
     -- Sanity check: reject obviously invalid measurements (> 1s)
     constant MAX_VALID_OFFSET : signed(63 downto 0) := to_signed(1_000_000_000, 64);  -- 1s
     
@@ -116,6 +136,42 @@ architecture Behavioral of ptpv2_servo is
     -- Phase jump output registers
     signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
     signal phase_jump_valid_reg : std_logic := '0';
+    
+    -- ============================================
+    -- Function: Find median of 5 signed values
+    -- Uses a sorting network approach (simple for 5 elements)
+    -- ============================================
+    function median5(buf : sample_buffer_t) return signed is
+        variable a, b, c, d, e : signed(63 downto 0);
+        variable t : signed(63 downto 0);
+    begin
+        -- Load values
+        a := buf(0); b := buf(1); c := buf(2); d := buf(3); e := buf(4);
+        
+        -- Sorting network for 5 elements to find median
+        -- Step 1: Compare and swap pairs
+        if a > b then t := a; a := b; b := t; end if;
+        if c > d then t := c; c := d; d := t; end if;
+        
+        -- Step 2: Move smaller of (a,c) and larger of (b,d)
+        if a > c then t := a; a := c; c := t; end if;
+        if b > d then t := b; b := d; d := t; end if;
+        
+        -- Step 3: Insert e and find median
+        -- Median is max(min(b,c), min(max(a,e), max(c,d)))
+        if b > c then t := b; b := c; c := t; end if;
+        if a > e then t := a; a := e; e := t; end if;
+        
+        -- Now a <= b <= c, a <= e, c <= d
+        -- Median candidates: b, c, or e
+        if e > c then
+            return c;
+        elsif e < b then
+            return b;
+        else
+            return e;
+        end if;
+    end function;
     
 begin
 
@@ -128,6 +184,9 @@ begin
     phase_jump_valid_o <= phase_jump_valid_reg;
     sync_timeout_o <= sync_timeout;
     effective_gain_shift_o <= effective_gain_shift;
+    median_offset_o <= median_offset;
+    median_delay_o  <= median_delay;
+    median_valid_o  <= median_valid;
     
     -- ============================================================
     -- Calculate effective gain shift based on message interval
@@ -141,27 +200,7 @@ begin
     --   -3      |  8 Hz     |   0.125x        |   3
     --    1      |  0.5 Hz   |   2x (capped)   |  -1 (but cap at 0)
     -- ============================================================
-    calc_gain_shift: process(current_log_interval)
-        variable extra_shift : integer;
-    begin
-        -- For negative intervals (faster sync), add shift to reduce gain
-        -- For positive intervals (slower sync), we could increase gain but it's risky
-        if current_log_interval < 0 then
-            -- Fast sync: add -interval to shift (reduce gain proportionally)
-            extra_shift := -to_integer(current_log_interval);
-            if extra_shift > 8 then
-                extra_shift := 8;  -- Cap at 8 extra shifts
-            end if;
-            effective_gain_shift <= GAIN_SHIFT + extra_shift;
-        elsif current_log_interval > 0 then
-            -- Slow sync: could reduce shift, but safer to keep gains lower
-            -- Just use base shift - don't increase gains for slow sync
-            effective_gain_shift <= GAIN_SHIFT;
-        else
-            -- interval = 0: use base shift
-            effective_gain_shift <= GAIN_SHIFT;
-        end if;
-    end process;
+
     
     servo_proc: process(clk, reset_n)
         variable offset_sample   : signed(63 downto 0);
@@ -186,6 +225,14 @@ begin
             timeout_limit   <= to_unsigned(CLOCK_FREQ_HZ * 4, 32);  -- Default 4s
             sync_timeout    <= '0';
             current_log_interval <= (others => '0');
+            -- Median filter reset
+            offset_buffer <= (others => (others => '0'));
+            delay_buffer  <= (others => (others => '0'));
+            buffer_write_idx  <= 0;
+            buffer_fill_count <= 0;
+            median_offset <= (others => '0');
+            median_delay  <= (others => '0');
+            median_valid  <= '0';
             
         elsif rising_edge(clk) then
             -- Default: no phase jump this cycle, clear timeout pulse
@@ -246,7 +293,44 @@ begin
             end if;
             
             if calc_valid_i = '1' then
-                offset_sample := offset_from_master_i;
+                -- ============================================
+                -- MEDIAN FILTER: Store samples and calculate median
+                -- ============================================
+                
+                -- Store new samples in circular buffer
+                offset_buffer(buffer_write_idx) <= offset_from_master_i;
+                delay_buffer(buffer_write_idx)  <= mean_path_delay_i;
+                
+                -- Update write index (circular)
+                if buffer_write_idx = MEDIAN_SIZE - 1 then
+                    buffer_write_idx <= 0;
+                else
+                    buffer_write_idx <= buffer_write_idx + 1;
+                end if;
+                
+                -- Track how many samples we have
+                if buffer_fill_count < MEDIAN_SIZE then
+                    buffer_fill_count <= buffer_fill_count + 1;
+                end if;
+                
+                -- Calculate median when buffer is full
+                if buffer_fill_count >= MEDIAN_SIZE - 1 then  -- Will be MEDIAN_SIZE after this cycle
+                    median_offset <= median5(offset_buffer);
+                    median_delay  <= median5(delay_buffer);
+                    median_valid  <= '1';
+                else
+                    -- Not enough samples yet - use raw value
+                    median_offset <= offset_from_master_i;
+                    median_delay  <= mean_path_delay_i;
+                    median_valid  <= '0';
+                end if;
+                
+                -- Use median-filtered offset for processing
+                if buffer_fill_count >= MEDIAN_SIZE then
+                    offset_sample := median_offset;
+                else
+                    offset_sample := offset_from_master_i;
+                end if;
                 
                 -- Calculate absolute offset for threshold comparisons
                 if offset_sample < 0 then
@@ -287,6 +371,12 @@ begin
                         sample_count <= 0;  -- Restart warmup
                         locked <= '0';
                         lock_counter <= 0;
+                        -- Reset median filter buffers
+                        offset_buffer <= (others => (others => '0'));
+                        delay_buffer  <= (others => (others => '0'));
+                        buffer_write_idx  <= 0;
+                        buffer_fill_count <= 0;
+                        median_valid <= '0';
                         
                     else
                         -- ============================================

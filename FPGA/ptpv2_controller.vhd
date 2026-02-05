@@ -12,13 +12,11 @@ entity ptpv2_controller is
         request_port_identity_o : out std_logic_vector(79 downto 0);
         wallclock_seconds_i     : in  unsigned(47 downto 0);
         wallclock_nanoseconds_i : in  unsigned(31 downto 0);
-        tx_ready_timestamp_seconds_i     : in  unsigned(47 downto 0);
-        tx_ready_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
         timestamp_seconds_o         : out unsigned(47 downto 0);
         timestamp_nanoseconds_o     : out unsigned(31 downto 0);
         rx_timestamp_seconds_i     : in  unsigned(47 downto 0);
         rx_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
-
+        
 
         sequence_id_i         : in  unsigned(15 downto 0);
         send_delay_resp_in        : in std_logic;
@@ -79,17 +77,12 @@ entity ptpv2_controller is
     signal tx_en_i_sync                     : std_logic := '0';
     signal tx_en_i_prev                     : std_logic := '0';  -- for edge detection
     
-    -- NOTE: tx_ready_ts_*_meta removed - we use handshake-based CDC now
-    -- Timestamps are only sampled when tx_en falling edge indicates stable data
-    signal tx_ready_ts_sec_sync             : unsigned(47 downto 0) := (others => '0');
-    signal tx_ready_ts_nsec_sync            : unsigned(31 downto 0) := (others => '0');
+
 
     -- Prevent register optimization/merging for metastability registers
     attribute PRESERVE : boolean;
     attribute PRESERVE of tx_en_i_meta : signal is true;
     attribute PRESERVE of tx_en_i_sync : signal is true;
-    attribute PRESERVE of tx_ready_ts_sec_sync : signal is true;
-    attribute PRESERVE of tx_ready_ts_nsec_sync : signal is true;
     attribute PRESERVE of is_leader : signal is true;
 
 
@@ -97,16 +90,6 @@ entity ptpv2_controller is
 architecture Behavioral of ptpv2_controller is
 begin
 
-    
-    -- ============================================================
-    -- CDC Synchronization Process (2-stage synchronizers)
-    -- ONLY for signals crossing from TX clock domain (mac_tx_clock)
-    -- 
-    -- CRITICAL FIX: Multi-bit timestamps cannot use simple 2FF sync!
-    -- The tx_en falling edge indicates data is stable - use this as
-    -- a handshake signal. Only sample timestamps when tx_en transitions
-    -- from high to low (transmission complete, timestamp valid).
-    -- ============================================================
     cdc_sync_proc: process(clk)
     begin
         if rising_edge(clk) then
@@ -115,14 +98,6 @@ begin
             tx_en_i_sync            <= tx_en_i_meta;
             tx_en_i_prev            <= tx_en_i_sync;  -- Stage 3 for edge detection
             
-            -- CRITICAL: Only latch timestamps on falling edge of tx_en!
-            -- At this point the TX side has finished and timestamps are stable.
-            -- This implements a proper handshake-based CDC for multi-bit data.
-            if (tx_en_i_prev = '1' and tx_en_i_sync = '0') then
-                -- Falling edge: TX complete, timestamps are now stable
-                tx_ready_ts_sec_sync    <= tx_ready_timestamp_seconds_i;
-                tx_ready_ts_nsec_sync   <= tx_ready_timestamp_nanoseconds_i;
-            end if;
         end if;
     end process cdc_sync_proc;
 
@@ -269,8 +244,8 @@ begin
 
                     when s_Wait_for_Sync_Done =>
                         -- Extra cycle for CDC timestamp to settle
-                        timestamp_nanoseconds_o <= tx_ready_ts_nsec_sync;
-                        timestamp_seconds_o <= tx_ready_ts_sec_sync;
+                        timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
+                        timestamp_seconds_o <= wallclock_seconds_i;
                         leader_state <= s_Latch_Sync_Timestamp;
 
                     when s_Latch_Sync_Timestamp =>
@@ -386,8 +361,6 @@ begin
                         tx_message_type_o <= "0001";
                         
                         sequence_id_o <= sequence_id_i;
-                        timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
-                        timestamp_seconds_o <= wallclock_seconds_i;
                         frame_start_o <= '1';
                         tx_started <= '0';
                         follower_state <= f_Wait_for_Delay_Req_Ack;
@@ -402,8 +375,8 @@ begin
                             tx_started <= '0';
                             follower_state <= f_Wait_for_Delay_Req_Done;
 
-                            timestamp_nanoseconds_o <= tx_ready_ts_nsec_sync;
-                            timestamp_seconds_o <= tx_ready_ts_sec_sync;
+                            timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
+                            timestamp_seconds_o <= wallclock_seconds_i;
                         end if;
 
                     when f_Wait_for_Delay_Req_Done =>

@@ -355,27 +355,6 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[30]
 set_global_assignment -name SEARCH_PATH miirmii/synthesis/submodules
 set_global_assignment -name SEARCH_PATH miirmii/synthesis
 set_global_assignment -name SEARCH_PATH miirmii
-set_global_assignment -name SLD_NODE_CREATOR_ID 110 -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_ENTITY_NAME sld_signaltap -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334535" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_7
 set_global_assignment -name VHDL_FILE ptpv2_servo.vhd
 set_global_assignment -name VHDL_FILE urt_dbg.vhd
 set_global_assignment -name VHDL_FILE ptpv2_controller.vhd
@@ -439,12 +418,9 @@ set_global_assignment -name SIGNALTAP_FILE stp1.stp
 set_global_assignment -name QIP_FILE audioclks.qip
 set_global_assignment -name QIP_FILE sample_counter.qip
 set_global_assignment -name QIP_FILE pll_systemclocks.qip
+set_global_assignment -name SLD_NODE_CREATOR_ID 110 -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_ENTITY_NAME sld_signaltap -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_clk -to clk_125MHz -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[0] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[0]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[1] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[10]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[2] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[11]" -section_id auto_signaltap_7
@@ -527,111 +503,6 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[78]
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[79] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[9]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[80] -to "ptpv2_parser:inst14|clock_configured" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[81] -to "ptpv2_parser:inst14|clock_set_o" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[0] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[1] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[2] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[3] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[4] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[5] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[6] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[7] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[8] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[9] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[10] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[11] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[12] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[13] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[14] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[15] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[16] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[17] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[18] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[19] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[20] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[21] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[22] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[23] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[24] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[25] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[26] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[27] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[28] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[29] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[30] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[31] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[53] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[54] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[55] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[56] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[57] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[32]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[58] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[33]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[59] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[34]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[60] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[35]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[61] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[36]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[62] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[37]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[63] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[38]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[64] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[39]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[65] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[66] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[40]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[67] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[41]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[68] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[42]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[69] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[43]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[70] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[44]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[71] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[45]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[72] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[46]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[73] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[47]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[74] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[75] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[76] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[77] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[78] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[79] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[80] -to "ptpv2_parser:inst14|clock_configured" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[81] -to "ptpv2_parser:inst14|clock_set_o" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=128" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=128" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[82] -to "ptpv2_parser:inst14|log_msg_interval_o[0]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[83] -to "ptpv2_parser:inst14|log_msg_interval_o[1]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[84] -to "ptpv2_parser:inst14|log_msg_interval_o[2]" -section_id auto_signaltap_7
@@ -722,38 +593,38 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[168
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[169] -to "ptpv2_parser:inst14|offset_from_master_ns_o[8]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[170] -to "ptpv2_parser:inst14|offset_from_master_ns_o[9]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[171] -to "ptpv2_parser:inst14|ptp_calc_valid_o" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[172] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[173] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[174] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[175] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[176] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[177] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[178] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[179] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[180] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[181] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[182] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[183] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[184] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[185] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[186] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[187] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[188] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[189] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[190] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[191] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[192] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[193] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[194] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[195] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[196] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[197] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[198] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[199] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[200] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[201] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[202] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[203] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[9]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[172] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[0]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[173] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[10]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[174] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[11]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[175] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[12]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[176] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[13]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[177] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[14]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[178] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[15]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[179] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[16]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[180] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[17]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[181] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[18]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[182] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[19]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[183] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[1]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[184] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[20]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[185] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[21]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[186] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[22]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[187] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[23]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[188] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[24]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[189] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[25]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[190] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[26]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[191] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[27]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[192] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[28]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[193] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[29]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[194] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[2]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[195] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[30]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[196] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[31]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[197] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[3]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[198] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[4]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[199] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[5]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[200] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[6]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[201] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[7]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[202] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[8]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[203] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[9]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[204] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[0]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[205] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[10]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[206] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[11]" -section_id auto_signaltap_7
@@ -1232,71 +1103,89 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[678
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[679] -to "ptpv2_servo:inst25|timeout_counter[7]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[680] -to "ptpv2_servo:inst25|timeout_counter[8]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[681] -to "ptpv2_servo:inst25|timeout_counter[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[682] -to "wallclock:inst9|frac_ns_accum[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[683] -to "wallclock:inst9|frac_ns_accum[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[684] -to "wallclock:inst9|frac_ns_accum[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[685] -to "wallclock:inst9|frac_ns_accum[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[686] -to "wallclock:inst9|frac_ns_accum[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[687] -to "wallclock:inst9|frac_ns_accum[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[688] -to "wallclock:inst9|frac_ns_accum[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[689] -to "wallclock:inst9|frac_ns_accum[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[690] -to "wallclock:inst9|frac_ns_accum[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[691] -to "wallclock:inst9|frac_ns_accum[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[692] -to "wallclock:inst9|frac_ns_accum[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[693] -to "wallclock:inst9|frac_ns_accum[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[694] -to "wallclock:inst9|frac_ns_accum[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[695] -to "wallclock:inst9|frac_ns_accum[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[696] -to "wallclock:inst9|frac_ns_accum[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[697] -to "wallclock:inst9|frac_ns_accum[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[698] -to "wallclock:inst9|frac_ns_accum[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[699] -to "wallclock:inst9|frac_ns_accum[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[700] -to "wallclock:inst9|frac_ns_accum[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[701] -to "wallclock:inst9|frac_ns_accum[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[702] -to "wallclock:inst9|frac_ns_accum[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[703] -to "wallclock:inst9|frac_ns_accum[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[704] -to "wallclock:inst9|frac_ns_accum[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[705] -to "wallclock:inst9|frac_ns_accum[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[706] -to "wallclock:inst9|frac_ns_accum[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[707] -to "wallclock:inst9|frac_ns_accum[32]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[708] -to "wallclock:inst9|frac_ns_accum[33]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[709] -to "wallclock:inst9|frac_ns_accum[34]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[710] -to "wallclock:inst9|frac_ns_accum[35]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[711] -to "wallclock:inst9|frac_ns_accum[36]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[712] -to "wallclock:inst9|frac_ns_accum[37]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[713] -to "wallclock:inst9|frac_ns_accum[38]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[714] -to "wallclock:inst9|frac_ns_accum[39]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[715] -to "wallclock:inst9|frac_ns_accum[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[716] -to "wallclock:inst9|frac_ns_accum[40]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[717] -to "wallclock:inst9|frac_ns_accum[41]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[718] -to "wallclock:inst9|frac_ns_accum[42]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[719] -to "wallclock:inst9|frac_ns_accum[43]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[720] -to "wallclock:inst9|frac_ns_accum[44]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[721] -to "wallclock:inst9|frac_ns_accum[45]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[722] -to "wallclock:inst9|frac_ns_accum[46]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[723] -to "wallclock:inst9|frac_ns_accum[47]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[724] -to "wallclock:inst9|frac_ns_accum[48]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[725] -to "wallclock:inst9|frac_ns_accum[49]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[726] -to "wallclock:inst9|frac_ns_accum[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[727] -to "wallclock:inst9|frac_ns_accum[50]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[728] -to "wallclock:inst9|frac_ns_accum[51]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[729] -to "wallclock:inst9|frac_ns_accum[52]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[730] -to "wallclock:inst9|frac_ns_accum[53]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[731] -to "wallclock:inst9|frac_ns_accum[54]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[732] -to "wallclock:inst9|frac_ns_accum[55]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[733] -to "wallclock:inst9|frac_ns_accum[56]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[734] -to "wallclock:inst9|frac_ns_accum[57]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[735] -to "wallclock:inst9|frac_ns_accum[58]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[736] -to "wallclock:inst9|frac_ns_accum[59]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[737] -to "wallclock:inst9|frac_ns_accum[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[738] -to "wallclock:inst9|frac_ns_accum[60]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[739] -to "wallclock:inst9|frac_ns_accum[61]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[740] -to "wallclock:inst9|frac_ns_accum[62]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[741] -to "wallclock:inst9|frac_ns_accum[63]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[742] -to "wallclock:inst9|frac_ns_accum[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[743] -to "wallclock:inst9|frac_ns_accum[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[744] -to "wallclock:inst9|frac_ns_accum[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[745] -to "wallclock:inst9|frac_ns_accum[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[746] -to "wallclock:inst9|wallclock_set_i" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[682] -to "wallclock:inst9|wallclock_set_i" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[0] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[0]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[1] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[10]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[2] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[11]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[3] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[12]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[4] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[13]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[5] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[14]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[6] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[15]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[7] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[16]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[8] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[17]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[9] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[18]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[10] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[19]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[11] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[1]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[12] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[20]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[13] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[21]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[14] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[22]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[15] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[23]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[16] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[24]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[17] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[25]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[18] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[26]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[19] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[27]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[20] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[28]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[21] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[29]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[22] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[2]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[23] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[30]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[24] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[31]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[25] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[3]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[26] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[4]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[27] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[5]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[28] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[6]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[29] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[7]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[30] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[8]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[31] -to "ptpv2_parser:inst14|clock_configure_timestamp_nanoseconds_o[9]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[32] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[0]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[33] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[10]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[34] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[11]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[35] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[12]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[36] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[13]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[37] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[14]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[38] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[15]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[39] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[16]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[40] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[17]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[41] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[18]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[42] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[19]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[43] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[1]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[44] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[20]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[45] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[21]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[46] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[22]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[47] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[23]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[48] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[24]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[49] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[25]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[50] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[26]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[51] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[27]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[52] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[28]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[53] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[29]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[54] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[2]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[55] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[30]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[56] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[31]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[57] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[32]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[58] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[33]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[59] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[34]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[60] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[35]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[61] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[36]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[62] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[37]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[63] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[38]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[64] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[39]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[65] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[3]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[66] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[40]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[67] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[41]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[68] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[42]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[69] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[43]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[70] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[44]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[71] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[45]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[72] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[46]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[73] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[47]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[74] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[4]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[75] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[5]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[76] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[6]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[77] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[7]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[78] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[8]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[79] -to "ptpv2_parser:inst14|clock_configure_timestamp_seconds_o[9]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[80] -to "ptpv2_parser:inst14|clock_configured" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[81] -to "ptpv2_parser:inst14|clock_set_o" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[82] -to "ptpv2_parser:inst14|log_msg_interval_o[0]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[83] -to "ptpv2_parser:inst14|log_msg_interval_o[1]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[84] -to "ptpv2_parser:inst14|log_msg_interval_o[2]" -section_id auto_signaltap_7
@@ -1387,38 +1276,38 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[168] -
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[169] -to "ptpv2_parser:inst14|offset_from_master_ns_o[8]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[170] -to "ptpv2_parser:inst14|offset_from_master_ns_o[9]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[171] -to "ptpv2_parser:inst14|ptp_calc_valid_o" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[172] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[173] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[174] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[175] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[176] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[177] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[178] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[179] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[180] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[181] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[182] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[183] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[184] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[185] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[186] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[187] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[188] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[189] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[190] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[191] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[192] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[193] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[194] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[195] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[196] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[197] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[198] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[199] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[200] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[201] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[202] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[203] -to "ptpv2_parser:inst14|rx_timestamp_nanoseconds_i[9]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[172] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[0]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[173] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[10]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[174] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[11]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[175] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[12]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[176] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[13]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[177] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[14]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[178] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[15]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[179] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[16]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[180] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[17]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[181] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[18]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[182] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[19]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[183] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[1]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[184] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[20]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[185] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[21]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[186] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[22]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[187] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[23]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[188] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[24]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[189] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[25]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[190] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[26]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[191] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[27]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[192] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[28]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[193] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[29]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[194] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[2]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[195] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[30]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[196] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[31]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[197] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[3]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[198] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[4]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[199] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[5]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[200] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[6]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[201] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[7]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[202] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[8]" -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[203] -to "ptpv2_parser:inst14|ptp_origin_timestamp_nanoseconds[9]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[204] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[0]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[205] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[10]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[206] -to "ptpv2_parser:inst14|rx_timestamp_seconds_i[11]" -section_id auto_signaltap_7
@@ -1897,80 +1786,63 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[678] -
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[679] -to "ptpv2_servo:inst25|timeout_counter[7]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[680] -to "ptpv2_servo:inst25|timeout_counter[8]" -section_id auto_signaltap_7
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[681] -to "ptpv2_servo:inst25|timeout_counter[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[682] -to "wallclock:inst9|frac_ns_accum[0]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[683] -to "wallclock:inst9|frac_ns_accum[10]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[684] -to "wallclock:inst9|frac_ns_accum[11]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[685] -to "wallclock:inst9|frac_ns_accum[12]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[686] -to "wallclock:inst9|frac_ns_accum[13]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[687] -to "wallclock:inst9|frac_ns_accum[14]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[688] -to "wallclock:inst9|frac_ns_accum[15]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[689] -to "wallclock:inst9|frac_ns_accum[16]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[690] -to "wallclock:inst9|frac_ns_accum[17]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[691] -to "wallclock:inst9|frac_ns_accum[18]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[692] -to "wallclock:inst9|frac_ns_accum[19]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[693] -to "wallclock:inst9|frac_ns_accum[1]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[694] -to "wallclock:inst9|frac_ns_accum[20]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[695] -to "wallclock:inst9|frac_ns_accum[21]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[696] -to "wallclock:inst9|frac_ns_accum[22]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[697] -to "wallclock:inst9|frac_ns_accum[23]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[698] -to "wallclock:inst9|frac_ns_accum[24]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[699] -to "wallclock:inst9|frac_ns_accum[25]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[700] -to "wallclock:inst9|frac_ns_accum[26]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[701] -to "wallclock:inst9|frac_ns_accum[27]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[702] -to "wallclock:inst9|frac_ns_accum[28]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[703] -to "wallclock:inst9|frac_ns_accum[29]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[704] -to "wallclock:inst9|frac_ns_accum[2]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[705] -to "wallclock:inst9|frac_ns_accum[30]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[706] -to "wallclock:inst9|frac_ns_accum[31]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[707] -to "wallclock:inst9|frac_ns_accum[32]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[708] -to "wallclock:inst9|frac_ns_accum[33]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[709] -to "wallclock:inst9|frac_ns_accum[34]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[710] -to "wallclock:inst9|frac_ns_accum[35]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[711] -to "wallclock:inst9|frac_ns_accum[36]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[712] -to "wallclock:inst9|frac_ns_accum[37]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[713] -to "wallclock:inst9|frac_ns_accum[38]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[714] -to "wallclock:inst9|frac_ns_accum[39]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[715] -to "wallclock:inst9|frac_ns_accum[3]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[716] -to "wallclock:inst9|frac_ns_accum[40]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[717] -to "wallclock:inst9|frac_ns_accum[41]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[718] -to "wallclock:inst9|frac_ns_accum[42]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[719] -to "wallclock:inst9|frac_ns_accum[43]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[720] -to "wallclock:inst9|frac_ns_accum[44]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[721] -to "wallclock:inst9|frac_ns_accum[45]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[722] -to "wallclock:inst9|frac_ns_accum[46]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[723] -to "wallclock:inst9|frac_ns_accum[47]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[724] -to "wallclock:inst9|frac_ns_accum[48]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[725] -to "wallclock:inst9|frac_ns_accum[49]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[726] -to "wallclock:inst9|frac_ns_accum[4]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[727] -to "wallclock:inst9|frac_ns_accum[50]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[728] -to "wallclock:inst9|frac_ns_accum[51]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[729] -to "wallclock:inst9|frac_ns_accum[52]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[730] -to "wallclock:inst9|frac_ns_accum[53]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[731] -to "wallclock:inst9|frac_ns_accum[54]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[732] -to "wallclock:inst9|frac_ns_accum[55]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[733] -to "wallclock:inst9|frac_ns_accum[56]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[734] -to "wallclock:inst9|frac_ns_accum[57]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[735] -to "wallclock:inst9|frac_ns_accum[58]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[736] -to "wallclock:inst9|frac_ns_accum[59]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[737] -to "wallclock:inst9|frac_ns_accum[5]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[738] -to "wallclock:inst9|frac_ns_accum[60]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[739] -to "wallclock:inst9|frac_ns_accum[61]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[740] -to "wallclock:inst9|frac_ns_accum[62]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[741] -to "wallclock:inst9|frac_ns_accum[63]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[742] -to "wallclock:inst9|frac_ns_accum[6]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[743] -to "wallclock:inst9|frac_ns_accum[7]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[744] -to "wallclock:inst9|frac_ns_accum[8]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[745] -to "wallclock:inst9|frac_ns_accum[9]" -section_id auto_signaltap_7
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[746] -to "wallclock:inst9|wallclock_set_i" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=747" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=747" -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=747" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[682] -to "wallclock:inst9|wallclock_set_i" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=683" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=683" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=683" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334535" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_7
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=000000000000000000000" -section_id auto_signaltap_7
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=21" -section_id auto_signaltap_7
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=sld_reserved_FPGA_auto_signaltap_7_1_2430," -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=128" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_7|gnd -section_id auto_signaltap_7
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_7|vcc -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=128" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=sld_reserved_FPGA_auto_signaltap_7_1_b152," -section_id auto_signaltap_7
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_7
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ENABLE_ADVANCED_TRIGGER=1" -section_id auto_signaltap_7
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

@@ -38,9 +38,7 @@ entity ptpv2_sender is
 
 
         message_type_i : in std_logic_vector(3 downto 0) := "0000";
-
-        tx_ready_timestamp_seconds_o : out unsigned(47 downto 0);
-        tx_ready_timestamp_nanoseconds_o : out unsigned(31 downto 0)
+		tx_ready_o			: out std_logic := '0'
 	);
 end entity;
 
@@ -206,6 +204,7 @@ begin
 	begin
 		if (falling_edge(tx_clk)) then
 			zframe_start <= frame_start_sync;
+			tx_ready_o <= '0';
 			if ((frame_start_sync = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
 				-- prepare begin of packet
 				packet_counter <= packet_counter + 1; -- increment packet counter
@@ -469,8 +468,7 @@ begin
 			elsif (s_SM_Ethernet = s_End) then
 				tx_enable <= '0';
 				tx_data <= "00000000";
-                tx_ready_timestamp_nanoseconds_o <= timestamp_nsec_sync;
-                tx_ready_timestamp_seconds_o <= timestamp_sec_sync;
+                tx_ready_o <= '1';
 				s_SM_Ethernet <= s_Idle;
 			end if;
 		end if;
