@@ -31,8 +31,8 @@ entity ptpv2_parser is
         src_mac_address		: in std_logic_vector(47 downto 0);
 
         -- PTP calculation outputs
-        mean_path_delay_ns_o       : out signed(63 downto 0);  -- Mean path delay in nanoseconds (signed for negative values)
-        offset_from_master_ns_o    : out signed(63 downto 0);  -- Offset from master in nanoseconds (signed)
+        mean_path_delay_ns_o       : out signed(31 downto 0);  -- Mean path delay in nanoseconds (signed)
+        offset_from_master_ns_o    : out signed(31 downto 0);  -- Offset from master in nanoseconds (signed)
         ptp_calc_valid_o           : out std_logic;            -- Pulse when calculation is complete
         log_msg_interval_o         : out signed(7 downto 0);   -- PTP logMessageInterval from last Sync/Follow_Up
         log_msg_interval_valid_o   : out std_logic;            -- Pulse when log_msg_interval is updated (from Follow_Up)
@@ -55,12 +55,13 @@ architecture Behavioral of ptpv2_parser is
     
     -- Constants for seconds-to-nanoseconds conversion (NO DSP multiplication!)
     -- Use lookup table approach since sec_diff is typically -2 to +2
-    constant ONE_SECOND_NS_POS  : signed(63 downto 0) := to_signed( 1_000_000_000, 64);
-    constant TWO_SECONDS_NS_POS : signed(63 downto 0) := to_signed( 2_000_000_000, 64);
-    constant ONE_SECOND_NS_NEG  : signed(63 downto 0) := to_signed(-1_000_000_000, 64);
-    constant TWO_SECONDS_NS_NEG : signed(63 downto 0) := to_signed(-2_000_000_000, 64);
+    -- 32-bit signed max is ~2.1e9, so ±2 seconds fits.
+    constant ONE_SECOND_NS_POS  : signed(31 downto 0) := to_signed( 1_000_000_000, 32);
+    constant TWO_SECONDS_NS_POS : signed(31 downto 0) := to_signed( 2_000_000_000, 32);
+    constant ONE_SECOND_NS_NEG  : signed(31 downto 0) := to_signed(-1_000_000_000, 32);
+    constant TWO_SECONDS_NS_NEG : signed(31 downto 0) := to_signed(-2_000_000_000, 32);
     
-    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_Stage2, s_Calc_Stage3, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_Stage2, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
     signal byte_counter   : integer range 0 to 1500 := 0;
 
@@ -68,65 +69,50 @@ architecture Behavioral of ptpv2_parser is
 
     -- ============================================================
     -- PIPELINED PTP Calculation Registers
-    -- The original implementation had ALL calculations in one clock cycle,
-    -- causing timing violations and random "garbage" values.
-    -- 
     -- Pipeline stages:
-    --   Stage 1: Latch all 4 timestamps into calc registers
-    --   Stage 2: Calculate deltas (T2-T1) and (T4-T3) 
-    --   Stage 3 (in s_Done): Calculate mean and offset, output result
+    --   Stage 1: Calculate delta_m2s = T2 - T1 (registered)
+    --   Stage 2: Calculate delta_s2m = T4 - T3 and final results
+    -- No calc_t* latches needed: stored_t* are stable during calculation
+    -- because no new PTP packet can be parsed while state machine is busy.
     -- ============================================================
     
-    -- Stage 1: Latched timestamps for calculation (prevents input changes during calc)
-    signal calc_t1_sec  : std_logic_vector(47 downto 0) := (others => '0');
-    signal calc_t1_nsec : std_logic_vector(31 downto 0) := (others => '0');
-    signal calc_t2_sec  : std_logic_vector(47 downto 0) := (others => '0');
-    signal calc_t2_nsec : std_logic_vector(31 downto 0) := (others => '0');
-    signal calc_t3_sec  : std_logic_vector(47 downto 0) := (others => '0');
-    signal calc_t3_nsec : std_logic_vector(31 downto 0) := (others => '0');
-    signal calc_t4_sec  : std_logic_vector(47 downto 0) := (others => '0');
-    signal calc_t4_nsec : std_logic_vector(31 downto 0) := (others => '0');
-    
-    -- Stage 2: Intermediate delta results (registered)
-    signal delta_m2s_reg : signed(63 downto 0) := (others => '0');  -- T2 - T1
-    signal delta_s2m_reg : signed(63 downto 0) := (others => '0');  -- T4 - T3
+    -- Intermediate delta result (registered between stages)
+    signal delta_m2s_reg : signed(31 downto 0) := (others => '0');  -- T2 - T1
 
     -- ============================================================
-    -- PTP Calculation Function (DSP-FREE VERSION)
-    -- Calculate time difference between two timestamps in nanoseconds
-    -- Uses lookup table for sec*1e9 since diff is typically -2..+2
-    -- Result = (sec_a - sec_b) * 1e9 + (ns_a - ns_b)
+    -- PTP Calculation Function (DSP-FREE, 32-bit VERSION)
+    -- Calculate time difference between two timestamps in nanoseconds.
+    -- Seconds inputs are only 4 bits wide (lower bits of full timestamp).
+    -- Result fits in signed 32 bits (max ±2.1e9 ns ≈ ±2.1 s).
+    -- Uses lookup table for sec*1e9 since diff is typically -2..+2.
     -- ============================================================
     function timestamp_diff_ns(
-        sec_a  : std_logic_vector(47 downto 0);
+        sec_a  : std_logic_vector(3 downto 0);
         ns_a   : std_logic_vector(31 downto 0);
-        sec_b  : std_logic_vector(47 downto 0);
+        sec_b  : std_logic_vector(3 downto 0);
         ns_b   : std_logic_vector(31 downto 0)
     ) return signed is
-        variable sec_diff    : signed(47 downto 0);
+        variable sec_diff    : signed(4 downto 0);  -- 5 bits for signed 4-bit diff
         variable ns_diff     : signed(32 downto 0);  -- Extra bit for sign
-        variable sec_as_ns   : signed(63 downto 0);
-        variable result      : signed(63 downto 0);
+        variable sec_as_ns   : signed(31 downto 0);
+        variable result      : signed(31 downto 0);
     begin
         -- Calculate seconds difference (small number, typically -2 to +2)
-        sec_diff := signed(sec_a) - signed(sec_b);
+        sec_diff := resize(signed('0' & sec_a), 5) - resize(signed('0' & sec_b), 5);
         
         -- Calculate nanoseconds difference  
         ns_diff := resize(signed('0' & ns_a), 33) - resize(signed('0' & ns_b), 33);
         
         -- Convert seconds difference to nanoseconds using LOOKUP TABLE
-        -- This uses pure combinational logic (MUX) instead of DSP multiplier!
-        -- PTP packets arrive within seconds of each other, so diff is small
-        case to_integer(sec_diff(2 downto 0)) is  -- Only check lower 3 bits
+        case to_integer(sec_diff) is
             when  0 => sec_as_ns := (others => '0');
             when  1 => sec_as_ns := ONE_SECOND_NS_POS;
             when  2 => sec_as_ns := TWO_SECONDS_NS_POS;
-            when -1 | 7 => sec_as_ns := ONE_SECOND_NS_NEG;  -- 7 = -1 in 3-bit two's complement
-            when -2 | 6 => sec_as_ns := TWO_SECONDS_NS_NEG;  -- 6 = -2 in 3-bit two's complement
+            when -1 => sec_as_ns := ONE_SECOND_NS_NEG;
+            when -2 => sec_as_ns := TWO_SECONDS_NS_NEG;
             when others => 
-                -- Fallback for unexpected large differences (should not happen in PTP)
-                -- Clamp to ±2 seconds to avoid overflow without DSP
-                if sec_diff(47) = '1' then  -- negative
+                -- Clamp to ±2 seconds (should not happen in normal PTP)
+                if sec_diff(4) = '1' then  -- negative
                     sec_as_ns := TWO_SECONDS_NS_NEG;
                 else
                     sec_as_ns := TWO_SECONDS_NS_POS;
@@ -134,7 +120,7 @@ architecture Behavioral of ptpv2_parser is
         end case;
         
         -- Total difference = seconds_as_ns + nanoseconds_diff
-        result := sec_as_ns + resize(ns_diff, 64);
+        result := sec_as_ns + resize(ns_diff, 32);
         
         return result;
     end function;
@@ -192,23 +178,27 @@ architecture Behavioral of ptpv2_parser is
     
 
     -- ============================================================
-    -- PTP Timestamp Storage (as signals for use with procedure)
+    -- PTP Timestamp Storage
+    -- T1: Full 48-bit seconds (needed for initial clock set)
+    -- T2, T3, T4: Only lower 4 bits of seconds (enough for ±2s diffs)
+    -- All nanoseconds remain full 32 bits
     -- ============================================================
     signal stored_t1_seconds     : std_logic_vector(47 downto 0) := (others => '0');
     signal stored_t1_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t2_seconds     : std_logic_vector(47 downto 0) := (others => '0');
+    signal stored_t2_seconds     : std_logic_vector(3 downto 0) := (others => '0');
     signal stored_t2_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t3_seconds     : std_logic_vector(47 downto 0) := (others => '0');
+    signal stored_t3_seconds     : std_logic_vector(3 downto 0) := (others => '0');
     signal stored_t3_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t4_seconds     : std_logic_vector(47 downto 0) := (others => '0');
+    signal stored_t4_seconds     : std_logic_vector(3 downto 0) := (others => '0');
     signal stored_t4_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
     
     -- Latched RX timestamp - captured immediately when packet parsing starts
+    -- Full seconds kept for delay_resp forwarding; only lower 4 bits used for T2
     signal latched_rx_timestamp_seconds     : std_logic_vector(47 downto 0) := (others => '0');
     signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
 
 
-        attribute PRESERVE of stored_t1_nanoseconds : signal is true;
+    attribute PRESERVE of stored_t1_nanoseconds : signal is true;
     attribute PRESERVE of stored_t2_nanoseconds : signal is true;
     attribute PRESERVE of stored_t3_nanoseconds : signal is true;
     attribute PRESERVE of stored_t4_nanoseconds : signal is true;
@@ -285,9 +275,7 @@ begin
         variable active_sequence_id: std_logic_vector(15 downto 0);
         variable requesting_port_identity: std_logic_vector(79 downto 0);
         variable message_length: integer := 85;
-        
-        -- NOTE: delta_master_to_slave and delta_slave_to_master are now 
-        -- SIGNALS (delta_m2s_reg, delta_s2m_reg) for proper pipelining
+        variable delta_s2m : signed(31 downto 0);  -- T4 - T3 (used in Calc_Stage2)
     begin
         if reset_n = '0' then
             s_SM_PtpParser <= s_Idle;
@@ -311,17 +299,8 @@ begin
             stored_t4_seconds <= (others => '0');
             stored_t4_nanoseconds <= (others => '0');
 
-            -- Pipeline calculation registers
-            calc_t1_sec <= (others => '0');
-            calc_t1_nsec <= (others => '0');
-            calc_t2_sec <= (others => '0');
-            calc_t2_nsec <= (others => '0');
-            calc_t3_sec <= (others => '0');
-            calc_t3_nsec <= (others => '0');
-            calc_t4_sec <= (others => '0');
-            calc_t4_nsec <= (others => '0');
+            -- Pipeline calculation register
             delta_m2s_reg <= (others => '0');
-            delta_s2m_reg <= (others => '0');
 
             clock_configure_timestamp_nanoseconds_o <= (others => '0');
             clock_configure_timestamp_seconds_o <= (others => '0');
@@ -339,7 +318,7 @@ begin
             -- It pulses HIGH only AFTER the timestamp has been synchronized
             -- across the clock domain, so we can safely sample here.
             if (t3_valid_i = '1') then
-                stored_t3_seconds <= tx_timestamp_seconds_i;
+                stored_t3_seconds <= tx_timestamp_seconds_i(3 downto 0);
                 stored_t3_nanoseconds <= tx_timestamp_nanoseconds_i;
             end if;
 
@@ -551,7 +530,7 @@ begin
                             -- Handle Sync message processing here
                             if (is_leader = '0') then
                                 active_sequence_id := ptp_sequence_id;
-                                stored_t2_seconds <= latched_rx_timestamp_seconds;
+                                stored_t2_seconds <= latched_rx_timestamp_seconds(3 downto 0);
                                 stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
                             end if;
                             s_SM_PtpParser <= s_Done;
@@ -609,24 +588,12 @@ begin
                             -- Check sequence ID AND that this response is for US (our clock identity)
                             if ptp_sequence_id = active_sequence_id and requesting_port_identity = my_clock_id then
                                 -- T4: Origin timestamp from Delay_Resp (when Master received Delay_Req)
-                                stored_t4_seconds <= ptp_origin_timestamp_seconds;
+                                stored_t4_seconds <= ptp_origin_timestamp_seconds(3 downto 0);
                                 stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                 
-                                -- ============================================
-                                -- PIPELINED CALCULATION - Stage 1
-                                -- Latch all timestamps into calculation registers
-                                -- This prevents any input changes during the calculation
-                                -- ============================================
-                                calc_t1_sec  <= stored_t1_seconds;
-                                calc_t1_nsec <= stored_t1_nanoseconds;
-                                calc_t2_sec  <= stored_t2_seconds;
-                                calc_t2_nsec <= stored_t2_nanoseconds;
-                                calc_t3_sec  <= stored_t3_seconds;
-                                calc_t3_nsec <= stored_t3_nanoseconds;
-                                calc_t4_sec  <= ptp_origin_timestamp_seconds;
-                                calc_t4_nsec <= ptp_origin_timestamp_nanoseconds;
-                                
                                 -- Go to calculation pipeline
+                                -- No extra latching needed: stored_t* are stable while
+                                -- the state machine is not in s_Idle (no new packets parsed)
                                 s_SM_PtpParser <= s_Calc_Stage1;
                             else
                                 -- Sequence ID or port identity mismatch - skip calculation
@@ -662,8 +629,8 @@ begin
                 -- Register result for next stage
                 -- ============================================
                 delta_m2s_reg <= timestamp_diff_ns(
-                    calc_t2_sec, calc_t2_nsec,
-                    calc_t1_sec, calc_t1_nsec
+                    stored_t2_seconds, stored_t2_nanoseconds,
+                    stored_t1_seconds(3 downto 0), stored_t1_nanoseconds
                 );
                 s_SM_PtpParser <= s_Calc_Stage2;
                 
@@ -671,26 +638,18 @@ begin
                 -- ============================================
                 -- PIPELINED CALCULATION - Stage 2
                 -- Calculate delta_slave_to_master = T4 - T3
-                -- Register result for next stage
+                -- Then final results using registered delta_m2s_reg
                 -- ============================================
-                delta_s2m_reg <= timestamp_diff_ns(
-                    calc_t4_sec, calc_t4_nsec,
-                    calc_t3_sec, calc_t3_nsec
+                delta_s2m := timestamp_diff_ns(
+                    stored_t4_seconds, stored_t4_nanoseconds,
+                    stored_t3_seconds, stored_t3_nanoseconds
                 );
-                s_SM_PtpParser <= s_Calc_Stage3;
-
-            elsif (s_SM_PtpParser = s_Calc_Stage3) then
-                -- ============================================
-                -- PIPELINED CALCULATION - Stage 3
-                -- Final calculation using REGISTERED deltas
-                -- This is now a simple add/sub and shift - fast!
-                -- ============================================
                 
                 -- Mean path delay = ((t2-t1) + (t4-t3)) / 2
-                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg, 1);
+                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m, 1);
                 
                 -- Offset from master = ((t2-t1) - (t4-t3)) / 2
-                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
+                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m, 1);
                 
                 ptp_calc_valid_o <= '1';
                 s_SM_PtpParser <= s_Done;

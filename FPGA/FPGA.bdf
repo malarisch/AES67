@@ -2498,15 +2498,15 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 64)
 		(input)
-		(text "offset_from_master_i[63..0]" (rect 0 0 147 11)(font "Arial" ))
-		(text "offset_from_master_i[63..0]" (rect 21 59 168 70)(font "Arial" ))
+		(text "offset_from_master_i[31..0]" (rect 0 0 147 11)(font "Arial" ))
+		(text "offset_from_master_i[31..0]" (rect 21 59 168 70)(font "Arial" ))
 		(line (pt 0 64)(pt 16 64)(line_width 3))
 	)
 	(port
 		(pt 0 80)
 		(input)
-		(text "mean_path_delay_i[63..0]" (rect 0 0 138 11)(font "Arial" ))
-		(text "mean_path_delay_i[63..0]" (rect 21 75 159 86)(font "Arial" ))
+		(text "mean_path_delay_i[31..0]" (rect 0 0 138 11)(font "Arial" ))
+		(text "mean_path_delay_i[31..0]" (rect 21 75 159 86)(font "Arial" ))
 		(line (pt 0 80)(pt 16 80)(line_width 3))
 	)
 	(port
@@ -2568,15 +2568,15 @@ on the Quartus Prime software download page.
 	(port
 		(pt 328 112)
 		(output)
-		(text "filtered_offset_o[63..0]" (rect 0 0 120 11)(font "Arial" ))
-		(text "filtered_offset_o[63..0]" (rect 206 107 326 118)(font "Arial" ))
+		(text "filtered_offset_o[31..0]" (rect 0 0 120 11)(font "Arial" ))
+		(text "filtered_offset_o[31..0]" (rect 206 107 326 118)(font "Arial" ))
 		(line (pt 328 112)(pt 312 112)(line_width 3))
 	)
 	(port
 		(pt 328 128)
 		(output)
-		(text "integral_o[63..0]" (rect 0 0 88 11)(font "Arial" ))
-		(text "integral_o[63..0]" (rect 233 123 321 134)(font "Arial" ))
+		(text "integral_o[31..0]" (rect 0 0 88 11)(font "Arial" ))
+		(text "integral_o[31..0]" (rect 233 123 321 134)(font "Arial" ))
 		(line (pt 328 128)(pt 312 128)(line_width 3))
 	)
 	(port
@@ -2769,15 +2769,15 @@ on the Quartus Prime software download page.
 	(port
 		(pt 448 144)
 		(output)
-		(text "mean_path_delay_ns_o[63..0]" (rect 0 0 159 11)(font "Arial" ))
-		(text "mean_path_delay_ns_o[63..0]" (rect 293 139 452 150)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 0 0 159 11)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 293 139 452 150)(font "Arial" ))
 		(line (pt 448 144)(pt 432 144)(line_width 3))
 	)
 	(port
 		(pt 448 160)
 		(output)
-		(text "offset_from_master_ns_o[63..0]" (rect 0 0 167 11)(font "Arial" ))
-		(text "offset_from_master_ns_o[63..0]" (rect 286 155 453 166)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 0 0 167 11)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 286 155 453 166)(font "Arial" ))
 		(line (pt 448 160)(pt 432 160)(line_width 3))
 	)
 	(port
@@ -4596,7 +4596,7 @@ on the Quartus Prime software download page.
 	(pt 4128 2000)
 )
 (connector
-	(text "ptp_mean_path_delay[63..0]" (rect 3488 1712 3624 1723)(font "DejaVu Sans Condensed" ))
+	(text "ptp_mean_path_delay[31..0]" (rect 3488 1712 3624 1723)(font "DejaVu Sans Condensed" ))
 	(pt 3480 1728)
 	(pt 3504 1728)
 	(bus)
@@ -4662,7 +4662,7 @@ on the Quartus Prime software download page.
 	(pt 3584 1712)
 )
 (connector
-	(text "ptp_offset_from_master[63..0]" (rect 3472 1728 3617 1739)(font "DejaVu Sans Condensed" ))
+	(text "ptp_offset_from_master[31..0]" (rect 3472 1728 3617 1739)(font "DejaVu Sans Condensed" ))
 	(pt 3536 1744)
 	(pt 3480 1744)
 	(bus)
@@ -4733,13 +4733,13 @@ on the Quartus Prime software download page.
 	(pt 2640 1464)
 )
 (connector
-	(text "ptp_offset_from_master[63..0]" (rect 2584 1464 2729 1475)(font "DejaVu Sans Condensed" ))
+	(text "ptp_offset_from_master[31..0]" (rect 2584 1464 2729 1475)(font "DejaVu Sans Condensed" ))
 	(pt 2576 1480)
 	(pt 2640 1480)
 	(bus)
 )
 (connector
-	(text "ptp_mean_path_delay[63..0]" (rect 2560 1480 2696 1491)(font "DejaVu Sans Condensed" ))
+	(text "ptp_mean_path_delay[31..0]" (rect 2560 1480 2696 1491)(font "DejaVu Sans Condensed" ))
 	(pt 2552 1496)
 	(pt 2640 1496)
 	(bus)

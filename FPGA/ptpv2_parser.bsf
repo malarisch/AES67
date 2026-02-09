@@ -153,15 +153,15 @@ on the Quartus Prime software download page.
 	(port
 		(pt 448 144)
 		(output)
-		(text "mean_path_delay_ns_o[63..0]" (rect 0 0 122 12)(font "Arial" ))
-		(text "mean_path_delay_ns_o[63..0]" (rect 305 139 427 151)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 0 0 122 12)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 305 139 427 151)(font "Arial" ))
 		(line (pt 448 144)(pt 432 144)(line_width 3))
 	)
 	(port
 		(pt 448 160)
 		(output)
-		(text "offset_from_master_ns_o[63..0]" (rect 0 0 134 12)(font "Arial" ))
-		(text "offset_from_master_ns_o[63..0]" (rect 293 155 427 167)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 0 0 134 12)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 293 155 427 167)(font "Arial" ))
 		(line (pt 448 160)(pt 432 160)(line_width 3))
 	)
 	(port
