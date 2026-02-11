@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 368 192)
+	(rect 16 16 368 256)
 	(text "wallclock" (rect 5 0 38 12)(font "Arial" ))
-	(text "inst" (rect 8 160 20 172)(font "Arial" ))
+	(text "inst" (rect 8 224 20 236)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -101,13 +101,51 @@ on the Quartus Prime software download page.
 		(text "second_pulse_o" (rect 267 59 331 71)(font "Arial" ))
 		(line (pt 352 64)(pt 336 64)(line_width 1))
 	)
+	(port
+		(pt 352 80)
+		(output)
+		(text "audio_bclk_o" (rect 0 0 52 12)(font "Arial" ))
+		(text "audio_bclk_o" (rect 279 75 331 87)(font "Arial" ))
+		(line (pt 352 80)(pt 336 80)(line_width 1))
+	)
+	(port
+		(pt 352 96)
+		(output)
+		(text "audio_lrck_o" (rect 0 0 52 12)(font "Arial" ))
+		(text "audio_lrck_o" (rect 279 91 331 103)(font "Arial" ))
+		(line (pt 352 96)(pt 336 96)(line_width 1))
+	)
+	(port
+		(pt 352 112)
+		(output)
+		(text "media_clock_o[31..0]" (rect 0 0 84 12)(font "Arial" ))
+		(text "media_clock_o[31..0]" (rect 247 107 331 119)(font "Arial" ))
+		(line (pt 352 112)(pt 336 112)(line_width 3))
+	)
+	(port
+		(pt 352 128)
+		(output)
+		(text "sample_pulse_o" (rect 0 0 64 12)(font "Arial" ))
+		(text "sample_pulse_o" (rect 267 123 331 135)(font "Arial" ))
+		(line (pt 352 128)(pt 336 128)(line_width 1))
+	)
 	(parameter
 		"increment_interval"
 		"8"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"sys_clk_hz"
+		"125000000"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"audio_fs"
+		"48000"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
-		(rectangle (rect 16 16 336 160)(line_width 1))
+		(rectangle (rect 16 16 336 224)(line_width 1))
 	)
 	(annotation_block (parameter)(rect 368 -64 468 16))
 )
