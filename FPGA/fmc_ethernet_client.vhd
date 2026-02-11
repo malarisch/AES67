@@ -46,6 +46,7 @@ architecture rtl of fmc_ethernet_client is
 
   signal reg_tx_len      : unsigned(15 downto 0) := (others => '0');
   signal reg_tx_start    : std_ulogic := '0';
+  signal reg_tx_start_toggle : std_ulogic := '0'; -- Toggle for CDC
 
   signal reg_rx_len      : unsigned(15 downto 0) := (others => '0');
   signal reg_rx_ready    : std_ulogic := '0';
@@ -287,6 +288,7 @@ begin
       rxfifo_rd_en    <= '0';
       reg_tx_len      <= (others => '0');
       reg_tx_start    <= '0';
+      reg_tx_start_toggle <= '0';
       reg_tx_len_reset <= '0';
       rx_clear_req_sys   <= '0';
       fmc_rx_bytes_sent <= (others => '0');
@@ -329,6 +331,9 @@ begin
             reg_tx_len(15 downto 8) <= unsigned(fmc_din_meta);
             reg_tx_len_reset <= '1';
           when "0000010" =>  -- 0x02 TX_CTRL
+            if fmc_din_meta(0) = '1' and reg_tx_start = '0' then
+              reg_tx_start_toggle <= not reg_tx_start_toggle;
+            end if;
             reg_tx_start <= fmc_din_meta(0);
           when "0100010" =>  -- 0x22 RX_STATUS clear
             if fmc_din_meta(0) = '1' then
@@ -402,9 +407,9 @@ begin
       tx_start_sync_2 <= '0';
       tx_start_pulse  <= '0';
     elsif rising_edge(mac_tx_clock_i) then
-      tx_start_sync_1 <= reg_tx_start;
+      tx_start_sync_1 <= reg_tx_start_toggle;
       tx_start_sync_2 <= tx_start_sync_1;
-      tx_start_pulse  <= tx_start_sync_1 and not tx_start_sync_2;
+      tx_start_pulse  <= tx_start_sync_1 xor tx_start_sync_2;
     end if;
   end process;
 

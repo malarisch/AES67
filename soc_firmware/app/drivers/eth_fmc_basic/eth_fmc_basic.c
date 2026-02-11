@@ -295,6 +295,9 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 
 			struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(data->iface, pkt_len,
 									AF_UNSPEC, 0, K_NO_WAIT);
+
+
+		//	LOG_HEXDUMP_INF(data->rx_buf, pkt_len, "Received Packet:");
 			if (!pkt) {
 				LOG_ERR("rx alloc failed");
 				continue;

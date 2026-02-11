@@ -72,33 +72,28 @@ entity ptpv2_servo is
         
         -- Status
         locked_o             : out std_logic;
-        sync_timeout_o       : out std_logic;  -- Pulses when no sync received for too long
-        
-        -- Debug outputs
-        filtered_offset_o    : out signed(31 downto 0);
-        integral_o           : out signed(31 downto 0);
-        effective_gain_shift_o : out integer range 0 to 15;  -- Debug: actual gain shift used
-        median_offset_o      : out signed(31 downto 0);      -- Debug: median-filtered offset
-        median_delay_o       : out signed(31 downto 0);      -- Debug: median-filtered path delay
-        median_valid_o       : out std_logic                 -- Debug: median filter has enough samples
+        sync_timeout_o       : out std_logic   -- Pulses when no sync received for too long
     );
 end entity;
 
 architecture Behavioral of ptpv2_servo is
 
-    -- Filtered offset (exponential moving average)
-    signal filtered_offset : signed(31 downto 0) := (others => '0');
+    -- Filtered offset - narrowed to 18 bits
+    -- In normal operation (not phase jump), values are always < PHASE_JUMP_THRESHOLD (100,000 ns)
+    -- 2^17 = 131,072 > 100,000, so signed(17 downto 0) is sufficient
+    signal filtered_offset : signed(17 downto 0) := (others => '0');
     
-    -- PI controller state
-    signal integral_sum    : signed(31 downto 0) := (others => '0');
-    signal freq_correction : signed(31 downto 0) := (others => '0');
+    -- PI controller state - narrowed to 20 bits
+    -- Both are clamped to ±500,000; 2^19 = 524,288 > 500,000
+    signal integral_sum    : signed(19 downto 0) := (others => '0');
+    signal freq_correction : signed(19 downto 0) := (others => '0');
     
-    -- Lock detection
-    signal lock_counter    : integer range 0 to 255 := 0;
+    -- Lock detection - sized to actual need
+    signal lock_counter    : integer range 0 to LOCK_COUNT_THRESHOLD := 0;
     signal locked          : std_logic := '0';
     
-    -- Sample counter for warmup
-    signal sample_count    : integer range 0 to 65535 := 0;
+    -- Sample counter for warmup - sized to actual need
+    signal sample_count    : integer range 0 to WARMUP_SAMPLES + 1 := 0;
     
     -- Sync timeout counter
     signal timeout_counter : unsigned(31 downto 0) := (others => '0');
@@ -107,7 +102,9 @@ architecture Behavioral of ptpv2_servo is
     
     -- Message interval tracking
     signal current_log_interval : signed(7 downto 0) := (others => '0');
-    signal effective_gain_shift : integer range 0 to 15 := GAIN_SHIFT;
+    
+    -- Gain shift is a compile-time constant (avoids runtime barrel shifter)
+    constant EFFECTIVE_GAIN_SHIFT : integer := GAIN_SHIFT;
     
     -- ============================================
     -- Median filter for outlier rejection (5 samples)
@@ -115,15 +112,13 @@ architecture Behavioral of ptpv2_servo is
     constant MEDIAN_SIZE : integer := 5;
     type sample_buffer_t is array(0 to MEDIAN_SIZE-1) of signed(31 downto 0);
     
-    -- Sample buffers (circular)
+    -- Sample buffer (circular) - only offset needs median filtering
     signal offset_buffer      : sample_buffer_t := (others => (others => '0'));
-    signal delay_buffer       : sample_buffer_t := (others => (others => '0'));
     signal buffer_write_idx   : integer range 0 to MEDIAN_SIZE-1 := 0;
     signal buffer_fill_count  : integer range 0 to MEDIAN_SIZE := 0;
     
     -- Median-filtered values
     signal median_offset      : signed(31 downto 0) := (others => '0');
-    signal median_delay       : signed(31 downto 0) := (others => '0');
     signal median_valid       : std_logic := '0';
     
     -- Sanity check: reject obviously invalid measurements (> 1s)
@@ -175,18 +170,12 @@ architecture Behavioral of ptpv2_servo is
     
 begin
 
-    -- Output assignments
-    freq_correction_o <= freq_correction;
+    -- Output assignments (sign-extend narrowed internal signals to 32-bit ports)
+    freq_correction_o <= resize(freq_correction, 32);
     locked_o <= locked;
-    filtered_offset_o <= filtered_offset;
-    integral_o <= integral_sum;
     phase_jump_o <= phase_jump_reg;
     phase_jump_valid_o <= phase_jump_valid_reg;
     sync_timeout_o <= sync_timeout;
-    effective_gain_shift_o <= effective_gain_shift;
-    median_offset_o <= median_offset;
-    median_delay_o  <= median_delay;
-    median_valid_o  <= median_valid;
     
     -- ============================================================
     -- Calculate effective gain shift based on message interval
@@ -205,12 +194,13 @@ begin
     servo_proc: process(clk, reset_n)
         variable offset_sample   : signed(31 downto 0);
         variable offset_abs      : signed(31 downto 0);
-        variable proportional    : signed(31 downto 0);
-        variable pi_output       : signed(31 downto 0);
-        variable filter_delta    : signed(31 downto 0);
-        variable scaled_offset   : signed(31 downto 0);  -- Scaled down offset for multiplication
-        variable mult_result     : signed(63 downto 0);  -- Result of 32x32 multiplication
+        variable proportional    : signed(19 downto 0);  -- Same width as freq_correction
+        variable pi_output       : signed(19 downto 0);  -- Same width as freq_correction
+        variable filter_delta    : signed(17 downto 0);  -- Same width as filtered_offset
+        variable scaled_offset   : signed(17 downto 0);  -- Clamped to filtered_offset range
+        variable mult_result     : signed(31 downto 0);  -- 18 * 14-bit max (KP_GAIN) = 32 bits sufficient
         variable timeout_cycles  : unsigned(31 downto 0);  -- Calculated timeout
+        variable integral_update : signed(19 downto 0);  -- Same width as integral_sum
     begin
         if reset_n = '0' then
             filtered_offset <= (others => '0');
@@ -227,11 +217,9 @@ begin
             current_log_interval <= (others => '0');
             -- Median filter reset
             offset_buffer <= (others => (others => '0'));
-            delay_buffer  <= (others => (others => '0'));
             buffer_write_idx  <= 0;
             buffer_fill_count <= 0;
             median_offset <= (others => '0');
-            median_delay  <= (others => '0');
             median_valid  <= '0';
             
         elsif rising_edge(clk) then
@@ -297,9 +285,8 @@ begin
                 -- MEDIAN FILTER: Store samples and calculate median
                 -- ============================================
                 
-                -- Store new samples in circular buffer
+                -- Store new offset sample in circular buffer
                 offset_buffer(buffer_write_idx) <= offset_from_master_i;
-                delay_buffer(buffer_write_idx)  <= mean_path_delay_i;
                 
                 -- Update write index (circular)
                 if buffer_write_idx = MEDIAN_SIZE - 1 then
@@ -316,12 +303,10 @@ begin
                 -- Calculate median when buffer is full
                 if buffer_fill_count >= MEDIAN_SIZE - 1 then  -- Will be MEDIAN_SIZE after this cycle
                     median_offset <= median5(offset_buffer);
-                    median_delay  <= median5(delay_buffer);
                     median_valid  <= '1';
                 else
                     -- Not enough samples yet - use raw value
                     median_offset <= offset_from_master_i;
-                    median_delay  <= mean_path_delay_i;
                     median_valid  <= '0';
                 end if;
                 
@@ -344,8 +329,8 @@ begin
                 -- ============================================
                 if offset_abs < MAX_VALID_OFFSET then
                     
-                    -- Count valid samples
-                    if sample_count < 65535 then
+                    -- Count valid samples (only up to warmup threshold + 1)
+                    if sample_count <= WARMUP_SAMPLES then
                         sample_count <= sample_count + 1;
                     end if;
                     
@@ -371,9 +356,8 @@ begin
                         sample_count <= 0;  -- Restart warmup
                         locked <= '0';
                         lock_counter <= 0;
-                        -- Reset median filter buffers
+                        -- Reset median filter buffer
                         offset_buffer <= (others => (others => '0'));
-                        delay_buffer  <= (others => (others => '0'));
                         buffer_write_idx  <= 0;
                         buffer_fill_count <= 0;
                         median_valid <= '0';
@@ -389,11 +373,11 @@ begin
                         -- Subsequent: exponential moving average
                         -- ============================================
                         if sample_count = 0 then
-                            -- First sample: initialize filter
-                            filtered_offset <= offset_sample;
+                            -- First sample: initialize filter (truncate to 18 bits, OK since < PHASE_JUMP_THRESHOLD)
+                            filtered_offset <= resize(offset_sample, 18);
                         else
                             -- EMA: filtered = filtered + (sample - filtered) >> FILTER_SHIFT
-                            filter_delta := shift_right(offset_sample - filtered_offset, FILTER_SHIFT);
+                            filter_delta := shift_right(resize(offset_sample, 18) - filtered_offset, FILTER_SHIFT);
                             filtered_offset <= filtered_offset + filter_delta;
                         end if;
                         
@@ -402,53 +386,35 @@ begin
                         -- ============================================
                         if sample_count >= WARMUP_SAMPLES then
                             
-                            -- Proportional term: Kp * filtered_offset / 2^GAIN_SHIFT
-                            -- Clamp to 30-bit range to prevent wrap-around in multiplication
-                            if filtered_offset > to_signed(2**30 - 1, 32) then
-                                scaled_offset := to_signed(2**30 - 1, 32);
-                            elsif filtered_offset < to_signed(-(2**30), 32) then
-                                scaled_offset := to_signed(-(2**30), 32);
+                            -- scaled_offset = filtered_offset (already narrow, max ±100,000)
+                            scaled_offset := filtered_offset;
+                            
+                            -- Proportional: -Kp * scaled_offset / 2^GAIN_SHIFT
+                            -- 18-bit * KP_GAIN(4-bit) = 22-bit, shift right by GAIN_SHIFT, result fits 20 bits
+                            mult_result := scaled_offset * to_signed(KP_GAIN, 14);
+                            proportional := -resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT), 20);
+                            
+                            -- Integral: accumulate -Ki * offset / 2^(GAIN_SHIFT+2)
+                            mult_result := scaled_offset * to_signed(KI_GAIN, 14);
+                            integral_update := integral_sum - resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT + 2), 20);
+                            
+                            -- Clamp integral to anti-windup limits ±500,000 PPB
+                            if integral_update > to_signed(500_000, 20) then
+                                integral_sum <= to_signed(500_000, 20);
+                            elsif integral_update < to_signed(-500_000, 20) then
+                                integral_sum <= to_signed(-500_000, 20);
                             else
-                                scaled_offset := filtered_offset;
-                            end if;
-                            
-                            -- Proportional: Kp * scaled_offset / 2^effective_gain_shift
-                            -- Note: 32-bit * 32-bit = 64-bit result
-                            -- SIGN INVERSION: positive offset means local clock is AHEAD,
-                            -- so we need NEGATIVE frequency correction to slow down.
-                            -- Formula: freq_correction = -Kp * offset
-                            -- 
-                            -- GAIN SCALING: effective_gain_shift is larger for faster sync rates
-                            -- This reduces the proportional gain to maintain stability
-                            mult_result := scaled_offset * to_signed(KP_GAIN, 32);
-                            proportional := -resize(shift_right(mult_result, effective_gain_shift), 32);
-                            
-                            -- Integral term: Accumulate filtered offset (also inverted)
-                            -- Anti-windup: limit to ±500000 PPB (same as output limit!)
-                            -- This prevents integrator from winding up beyond useful range
-                            -- Note: integral uses effective_gain_shift + 2 (same relative Ki/Kp ratio)
-                            if integral_sum > to_signed(-500_000, 32) and 
-                               integral_sum < to_signed(500_000, 32) then
-                                mult_result := scaled_offset * to_signed(KI_GAIN, 32);
-                                integral_sum <= integral_sum - resize(shift_right(mult_result, effective_gain_shift + 2), 32);
-                            elsif integral_sum >= to_signed(500_000, 32) and scaled_offset > 0 then
-                                -- At positive limit but offset is positive, let it decrease
-                                mult_result := scaled_offset * to_signed(KI_GAIN, 32);
-                                integral_sum <= integral_sum - resize(shift_right(mult_result, effective_gain_shift + 2), 32);
-                            elsif integral_sum <= to_signed(-500_000, 32) and scaled_offset < 0 then
-                                -- At negative limit but offset is negative, let it increase
-                                mult_result := scaled_offset * to_signed(KI_GAIN, 32);
-                                integral_sum <= integral_sum - resize(shift_right(mult_result, effective_gain_shift + 2), 32);
+                                integral_sum <= integral_update;
                             end if;
                             
                             -- Combined PI output
                             pi_output := proportional + integral_sum;
                             
-                            -- Limit frequency correction to ±500 PPM = ±500000 PPB
-                            if pi_output > to_signed(500_000, 32) then
-                                freq_correction <= to_signed(500_000, 32);
-                            elsif pi_output < to_signed(-500_000, 32) then
-                                freq_correction <= to_signed(-500_000, 32);
+                            -- Limit frequency correction to ±500 PPM = ±500,000 PPB
+                            if pi_output > to_signed(500_000, 20) then
+                                freq_correction <= to_signed(500_000, 20);
+                            elsif pi_output < to_signed(-500_000, 20) then
+                                freq_correction <= to_signed(-500_000, 20);
                             else
                                 freq_correction <= pi_output;
                             end if;
