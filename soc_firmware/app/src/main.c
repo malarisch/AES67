@@ -94,31 +94,30 @@ static int fpga_write_ip_address(const struct in_addr *addr)
 static struct net_mgmt_event_callback dhcp_cb;
 
 static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
-			  uint32_t mgmt_event,
+			  uint64_t mgmt_event,
 			  struct net_if *iface)
 {
 	if (mgmt_event != NET_EVENT_IPV4_DHCP_BOUND) {
 		return;
 	}
 
-	/* Retrieve the assigned address */
-	struct net_if_config *if_cfg = net_if_get_config(iface);
+	/* The event info payload is a struct net_if_dhcpv4 containing
+	 * the assigned IP in 'requested_ip'.
+	 */
+	const struct net_if_dhcpv4 *dhcpv4 =
+		(const struct net_if_dhcpv4 *)cb->info;
 
-	if (!if_cfg || if_cfg->ip.ipv4 == NULL) {
-		LOG_WRN("DHCP bound but no IPv4 config available");
+	if (!dhcpv4) {
+		LOG_WRN("DHCP bound but no info payload");
 		return;
 	}
 
-	struct net_if_addr *unicast = &if_cfg->ip.ipv4->unicast[0].ipv4;
+	const uint8_t *ip = (const uint8_t *)&dhcpv4->requested_ip.s_addr;
 
-	LOG_INF("DHCP bound: %u.%u.%u.%u",
-		((const uint8_t *)&unicast->address.in_addr.s_addr)[0],
-		((const uint8_t *)&unicast->address.in_addr.s_addr)[1],
-		((const uint8_t *)&unicast->address.in_addr.s_addr)[2],
-		((const uint8_t *)&unicast->address.in_addr.s_addr)[3]);
+	LOG_INF("DHCP bound: %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 
 	/* Push the new IP address to the FPGA */
-	fpga_write_ip_address(&unicast->address.in_addr);
+	fpga_write_ip_address(&dhcpv4->requested_ip);
 }
 
 /* ---- Legacy test code (unused) ---- */
