@@ -186,6 +186,283 @@ static int send_raw_frame(struct net_if *iface, uint8_t seq)
 	return 0;
 }
 
+/* ---- FPGA status polling & PLL correction ---- */
+
+/**
+ * @brief Read a 4-byte (32-bit) value from a sequential FPGA register.
+ *
+ * The FPGA auto-increments the internal byte pointer on each read
+ * to the same address.  Reads LSB first.
+ *
+ * @param fmc   The FMC device
+ * @param reg   FPGA register address (0x52, 0x53, 0x54)
+ * @param val   Pointer to store the 32-bit result
+ * @return 0 on success, negative errno on error
+ */
+static int fpga_read_32(const struct device *fmc, uint8_t reg, int32_t *val)
+{
+	uint8_t buf[4];
+	int ret;
+
+	ret = eth_fmc_reg_read_block(fmc, reg, buf, 4);
+	if (ret < 0) {
+		return ret;
+	}
+
+	*val = (int32_t)((uint32_t)buf[0] |
+			 ((uint32_t)buf[1] << 8) |
+			 ((uint32_t)buf[2] << 16) |
+			 ((uint32_t)buf[3] << 24));
+	return 0;
+}
+
+/* Base frequency for CLK0 – must match initial si5351a_set_frequency() call */
+#define SI_CLK0_BASE_FREQ_HZ 24576000U
+
+/* Polling interval for FPGA status registers */
+#define FPGA_POLL_INTERVAL_MS 100
+
+/* =====================================================================
+ * PI controller for PLL frequency discipline
+ *
+ * The FPGA measures the PPB error between the PLL clock and the PTP
+ * wallclock once per second.  We use a PI controller to smoothly
+ * converge on zero error.
+ *
+ * Controller output = Kp * error + Ki * integral(error)
+ *
+ * Gains are expressed as fixed-point fractions to avoid floating point:
+ *   Kp = PI_KP_NUM / PI_KP_DEN   (proportional gain)
+ *   Ki = PI_KI_NUM / PI_KI_DEN   (integral gain per sample)
+ *
+ * Typical tuning:
+ *   Kp = 1/4 = 0.25  → convergence in ~4 steps, no overshoot
+ *   Ki = 1/32 = 0.03  → slowly eliminates residual offset
+ *
+ * Anti-windup: integrator clamped to ±PI_IMAX ppb
+ * Outlier rejection: samples > PI_OUTLIER_PPB rejected after warm-up
+ * ===================================================================== */
+
+#define PI_KP_NUM          1       /* Proportional numerator */
+#define PI_KP_DEN          4       /* Proportional denominator (Kp = 0.25) */
+#define PI_KI_NUM          1       /* Integral numerator */
+#define PI_KI_DEN          32      /* Integral denominator   (Ki = 0.03125) */
+#define PI_IMAX            500000  /* Anti-windup: max integrator magnitude (ppb) */
+#define PI_OUTLIER_PPB     50000   /* Max plausible single-measurement error (ppb) */
+#define PI_WARMUP_CYCLES   3       /* First N cycles: no outlier rejection */
+
+/* PI controller state */
+static struct {
+	int64_t integrator;    /* Accumulated integral term (ppb, scaled by KI_DEN) */
+	int32_t output;        /* Current total correction applied (ppb) */
+	uint32_t cycle;        /* Total accepted measurement count */
+	uint32_t outliers;     /* Rejected outlier count */
+} pi_state;
+
+/**
+ * @brief Background thread that continuously measures the PPB offset
+ *        between the PLL and the PTP wallclock, and applies correction
+ *        to the Si5351A clock generator.
+ *
+ * Flow:
+ *   1. Write bit[0] of register 0x50 to start measurement.
+ *   2. Poll register 0x50 every 100 ms until PPB-valid flag appears.
+ *   3. Read the 32-bit signed PPB value from register 0x54.
+ *   4. Apply the negated PPB as a correction to the Si5351A PLL.
+ *   5. Start the next measurement immediately and repeat.
+ */
+static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	const struct device *fmc = device_get_binding("eth_fmc0");
+	const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
+	bool measurement_running = false;
+	uint8_t status;
+	int ret;
+	uint32_t poll_count = 0;   /* Counts 100ms ticks; print at 10 = 1s */
+
+	if (!fmc) {
+		LOG_ERR("PPB poll: FMC device not found");
+		return;
+	}
+	if (!device_is_ready(clkgen)) {
+		LOG_ERR("PPB poll: Si5351A device not ready");
+		return;
+	}
+
+	LOG_INF("PPB poll thread started");
+
+	while (1) {
+		k_msleep(FPGA_POLL_INTERVAL_MS);
+		poll_count++;
+
+		/* Read clocking status flags (register 0x50 read) */
+		ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_CLK, &status);
+		if (ret < 0) {
+			LOG_WRN("PPB poll: failed to read status: %d", ret);
+			continue;
+		}
+
+		/* ---- Print all status registers every 1 second ---- */
+		if (poll_count >= 10) {
+			poll_count = 0;
+
+			/* 0x50 - Clocking flags (already in 'status') */
+			LOG_INF("CLK flags: PPB_valid=%d WC_locked=%d WC_phasejump=%d "
+				"WC_configured=%d PTP_leader_lost=%d",
+				!!(status & ETH_FMC_CLK_PPB_VALID),
+				!!(status & ETH_FMC_CLK_WC_LOCKED),
+				!!(status & ETH_FMC_CLK_WC_PHASEJUMP),
+				!!(status & ETH_FMC_CLK_WC_CONFIGURED),
+				!!(status & ETH_FMC_CLK_PTP_LEADER_LOST));
+
+			/* 0x51 - Ethernet flags */
+			uint8_t eth_status;
+
+			ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_ETH,
+					       &eth_status);
+			if (ret == 0) {
+				unsigned speed_code = (eth_status &
+						       ETH_FMC_ETH_SPEED_MASK) >>
+						      ETH_FMC_ETH_SPEED_SHIFT;
+				const char *speed_str =
+					(speed_code == 0) ? "10M" :
+					(speed_code == 1) ? "100M" :
+					(speed_code == 2) ? "1G" : "?";
+
+				LOG_INF("ETH flags: link_up=%d speed=%s",
+					!!(eth_status & ETH_FMC_ETH_LINK_UP),
+					speed_str);
+			}
+
+			/* 0x52 - Path delay */
+			int32_t path_delay;
+
+			ret = fpga_read_32(fmc, ETH_FMC_REG_PATH_DELAY,
+					   &path_delay);
+			if (ret == 0) {
+				LOG_INF("Path delay: %d ns", path_delay);
+			}
+
+			/* 0x53 - Leader offset */
+			int32_t leader_offset;
+
+			ret = fpga_read_32(fmc, ETH_FMC_REG_LEADER_OFFSET,
+					   &leader_offset);
+			if (ret == 0) {
+				LOG_INF("Leader offset: %d ns", leader_offset);
+			}
+
+			/* 0x54 - PPB offset (current reading) */
+			int32_t ppb_current;
+
+			ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET,
+					   &ppb_current);
+			if (ret == 0) {
+				LOG_INF("PPB offset: %d  (total correction: %d)",
+					ppb_current, pi_state.output);
+			}
+		}
+
+		/* If no measurement is running, start one */
+		if (!measurement_running) {
+			uint8_t cmd = ETH_FMC_FLAG_PPB_START;
+
+			ret = eth_fmc_reg_write(fmc, ETH_FMC_REG_STATUS_WR,
+						&cmd, 1);
+			if (ret < 0) {
+				LOG_WRN("PPB poll: failed to start measurement: %d", ret);
+				continue;
+			}
+			measurement_running = true;
+			LOG_DBG("PPB measurement started");
+			continue;
+		}
+
+		/* Check if measurement is complete */
+		if (!(status & ETH_FMC_CLK_PPB_VALID)) {
+			/* Still measuring — wait */
+			continue;
+		}
+
+		/* Measurement complete — read the PPB value */
+		int32_t ppb_measured;
+
+		ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET, &ppb_measured);
+		if (ret < 0) {
+			LOG_WRN("PPB poll: failed to read PPB: %d", ret);
+			measurement_running = false;
+			continue;
+		}
+
+		/* ---- Outlier rejection (after warm-up) ---- */
+		if (pi_state.cycle >= PI_WARMUP_CYCLES) {
+			int32_t abs_meas = (ppb_measured < 0) ? -ppb_measured
+							      : ppb_measured;
+			if (abs_meas > PI_OUTLIER_PPB) {
+				pi_state.outliers++;
+				LOG_WRN("PPB outlier rejected: %d  "
+					"(outliers=%u cycle=%u)",
+					ppb_measured, pi_state.outliers,
+					pi_state.cycle);
+				measurement_running = false;
+				continue;
+			}
+		}
+
+		pi_state.cycle++;
+
+		/*
+		 * PI controller:
+		 *
+		 * error = ppb_measured  (positive = PLL fast → need to slow down)
+		 *
+		 * P term:  correction_p = Kp * error
+		 * I term:  integrator += error;  correction_i = Ki * integrator
+		 * Output:  output -= (correction_p + correction_i)
+		 *
+		 * The output is the *absolute* ppb offset applied to the PLL
+		 * via si5351a_adjust_ppb().
+		 */
+		int32_t error = ppb_measured;
+
+		/* Proportional term */
+		int32_t p_term = (int32_t)(((int64_t)error * PI_KP_NUM) / PI_KP_DEN);
+
+		/* Integral term with anti-windup */
+		pi_state.integrator += error;
+		if (pi_state.integrator > (int64_t)PI_IMAX * PI_KI_DEN) {
+			pi_state.integrator = (int64_t)PI_IMAX * PI_KI_DEN;
+		} else if (pi_state.integrator < -(int64_t)PI_IMAX * PI_KI_DEN) {
+			pi_state.integrator = -(int64_t)PI_IMAX * PI_KI_DEN;
+		}
+		int32_t i_term = (int32_t)(pi_state.integrator * PI_KI_NUM / PI_KI_DEN);
+
+		/* Apply combined correction (subtract because positive error = too fast) */
+		pi_state.output -= (p_term + i_term);
+
+		LOG_INF("PI: err=%d P=%d I=%d out=%d  cycle=%u",
+			error, p_term, i_term, pi_state.output, pi_state.cycle);
+
+		ret = si5351a_adjust_ppb(clkgen, 0, SI_CLK0_BASE_FREQ_HZ,
+					 pi_state.output);
+		if (ret < 0) {
+			LOG_ERR("PPB poll: Si5351A adjust failed: %d", ret);
+		}
+
+		/* Start next measurement immediately */
+		measurement_running = false;
+	}
+}
+
+#define PPB_POLL_STACK_SIZE 2048
+#define PPB_POLL_PRIORITY   K_PRIO_PREEMPT(10)
+
+K_THREAD_STACK_DEFINE(ppb_poll_stack, PPB_POLL_STACK_SIZE);
+static struct k_thread ppb_poll_thread_data;
+
 int main(void)
 {
 	struct net_if *iface = net_if_get_default();
@@ -246,6 +523,13 @@ int main(void)
 
     LOG_INF("Starting DHCP...");
     net_dhcpv4_start(iface);
+
+    /* ---- Start PPB measurement / PLL correction thread ---- */
+    k_thread_create(&ppb_poll_thread_data, ppb_poll_stack,
+                    PPB_POLL_STACK_SIZE,
+                    fpga_status_poll_thread, NULL, NULL, NULL,
+                    PPB_POLL_PRIORITY, 0, K_NO_WAIT);
+    k_thread_name_set(&ppb_poll_thread_data, "ppb_poll");
 
     LOG_INF("System ready");
     return 0;

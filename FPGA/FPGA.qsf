@@ -359,6 +359,71 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio33
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio[33]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[35]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[34]
+set_global_assignment -name VHDL_FILE clock_ppb_meter.vhd
+set_global_assignment -name VHDL_FILE system_config_reg.vhd
+set_global_assignment -name VHDL_FILE ptpv2_servo.vhd
+set_global_assignment -name VHDL_FILE urt_dbg.vhd
+set_global_assignment -name VHDL_FILE ptpv2_controller.vhd
+set_global_assignment -name VHDL_FILE ptpv2_sender.vhd
+set_global_assignment -name VHDL_FILE ptpv2_parser.vhd
+set_global_assignment -name VHDL_FILE ptpv2_delay_resp_sender.vhd
+set_global_assignment -name VHDL_FILE miirmii/synthesis/miirmii.vhd
+set_global_assignment -name VHDL_FILE pulse_cdc_mac_sys.vhd
+set_global_assignment -name VHDL_FILE ptpv2_followup_sender.vhd
+set_global_assignment -name VHDL_FILE ptpv2_sync_sender.vhd
+set_global_assignment -name VHDL_FILE ethernet_timestamp.vhd
+set_global_assignment -name VHDL_FILE wallclock.vhd
+set_global_assignment -name VHDL_FILE fmc_ethernet_client.vhd
+set_global_assignment -name VHDL_FILE async_fifo.vhd
+set_global_assignment -name VHDL_FILE ethernet_packet_aggregator.vhd
+set_global_assignment -name BSF_FILE pll_systemclocks.bsf
+set_global_assignment -name BSF_FILE i2s_in.bsf
+set_global_assignment -name VHDL_FILE I2S_IN.vhd
+set_global_assignment -name BSF_FILE miirmii/miirmii.bsf
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/eth_ram.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_brom.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_amplitude.vhd
+set_global_assignment -name VHDL_FILE clk_by_x.vhd
+set_global_assignment -name VHDL_FILE udp_audio_packet.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/arp_packet.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/const_eth_speed.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/udp_packet.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/utility.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/single_signal_synchronizer.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/mii_gmii_io.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc32_tb.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_control.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/uart_tx.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/uart_rx.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/rs232_encoder.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/RS232_Decoder.vhdl
+set_global_assignment -name BDF_FILE FPGA.bdf
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_receive.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_reset.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/detect_rising_edge.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/const_eth_config.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/reverse_mac.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd
+set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/icmp_packet.vhd
+set_global_assignment -name QIP_FILE FPGA_Ethernet/FPGA/const_ddfs_freq0.qip
+set_global_assignment -name QIP_FILE FPGA_Ethernet/FPGA/const_ddfs_freq1.qip
+set_global_assignment -name SDC_FILE FPGA.sdc
+set_global_assignment -name SIGNALTAP_FILE stp1.stp
+set_global_assignment -name QIP_FILE audioclks.qip
+set_global_assignment -name QIP_FILE sample_counter.qip
+set_global_assignment -name QIP_FILE pll_systemclocks.qip
 set_global_assignment -name SLD_NODE_CREATOR_ID 110 -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_ENTITY_NAME sld_signaltap -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_clk -to clk_125MHz -section_id auto_signaltap_10
@@ -494,6 +559,75 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[128
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[129] -to "fmc_ethernet_client:inst8|tx_start_sync_2" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[130] -to "fmc_ethernet_client:inst8|txfifo_rd_en" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[131] -to "fmc_ethernet_client:inst8|txfifo_wr_en" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[132] -to "system_config_reg:inst10|data_in[0]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[133] -to "system_config_reg:inst10|data_in[1]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[134] -to "system_config_reg:inst10|data_in[2]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[135] -to "system_config_reg:inst10|data_in[3]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[136] -to "system_config_reg:inst10|data_in[4]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[137] -to "system_config_reg:inst10|data_in[5]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[138] -to "system_config_reg:inst10|data_in[6]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[139] -to "system_config_reg:inst10|data_in[7]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[140] -to "system_config_reg:inst10|mac_addr_out[0]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[141] -to "system_config_reg:inst10|mac_addr_out[10]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[142] -to "system_config_reg:inst10|mac_addr_out[11]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[143] -to "system_config_reg:inst10|mac_addr_out[12]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[144] -to "system_config_reg:inst10|mac_addr_out[13]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[145] -to "system_config_reg:inst10|mac_addr_out[14]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[146] -to "system_config_reg:inst10|mac_addr_out[15]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[147] -to "system_config_reg:inst10|mac_addr_out[16]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[148] -to "system_config_reg:inst10|mac_addr_out[17]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[149] -to "system_config_reg:inst10|mac_addr_out[18]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[150] -to "system_config_reg:inst10|mac_addr_out[19]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[151] -to "system_config_reg:inst10|mac_addr_out[1]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[152] -to "system_config_reg:inst10|mac_addr_out[20]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[153] -to "system_config_reg:inst10|mac_addr_out[21]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[154] -to "system_config_reg:inst10|mac_addr_out[22]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[155] -to "system_config_reg:inst10|mac_addr_out[23]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[156] -to "system_config_reg:inst10|mac_addr_out[24]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[157] -to "system_config_reg:inst10|mac_addr_out[25]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[158] -to "system_config_reg:inst10|mac_addr_out[26]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[159] -to "system_config_reg:inst10|mac_addr_out[27]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[160] -to "system_config_reg:inst10|mac_addr_out[28]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[161] -to "system_config_reg:inst10|mac_addr_out[29]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[162] -to "system_config_reg:inst10|mac_addr_out[2]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[163] -to "system_config_reg:inst10|mac_addr_out[30]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[164] -to "system_config_reg:inst10|mac_addr_out[31]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[165] -to "system_config_reg:inst10|mac_addr_out[32]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[166] -to "system_config_reg:inst10|mac_addr_out[33]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[167] -to "system_config_reg:inst10|mac_addr_out[34]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[168] -to "system_config_reg:inst10|mac_addr_out[35]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[169] -to "system_config_reg:inst10|mac_addr_out[36]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[170] -to "system_config_reg:inst10|mac_addr_out[37]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[171] -to "system_config_reg:inst10|mac_addr_out[38]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[172] -to "system_config_reg:inst10|mac_addr_out[39]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[173] -to "system_config_reg:inst10|mac_addr_out[3]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[174] -to "system_config_reg:inst10|mac_addr_out[40]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[175] -to "system_config_reg:inst10|mac_addr_out[41]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[176] -to "system_config_reg:inst10|mac_addr_out[42]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[177] -to "system_config_reg:inst10|mac_addr_out[43]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[178] -to "system_config_reg:inst10|mac_addr_out[44]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[179] -to "system_config_reg:inst10|mac_addr_out[45]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[180] -to "system_config_reg:inst10|mac_addr_out[46]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[181] -to "system_config_reg:inst10|mac_addr_out[47]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[182] -to "system_config_reg:inst10|mac_addr_out[4]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[183] -to "system_config_reg:inst10|mac_addr_out[5]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[184] -to "system_config_reg:inst10|mac_addr_out[6]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[185] -to "system_config_reg:inst10|mac_addr_out[7]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[186] -to "system_config_reg:inst10|mac_addr_out[8]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[187] -to "system_config_reg:inst10|mac_addr_out[9]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[188] -to "system_config_reg:inst10|wr_clk" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[189] -to "system_config_reg:inst10|wr_enable" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[190] -to "system_config_reg:inst10|writeAddr[0]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[191] -to "system_config_reg:inst10|writeAddr[10]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[192] -to "system_config_reg:inst10|writeAddr[1]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[193] -to "system_config_reg:inst10|writeAddr[2]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[194] -to "system_config_reg:inst10|writeAddr[3]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[195] -to "system_config_reg:inst10|writeAddr[4]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[196] -to "system_config_reg:inst10|writeAddr[5]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[197] -to "system_config_reg:inst10|writeAddr[6]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[198] -to "system_config_reg:inst10|writeAddr[7]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[199] -to "system_config_reg:inst10|writeAddr[8]" -section_id auto_signaltap_10
+set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[200] -to "system_config_reg:inst10|writeAddr[9]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[0] -to "fmc_ethernet_client:inst8|clk_sys_i" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[1] -to "fmc_ethernet_client:inst8|fmc_addr_i[0]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[2] -to "fmc_ethernet_client:inst8|fmc_addr_i[1]" -section_id auto_signaltap_10
@@ -626,173 +760,6 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[128] -
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[129] -to "fmc_ethernet_client:inst8|tx_start_sync_2" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[130] -to "fmc_ethernet_client:inst8|txfifo_rd_en" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[131] -to "fmc_ethernet_client:inst8|txfifo_wr_en" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334538" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=2048" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=2048" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=basic,1," -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_10
-set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ENABLE_ADVANCED_TRIGGER=0" -section_id auto_signaltap_10
-set_global_assignment -name VHDL_FILE system_config_reg.vhd
-set_global_assignment -name VHDL_FILE ptpv2_servo.vhd
-set_global_assignment -name VHDL_FILE urt_dbg.vhd
-set_global_assignment -name VHDL_FILE ptpv2_controller.vhd
-set_global_assignment -name VHDL_FILE ptpv2_sender.vhd
-set_global_assignment -name VHDL_FILE ptpv2_parser.vhd
-set_global_assignment -name VHDL_FILE ptpv2_delay_resp_sender.vhd
-set_global_assignment -name VHDL_FILE miirmii/synthesis/miirmii.vhd
-set_global_assignment -name VHDL_FILE pulse_cdc_mac_sys.vhd
-set_global_assignment -name VHDL_FILE ptpv2_followup_sender.vhd
-set_global_assignment -name VHDL_FILE ptpv2_sync_sender.vhd
-set_global_assignment -name VHDL_FILE ethernet_timestamp.vhd
-set_global_assignment -name VHDL_FILE wallclock.vhd
-set_global_assignment -name VHDL_FILE fmc_ethernet_client.vhd
-set_global_assignment -name VHDL_FILE async_fifo.vhd
-set_global_assignment -name VHDL_FILE ethernet_packet_aggregator.vhd
-set_global_assignment -name BSF_FILE pll_systemclocks.bsf
-set_global_assignment -name BSF_FILE i2s_in.bsf
-set_global_assignment -name VHDL_FILE I2S_IN.vhd
-set_global_assignment -name BSF_FILE miirmii/miirmii.bsf
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/eth_ram.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_brom.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_amplitude.vhd
-set_global_assignment -name VHDL_FILE clk_by_x.vhd
-set_global_assignment -name VHDL_FILE udp_audio_packet.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/arp_packet.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/const_eth_speed.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/udp_packet.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/utility.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/single_signal_synchronizer.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/intel/mii_gmii_io.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc32_tb.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_control.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/uart_tx.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/uart_rx.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/rs232_encoder.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/RS232_Decoder.vhdl
-set_global_assignment -name BDF_FILE FPGA.bdf
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_receive.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_reset.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/detect_rising_edge.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/const_eth_config.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/reverse_mac.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd
-set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/icmp_packet.vhd
-set_global_assignment -name QIP_FILE FPGA_Ethernet/FPGA/const_ddfs_freq0.qip
-set_global_assignment -name QIP_FILE FPGA_Ethernet/FPGA/const_ddfs_freq1.qip
-set_global_assignment -name SDC_FILE FPGA.sdc
-set_global_assignment -name SIGNALTAP_FILE stp1.stp
-set_global_assignment -name QIP_FILE audioclks.qip
-set_global_assignment -name QIP_FILE sample_counter.qip
-set_global_assignment -name QIP_FILE pll_systemclocks.qip
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[132] -to "system_config_reg:inst10|data_in[0]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[133] -to "system_config_reg:inst10|data_in[1]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[134] -to "system_config_reg:inst10|data_in[2]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[135] -to "system_config_reg:inst10|data_in[3]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[136] -to "system_config_reg:inst10|data_in[4]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[137] -to "system_config_reg:inst10|data_in[5]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[138] -to "system_config_reg:inst10|data_in[6]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[139] -to "system_config_reg:inst10|data_in[7]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[140] -to "system_config_reg:inst10|mac_addr_out[0]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[141] -to "system_config_reg:inst10|mac_addr_out[10]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[142] -to "system_config_reg:inst10|mac_addr_out[11]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[143] -to "system_config_reg:inst10|mac_addr_out[12]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[144] -to "system_config_reg:inst10|mac_addr_out[13]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[145] -to "system_config_reg:inst10|mac_addr_out[14]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[146] -to "system_config_reg:inst10|mac_addr_out[15]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[147] -to "system_config_reg:inst10|mac_addr_out[16]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[148] -to "system_config_reg:inst10|mac_addr_out[17]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[149] -to "system_config_reg:inst10|mac_addr_out[18]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[150] -to "system_config_reg:inst10|mac_addr_out[19]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[151] -to "system_config_reg:inst10|mac_addr_out[1]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[152] -to "system_config_reg:inst10|mac_addr_out[20]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[153] -to "system_config_reg:inst10|mac_addr_out[21]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[154] -to "system_config_reg:inst10|mac_addr_out[22]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[155] -to "system_config_reg:inst10|mac_addr_out[23]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[156] -to "system_config_reg:inst10|mac_addr_out[24]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[157] -to "system_config_reg:inst10|mac_addr_out[25]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[158] -to "system_config_reg:inst10|mac_addr_out[26]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[159] -to "system_config_reg:inst10|mac_addr_out[27]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[160] -to "system_config_reg:inst10|mac_addr_out[28]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[161] -to "system_config_reg:inst10|mac_addr_out[29]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[162] -to "system_config_reg:inst10|mac_addr_out[2]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[163] -to "system_config_reg:inst10|mac_addr_out[30]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[164] -to "system_config_reg:inst10|mac_addr_out[31]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[165] -to "system_config_reg:inst10|mac_addr_out[32]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[166] -to "system_config_reg:inst10|mac_addr_out[33]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[167] -to "system_config_reg:inst10|mac_addr_out[34]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[168] -to "system_config_reg:inst10|mac_addr_out[35]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[169] -to "system_config_reg:inst10|mac_addr_out[36]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[170] -to "system_config_reg:inst10|mac_addr_out[37]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[171] -to "system_config_reg:inst10|mac_addr_out[38]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[172] -to "system_config_reg:inst10|mac_addr_out[39]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[173] -to "system_config_reg:inst10|mac_addr_out[3]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[174] -to "system_config_reg:inst10|mac_addr_out[40]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[175] -to "system_config_reg:inst10|mac_addr_out[41]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[176] -to "system_config_reg:inst10|mac_addr_out[42]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[177] -to "system_config_reg:inst10|mac_addr_out[43]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[178] -to "system_config_reg:inst10|mac_addr_out[44]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[179] -to "system_config_reg:inst10|mac_addr_out[45]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[180] -to "system_config_reg:inst10|mac_addr_out[46]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[181] -to "system_config_reg:inst10|mac_addr_out[47]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[182] -to "system_config_reg:inst10|mac_addr_out[4]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[183] -to "system_config_reg:inst10|mac_addr_out[5]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[184] -to "system_config_reg:inst10|mac_addr_out[6]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[185] -to "system_config_reg:inst10|mac_addr_out[7]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[186] -to "system_config_reg:inst10|mac_addr_out[8]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[187] -to "system_config_reg:inst10|mac_addr_out[9]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[188] -to "system_config_reg:inst10|wr_clk" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[189] -to "system_config_reg:inst10|wr_enable" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[190] -to "system_config_reg:inst10|writeAddr[0]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[191] -to "system_config_reg:inst10|writeAddr[10]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[192] -to "system_config_reg:inst10|writeAddr[1]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[193] -to "system_config_reg:inst10|writeAddr[2]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[194] -to "system_config_reg:inst10|writeAddr[3]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[195] -to "system_config_reg:inst10|writeAddr[4]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[196] -to "system_config_reg:inst10|writeAddr[5]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[197] -to "system_config_reg:inst10|writeAddr[6]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[198] -to "system_config_reg:inst10|writeAddr[7]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[199] -to "system_config_reg:inst10|writeAddr[8]" -section_id auto_signaltap_10
-set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_trigger_in[200] -to "system_config_reg:inst10|writeAddr[9]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[132] -to "system_config_reg:inst10|data_in[0]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[133] -to "system_config_reg:inst10|data_in[1]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[134] -to "system_config_reg:inst10|data_in[2]" -section_id auto_signaltap_10
@@ -862,28 +829,62 @@ set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[197] -
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[198] -to "system_config_reg:inst10|writeAddr[7]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[199] -to "system_config_reg:inst10|writeAddr[8]" -section_id auto_signaltap_10
 set_instance_assignment -name CONNECT_TO_SLD_NODE_ENTITY_PORT acq_data_in[200] -to "system_config_reg:inst10|writeAddr[9]" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_BLOCK_TYPE=AUTO" -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_DATA_BITS=201" -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_BITS=201" -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_BITS=201" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_NODE_INFO=805334538" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_POWER_UP_TRIGGER=0" -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK=0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" -section_id auto_signaltap_10
 set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INVERSION_MASK_LENGTH=628" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STORAGE_QUALIFIER_INVERSION_MASK_LENGTH=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SEGMENT_SIZE=2048" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ATTRIBUTE_MEM_MODE=OFF" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_FLOW_USE_GENERATED=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_STATE_BITS=11" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_BUFFER_FULL_STOP=1" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_CURRENT_RESOURCE_WIDTH=1" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_INCREMENTAL_ROUTING=1" -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[0] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[1] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[2] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[3] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[4] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[5] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[6] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[7] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[8] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[9] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[10] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[11] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[12] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[13] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[14] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[15] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[16] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[17] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[18] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[19] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[20] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[21] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[22] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[23] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[24] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[25] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[26] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[27] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[28] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
 set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[29] -to auto_signaltap_10|vcc -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[30] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_instance_assignment -name POST_FIT_CONNECT_TO_SLD_NODE_ENTITY_PORT crc[31] -to auto_signaltap_10|gnd -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL=1" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_SAMPLE_DEPTH=2048" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_IN_ENABLED=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_PIPELINE=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_RAM_PIPELINE=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_COUNTER_PIPELINE=0" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ADVANCED_TRIGGER_ENTITY=basic,1," -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_TRIGGER_LEVEL_PIPELINE=1" -section_id auto_signaltap_10
+set_global_assignment -name SLD_NODE_PARAMETER_ASSIGNMENT "SLD_ENABLE_ADVANCED_TRIGGER=0" -section_id auto_signaltap_10
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

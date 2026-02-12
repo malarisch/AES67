@@ -358,7 +358,7 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 									AF_UNSPEC, 0, K_NO_WAIT);
 
 
-		//	LOG_HEXDUMP_INF(data->rx_buf, pkt_len, "Received Packet:");
+			//LOG_HEXDUMP_INF(data->rx_buf, pkt_len, "Received Packet:");
 			if (!pkt) {
 				LOG_ERR("rx alloc failed");
 				continue;

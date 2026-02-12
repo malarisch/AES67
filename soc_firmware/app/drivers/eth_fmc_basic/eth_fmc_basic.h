@@ -23,6 +23,41 @@ extern "C" {
 #define ETH_FMC_REG_IP_ADDR    0x41  /* Write 4 bytes (auto-increment) */
 #define ETH_FMC_REG_AUDIO_STAT 0x42  /* Audio status (reserved) */
 
+/* ---- Status / control registers (0x50 region) ---- */
+
+/* Write register 0x50 - flag bitmask */
+#define ETH_FMC_REG_STATUS_WR  0x50
+#define ETH_FMC_FLAG_PPB_START       BIT(0)  /* Start PLL PPB measurement */
+#define ETH_FMC_FLAG_RESET_WALLCLOCK BIT(1)  /* Pulse reset wallclock */
+#define ETH_FMC_FLAG_RESET_PTP       BIT(2)  /* Pulse reset PTP */
+#define ETH_FMC_FLAG_RESET_ETHERNET  BIT(3)  /* Pulse reset Ethernet */
+
+/* Read register 0x50 - clocking flags */
+#define ETH_FMC_REG_STATUS_CLK 0x50
+#define ETH_FMC_CLK_PPB_VALID        BIT(0)  /* PLL PPB measurement valid */
+#define ETH_FMC_CLK_WC_LOCKED        BIT(1)  /* Wallclock locked */
+#define ETH_FMC_CLK_WC_PHASEJUMP     BIT(2)  /* Wallclock did phasejump */
+#define ETH_FMC_CLK_WC_CONFIGURED    BIT(3)  /* Wallclock configured */
+#define ETH_FMC_CLK_PTP_LEADER_LOST  BIT(4)  /* PTP leader lost */
+
+/* Read register 0x51 - ethernet flags */
+#define ETH_FMC_REG_STATUS_ETH 0x51
+#define ETH_FMC_ETH_LINK_UP          BIT(0)
+#define ETH_FMC_ETH_SPEED_0          BIT(1)  /* 00=10M, 01=100M, 10=1G */
+#define ETH_FMC_ETH_SPEED_1          BIT(2)
+#define ETH_FMC_ETH_SPEED_MASK       (BIT(1) | BIT(2))
+#define ETH_FMC_ETH_SPEED_SHIFT      1
+
+/* Read register 0x52 - path delay, 4-byte sequential read (LSB first) */
+#define ETH_FMC_REG_PATH_DELAY     0x52
+/* Read register 0x53 - leader offset, 4-byte sequential read (LSB first) */
+#define ETH_FMC_REG_LEADER_OFFSET  0x53
+/* Read register 0x54 - PLL PPB offset, 4-byte sequential read (LSB first) */
+#define ETH_FMC_REG_PPB_OFFSET     0x54
+
+/* Read register 0x60..0x7F - direct config RAM access (addr - 0x60) */
+#define ETH_FMC_REG_CONFIG_RAM     0x60
+
 /**
  * @brief Write a block of bytes to an FPGA register address.
  *

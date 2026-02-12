@@ -634,6 +634,121 @@ int si5351a_set_frequency(const struct device *dev, uint8_t output,
 }
 
 /* ===================================================================
+ * PPB adjustment – tweak PLL fractional divider for fine-tuning
+ *
+ * Strategy:
+ *   Re-use the same even MS divider from set_frequency().  Recompute
+ *   the PLL fractional parameters for:
+ *     freq_adjusted = base_freq_hz * (1 + ppb / 1e9)
+ *   Since ppb is tiny, this only changes PLL numerator/denominator
+ *   by a few LSBs.  No PLL reset is required – the Si5351 tracks
+ *   the new frequency smoothly.
+ * =================================================================== */
+
+int si5351a_adjust_ppb(const struct device *dev, uint8_t output,
+		       uint32_t base_freq_hz, int32_t ppb)
+{
+	const struct si5351a_config *cfg = dev->config;
+	uint32_t xtal = cfg->xtal_freq;
+	enum si5351a_pll pll;
+	uint32_t ms_div;
+	uint64_t vco;
+	uint32_t pll_a, pll_b, pll_c;
+	uint8_t r_div = 0;
+	uint32_t freq = base_freq_hz;
+	int ret;
+
+	if (output >= SI5351A_OUTPUT_COUNT) {
+		return -EINVAL;
+	}
+	if (base_freq_hz == 0 || base_freq_hz > 200000000UL) {
+		return -EINVAL;
+	}
+
+	pll = (output == 0) ? SI5351A_PLL_A : SI5351A_PLL_B;
+
+	/* Handle low frequencies via R divider */
+	while (freq < 1000000UL && r_div < 7) {
+		freq *= 2;
+		r_div++;
+	}
+
+	/* Pick same even MS divider as set_frequency would */
+	ms_div = (uint32_t)(SI5351_VCO_MAX / freq);
+	if (ms_div > SI5351_MS_DIV_MAX) {
+		ms_div = SI5351_MS_DIV_MAX;
+	}
+	if (ms_div < SI5351_MS_DIV_MIN + 2) {
+		ms_div = SI5351_MS_DIV_MIN + 2;
+	}
+	ms_div &= ~1U;
+
+	/* Clamp same as set_frequency */
+	vco = (uint64_t)freq * ms_div;
+	if (vco < SI5351_VCO_MIN) {
+		ms_div = (uint32_t)((SI5351_VCO_MIN + freq - 1) / freq);
+		ms_div = (ms_div + 1) & ~1U;
+	}
+	if (vco > SI5351_VCO_MAX) {
+		ms_div = (uint32_t)(SI5351_VCO_MAX / freq);
+		ms_div &= ~1U;
+	}
+
+	/*
+	 * Compute adjusted VCO:
+	 *   vco = freq * ms_div * (1 + ppb/1e9)
+	 *       = freq * ms_div + freq * ms_div * ppb / 1e9
+	 *
+	 * Use 64-bit arithmetic to avoid overflow.
+	 */
+	{
+		int64_t vco_base = (int64_t)freq * ms_div;
+		int64_t vco_adj  = (vco_base * (int64_t)ppb) / 1000000000LL;
+
+		vco = (uint64_t)(vco_base + vco_adj);
+	}
+
+	/* PLL feedback: VCO = XTAL * (pll_a + pll_b/pll_c) */
+	pll_a = (uint32_t)(vco / xtal);
+	{
+		uint64_t remainder = vco - (uint64_t)pll_a * xtal;
+		uint32_t g;
+
+		pll_c = xtal;
+		pll_b = (uint32_t)remainder;
+
+		g = gcd32(pll_b, pll_c);
+		if (g > 1) {
+			pll_b /= g;
+			pll_c /= g;
+		}
+
+		while (pll_c > SI5351_P_MAX) {
+			pll_b >>= 1;
+			pll_c >>= 1;
+			if (pll_c == 0) {
+				pll_c = 1;
+			}
+		}
+	}
+
+	if (pll_a < SI5351_PLL_A_MIN || pll_a > SI5351_PLL_A_MAX) {
+		LOG_ERR("PPB adjust: PLL mult %u out of range", pll_a);
+		return -ERANGE;
+	}
+
+	LOG_DBG("PPB adj CLK%u: ppb=%d PLL%c=%u+%u/%u MS=%u",
+		output, ppb,
+		(pll == SI5351A_PLL_A) ? 'A' : 'B',
+		pll_a, pll_b, pll_c, ms_div);
+
+	/* Update PLL only – no MS change, no PLL reset for glitch-free tuning */
+	ret = si5351a_setup_pll(dev, pll, pll_a, pll_b, pll_c);
+
+	return ret;
+}
+
+/* ===================================================================
  * Initialisation – follows the recommended startup sequence
  * from the Si5351 datasheet §5:
  *

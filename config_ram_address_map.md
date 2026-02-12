@@ -1,0 +1,76 @@
+# Registers: Ethernet
+
+Write Register 0x00 Eth TX Length LSB Impl
+Write Register 0x01 Eth TX Length MSB Impl
+Write Register 0x02 Eth TX CTRL Impl
+Content Bit [0] => Reg TX Start
+
+Write Register 0x22 Eth RX Status Clear Impl
+Content Bit [0] => Reg RX Clear
+
+Write Register 0x10 - 0x20 ETH TX FRAME - Length From 0x00 0x01 Impl
+
+Write Register 0x40 - 6 Bytes MAC ADDR Impl
+0x000 Mac Addr 0
+0x001 Mac Addr 1
+0x002 Mac Addr 2
+0x003 Mac Addr 3
+0x004 Mac Addr 4
+0x005 Mac Addr 5
+
+
+Write Register 0x41 - 4 Bytes IP ADDR Impl
+0x006 IP Addr 0
+0x007 IP Addr 1
+0x008 IP Addr 2
+0x009 IP Addr 4
+
+
+
+Read Register 0x20 ETH RX Lengh LSB Impl
+Read Register 0x21 ETH RX Length MSB Impl
+Read Register 0x22 ETH RX Status Impl
+Bit [0] Reg RX Ready
+Bit [1] Reg RX Overflow
+
+Read Register 0x30 - 0x40: ETH RX FRAME - Length MSB + LSB Impl
+
+# Status Registers
+
+Write Register 0x50 - Flag Bitmask
+[0] Start PLL PPB Measurement; FPGA Implementation: sets output PLL_PBB_Measurment_start_o high until acknowledged by Input PLL_PBB_Measurement_valid_i going low. Then the output must be set to low as well. Note: The valid I is for the first measurement low, since no measurement was taken yet
+[1] Reset Wallclock -- Implementation: Output pin reset_wallclock_o pulses for one cycle high
+[2] Reset PTP -- Implementation: Output pin reset_ptp_o pulses for one cycle high
+[3] Reset Ethernet -- Implementation: Output pin reset_ethernet_o pulses for one cycle high
+[4]
+[5]
+[6]
+[7]
+
+Read Register 0x50 - Flag Bitmask -- Clocking
+
+[0] PLL PPB Measurement Valid -- simple input pin, needs cdc
+[1] Wallclock Locked -- simple input pin, needs CDC
+[2] Wallclock Did Phasejump -- simple input pin, needs CDC
+[3] Wallclock Configured -- simple input pin, needs cdc
+[4] PTP Leader lost -- simple input pin, needs cdc
+[5]
+[6]
+[7]
+
+Read Register 0x51 - Flag Bitmask -- Ethernet
+[0] Ethernet Link up -- input pin, needs cdc
+[1] Ethernet Link Speed 0 Bitmask: 00 10 Mbps - 01 100 Mbps - 10 1000 Mbps -- input, needs cdc
+[2] Ethernet Link Speed 1 -- input pin, needs cdc
+[3] 
+[4]
+[5]
+[6]
+[7]
+
+Read Register 0x52 -- Path Delay -- Four Byte Read: Input path_delay_i (31..0)
+Read Register 0x53 -- Leader Offset -- Four Byte Read: Input leader_offset_i (31..0)
+Read Regiter  0x54 -- pll_ptp_ppb offset -- Four Byte Read: Input clock_ppb_meter_i (31..0) - only if pll_ppb_measurement_valid_i is high, if not output just zeros
+
+Read Register 0x60 .. 0xFF
+-- Direct Access to RAM (system_config_reg.vhd) - Address minus 0x60

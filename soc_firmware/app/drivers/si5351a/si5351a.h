@@ -144,6 +144,25 @@ int si5351a_pll_reset(const struct device *dev, enum si5351a_pll pll);
 int si5351a_set_frequency(const struct device *dev, uint8_t output,
 			  uint32_t freq_hz);
 
+/**
+ * @brief Adjust an output frequency by the given PPB offset.
+ *
+ * Tweaks the PLL fractional numerator to shift the output frequency
+ * by `ppb` parts-per-billion.  Positive ppb → increase frequency.
+ * Does NOT reset the PLL, so the output glitch is minimal.
+ *
+ * Only CLK0 is supported (uses PLLA).  The base frequency must
+ * have been set previously with si5351a_set_frequency().
+ *
+ * @param dev     Si5351A device
+ * @param output  Output index (currently only 0 supported)
+ * @param base_freq_hz  The nominal target frequency in Hz
+ * @param ppb     Frequency correction in parts-per-billion (signed)
+ * @return 0 on success, negative errno on error.
+ */
+int si5351a_adjust_ppb(const struct device *dev, uint8_t output,
+		       uint32_t base_freq_hz, int32_t ppb);
+
 #ifdef __cplusplus
 }
 #endif

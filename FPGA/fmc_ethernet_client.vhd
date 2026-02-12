@@ -46,7 +46,29 @@ entity fmc_ethernet_client is
     system_config_rd_addr : out unsigned(10 downto 0);
     system_config_rd_data : in  std_ulogic_vector(7 downto 0);
 
-    system_config_done_o : out std_ulogic
+    system_config_done_o : out std_ulogic;
+
+    -- Write 0x50 outputs
+    pll_ppb_measurement_start_o : out std_ulogic;
+    reset_wallclock_o           : out std_ulogic;
+    reset_ptp_o                 : out std_ulogic;
+    reset_ethernet_o            : out std_ulogic;
+
+    -- Read 0x50 inputs (clocking flags, async -> need CDC)
+    pll_ppb_measurement_valid_i : in  std_ulogic;
+    wallclock_locked_i          : in  std_ulogic;
+    wallclock_phasejump_i       : in  std_ulogic;
+    wallclock_configured_i      : in  std_ulogic;
+    ptp_leader_lost_i           : in  std_ulogic;
+
+    -- Read 0x51 inputs (ethernet flags, async -> need CDC)
+    eth_link_up_i               : in  std_ulogic;
+    eth_link_speed_i            : in  std_ulogic_vector(1 downto 0);
+
+    -- Read 0x52..0x54 (32-bit values)
+    path_delay_i                : in  std_ulogic_vector(31 downto 0);
+    leader_offset_i             : in  std_ulogic_vector(31 downto 0);
+    clock_ppb_meter_i           : in  std_ulogic_vector(31 downto 0)
   );
 end entity;
 
@@ -156,8 +178,34 @@ architecture rtl of fmc_ethernet_client is
 
   signal overflow_interrupt : std_ulogic := '0';
 
-
   signal register_byte_count : unsigned(3 downto 0) := (others => '0');
+
+  -- CDC registers for status inputs (2-FF synchronisers)
+  signal ppb_valid_meta, ppb_valid_sync               : std_ulogic := '0';
+  signal wc_locked_meta, wc_locked_sync               : std_ulogic := '0';
+  signal wc_phasejump_meta, wc_phasejump_sync         : std_ulogic := '0';
+  signal wc_configured_meta, wc_configured_sync       : std_ulogic := '0';
+  signal ptp_leader_lost_meta, ptp_leader_lost_sync   : std_ulogic := '0';
+  signal eth_link_up_meta, eth_link_up_sync           : std_ulogic := '0';
+  signal eth_speed_meta, eth_speed_sync               : std_ulogic_vector(1 downto 0) := (others => '0');
+
+  -- CDC for 32-bit status inputs
+  signal path_delay_meta, path_delay_sync             : std_ulogic_vector(31 downto 0) := (others => '0');
+  signal leader_offset_meta, leader_offset_sync       : std_ulogic_vector(31 downto 0) := (others => '0');
+  signal ppb_meter_meta, ppb_meter_sync               : std_ulogic_vector(31 downto 0) := (others => '0');
+
+  -- PPB measurement start handshake
+  signal ppb_start_reg : std_ulogic := '0';
+
+  -- Reset pulse signals (active one sys-clk cycle)
+  signal reset_wallclock_pulse : std_ulogic := '0';
+  signal reset_ptp_pulse       : std_ulogic := '0';
+  signal reset_ethernet_pulse  : std_ulogic := '0';
+
+  -- Read byte counter for multi-byte registers (0x52..0x54)
+  signal read_byte_count    : unsigned(1 downto 0) := (others => '0');
+  signal read_reg_addr_prev : std_ulogic_vector(6 downto 0) := (others => '0');
+
 begin
 
   fmc_data_in <= fmc_data_io;
@@ -167,6 +215,17 @@ begin
   fmc_data_io <= fmc_data_out
     when (fmc_data_oe = '1') and (fmc_ne_n_i = '0') and (fmc_noe_n_i = '0') and (fmc_nwe_n_i = '1')
     else (others => 'Z');
+
+  -- Concurrent output assignments for status/control ports
+  pll_ppb_measurement_start_o <= ppb_start_reg;
+  reset_wallclock_o           <= reset_wallclock_pulse;
+  reset_ptp_o                 <= reset_ptp_pulse;
+  reset_ethernet_o            <= reset_ethernet_pulse;
+
+  -- Config RAM read address: combinational so data is ready when latched
+  system_config_rd_addr <= resize(unsigned(fmc_addr_meta) - to_unsigned(16#60#, 7), 11)
+                           when unsigned(fmc_addr_meta) >= 16#60#
+                           else (others => '0');
 
   -- Qualify NE low using both raw and synchronized versions to tolerate phase differences
   fmc_ne_qual_low <= '1' when (fmc_ne_n_i = '0') or (fmc_ne_n_sync = '0') or (fmc_ne_n_sync_d = '0') else '0';
@@ -310,6 +369,48 @@ begin
   end process;
 
   --------------------------------------------------------------------
+  -- CDC: Synchronise asynchronous status inputs into clk_sys_i
+  --------------------------------------------------------------------
+  p_status_cdc : process(clk_sys_i, rst_sys_i)
+  begin
+    if rst_sys_i = '1' then
+      ppb_valid_meta       <= '0';  ppb_valid_sync       <= '0';
+      wc_locked_meta       <= '0';  wc_locked_sync       <= '0';
+      wc_phasejump_meta    <= '0';  wc_phasejump_sync    <= '0';
+      wc_configured_meta   <= '0';  wc_configured_sync   <= '0';
+      ptp_leader_lost_meta <= '0';  ptp_leader_lost_sync <= '0';
+      eth_link_up_meta     <= '0';  eth_link_up_sync     <= '0';
+      eth_speed_meta       <= (others => '0'); eth_speed_sync       <= (others => '0');
+      path_delay_meta      <= (others => '0'); path_delay_sync      <= (others => '0');
+      leader_offset_meta   <= (others => '0'); leader_offset_sync   <= (others => '0');
+      ppb_meter_meta       <= (others => '0'); ppb_meter_sync       <= (others => '0');
+    elsif rising_edge(clk_sys_i) then
+      -- 1-bit flags
+      ppb_valid_meta       <= pll_ppb_measurement_valid_i;
+      ppb_valid_sync       <= ppb_valid_meta;
+      wc_locked_meta       <= wallclock_locked_i;
+      wc_locked_sync       <= wc_locked_meta;
+      wc_phasejump_meta    <= wallclock_phasejump_i;
+      wc_phasejump_sync    <= wc_phasejump_meta;
+      wc_configured_meta   <= wallclock_configured_i;
+      wc_configured_sync   <= wc_configured_meta;
+      ptp_leader_lost_meta <= ptp_leader_lost_i;
+      ptp_leader_lost_sync <= ptp_leader_lost_meta;
+      eth_link_up_meta     <= eth_link_up_i;
+      eth_link_up_sync     <= eth_link_up_meta;
+      eth_speed_meta       <= eth_link_speed_i;
+      eth_speed_sync       <= eth_speed_meta;
+      -- 32-bit values (slow-changing, per-bit 2-FF is sufficient)
+      path_delay_meta      <= path_delay_i;
+      path_delay_sync      <= path_delay_meta;
+      leader_offset_meta   <= leader_offset_i;
+      leader_offset_sync   <= leader_offset_meta;
+      ppb_meter_meta       <= clock_ppb_meter_i;
+      ppb_meter_sync       <= ppb_meter_meta;
+    end if;
+  end process p_status_cdc;
+
+  --------------------------------------------------------------------
   -- Write capture on NWE rising edge.
   -- FMC spec guarantees address and data are stable at this point.
   -- wr_cap_addr / wr_cap_data stay constant until the NEXT write
@@ -335,7 +436,8 @@ begin
   -- FMC bus handling (byte accesses, lower byte used)
   --------------------------------------------------------------------
   process(clk_sys_i, rst_sys_i)
-    variable addr_v  : unsigned(6 downto 0);
+    variable addr_v    : unsigned(6 downto 0);
+    variable v_rd_byte : unsigned(1 downto 0);
   begin
     if rst_sys_i = '1' then
       txfifo_wr_en    <= '0';
@@ -355,12 +457,29 @@ begin
       system_config_wr_addr <= (others => '0');
       system_config_wr_data <= (others => '0');
       system_config_done_o <= '0';
+      ppb_start_reg         <= '0';
+      reset_wallclock_pulse <= '0';
+      reset_ptp_pulse       <= '0';
+      reset_ethernet_pulse  <= '0';
+      read_byte_count       <= (others => '0');
+      read_reg_addr_prev    <= (others => '0');
     elsif rising_edge(clk_sys_i) then
       system_config_wr_en <= '0';
       txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
       fmc_data_oe  <= '0';
+
+      -- Reset pulses default low; set high only during write 0x50 cycle
+      reset_wallclock_pulse <= '0';
+      reset_ptp_pulse       <= '0';
+      reset_ethernet_pulse  <= '0';
+
+      -- PPB measurement start handshake:
+      -- start_o stays high until valid_i goes low (measurement accepted)
+      if ppb_start_reg = '1' and ppb_valid_sync = '0' then
+        ppb_start_reg <= '0';
+      end if;
       -- Clear request once MAC side acknowledged
       if rx_clear_sys_pulse = '1' then
         rx_clear_req_sys <= '0';
@@ -435,6 +554,26 @@ begin
             null;
           when "1000011" =>  -- 0x43
             null;
+
+          when "1010000" =>  -- 0x50 Status flag write
+            -- Bit[0]: Start PLL PPB Measurement
+            if wr_cap_data(0) = '1' then
+              ppb_start_reg <= '1';
+            end if;
+            -- Bit[1]: Reset Wallclock (one-cycle pulse)
+            if wr_cap_data(1) = '1' then
+              reset_wallclock_pulse <= '1';
+            end if;
+            -- Bit[2]: Reset PTP (one-cycle pulse)
+            if wr_cap_data(2) = '1' then
+              reset_ptp_pulse <= '1';
+            end if;
+            -- Bit[3]: Reset Ethernet (one-cycle pulse)
+            if wr_cap_data(3) = '1' then
+              reset_ethernet_pulse <= '1';
+            end if;
+            register_byte_count <= (others => '0');
+
           when others =>
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then
               if txfifo_wr_full = '0' then
@@ -453,12 +592,63 @@ begin
         --addr_v := unsigned(fmc_addr_meta);
         --fmc_read_addr_lat <= addr_v;
         fmc_read_data_lat <= (others => '0');
+
+        -- Determine byte position for multi-byte sequential registers
+        if fmc_addr_meta /= read_reg_addr_prev then
+          v_rd_byte := "00";
+        else
+          v_rd_byte := read_byte_count;
+        end if;
+
         case fmc_addr_meta is
           when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
           when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
           when "0100010" => -- 0x22
             fmc_read_data_lat(0) <= reg_rx_ready_sys;
             fmc_read_data_lat(1) <= reg_rx_overflow_sys;
+
+          when "1010000" => -- 0x50 Read: Clocking flags
+            fmc_read_data_lat(0) <= ppb_valid_sync;
+            fmc_read_data_lat(1) <= wc_locked_sync;
+            fmc_read_data_lat(2) <= wc_phasejump_sync;
+            fmc_read_data_lat(3) <= wc_configured_sync;
+            fmc_read_data_lat(4) <= ptp_leader_lost_sync;
+
+          when "1010001" => -- 0x51 Read: Ethernet flags
+            fmc_read_data_lat(0) <= eth_link_up_sync;
+            fmc_read_data_lat(1) <= eth_speed_sync(0);
+            fmc_read_data_lat(2) <= eth_speed_sync(1);
+
+          when "1010010" => -- 0x52 Read: Path Delay (4-byte sequential)
+            case v_rd_byte is
+              when "00"   => fmc_read_data_lat <= path_delay_sync(7 downto 0);
+              when "01"   => fmc_read_data_lat <= path_delay_sync(15 downto 8);
+              when "10"   => fmc_read_data_lat <= path_delay_sync(23 downto 16);
+              when others => fmc_read_data_lat <= path_delay_sync(31 downto 24);
+            end case;
+            read_byte_count <= v_rd_byte + 1;
+
+          when "1010011" => -- 0x53 Read: Leader Offset (4-byte sequential)
+            case v_rd_byte is
+              when "00"   => fmc_read_data_lat <= leader_offset_sync(7 downto 0);
+              when "01"   => fmc_read_data_lat <= leader_offset_sync(15 downto 8);
+              when "10"   => fmc_read_data_lat <= leader_offset_sync(23 downto 16);
+              when others => fmc_read_data_lat <= leader_offset_sync(31 downto 24);
+            end case;
+            read_byte_count <= v_rd_byte + 1;
+
+          when "1010100" => -- 0x54 Read: PLL PPB meter (4-byte, zeros if not valid)
+            if ppb_valid_sync = '1' then
+              case v_rd_byte is
+                when "00"   => fmc_read_data_lat <= ppb_meter_sync(7 downto 0);
+                when "01"   => fmc_read_data_lat <= ppb_meter_sync(15 downto 8);
+                when "10"   => fmc_read_data_lat <= ppb_meter_sync(23 downto 16);
+                when others => fmc_read_data_lat <= ppb_meter_sync(31 downto 24);
+              end case;
+            end if;
+            -- fmc_read_data_lat stays zeros when ppb_valid_sync = '0'
+            read_byte_count <= v_rd_byte + 1;
+
           when others =>
             if unsigned(fmc_addr_meta) >= 16#30# and unsigned(fmc_addr_meta) < 16#40# then
               if rxfifo_rd_empty = '0' then
@@ -466,8 +656,13 @@ begin
                 rxfifo_rd_en <= '1';
                 fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
               end if;
+            elsif unsigned(fmc_addr_meta) >= 16#60# then
+              -- 0x60..0x7F: Direct config RAM read (address - 0x60)
+              fmc_read_data_lat <= system_config_rd_data;
             end if;
         end case;
+
+        read_reg_addr_prev <= fmc_addr_meta;
         fmc_read_latched <= '1';
       end if;
 
