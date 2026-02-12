@@ -38,7 +38,15 @@ entity fmc_ethernet_client is
     mac_rx_frame_i        : in  std_ulogic;
     mac_rx_data_i         : in  t_ethernet_data;
     mac_rx_byte_rcv_i     : in  std_ulogic;
-    mac_rx_error_i        : in  std_ulogic
+    mac_rx_error_i        : in  std_ulogic;
+    system_config_wr_en   : out std_ulogic;
+    system_config_wr_addr : out unsigned(10 downto 0);
+    system_config_wr_data : out std_ulogic_vector(7 downto 0);
+
+    system_config_rd_addr : out unsigned(10 downto 0);
+    system_config_rd_data : in  std_ulogic_vector(7 downto 0);
+
+    system_config_done_o : out std_ulogic
   );
 end entity;
 
@@ -136,8 +144,20 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_read_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_ne_qual_low : std_ulogic := '0';
 
+  -- NWE-edge write capture (CDC from NWE domain → clk_sys domain)
+  signal wr_cap_addr   : unsigned(6 downto 0) := (others => '0');
+  signal wr_cap_data   : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal wr_cap_toggle : std_ulogic := '0';
+  signal wr_cap_toggle_meta : std_ulogic := '0';
+  signal wr_cap_toggle_sync : std_ulogic := '0';
+  signal wr_cap_toggle_d    : std_ulogic := '0';
+  signal wr_pending         : std_ulogic := '0';
+
 
   signal overflow_interrupt : std_ulogic := '0';
+
+
+  signal register_byte_count : unsigned(3 downto 0) := (others => '0');
 begin
 
   fmc_data_in <= fmc_data_io;
@@ -231,6 +251,7 @@ begin
 
   --------------------------------------------------------------------
   -- FMC signal synchronization into clk_sys_i domain
+  -- (NE, NOE still needed for read path)
   --------------------------------------------------------------------
   process(clk_sys_i, rst_sys_i)
   begin
@@ -253,6 +274,11 @@ begin
       fmc_din_sync_d <= (others => '0');
 
       nwe_d <= '1';
+
+      wr_cap_toggle_meta <= '0';
+      wr_cap_toggle_sync <= '0';
+      wr_cap_toggle_d    <= '0';
+      wr_pending         <= '0';
     elsif rising_edge(clk_sys_i) then
       fmc_ne_n_meta <= fmc_ne_n_i;
       fmc_ne_n_sync <= fmc_ne_n_meta;
@@ -274,6 +300,34 @@ begin
       fmc_din_meta  <= fmc_data_in;
       fmc_din_sync  <= fmc_din_meta;
       fmc_din_sync_d <= fmc_din_sync;
+
+      -- 2-stage sync of write-capture toggle into clk_sys domain
+      wr_cap_toggle_meta <= wr_cap_toggle;
+      wr_cap_toggle_sync <= wr_cap_toggle_meta;
+      wr_cap_toggle_d    <= wr_cap_toggle_sync;
+      wr_pending         <= wr_cap_toggle_sync xor wr_cap_toggle_d;
+    end if;
+  end process;
+
+  --------------------------------------------------------------------
+  -- Write capture on NWE rising edge.
+  -- FMC spec guarantees address and data are stable at this point.
+  -- wr_cap_addr / wr_cap_data stay constant until the NEXT write
+  -- cycle (~75 ns later), so they are rock-stable by the time the
+  -- toggle-CDC delivers wr_pending in the clk_sys domain (~12 ns).
+  --------------------------------------------------------------------
+  process(fmc_nwe_n_i, rst_sys_i)
+  begin
+    if rst_sys_i = '1' then
+      wr_cap_addr   <= (others => '0');
+      wr_cap_data   <= (others => '0');
+      wr_cap_toggle <= '0';
+    elsif rising_edge(fmc_nwe_n_i) then
+      if fmc_ne_n_i = '0' then
+        wr_cap_addr   <= unsigned(fmc_addr_i);
+        wr_cap_data   <= fmc_data_in;      -- use the dedicated input alias
+        wr_cap_toggle <= not wr_cap_toggle;
+      end if;
     end if;
   end process;
 
@@ -297,7 +351,12 @@ begin
       fmc_read_latched <= '0';
       fmc_read_addr_lat <= (others => '0');
       fmc_read_data_lat <= (others => '0');
+      system_config_wr_en <= '0';
+      system_config_wr_addr <= (others => '0');
+      system_config_wr_data <= (others => '0');
+      system_config_done_o <= '0';
     elsif rising_edge(clk_sys_i) then
+      system_config_wr_en <= '0';
       txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
@@ -312,31 +371,30 @@ begin
         fmc_read_latched <= '0';
       end if;
 
-      -- Latch write address/data while write strobe is active (prevents sampling after NWE rises).
-      if (fmc_ne_n_sync = '0') and (fmc_ne_n_sync_d = '1') then
-        -- Capture early (1-stage synced) address/data during NWE low to avoid missing
-        -- simultaneous NE/NWE assertions.
-        fmc_wr_addr_lat <= unsigned(fmc_addr_meta);
-        fmc_wr_data_lat <= fmc_din_meta;
-      end if;
-
-      -- Detect end of write cycle on falling edge of synchronized NWE (one update per FMC write transaction).
-      if (fmc_ne_qual_low = '1') and (fmc_nwe_n_sync_d = '1') and (fmc_nwe_n_sync = '0') then
-        --addr_v := fmc_wr_addr_lat;
-        case fmc_wr_addr_lat is
+      -- Process write when toggle-CDC signals a completed FMC write cycle.
+      -- wr_cap_addr / wr_cap_data were captured on NWE rising edge and are
+      -- guaranteed stable (next write is at least ~75 ns away).
+      if wr_pending = '1' then
+        case wr_cap_addr is
           when "0000000" =>  -- 0x00 TX_LEN low
-            reg_tx_len(7 downto 0) <= unsigned(fmc_din_meta);
+            reg_tx_len(7 downto 0) <= unsigned(wr_cap_data);
             reg_tx_len_reset <= '1';
+
+            register_byte_count <= (others => '0');
           when "0000001" =>  -- 0x01 TX_LEN high
-            reg_tx_len(15 downto 8) <= unsigned(fmc_din_meta);
+            reg_tx_len(15 downto 8) <= unsigned(wr_cap_data);
             reg_tx_len_reset <= '1';
+
+            register_byte_count <= (others => '0');
           when "0000010" =>  -- 0x02 TX_CTRL
-            if fmc_din_meta(0) = '1' and reg_tx_start = '0' then
+            if wr_cap_data(0) = '1' and reg_tx_start = '0' then
               reg_tx_start_toggle <= not reg_tx_start_toggle;
             end if;
-            reg_tx_start <= fmc_din_meta(0);
+            reg_tx_start <= wr_cap_data(0);
+
+            register_byte_count <= (others => '0');
           when "0100010" =>  -- 0x22 RX_STATUS clear
-            if fmc_din_meta(0) = '1' then
+            if wr_cap_data(0) = '1' then
               if not mac_rx_frame_d = '1' then
                 rx_clear_req_sys <= '1';
                 overflow_interrupt <= '0';
@@ -348,11 +406,39 @@ begin
               --
               
               fmc_rx_bytes_sent   <= (others => '0');
+
+              register_byte_count <= (others => '0');
             end if;
+          when "1000000" =>  -- 0x40 Write Register for MAC Address (6 Byte)
+                system_config_done_o <= '0'; -- Indicate write in progress
+                system_config_wr_en <= '1';
+                system_config_wr_addr <= resize(register_byte_count, 11);
+                system_config_wr_data <= wr_cap_data;
+                if (register_byte_count >= 5) then
+                  register_byte_count <= (others => '0');
+                  system_config_done_o <= '1'; -- Indicate write done
+                else
+                  register_byte_count <= register_byte_count + 1;
+                end if;
+          when "1000001" =>  -- 0x41 Write Register for IP Address  (4 Byte)
+                system_config_done_o <= '0'; -- Indicate write in progress
+                system_config_wr_en <= '1';
+                system_config_wr_addr <= to_unsigned(6, 11) + resize(register_byte_count, 11);
+                system_config_wr_data <= wr_cap_data;
+                if (register_byte_count >= 3) then
+                  register_byte_count <= (others => '0');
+                  system_config_done_o <= '1'; -- Indicate write done
+                else
+                  register_byte_count <= register_byte_count + 1;
+                end if;
+          when "1000010" =>  -- 0x42 Write Register for Audio Status
+            null;
+          when "1000011" =>  -- 0x43
+            null;
           when others =>
-            if fmc_wr_addr_lat >= 16#10# and fmc_wr_addr_lat < 16#20# then
+            if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then
               if txfifo_wr_full = '0' then
-                txfifo_wr_data <= fmc_din_meta;
+                txfifo_wr_data <= wr_cap_data;
                 txfifo_wr_en   <= '1';
               end if;
             end if;

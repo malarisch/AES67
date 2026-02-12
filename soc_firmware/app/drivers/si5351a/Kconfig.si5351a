@@ -1,0 +1,23 @@
+# Si5351A I2C Clock Generator driver
+
+menuconfig SI5351A
+	bool "Si5351A I2C Programmable Clock Generator"
+	depends on I2C
+	help
+	  Enable driver for Silicon Labs Si5351A I2C programmable
+	  any-frequency CMOS clock generator. Supports 3 independent
+	  clock outputs (CLK0, CLK1, CLK2) derived from an external
+	  crystal (25 MHz or 27 MHz) via two PLLs and per-output
+	  multisynth fractional dividers.
+
+if SI5351A
+
+config SI5351A_INIT_PRIORITY
+	int "Si5351A init priority"
+	default 70
+	help
+	  Device driver initialization priority for the Si5351A.
+	  Must be higher (later) than the I2C bus driver priority
+	  so that the I2C bus is available at init time.
+
+endif # SI5351A

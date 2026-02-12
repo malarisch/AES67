@@ -79,6 +79,16 @@
 };
 */
 
+/* ---- Si5351A clock generator on I2C1 (PB8=SCL, PB9=SDA) ---- */
+&i2c1 {
+	si5351a: si5351a@60 {
+		compatible = "silabs,si5351a";
+		reg = <0x60>;
+		clock-frequency = <25000000>;   /* 25 MHz crystal */
+		silabs,xtal-load-pf = <10>;     /* 10 pF load cap */
+	};
+};
+
 /* Disable user_button to prevent conflict on PC13 */
 &user_button {
 	status = "disabled";
@@ -133,7 +143,7 @@
 						  STM32_FMC_CONTINUOUS_CLOCK_SYNC_ONLY
 						  STM32_FMC_WRITE_FIFO_DISABLE
 						  STM32_FMC_PAGE_SIZE_NONE>;
-			st,timing = <6 1 8 0 3 9 STM32_FMC_ACCESS_MODE_A>;
+			st,timing = <8 1 8 2 3 9 STM32_FMC_ACCESS_MODE_A>;
 		};
 	};
 };

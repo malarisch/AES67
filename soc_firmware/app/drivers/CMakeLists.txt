@@ -1,2 +1,3 @@
 add_subdirectory_ifdef(CONFIG_ETH_SPI_BASIC eth_spi_basic)
 add_subdirectory_ifdef(CONFIG_ETH_FMC_BASIC eth_fmc_basic)
+add_subdirectory_ifdef(CONFIG_SI5351A si5351a)

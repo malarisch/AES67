@@ -1,0 +1,44 @@
+# Copyright (c) 2025
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Silicon Labs Si5351A I2C Programmable Any-Frequency CMOS Clock Generator.
+  Supports 3 independent clock outputs derived from a crystal oscillator
+  via 2 PLLs and per-output multisynth fractional dividers.
+
+  Example usage in a device tree overlay:
+
+    &i2c1 {
+        status = "okay";
+        clock-frequency = <I2C_BITRATE_FAST>;
+
+        si5351a: si5351a@60 {
+            compatible = "silabs,si5351a";
+            reg = <0x60>;
+            clock-frequency = <25000000>;
+            silabs,xtal-load-pf = <10>;
+        };
+    };
+
+compatible: "silabs,si5351a"
+
+include: [i2c-device.yaml]
+
+properties:
+  clock-frequency:
+    type: int
+    required: true
+    description: |
+      Crystal oscillator frequency in Hz.
+      Common values: 25000000 (25 MHz) or 27000000 (27 MHz).
+
+  silabs,xtal-load-pf:
+    type: int
+    default: 10
+    enum: [6, 8, 10]
+    description: |
+      Crystal internal load capacitance in picofarads.
+      Corresponds to register 183 bits [7:6].
+        6  → CL = 6 pF
+        8  → CL = 8 pF
+        10 → CL = 10 pF (default)

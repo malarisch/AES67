@@ -15,6 +15,8 @@
 
 #include <zephyr/spinlock.h>
 
+#include "eth_fmc_basic.h"
+
 LOG_MODULE_REGISTER(eth_fmc_basic, CONFIG_ETHERNET_LOG_LEVEL);
 
 /* FPGA Ready Pin */
@@ -113,6 +115,65 @@ static inline void fmc_read_block(uintptr_t base, uint8_t addr, uint8_t *buf, si
 	for (size_t i = 0; i < len; i++) {
 		buf[i] = p[0];
 	}
+}
+
+/* ---- Public register access API ---- */
+
+int eth_fmc_reg_write(const struct device *dev, uint8_t reg,
+		      const uint8_t *data, size_t len)
+{
+	const struct eth_fmc_basic_config *cfg = dev->config;
+	struct eth_fmc_basic_data *drv_data = dev->data;
+	k_spinlock_key_t key;
+
+	if (!dev || !data || len == 0) {
+		return -EINVAL;
+	}
+
+	key = k_spin_lock(&drv_data->lock);
+	for (size_t i = 0; i < len; i++) {
+		fmc_write8(cfg->base, reg, data[i]);
+	}
+	k_spin_unlock(&drv_data->lock, key);
+
+	return 0;
+}
+
+int eth_fmc_reg_read(const struct device *dev, uint8_t reg, uint8_t *val)
+{
+	const struct eth_fmc_basic_config *cfg = dev->config;
+	struct eth_fmc_basic_data *drv_data = dev->data;
+	k_spinlock_key_t key;
+
+	if (!dev || !val) {
+		return -EINVAL;
+	}
+
+	key = k_spin_lock(&drv_data->lock);
+	*val = fmc_read8(cfg->base, reg);
+	k_spin_unlock(&drv_data->lock, key);
+
+	return 0;
+}
+
+int eth_fmc_reg_read_block(const struct device *dev, uint8_t reg,
+			   uint8_t *data, size_t len)
+{
+	const struct eth_fmc_basic_config *cfg = dev->config;
+	struct eth_fmc_basic_data *drv_data = dev->data;
+	k_spinlock_key_t key;
+
+	if (!dev || !data || len == 0) {
+		return -EINVAL;
+	}
+
+	key = k_spin_lock(&drv_data->lock);
+	for (size_t i = 0; i < len; i++) {
+		data[i] = fmc_read8(cfg->base, reg);
+	}
+	k_spin_unlock(&drv_data->lock, key);
+
+	return 0;
 }
 
 /* TX path */
