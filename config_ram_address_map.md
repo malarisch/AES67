@@ -35,15 +35,22 @@ Bit [1] Reg RX Overflow
 
 Read Register 0x30 - 0x40: ETH RX FRAME - Length MSB + LSB Impl
 
+# Write Registers - PTP Configuration
+
+Write Register 0x55 -- PTP Configuration - 10 Byte Write
+FPGA RAM 0x010..0x17 Byte 1..8: Current Leader Clock Identity
+FPGA RAM 0x018 Byte 9 PTP Time Source
+FPGA RAM 0x019 Byte 10 ptp LogMessageInterval
+
 # Status Registers
 
 Write Register 0x50 - Flag Bitmask
 [0] Start PLL PPB Measurement; FPGA Implementation: sets output PLL_PBB_Measurment_start_o high until acknowledged by Input PLL_PBB_Measurement_valid_i going low. Then the output must be set to low as well. Note: The valid I is for the first measurement low, since no measurement was taken yet
-[1] Reset Wallclock -- Implementation: Output pin reset_wallclock_o pulses for one cycle high
-[2] Reset PTP -- Implementation: Output pin reset_ptp_o pulses for one cycle high
-[3] Reset Ethernet -- Implementation: Output pin reset_ethernet_o pulses for one cycle high
-[4]
-[5]
+[1] Reset Wallclock -- Implementation: Output pin reset_wallclock_o
+[2] Reset PTP -- Implementation: Output pin reset_ptp_o
+[3] Reset Ethernet -- Implementation: Output pin reset_ethernet_o
+[4] PTP: Is Leader -- Implementattion: Output pin ptp_is_leader
+[5] PTP: Is Follower -- Output pin
 [6]
 [7]
 
@@ -72,5 +79,5 @@ Read Register 0x52 -- Path Delay -- Four Byte Read: Input path_delay_i (31..0)
 Read Register 0x53 -- Leader Offset -- Four Byte Read: Input leader_offset_i (31..0)
 Read Regiter  0x54 -- pll_ptp_ppb offset -- Four Byte Read: Input clock_ppb_meter_i (31..0) - only if pll_ppb_measurement_valid_i is high, if not output just zeros
 
-Read Register 0x60 .. 0xFF
+Read Register 0x60 .. 0x7F
 -- Direct Access to RAM (system_config_reg.vhd) - Address minus 0x60

@@ -68,7 +68,10 @@ entity fmc_ethernet_client is
     -- Read 0x52..0x54 (32-bit values)
     path_delay_i                : in  std_ulogic_vector(31 downto 0);
     leader_offset_i             : in  std_ulogic_vector(31 downto 0);
-    clock_ppb_meter_i           : in  std_ulogic_vector(31 downto 0)
+    clock_ppb_meter_i           : in  std_ulogic_vector(31 downto 0);
+
+    ptp_is_leader_o               : out STD_ULOGIC;
+    ptp_is_follower_o             : out STD_ULOGIC
   );
 end entity;
 
@@ -197,10 +200,7 @@ architecture rtl of fmc_ethernet_client is
   -- PPB measurement start handshake
   signal ppb_start_reg : std_ulogic := '0';
 
-  -- Reset pulse signals (active one sys-clk cycle)
-  signal reset_wallclock_pulse : std_ulogic := '0';
-  signal reset_ptp_pulse       : std_ulogic := '0';
-  signal reset_ethernet_pulse  : std_ulogic := '0';
+
 
   -- Read byte counter for multi-byte registers (0x52..0x54)
   signal read_byte_count    : unsigned(1 downto 0) := (others => '0');
@@ -218,9 +218,7 @@ begin
 
   -- Concurrent output assignments for status/control ports
   pll_ppb_measurement_start_o <= ppb_start_reg;
-  reset_wallclock_o           <= reset_wallclock_pulse;
-  reset_ptp_o                 <= reset_ptp_pulse;
-  reset_ethernet_o            <= reset_ethernet_pulse;
+
 
   -- Config RAM read address: combinational so data is ready when latched
   system_config_rd_addr <= resize(unsigned(fmc_addr_meta) - to_unsigned(16#60#, 7), 11)
@@ -458,9 +456,6 @@ begin
       system_config_wr_data <= (others => '0');
       system_config_done_o <= '0';
       ppb_start_reg         <= '0';
-      reset_wallclock_pulse <= '0';
-      reset_ptp_pulse       <= '0';
-      reset_ethernet_pulse  <= '0';
       read_byte_count       <= (others => '0');
       read_reg_addr_prev    <= (others => '0');
     elsif rising_edge(clk_sys_i) then
@@ -470,10 +465,6 @@ begin
       fmc_data_out <= fmc_read_data_lat;
       fmc_data_oe  <= '0';
 
-      -- Reset pulses default low; set high only during write 0x50 cycle
-      reset_wallclock_pulse <= '0';
-      reset_ptp_pulse       <= '0';
-      reset_ethernet_pulse  <= '0';
 
       -- PPB measurement start handshake:
       -- start_o stays high until valid_i goes low (measurement accepted)
@@ -560,20 +551,33 @@ begin
             if wr_cap_data(0) = '1' then
               ppb_start_reg <= '1';
             end if;
-            -- Bit[1]: Reset Wallclock (one-cycle pulse)
-            if wr_cap_data(1) = '1' then
-              reset_wallclock_pulse <= '1';
-            end if;
-            -- Bit[2]: Reset PTP (one-cycle pulse)
-            if wr_cap_data(2) = '1' then
-              reset_ptp_pulse <= '1';
-            end if;
-            -- Bit[3]: Reset Ethernet (one-cycle pulse)
-            if wr_cap_data(3) = '1' then
-              reset_ethernet_pulse <= '1';
-            end if;
-            register_byte_count <= (others => '0');
+            -- Bit[1]: Reset Wallclock
+            reset_wallclock_o <= wr_cap_data(1);
+            -- Bit[2]: Reset PTP
+            reset_ptp_o <= wr_cap_data(2);
+            
+            -- Bit[3]: Reset Ethernet
+            reset_ethernet_o <= wr_cap_data(3);
+            
+            -- Bit[4]: PTP Is leader
+            ptp_is_leader_o <= wr_cap_data(4);
 
+            -- Bit[5]: PTP Is follower
+            ptp_is_follower_o <= wr_cap_data(5);
+            
+            register_byte_count <= (others => '0');
+          when "1010101" =>  -- 0x55 PTP config write (10 bytes, starts at RAM 0x10)
+              system_config_done_o <= '0'; -- Indicate write in progress
+              system_config_wr_en <= '1';
+              system_config_wr_addr <= to_unsigned(10, 11) + resize(register_byte_count, 11);
+              system_config_wr_data <= wr_cap_data;
+              if (register_byte_count >= 10) then
+                register_byte_count <= (others => '0');
+                system_config_done_o <= '1'; -- Indicate write done
+              else
+                register_byte_count <= register_byte_count + 1;
+              end if;
+            null;
           when others =>
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then
               if txfifo_wr_full = '0' then

@@ -13,6 +13,7 @@
 #include "../drivers/si5351a/si5351a.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 #include "ui_display.h"
+#include "ptp_bmc.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -120,6 +121,9 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 	/* Push the new IP address to the FPGA */
 	fpga_write_ip_address(&dhcpv4->requested_ip);
 	ui_display_set_ip(&dhcpv4->requested_ip);
+
+	/* Unblock the BMC thread now that we have a valid IP on the FPGA */
+	ptp_bmc_notify_ip_ready();
 }
 
 /* ---- Legacy test code (unused) ---- */
@@ -250,7 +254,7 @@ static int fpga_read_32(const struct device *fmc, uint8_t reg, int32_t *val)
 #define PI_KI_NUM          1       /* Integral numerator */
 #define PI_KI_DEN          32      /* Integral denominator   (Ki = 0.03125) */
 #define PI_IMAX            500000  /* Anti-windup: max integrator magnitude (ppb) */
-#define PI_OUTLIER_PPB     50000   /* Max plausible single-measurement error (ppb) */
+#define PI_OUTLIER_PPB     500000   /* Max plausible single-measurement error (ppb) */
 #define PI_WARMUP_CYCLES   3       /* First N cycles: no outlier rejection */
 
 /* PI controller state */
@@ -260,6 +264,19 @@ static struct {
 	uint32_t cycle;        /* Total accepted measurement count */
 	uint32_t outliers;     /* Rejected outlier count */
 } pi_state;
+
+/**
+ * @brief Called by the BMC whenever the PTP state changes (role or leader).
+ *        Resets the PI controller warm-up so outlier rejection re-arms.
+ */
+static void on_bmc_change(enum ptp_bmc_role new_role)
+{
+	LOG_INF("PLL: BMC change (role=%d) — resetting PI controller", new_role);
+	pi_state.integrator = 0;
+	pi_state.output     = 0;
+	pi_state.cycle      = 0;
+	pi_state.outliers   = 0;
+}
 
 static struct ui_fpga_metrics disp_metrics = {
 	.speed_code = 0xFF,
@@ -322,14 +339,14 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			disp_metrics.ptp_leader_lost = !!(status & ETH_FMC_CLK_PTP_LEADER_LOST);
 
 			/* 0x50 - Clocking flags (already in 'status') */
-			LOG_INF("CLK flags: PPB_valid=%d WC_locked=%d WC_phasejump=%d "
-				"WC_configured=%d PTP_leader_lost=%d",
+			//LOG_INF("CLK flags: PPB_valid=%d WC_locked=%d WC_phasejump=%d "
+			/*	"WC_configured=%d PTP_leader_lost=%d",
 				disp_metrics.ppb_valid,
 				disp_metrics.wc_locked,
 				disp_metrics.wc_phasejump,
 				disp_metrics.wc_configured,
 				disp_metrics.ptp_leader_lost);
-
+*/
 			/* 0x51 - Ethernet flags */
 			uint8_t eth_status;
 
@@ -344,9 +361,9 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					(speed_code == 1) ? "100M" :
 					(speed_code == 2) ? "1G" : "?";
 
-				LOG_INF("ETH flags: link_up=%d speed=%s",
-					!!(eth_status & ETH_FMC_ETH_LINK_UP),
-					speed_str);
+				//LOG_INF("ETH flags: link_up=%d speed=%s",
+				//	!!(eth_status & ETH_FMC_ETH_LINK_UP),
+				//	speed_str);
 
 				disp_metrics.link_up =
 					!!(eth_status & ETH_FMC_ETH_LINK_UP);
@@ -359,7 +376,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			ret = fpga_read_32(fmc, ETH_FMC_REG_PATH_DELAY,
 					   &path_delay);
 			if (ret == 0) {
-				LOG_INF("Path delay: %d ns", path_delay);
+				//LOG_INF("Path delay: %d ns", path_delay);
 				disp_metrics.path_delay_ns = path_delay;
 			}
 
@@ -369,7 +386,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			ret = fpga_read_32(fmc, ETH_FMC_REG_LEADER_OFFSET,
 					   &leader_offset);
 			if (ret == 0) {
-				LOG_INF("Leader offset: %d ns", leader_offset);
+				//LOG_INF("Leader offset: %d ns", leader_offset);
 				disp_metrics.leader_offset_ns = leader_offset;
 			}
 
@@ -379,8 +396,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET,
 					   &ppb_current);
 			if (ret == 0) {
-				LOG_INF("PPB offset: %d  (total correction: %d)",
-					ppb_current, pi_state.output);
+				//LOG_INF("PPB offset: %d  (total correction: %d)",
+				//	ppb_current, pi_state.output);
 				disp_metrics.ppb_offset = ppb_current;
 			}
 
@@ -392,10 +409,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 
 		/* If no measurement is running, start one */
 		if (!measurement_running) {
-			uint8_t cmd = ETH_FMC_FLAG_PPB_START;
-
-			ret = eth_fmc_reg_write(fmc, ETH_FMC_REG_STATUS_WR,
-						&cmd, 1);
+			ret = eth_fmc_status_set_bits(fmc, ETH_FMC_FLAG_PPB_START);
 			if (ret < 0) {
 				LOG_WRN("PPB poll: failed to start measurement: %d", ret);
 				continue;
@@ -411,7 +425,9 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		/* Measurement complete — read the PPB value */
+		/* Measurement complete — clear the start bit and read the PPB value */
+		eth_fmc_status_clear_bits(fmc, ETH_FMC_FLAG_PPB_START);
+
 		int32_t ppb_measured;
 
 		ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET, &ppb_measured);
@@ -467,8 +483,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		/* Apply combined correction (subtract because positive error = too fast) */
 		pi_state.output -= (p_term + i_term);
 
-		LOG_INF("PI: err=%d P=%d I=%d out=%d  cycle=%u",
-			error, p_term, i_term, pi_state.output, pi_state.cycle);
+		//LOG_INF("PI: err=%d P=%d I=%d out=%d  cycle=%u",
+		//	error, p_term, i_term, pi_state.output, pi_state.cycle);
 
 		ret = si5351a_adjust_ppb(clkgen, 0, SI_CLK0_BASE_FREQ_HZ,
 					 pi_state.output);
@@ -525,18 +541,10 @@ int main(void)
         if (ret) {
             LOG_ERR("Failed to set CLK0: %d", ret);
         }
-
-        /* CLK1: 12.288 MHz  – I2S MCLK (48 kHz × 256) */
-        ret = si5351a_set_frequency(clkgen, 1, 12288000);
-        if (ret) {
-            LOG_ERR("Failed to set CLK1: %d", ret);
-        }
-
         /* Drive strength 8 mA for both outputs */
         si5351a_set_drive_strength(clkgen, 0, SI5351A_DRIVE_8MA);
-        si5351a_set_drive_strength(clkgen, 1, SI5351A_DRIVE_8MA);
 
-        LOG_INF("Si5351A clocks configured: CLK0=24.576 MHz, CLK1=12.288 MHz");
+        LOG_INF("Si5351A clocks configured: CLK0=24.576 MHz");
     }
 
     /* ---- Write MAC address to FPGA ---- */
@@ -549,6 +557,13 @@ int main(void)
 
     LOG_INF("Starting DHCP...");
     net_dhcpv4_start(iface);
+
+    /* ---- Start PTPv2 Best Master Clock algorithm ---- */
+    ptp_bmc_register_change_cb(on_bmc_change);
+    int bmc_ret = ptp_bmc_start(iface);
+    if (bmc_ret < 0) {
+        LOG_ERR("Failed to start PTP BMC: %d", bmc_ret);
+    }
 
     /* ---- Start PPB measurement / PLL correction thread ---- */
     k_thread_create(&ppb_poll_thread_data, ppb_poll_stack,

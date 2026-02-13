@@ -298,6 +298,20 @@ on the Quartus Prime software download page.
 		(line (pt 344 224)(pt 328 224)(line_width 1))
 	)
 	(port
+		(pt 344 240)
+		(output)
+		(text "ptp_is_leader_o" (rect 0 0 63 12)(font "Arial" ))
+		(text "ptp_is_leader_o" (rect 260 235 323 247)(font "Arial" ))
+		(line (pt 344 240)(pt 328 240)(line_width 1))
+	)
+	(port
+		(pt 344 256)
+		(output)
+		(text "ptp_is_follower_o" (rect 0 0 69 12)(font "Arial" ))
+		(text "ptp_is_follower_o" (rect 254 251 323 263)(font "Arial" ))
+		(line (pt 344 256)(pt 328 256)(line_width 1))
+	)
+	(port
 		(pt 344 32)
 		(bidir)
 		(text "fmc_data_io[7..0]" (rect 0 0 70 12)(font "Arial" ))

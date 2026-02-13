@@ -31,6 +31,16 @@ extern "C" {
 #define ETH_FMC_FLAG_RESET_WALLCLOCK BIT(1)  /* Pulse reset wallclock */
 #define ETH_FMC_FLAG_RESET_PTP       BIT(2)  /* Pulse reset PTP */
 #define ETH_FMC_FLAG_RESET_ETHERNET  BIT(3)  /* Pulse reset Ethernet */
+#define ETH_FMC_FLAG_PTP_IS_LEADER   BIT(4)  /* PTP: this node is leader */
+#define ETH_FMC_FLAG_PTP_IS_FOLLOWER BIT(5)  /* PTP: this node is follower */
+
+/* Write register 0x55 - PTP configuration (10-byte auto-increment write)
+ * Bytes 1..8: Current leader clock identity (EUI-64)
+ * Byte  9:   PTP time source
+ * Byte 10:   PTP logMessageInterval
+ */
+#define ETH_FMC_REG_PTP_CONFIG 0x55
+#define ETH_FMC_PTP_CONFIG_LEN 11  /* 10 data bytes + 1 dummy to trigger FPGA latch */
 
 /* Read register 0x50 - clocking flags */
 #define ETH_FMC_REG_STATUS_CLK 0x50
@@ -99,6 +109,51 @@ int eth_fmc_reg_read(const struct device *dev, uint8_t reg, uint8_t *val);
  */
 int eth_fmc_reg_read_block(const struct device *dev, uint8_t reg,
 			   uint8_t *data, size_t len);
+
+/* ---- Convenience helpers ---- */
+
+/**
+ * @brief Set one or more bits in the FPGA status register 0x50
+ *        and write the full shadow value to the hardware.
+ *
+ * Thread-safe: uses a spinlock to protect the shadow byte.
+ *
+ * @param dev   The FMC Ethernet bridge device
+ * @param bits  Bitmask of ETH_FMC_FLAG_* bits to set
+ * @return 0 on success, negative errno on error
+ */
+int eth_fmc_status_set_bits(const struct device *dev, uint8_t bits);
+
+/**
+ * @brief Clear one or more bits in the FPGA status register 0x50
+ *        and write the full shadow value to the hardware.
+ *
+ * Thread-safe: uses a spinlock to protect the shadow byte.
+ *
+ * @param dev   The FMC Ethernet bridge device
+ * @param bits  Bitmask of ETH_FMC_FLAG_* bits to clear
+ * @return 0 on success, negative errno on error
+ */
+int eth_fmc_status_clear_bits(const struct device *dev, uint8_t bits);
+
+/**
+ * @brief Write PTP configuration to FPGA register 0x55.
+ *
+ * Sends a 10-byte auto-increment write containing:
+ *   - 8 bytes: leader clock identity (EUI-64, big-endian)
+ *   - 1 byte:  PTP time source
+ *   - 1 byte:  logMessageInterval (signed)
+ *
+ * @param dev                  The FMC Ethernet bridge device
+ * @param leader_clock_id      8-byte leader clock identity (big-endian)
+ * @param time_source          PTP time source (IEEE 1588 enum)
+ * @param log_msg_interval     logMessageInterval (signed, e.g. -3 for 125ms)
+ * @return 0 on success, negative errno on error
+ */
+int eth_fmc_write_ptp_config(const struct device *dev,
+			    const uint8_t leader_clock_id[8],
+			    uint8_t time_source,
+			    int8_t log_msg_interval);
 
 #ifdef __cplusplus
 }

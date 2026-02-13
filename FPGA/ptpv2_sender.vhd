@@ -38,7 +38,9 @@ entity ptpv2_sender is
 
 
         message_type_i : in std_logic_vector(3 downto 0) := "0000";
-		tx_ready_o			: out std_logic := '0'
+		tx_ready_o			: out std_logic := '0';
+		ptp_time_source_i : in std_logic_vector(7 downto 0);
+		ptp_log_interval_i : in std_logic_vector(7 downto 0)
 	);
 end entity;
 
@@ -338,7 +340,7 @@ begin
 
                         -- TODO: Later add 0x04 for management messagess
                 end case;
-                udp_frame(75) <= x"00"; -- 33 logMessageInterval
+                udp_frame(75) <= ptp_log_interval_i; -- 33 logMessageInterval
                 udp_frame(76) <= std_logic_vector(timestamp_sec_sync(47 downto 40)); -- 34 0 originTimestamp seconds
                 udp_frame(77) <= std_logic_vector(timestamp_sec_sync(39 downto 32)); -- 35 1 originTimestamp seconds
 				udp_frame(78) <= std_logic_vector(timestamp_sec_sync(31 downto 24)); -- 36 2 originTimestamp seconds 
@@ -384,7 +386,7 @@ begin
 					udp_frame(103) <= x"00"; -- stepsRemoved MSB
 					udp_frame(104) <= x"00"; -- stepsRemoved LSB
 
-					udp_frame(105) <= x"A0"; -- timeSource
+					udp_frame(105) <= ptp_time_source_i; -- timeSource
 				end if;
 				
                 

@@ -102,6 +102,20 @@ on the Quartus Prime software download page.
 		(line (pt 0 192)(pt 16 192)(line_width 3))
 	)
 	(port
+		(pt 0 208)
+		(input)
+		(text "ptp_current_leader_id_i[63..0]" (rect 0 0 119 12)(font "Arial" ))
+		(text "ptp_current_leader_id_i[63..0]" (rect 21 203 140 215)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208)(line_width 3))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "ptp_is_follower_i" (rect 0 0 66 12)(font "Arial" ))
+		(text "ptp_is_follower_i" (rect 21 219 87 231)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 1))
+	)
+	(port
 		(pt 448 32)
 		(output)
 		(text "ram_read_address[10..0]" (rect 0 0 101 12)(font "Arial" ))
@@ -153,15 +167,15 @@ on the Quartus Prime software download page.
 	(port
 		(pt 448 144)
 		(output)
-		(text "mean_path_delay_ns_o[31..0]" (rect 0 0 122 12)(font "Arial" ))
-		(text "mean_path_delay_ns_o[31..0]" (rect 305 139 427 151)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 0 0 121 12)(font "Arial" ))
+		(text "mean_path_delay_ns_o[31..0]" (rect 306 139 427 151)(font "Arial" ))
 		(line (pt 448 144)(pt 432 144)(line_width 3))
 	)
 	(port
 		(pt 448 160)
 		(output)
-		(text "offset_from_master_ns_o[31..0]" (rect 0 0 134 12)(font "Arial" ))
-		(text "offset_from_master_ns_o[31..0]" (rect 293 155 427 167)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 0 0 133 12)(font "Arial" ))
+		(text "offset_from_master_ns_o[31..0]" (rect 294 155 427 167)(font "Arial" ))
 		(line (pt 448 160)(pt 432 160)(line_width 3))
 	)
 	(port

@@ -23,7 +23,8 @@ entity ptpv2_controller is
 
         second_pulse_i       : in  std_logic;
 
-        is_leader_override_i   : in  std_logic;
+        is_leader_i   : in  std_logic;
+        is_follower_i : in  std_logic;
 
         tx_en_i: in  std_logic;
         request_port_identity_i : in std_logic_vector(79 downto 0);
@@ -127,42 +128,7 @@ begin
             -- NOTE: frame_start_o is managed by the state machine only
             -- Do NOT clear it here based on tx_en - the state machine handles this
 
-            -- PTPv2 controller logic
-            if (is_leader_override_i = '1') then
-                is_leader <= '1';
-            else
-                is_leader <= '0';
-            end if;
 
-            case c_state is
-                when c_Idle =>
-                    if (is_leader_override_i = '1') then
-                        c_state <= c_Leader;
-                    else 
-                        c_state <= c_Run_BMC;
-                    end if;
-
-                when c_Leader =>
-                    -- Leader state
-                    c_state <= c_Leader;  -- Stay in leader state
-                    is_leader <= '1';
-
-                when c_Follower =>
-                    -- Follower state
-                    c_state <= c_Follower;  -- Stay in follower state
-                    is_leader <= '0';
-
-                when c_Leader_Lost =>
-                    -- Lost leadership - transition to follower
-                    c_state <= c_Run_BMC;
-
-                when c_Run_BMC =>
-                    -- Run Best Master Clock algorithm (not implemented here)
-                    c_state <= c_Idle;
-
-                when others =>
-                    c_state <= c_Idle;
-            end case;
 
 
             case p2p_state is
@@ -202,7 +168,7 @@ begin
 
 
 
-            if (is_leader = '1') then
+            if (is_leader_i = '1' and is_follower_i = '0') then
                 -- Leader logic - simple state machine
                 case leader_state is
                     when s_Idle =>
@@ -341,7 +307,7 @@ begin
                     rx_timestamp_seconds_i_latched <= rx_timestamp_seconds_i;
                 end if;
                 follower_state <= f_Idle;  -- Ensure follower state machine is reset
-            else
+            elsif (is_leader_i = '0' and is_follower_i = '1') then
                 -- Follower logic - reset state machine when not leader
                 leader_state <= s_Idle;
                 
@@ -388,6 +354,10 @@ begin
                         follower_state <= f_Idle;
 
                 end case;
+                else
+                -- Not a leader or follower - reset state machines and outputs
+                leader_state <= s_Idle;
+                follower_state <= f_Idle;
             end if;
 
         end if;

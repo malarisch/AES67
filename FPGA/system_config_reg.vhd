@@ -26,7 +26,11 @@ entity system_config_reg is
 		
 		valid_out			: out std_logic;
         mac_addr_out    : out std_logic_vector(47 downto 0);
-        ip_addr_out     : out std_logic_vector(31 downto 0)
+        ip_addr_out     : out std_logic_vector(31 downto 0);
+
+		ptp_current_leader_id: out std_logic_vector(63 downto 0);
+		ptp_time_source_o: out std_logic_vector(7 downto 0);
+		ptp_log_message_interval_o: out std_logic_vector(7 downto 0)
 	);
 end system_config_reg;
 
@@ -43,7 +47,9 @@ begin
 				valid_out <= '1';
 				mac_addr_out <= ram(0) & ram(1) & ram(2) & ram(3) & ram(4) & ram(5);
 				ip_addr_out <= ram(6) & ram(7) & ram(8) & ram(9);
-				
+				ptp_current_leader_id <= ram(10) & ram(11) & ram(12) & ram(13) & ram(14) & ram(15) & ram(16) & ram(17);
+				ptp_time_source_o <= ram(18);
+				ptp_log_message_interval_o <= ram(19);
 			else
 				valid_out <= '0';
 			end if;

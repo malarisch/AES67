@@ -40,7 +40,9 @@ entity ptpv2_parser is
         clock_set_o            : out std_logic;
         clock_configured_o   : out std_logic;
         clock_configure_timestamp_seconds_o     : out std_logic_vector(47 downto 0);
-        clock_configure_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0)
+        clock_configure_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0); 
+        ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
+        ptp_is_follower_i : in std_logic
 
     );
 end entity;
@@ -518,17 +520,19 @@ begin
                 -- VERSION CHECK: Only accept PTPv2 packets!
                 -- PTPv1 uses same ports/multicast but different header format
                 -- ============================================
-                if ptp_version /= x"2" then
-                    -- Not PTPv2 - discard packet silently
+                if ptp_version /= x"2" or  (ptp_source_port_identity /= ptp_current_leader_id_i and is_leader = '0' and ptp_is_follower_i = '1') then
+                    -- Not PTPv2 or not from current leader - discard packet silently
                     s_SM_PtpParser <= s_Done;
                 else
+
+                    
                     -- interpret the PTPv2 packet based on message type (lower 4 bits only!)
                     -- PTP Byte 0: [ majorSdoId (4 bit) | messageType (4 bit) ]
                     case ptp_message_type(3 downto 0) is
                         when x"0" =>
                             -- Sync Message
                             -- Handle Sync message processing here
-                            if (is_leader = '0') then
+                            if (is_leader = '0' and ptp_is_follower_i = '1') then
                                 active_sequence_id := ptp_sequence_id;
                                 stored_t2_seconds <= latched_rx_timestamp_seconds(3 downto 0);
                                 stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
@@ -537,7 +541,7 @@ begin
                             
                         when x"1" =>
                             -- Delay_Req Message
-                            if is_leader = '1' then
+                            if is_leader = '1' and ptp_is_follower_i = '0' then
                                 -- Prepare Delay_Resp message
                                 rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
                                 rx_timestamp_seconds_o <= latched_rx_timestamp_seconds;
@@ -557,7 +561,7 @@ begin
                             
                         when x"8" =>
                             -- Follow_Up Message
-                            if (is_leader = '0') then
+                            if (is_leader = '0' and ptp_is_follower_i = '1') then
                                 -- Always update log_msg_interval from Follow_Up - this is the master's sync rate
                                 -- Do this BEFORE sequence ID check so we track the rate even if we miss packets
                                 log_msg_interval_o <= signed(ptp_log_msg_interval);
@@ -583,7 +587,7 @@ begin
                             
                         when x"9" =>
                         -- Delay_resp Message
-                        if (is_leader = '0') then
+                        if (is_leader = '0' and ptp_is_follower_i = '1') then
                             -- Handle Delay_Resp message processing here
                             -- Check sequence ID AND that this response is for US (our clock identity)
                             if ptp_sequence_id = active_sequence_id and requesting_port_identity = my_clock_id then

@@ -176,6 +176,60 @@ int eth_fmc_reg_read_block(const struct device *dev, uint8_t reg,
 	return 0;
 }
 
+/* ---- Convenience helpers ---- */
+
+/* Shadow copy of register 0x50 write value, protected by its own spinlock
+ * so that multiple threads (PPB poll, BMC, shell) can safely set/clear
+ * individual bits without clobbering each other. */
+static uint8_t status_shadow;
+static struct k_spinlock status_lock;
+
+int eth_fmc_status_set_bits(const struct device *dev, uint8_t bits)
+{
+	k_spinlock_key_t key = k_spin_lock(&status_lock);
+
+	status_shadow |= bits;
+	uint8_t val = status_shadow;
+
+	k_spin_unlock(&status_lock, key);
+
+	return eth_fmc_reg_write(dev, ETH_FMC_REG_STATUS_WR, &val, 1);
+}
+
+int eth_fmc_status_clear_bits(const struct device *dev, uint8_t bits)
+{
+	k_spinlock_key_t key = k_spin_lock(&status_lock);
+
+	status_shadow &= ~bits;
+	uint8_t val = status_shadow;
+
+	k_spin_unlock(&status_lock, key);
+
+	return eth_fmc_reg_write(dev, ETH_FMC_REG_STATUS_WR, &val, 1);
+}
+
+int eth_fmc_write_ptp_config(const struct device *dev,
+			     const uint8_t leader_clock_id[8],
+			     uint8_t time_source,
+			     int8_t log_msg_interval)
+{
+	uint8_t buf[ETH_FMC_PTP_CONFIG_LEN];
+
+	/* Bytes 0..7: Leader clock identity (EUI-64, big-endian) */
+	memcpy(buf, leader_clock_id, 8);
+	/* Byte 8: PTP time source */
+	buf[8] = time_source;
+	/* Byte 9: logMessageInterval (signed, cast to unsigned for wire) */
+	buf[9] = (uint8_t)log_msg_interval;
+	/* Byte 10: Dummy — triggers the FPGA system_config_done latch
+	 * (byte_count reaches 10, which fires the done pulse that
+	 *  copies RAM to output registers in system_config_reg) */
+	buf[10] = 0x00;
+
+	return eth_fmc_reg_write(dev, ETH_FMC_REG_PTP_CONFIG, buf,
+				 ETH_FMC_PTP_CONFIG_LEN);
+}
+
 /* TX path */
 static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 {
