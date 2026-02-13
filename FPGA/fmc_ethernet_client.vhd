@@ -859,6 +859,6 @@ begin
     end if;
   end process;
 
-  fmc_int_o <= (reg_rx_ready xor reg_rx_overflow_sys )or overflow_interrupt;
+  fmc_int_o <= (reg_rx_ready or reg_rx_overflow_sys )or overflow_interrupt;
 
 end architecture;

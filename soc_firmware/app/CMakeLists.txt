@@ -24,4 +24,5 @@ add_subdirectory(drivers)
 
 target_sources(app PRIVATE
   src/main.c
+  src/ui_display.c
 )

@@ -12,6 +12,7 @@
 
 #include "../drivers/si5351a/si5351a.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "ui_display.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -118,6 +119,7 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 	/* Push the new IP address to the FPGA */
 	fpga_write_ip_address(&dhcpv4->requested_ip);
+	ui_display_set_ip(&dhcpv4->requested_ip);
 }
 
 /* ---- Legacy test code (unused) ---- */
@@ -259,6 +261,10 @@ static struct {
 	uint32_t outliers;     /* Rejected outlier count */
 } pi_state;
 
+static struct ui_fpga_metrics disp_metrics = {
+	.speed_code = 0xFF,
+};
+
 /**
  * @brief Background thread that continuously measures the PPB offset
  *        between the PLL and the PTP wallclock, and applies correction
@@ -309,14 +315,20 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		if (poll_count >= 10) {
 			poll_count = 0;
 
+			disp_metrics.ppb_valid = !!(status & ETH_FMC_CLK_PPB_VALID);
+			disp_metrics.wc_locked = !!(status & ETH_FMC_CLK_WC_LOCKED);
+			disp_metrics.wc_phasejump = !!(status & ETH_FMC_CLK_WC_PHASEJUMP);
+			disp_metrics.wc_configured = !!(status & ETH_FMC_CLK_WC_CONFIGURED);
+			disp_metrics.ptp_leader_lost = !!(status & ETH_FMC_CLK_PTP_LEADER_LOST);
+
 			/* 0x50 - Clocking flags (already in 'status') */
 			LOG_INF("CLK flags: PPB_valid=%d WC_locked=%d WC_phasejump=%d "
 				"WC_configured=%d PTP_leader_lost=%d",
-				!!(status & ETH_FMC_CLK_PPB_VALID),
-				!!(status & ETH_FMC_CLK_WC_LOCKED),
-				!!(status & ETH_FMC_CLK_WC_PHASEJUMP),
-				!!(status & ETH_FMC_CLK_WC_CONFIGURED),
-				!!(status & ETH_FMC_CLK_PTP_LEADER_LOST));
+				disp_metrics.ppb_valid,
+				disp_metrics.wc_locked,
+				disp_metrics.wc_phasejump,
+				disp_metrics.wc_configured,
+				disp_metrics.ptp_leader_lost);
 
 			/* 0x51 - Ethernet flags */
 			uint8_t eth_status;
@@ -335,6 +347,10 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				LOG_INF("ETH flags: link_up=%d speed=%s",
 					!!(eth_status & ETH_FMC_ETH_LINK_UP),
 					speed_str);
+
+				disp_metrics.link_up =
+					!!(eth_status & ETH_FMC_ETH_LINK_UP);
+				disp_metrics.speed_code = speed_code;
 			}
 
 			/* 0x52 - Path delay */
@@ -344,6 +360,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					   &path_delay);
 			if (ret == 0) {
 				LOG_INF("Path delay: %d ns", path_delay);
+				disp_metrics.path_delay_ns = path_delay;
 			}
 
 			/* 0x53 - Leader offset */
@@ -353,6 +370,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					   &leader_offset);
 			if (ret == 0) {
 				LOG_INF("Leader offset: %d ns", leader_offset);
+				disp_metrics.leader_offset_ns = leader_offset;
 			}
 
 			/* 0x54 - PPB offset (current reading) */
@@ -363,7 +381,13 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			if (ret == 0) {
 				LOG_INF("PPB offset: %d  (total correction: %d)",
 					ppb_current, pi_state.output);
+				disp_metrics.ppb_offset = ppb_current;
 			}
+
+			disp_metrics.correction_ppb = pi_state.output;
+			disp_metrics.cycle = pi_state.cycle;
+			disp_metrics.outliers = pi_state.outliers;
+			ui_display_set_metrics(&disp_metrics);
 		}
 
 		/* If no measurement is running, start one */
@@ -476,6 +500,8 @@ int main(void)
         LOG_ERR("No network interface found");
         return -1;
     }
+
+	ui_display_init();
 	/*while (1) {
 		static uint8_t seq = 0;
 		if (send_raw_frame(iface, seq) == 0) {
