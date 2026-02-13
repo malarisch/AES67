@@ -211,7 +211,8 @@ int eth_fmc_status_clear_bits(const struct device *dev, uint8_t bits)
 int eth_fmc_write_ptp_config(const struct device *dev,
 			     const uint8_t leader_clock_id[8],
 			     uint8_t time_source,
-			     int8_t log_msg_interval)
+			     int8_t log_msg_interval,
+			     int8_t log_announce_interval)
 {
 	uint8_t buf[ETH_FMC_PTP_CONFIG_LEN];
 
@@ -219,12 +220,14 @@ int eth_fmc_write_ptp_config(const struct device *dev,
 	memcpy(buf, leader_clock_id, 8);
 	/* Byte 8: PTP time source */
 	buf[8] = time_source;
-	/* Byte 9: logMessageInterval (signed, cast to unsigned for wire) */
+	/* Byte 9: logMessageInterval for Sync (signed, cast to unsigned for wire) */
 	buf[9] = (uint8_t)log_msg_interval;
-	/* Byte 10: Dummy — triggers the FPGA system_config_done latch
-	 * (byte_count reaches 10, which fires the done pulse that
+	/* Byte 10: logAnnounceInterval (signed, cast to unsigned for wire) */
+	buf[10] = (uint8_t)log_announce_interval;
+	/* Byte 11: Dummy — triggers the FPGA system_config_done latch
+	 * (byte_count reaches 11, which fires the done pulse that
 	 *  copies RAM to output registers in system_config_reg) */
-	buf[10] = 0x00;
+	buf[11] = 0x00;
 
 	return eth_fmc_reg_write(dev, ETH_FMC_REG_PTP_CONFIG, buf,
 				 ETH_FMC_PTP_CONFIG_LEN);

@@ -37,10 +37,11 @@ Read Register 0x30 - 0x40: ETH RX FRAME - Length MSB + LSB Impl
 
 # Write Registers - PTP Configuration
 
-Write Register 0x55 -- PTP Configuration - 10 Byte Write
+Write Register 0x55 -- PTP Configuration - 11 Byte Write
 FPGA RAM 0x010..0x17 Byte 1..8: Current Leader Clock Identity
 FPGA RAM 0x018 Byte 9 PTP Time Source
-FPGA RAM 0x019 Byte 10 ptp LogMessageInterval
+FPGA RAM 0x019 Byte 10 ptp LogMessageInterval_Sync
+FPGA RAM 0x020 Byte 11 ptp LogMessageInterval_Announce
 
 # Status Registers
 

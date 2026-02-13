@@ -334,7 +334,9 @@ begin
 					when t_Pdelay_Follow_Up =>
 						udp_frame(74) <= x"05"; -- 32 controlField
 					when t_Pdelay_Resp =>
-						udp_frame(74) <= x"05"; -- 32 controlField
+						udp_frame(74) <= x"05"; -- 32 
+					when t_Announce =>
+						udp_frame(74) <= x"05"; -- 32 controlField --
                     when others =>
                         udp_frame(74) <= x"02"; -- 32 controlField -- 0x02 for Delay_Req, Sync, Follow_Up, Announce
 

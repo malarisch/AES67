@@ -566,12 +566,12 @@ begin
             ptp_is_follower_o <= wr_cap_data(5);
             
             register_byte_count <= (others => '0');
-          when "1010101" =>  -- 0x55 PTP config write (10 bytes, starts at RAM 0x10)
+          when "1010101" =>  -- 0x55 PTP config write (11 bytes, starts at RAM 0x10)
               system_config_done_o <= '0'; -- Indicate write in progress
               system_config_wr_en <= '1';
               system_config_wr_addr <= to_unsigned(10, 11) + resize(register_byte_count, 11);
               system_config_wr_data <= wr_cap_data;
-              if (register_byte_count >= 10) then
+              if (register_byte_count >= 11) then
                 register_byte_count <= (others => '0');
                 system_config_done_o <= '1'; -- Indicate write done
               else

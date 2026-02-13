@@ -293,7 +293,8 @@ static void fm_expire(void)
 static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 				    const uint8_t leader_id[8],
 				    uint8_t time_source,
-				    int8_t log_msg_interval)
+				    int8_t log_msg_interval,
+				    int8_t log_announce_interval)
 {
 	const struct device *fmc = device_get_binding("eth_fmc0");
 
@@ -306,7 +307,8 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 
 	/* Write PTP configuration register 0x55 */
 	ret = eth_fmc_write_ptp_config(fmc, leader_id, time_source,
-				       log_msg_interval);
+				       log_msg_interval,
+				       log_announce_interval);
 	if (ret < 0) {
 		LOG_ERR("BMC: Failed to write PTP config: %d", ret);
 		return;
@@ -329,11 +331,11 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 	}
 
 	LOG_INF("BMC: FPGA updated — role=%s leader=%02x%02x%02x%02x%02x%02x%02x%02x "
-		"timeSrc=0x%02x logMsgInt=%d",
+		"timeSrc=0x%02x logSyncInt=%d logAnnInt=%d",
 		(role == PTP_ROLE_LEADER) ? "LEADER" : "FOLLOWER",
 		leader_id[0], leader_id[1], leader_id[2], leader_id[3],
 		leader_id[4], leader_id[5], leader_id[6], leader_id[7],
-		time_source, log_msg_interval);
+		time_source, log_msg_interval, log_announce_interval);
 }
 
 /* ================================================================
@@ -370,6 +372,7 @@ static void run_bmc(void)
 	const uint8_t *leader_id;
 	uint8_t time_source;
 	int8_t log_msg_interval;
+	int8_t log_announce_interval;
 
 	if (!best_foreign ||
 	    dataset_comparison(&my_dataset, best_foreign) <= 0) {
@@ -378,16 +381,18 @@ static void run_bmc(void)
 		leader_id = my_clock_id;
 		/* Crystal oscillator for self-clocked AES67 device */
 		time_source = PTP_TIME_SRC_INTERNAL_OSC;
-		/* AES67: logMessageInterval for announce = 0 (1 sec) */
-		log_msg_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
+		/* AES67: logMessageInterval for sync = -3 (0.125 sec) */
+		log_msg_interval = AES67_LOG_MSG_INTERVAL_SYNC;
+		log_announce_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
 	} else {
 		/* Follow the best foreign master */
 		new_role = PTP_ROLE_FOLLOWER;
 		leader_id = best_foreign->gm_identity;
 		time_source = best_foreign->time_source;
 		/* Use the foreign master's message interval info.
-		 * For the FPGA config we write the Announce interval. */
-		log_msg_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
+		 * For the FPGA config we write the Sync interval. */
+		log_msg_interval = AES67_LOG_MSG_INTERVAL_SYNC;
+		log_announce_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
 	}
 
 	/* Only write to FPGA if something changed */
@@ -401,7 +406,8 @@ static void run_bmc(void)
 		bmc_decision_valid = true;
 
 		fpga_apply_bmc_decision(new_role, leader_id, time_source,
-					log_msg_interval);
+					log_msg_interval,
+					log_announce_interval);
 
 		/* Notify registered listener (e.g. PLL reset) */
 		if (bmc_change_cb) {
