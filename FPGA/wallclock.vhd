@@ -262,10 +262,12 @@ begin
                 -- Scale: when frac_ns_accum reaches ±2^30, adjust by ±1 ns
                 -- This gives effective resolution of ~1 PPB
                 
-                -- Calculate fractional increment (limit to 16-bit ppb to prevent overflow)
-                -- For ±500000 PPB max: 8 * 500000 = 4M, fits in 32 bits
-                frac_increment := to_signed(increment_interval, 16) * 
-                                  resize(freq_correction_ppb_i(23 downto 0), 16);  -- Limit to ±8M PPB
+                -- Calculate fractional increment: increment_interval * ppb
+                -- For ±500,000 PPB max: 8 * 500,000 = 4M, fits in 32 bits
+                -- Use 12-bit * 20-bit = 32-bit multiply (no truncation)
+                -- freq(19:0) covers ±524,287 PPB — sufficient for servo's ±500,000 limit
+                frac_increment := to_signed(increment_interval, 12) *
+                                  freq_correction_ppb_i(19 downto 0);
                 
                 -- Accumulate and check overflow
                 new_frac := frac_ns_accum + frac_increment;

@@ -78,10 +78,8 @@ end entity;
 
 architecture Behavioral of ptpv2_servo is
 
-    -- Filtered offset - narrowed to 18 bits
-    -- In normal operation (not phase jump), values are always < PHASE_JUMP_THRESHOLD (100,000 ns)
-    -- 2^17 = 131,072 > 100,000, so signed(17 downto 0) is sufficient
-    signal filtered_offset : signed(17 downto 0) := (others => '0');
+    -- Filtered offset - full 32 bits to handle offsets up to PHASE_JUMP_THRESHOLD
+    signal filtered_offset : signed(31 downto 0) := (others => '0');
     
     -- PI controller state - narrowed to 20 bits
     -- Both are clamped to ±500,000; 2^19 = 524,288 > 500,000
@@ -125,8 +123,9 @@ architecture Behavioral of ptpv2_servo is
     constant MAX_VALID_OFFSET : signed(31 downto 0) := to_signed(1_000_000_000, 32);  -- 1s
     
     -- Phase jump threshold: if offset > this, do phase jump instead of frequency correction
-    -- Set low enough to quickly correct initial offset from parser (~100µs)
-    constant PHASE_JUMP_THRESHOLD : signed(31 downto 0) := to_signed(100_000, 32);  -- 10µs (was 10ms!)
+    -- Must be large enough that PI loop handles initial clock_set residual (~3ms)
+    -- but small enough to quickly correct true time steps
+    constant PHASE_JUMP_THRESHOLD : signed(31 downto 0) := to_signed(10_000_000, 32);  -- 10ms
     
     -- Phase jump output registers
     signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
@@ -196,9 +195,9 @@ begin
         variable offset_abs      : signed(31 downto 0);
         variable proportional    : signed(19 downto 0);  -- Same width as freq_correction
         variable pi_output       : signed(19 downto 0);  -- Same width as freq_correction
-        variable filter_delta    : signed(17 downto 0);  -- Same width as filtered_offset
-        variable scaled_offset   : signed(17 downto 0);  -- Clamped to filtered_offset range
-        variable mult_result     : signed(31 downto 0);  -- 18 * 14-bit max (KP_GAIN) = 32 bits sufficient
+        variable filter_delta    : signed(31 downto 0);  -- Same width as filtered_offset
+        variable scaled_offset   : signed(31 downto 0);  -- Full width offset for PI input
+        variable mult_result     : signed(47 downto 0);  -- 32 * 16-bit = 48 bits for wide multiply
         variable timeout_cycles  : unsigned(31 downto 0);  -- Calculated timeout
         variable integral_update : signed(19 downto 0);  -- Same width as integral_sum
     begin
@@ -373,29 +372,34 @@ begin
                         -- Subsequent: exponential moving average
                         -- ============================================
                         if sample_count = 0 then
-                            -- First sample: initialize filter (truncate to 18 bits, OK since < PHASE_JUMP_THRESHOLD)
-                            filtered_offset <= resize(offset_sample, 18);
+                            -- First sample: initialize filter
+                            filtered_offset <= offset_sample;
                         else
                             -- EMA: filtered = filtered + (sample - filtered) >> FILTER_SHIFT
-                            filter_delta := shift_right(resize(offset_sample, 18) - filtered_offset, FILTER_SHIFT);
+                            filter_delta := shift_right(offset_sample - filtered_offset, FILTER_SHIFT);
                             filtered_offset <= filtered_offset + filter_delta;
                         end if;
-                        
+
                         -- ============================================
                         -- PI Controller (only after warmup)
                         -- ============================================
                         if sample_count >= WARMUP_SAMPLES then
-                            
-                            -- scaled_offset = filtered_offset (already narrow, max ±100,000)
+
                             scaled_offset := filtered_offset;
-                            
+
                             -- Proportional: -Kp * scaled_offset / 2^GAIN_SHIFT
-                            -- 18-bit * KP_GAIN(4-bit) = 22-bit, shift right by GAIN_SHIFT, result fits 20 bits
-                            mult_result := scaled_offset * to_signed(KP_GAIN, 14);
-                            proportional := -resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT), 20);
-                            
+                            -- 32-bit * 16-bit = 48-bit, shift right, clamp to ±500,000
+                            mult_result := scaled_offset * to_signed(KP_GAIN, 16);
+                            if shift_right(mult_result, EFFECTIVE_GAIN_SHIFT) > to_signed(500_000, 48) then
+                                proportional := to_signed(-500_000, 20);
+                            elsif shift_right(mult_result, EFFECTIVE_GAIN_SHIFT) < to_signed(-500_000, 48) then
+                                proportional := to_signed(500_000, 20);
+                            else
+                                proportional := -resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT), 20);
+                            end if;
+
                             -- Integral: accumulate -Ki * offset / 2^(GAIN_SHIFT+2)
-                            mult_result := scaled_offset * to_signed(KI_GAIN, 14);
+                            mult_result := scaled_offset * to_signed(KI_GAIN, 16);
                             integral_update := integral_sum - resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT + 2), 20);
                             
                             -- Clamp integral to anti-windup limits ±500,000 PPB
