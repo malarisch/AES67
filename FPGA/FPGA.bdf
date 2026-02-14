@@ -4270,14 +4270,6 @@ on the Quartus Prime software download page.
 	(bus)
 )
 (connector
-	(pt 2000 1904)
-	(pt 2144 1904)
-)
-(connector
-	(pt 2000 1936)
-	(pt 2000 1904)
-)
-(connector
 	(pt 1944 1096)
 	(pt 1944 1552)
 	(bus)
@@ -6358,6 +6350,14 @@ on the Quartus Prime software download page.
 (connector
 	(pt 1344 1880)
 	(pt 1616 1880)
+)
+(connector
+	(pt 2000 1936)
+	(pt 2000 1904)
+)
+(connector
+	(pt 2000 1904)
+	(pt 2144 1904)
 )
 (junction (pt 1976 816))
 (junction (pt 1976 1048))

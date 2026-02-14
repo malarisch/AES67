@@ -258,7 +258,7 @@ static int fpga_read_32(const struct device *fmc, uint8_t reg, int32_t *val)
 #define PI_KI_NUM          1       /* Integral numerator */
 #define PI_KI_DEN          32      /* Integral denominator   (Ki = 0.03125) */
 #define PI_IMAX            500000  /* Anti-windup: max integrator magnitude (ppb) */
-#define PI_OUTLIER_PPB     500000   /* Max plausible single-measurement error (ppb) */
+#define PI_OUTLIER_PPB     50000000   /* Max plausible single-measurement error (ppb) */
 #define PI_WARMUP_CYCLES   3       /* First N cycles: no outlier rejection */
 
 /* PI controller state */

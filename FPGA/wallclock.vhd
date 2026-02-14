@@ -99,23 +99,20 @@ architecture Behavioral of wallclock is
     signal sample_pulse_int : std_logic := '0';
     
     -- ============================================================
-    -- Media Clock Computation (no counter - computed from wallclock)
+    -- Media Clock (AES67): epoch-aligned, computed from wallclock
     -- media_clock = (seconds * audio_fs + sample_in_second) mod 2^32
-    -- ============================================================
-    -- Base media clock: seconds contribution (updated on second pulse)
-    signal media_base : unsigned(31 downto 0) := (others => '0');
-    
-    -- For sample_in_second computation:
-    -- sample_in_second = floor(nanoseconds * audio_fs / 1e9)
+    -- where sample_in_second = floor(nanoseconds * audio_fs / 1e9)
     -- Using reciprocal multiplication:
-    --   = floor(nanoseconds * K) >> 32  where K = audio_fs * 2^32 / 1e9
-    --   For 48kHz: K = 48000 * 4294967296 / 1e9 = 206,158.43 → 206158
-    -- nanoseconds (30 bits) * K (18 bits) = 48-bit product, take upper 16 bits
-    constant MEDIA_CLK_RECIP : unsigned(17 downto 0) := 
+    --   sample_in_sec = (nanoseconds * K) >> 32  where K = audio_fs * 2^32 / 1e9
+    --   For 48kHz: K = 48000 * 4294967296 / 1e9 = 206158
+    -- ============================================================
+    constant MEDIA_CLK_RECIP : unsigned(17 downto 0) :=
         to_unsigned(integer(real(audio_fs) * 4294967296.0 / 1.0e9), 18);
-    
-    signal media_clock_reg : unsigned(31 downto 0) := (others => '0');
-    signal media_init_done : std_logic := '0';  -- Set after first wallclock_set
+
+    -- Base media clock: seconds contribution (updated on second pulse)
+    signal media_base       : unsigned(31 downto 0) := (others => '0');
+    signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
+    signal media_init_done  : std_logic := '0';
     
 begin
 
@@ -175,10 +172,8 @@ begin
     end process nco_proc;
 
     -- ============================================================
-    -- Media Clock Computation Process
-    -- Computes RTP media clock timestamp from wallclock registers.
-    -- media_clock = (seconds * 48000 + sample_in_second) mod 2^32
-    -- Updated every clock cycle for immediate availability.
+    -- Media Clock Computation Process (AES67)
+    -- Epoch-aligned: media_clock = (sec * 48000 + sample_in_sec) mod 2^32
     -- ============================================================
     media_proc: process(clk, reset_n)
         variable ns_times_recip : unsigned(49 downto 0);  -- 32 × 18 = 50 bits
@@ -191,8 +186,6 @@ begin
         elsif rising_edge(clk) then
             if wallclock_set_i = '1' then
                 -- Hard set: compute base from new seconds value
-                -- Use lower 32 bits of seconds (result wraps mod 2^32, which is correct)
-                -- This uses one DSP block for 32×16 multiplication (only on set, which is rare)
                 media_base <= resize(
                     wallclock_seconds_i(15 downto 0) * to_unsigned(audio_fs, 16), 32);
                 media_init_done <= '1';
@@ -200,13 +193,11 @@ begin
                 -- Every second: advance base by audio_fs samples
                 media_base <= media_base + to_unsigned(audio_fs, 32);
             end if;
-            
-            -- Compute sample-within-second from current nanoseconds
-            -- sample_in_sec = floor(nanoseconds * audio_fs / 1e9)
-            --               = (nanoseconds * MEDIA_CLK_RECIP) >> 32
+
+            -- sample_in_sec = floor(nanoseconds * MEDIA_CLK_RECIP / 2^32)
             ns_times_recip := unsigned(nsec_reg) * MEDIA_CLK_RECIP;
-            sample_in_sec  := ns_times_recip(49 downto 34);  -- Upper 16 bits of 50-bit product
-            
+            sample_in_sec  := ns_times_recip(47 downto 32);
+
             -- Output: base + offset within second
             media_clock_reg <= media_base + resize(sample_in_sec, 32);
         end if;

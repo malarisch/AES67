@@ -43,7 +43,8 @@ entity udp_audio_packet is
 		sample_counter			: in std_logic_vector(31 downto 0) := (others => '0');
 		
 		tx_enable				: out std_logic := '0';  -- TX valid
-		tx_data					: out std_logic_vector(7 downto 0) := (others => '0') -- data-octet
+		tx_data					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
+		samples_since_last_packet_out	: out integer range 0 to 100 := 0
 		
 	);
 end entity;
@@ -55,8 +56,8 @@ architecture Behavioral of udp_audio_packet is
 	-- block RAMs for the heavy buffers.
 
 	-- Constants
-	constant BUFFERED_AUDIO_SAMPLES	: integer := 16; -- keep limit of 1460 bytes per UDP-frame in mind
-	constant AUDIO_CHANNELS			: integer := 4; -- keep audio-channels factor of two if using 24-bit per sample. Otherwise we will get uneven byte-numbers due to 3-byte-samples
+	constant BUFFERED_AUDIO_SAMPLES	: integer := 48; -- keep limit of 1460 bytes per UDP-frame in mind
+	constant AUDIO_CHANNELS			: integer := 2; -- keep audio-channels factor of two if using 24-bit per sample. Otherwise we will get uneven byte-numbers due to 3-byte-samples
 	constant BYTES_PER_SAMPLE		: integer := 3; -- 2 (16-bit), 3 (24-bit) or 4 (32-bit)
 	constant AUDIO_START_SIGNAL	: integer := 8;
 	constant AUDIO_BUFFER_LENGTH	: integer := BUFFERED_AUDIO_SAMPLES * AUDIO_CHANNELS * BYTES_PER_SAMPLE;
@@ -99,12 +100,12 @@ architecture Behavioral of udp_audio_packet is
 		case idx is
 		
 			-- ethernet
-			when 0	=> return dst_mac(47 downto 40);
-			when 1	=> return dst_mac(39 downto 32);
-			when 2	=> return dst_mac(31 downto 24);
-			when 3	=> return dst_mac(23 downto 16);
-			when 4	=> return dst_mac(15 downto 8);
-			when 5	=> return dst_mac(7 downto 0);
+			when 0	=> return x"01";
+			when 1	=> return x"00";
+			when 2	=> return x"5E";
+			when 3	=> return b"0" & dst_ip(22 downto 16);
+			when 4	=> return dst_ip(15 downto 8);
+			when 5	=> return dst_ip(7 downto 0);
 			when 6	=> return src_mac(47 downto 40);
 			when 7	=> return src_mac(39 downto 32);
 			when 8	=> return src_mac(31 downto 24);
@@ -209,7 +210,7 @@ architecture Behavioral of udp_audio_packet is
 	signal sample_wr_en		: std_logic := '0';
 	signal sample_wr_addr	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
 	signal sample_wr_data	: std_logic_vector(7 downto 0) := (others => '0');
-	signal sample_rd_addr	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+	signal sample_rd_addr	: integer range 0 to AUDIO_BUFFER_LENGTH := 0;
 	signal sample_rd_data	: std_logic_vector(7 downto 0) := (others => '0');
 
 	signal packet_wr_en		: std_logic := '0';
@@ -219,7 +220,7 @@ architecture Behavioral of udp_audio_packet is
 	signal packet_rd_data	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_packet_byte	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_tx_byte_pending	: std_logic := '0';
-
+	signal samples_since_last_packet	: integer range 0 to 100 := 0;
 	attribute ram_style : string;
 	attribute ram_style of sample_ram : signal is "block";
 	attribute ram_style of packet_ram : signal is "block";
@@ -262,6 +263,8 @@ architecture Behavioral of udp_audio_packet is
 	signal udp_checksum_request_count	: integer range 0 to UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH := 0;
 	signal udp_checksum_data_valid	: std_logic := '0';
 begin
+
+	samples_since_last_packet_out <= samples_since_last_packet;
 	sample_ram_process : process(tx_clk)
 	begin
 		if falling_edge(tx_clk) then
@@ -297,18 +300,14 @@ begin
 
 			-- capture audio words when allowed and push them into the sample RAM sequentially
 			if ((audio_sync_sync2 = '1') and (zaudio_sync = '0') and (buffer_locked = '0') and (sample_write_active = '0')) then
-				pending_bytes(0) <= audio_ch0_in(7 downto 0);
+				samples_since_last_packet <= samples_since_last_packet + 1;
+				-- AES67 L24: network byte order (MSB first)
+				pending_bytes(0) <= audio_ch0_in(23 downto 16);
 				pending_bytes(1) <= audio_ch0_in(15 downto 8);
-				pending_bytes(2) <= audio_ch0_in(23 downto 16);
-				pending_bytes(3) <= audio_ch1_in(7 downto 0);
+				pending_bytes(2) <= audio_ch0_in(7 downto 0);
+				pending_bytes(3) <= audio_ch1_in(23 downto 16);
 				pending_bytes(4) <= audio_ch1_in(15 downto 8);
-				pending_bytes(5) <= audio_ch1_in(23 downto 16);
-				pending_bytes(6) <= audio_ch2_in(7 downto 0);
-				pending_bytes(7) <= audio_ch2_in(15 downto 8);
-				pending_bytes(8) <= audio_ch2_in(23 downto 16);
-				pending_bytes(9) <= audio_ch3_in(7 downto 0);
-				pending_bytes(10) <= audio_ch3_in(15 downto 8);
-				pending_bytes(11) <= audio_ch3_in(23 downto 16);
+				pending_bytes(5) <= audio_ch1_in(7 downto 0);
 				sample_write_base <= audio_buffer_ptr;
 				sample_write_index <= 0;
 				sample_write_active <= '1';
@@ -319,6 +318,7 @@ begin
 				else
 					next_audio_ptr <= 0;
 					frame_start <= '1';
+					samples_since_last_packet <= 0;
 				end if;
 			end if;
 
@@ -384,7 +384,9 @@ begin
 						end if;
 					else
 						packet_wr_data <= sample_rd_data;
-						sample_rd_addr <= sample_rd_addr + 1;
+						if (sample_rd_addr < AUDIO_BUFFER_LENGTH - 1) then
+							sample_rd_addr <= sample_rd_addr + 1;
+						end if;
 						
 						--audio_payload_index <= audio_payload_index + 1;
 					end if;
