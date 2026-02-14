@@ -71,7 +71,11 @@ entity fmc_ethernet_client is
     clock_ppb_meter_i           : in  std_ulogic_vector(31 downto 0);
 
     ptp_is_leader_o               : out STD_ULOGIC;
-    ptp_is_follower_o             : out STD_ULOGIC
+    ptp_is_follower_o             : out STD_ULOGIC;
+
+    -- Audio stream destination (written via 0x57, 6 bytes: 4 IP + 2 port)
+    audio_dst_ip_o                : out std_ulogic_vector(31 downto 0);
+    audio_dst_port_o              : out std_ulogic_vector(15 downto 0)
   );
 end entity;
 
@@ -200,6 +204,10 @@ architecture rtl of fmc_ethernet_client is
   -- PPB measurement start handshake
   signal ppb_start_reg : std_ulogic := '0';
 
+  -- Audio destination registers (6 bytes: 4 IP + 2 port)
+  signal audio_dst_ip_reg   : std_ulogic_vector(31 downto 0) := (others => '0');
+  signal audio_dst_port_reg : std_ulogic_vector(15 downto 0) := (others => '0');
+
 
 
   -- Read byte counter for multi-byte registers (0x52..0x54)
@@ -218,6 +226,8 @@ begin
 
   -- Concurrent output assignments for status/control ports
   pll_ppb_measurement_start_o <= ppb_start_reg;
+  audio_dst_ip_o   <= audio_dst_ip_reg;
+  audio_dst_port_o <= audio_dst_port_reg;
 
 
   -- Config RAM read address: combinational so data is ready when latched
@@ -456,6 +466,8 @@ begin
       system_config_wr_data <= (others => '0');
       system_config_done_o <= '0';
       ppb_start_reg         <= '0';
+      audio_dst_ip_reg      <= (others => '0');
+      audio_dst_port_reg    <= (others => '0');
       read_byte_count       <= (others => '0');
       read_reg_addr_prev    <= (others => '0');
     elsif rising_edge(clk_sys_i) then
@@ -578,6 +590,21 @@ begin
                 register_byte_count <= register_byte_count + 1;
               end if;
             null;
+          when "1010111" =>  -- 0x57 Audio destination write (6 bytes: 4 IP + 2 port)
+              case register_byte_count is
+                when x"0" => audio_dst_ip_reg(31 downto 24) <= wr_cap_data;
+                when x"1" => audio_dst_ip_reg(23 downto 16) <= wr_cap_data;
+                when x"2" => audio_dst_ip_reg(15 downto 8)  <= wr_cap_data;
+                when x"3" => audio_dst_ip_reg(7 downto 0)   <= wr_cap_data;
+                when x"4" => audio_dst_port_reg(15 downto 8) <= wr_cap_data;
+                when x"5" => audio_dst_port_reg(7 downto 0)  <= wr_cap_data;
+                when others => null;
+              end case;
+              if (register_byte_count >= 5) then
+                register_byte_count <= (others => '0');
+              else
+                register_byte_count <= register_byte_count + 1;
+              end if;
           when others =>
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then
               if txfifo_wr_full = '0' then

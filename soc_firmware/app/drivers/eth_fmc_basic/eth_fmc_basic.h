@@ -43,6 +43,13 @@ extern "C" {
 #define ETH_FMC_REG_PTP_CONFIG 0x55
 #define ETH_FMC_PTP_CONFIG_LEN 12  /* 11 data bytes + 1 dummy to trigger FPGA latch */
 
+/* Write register 0x57 - Audio stream destination (6-byte auto-increment write)
+ * Bytes 0..3: Destination IP address (network byte order, MSB first)
+ * Bytes 4..5: Destination UDP port (big-endian)
+ */
+#define ETH_FMC_REG_AUDIO_DST  0x57
+#define ETH_FMC_AUDIO_DST_LEN  6
+
 /* Read register 0x50 - clocking flags */
 #define ETH_FMC_REG_STATUS_CLK 0x50
 #define ETH_FMC_CLK_PPB_VALID        BIT(0)  /* PLL PPB measurement valid */

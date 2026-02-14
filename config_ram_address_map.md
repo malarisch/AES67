@@ -43,6 +43,17 @@ FPGA RAM 0x018 Byte 9 PTP Time Source
 FPGA RAM 0x019 Byte 10 ptp LogMessageInterval_Sync
 FPGA RAM 0x020 Byte 11 ptp LogMessageInterval_Announce
 
+# Write Registers - Audio Stream Destination
+
+Write Register 0x57 -- Audio Destination IP + Port - 6 Byte Write
+Byte 0: Destination IP Addr 0 (MSB, network byte order)
+Byte 1: Destination IP Addr 1
+Byte 2: Destination IP Addr 2
+Byte 3: Destination IP Addr 3 (LSB)
+Byte 4: Destination UDP Port MSB
+Byte 5: Destination UDP Port LSB
+Output: audio_dst_ip_o(31..0), audio_dst_port_o(15..0)
+
 # Status Registers
 
 Write Register 0x50 - Flag Bitmask

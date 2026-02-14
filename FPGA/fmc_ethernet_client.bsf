@@ -312,6 +312,20 @@ on the Quartus Prime software download page.
 		(line (pt 344 256)(pt 328 256)(line_width 1))
 	)
 	(port
+		(pt 344 272)
+		(output)
+		(text "audio_dst_ip_o[31..0]" (rect 0 0 83 12)(font "Arial" ))
+		(text "audio_dst_ip_o[31..0]" (rect 240 267 323 279)(font "Arial" ))
+		(line (pt 344 272)(pt 328 272)(line_width 3))
+	)
+	(port
+		(pt 344 288)
+		(output)
+		(text "audio_dst_port_o[15..0]" (rect 0 0 93 12)(font "Arial" ))
+		(text "audio_dst_port_o[15..0]" (rect 230 283 323 295)(font "Arial" ))
+		(line (pt 344 288)(pt 328 288)(line_width 3))
+	)
+	(port
 		(pt 344 32)
 		(bidir)
 		(text "fmc_data_io[7..0]" (rect 0 0 70 12)(font "Arial" ))

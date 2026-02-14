@@ -14,6 +14,7 @@
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 #include "ui_display.h"
 #include "ptp_bmc.h"
+#include "sap_sdp.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -124,6 +125,9 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 	/* Unblock the BMC thread now that we have a valid IP on the FPGA */
 	ptp_bmc_notify_ip_ready();
+
+	/* Notify SAP/SDP module of the assigned IP */
+	sap_sdp_notify_ip_ready(&dhcpv4->requested_ip);
 }
 
 /* ---- Legacy test code (unused) ---- */
@@ -563,6 +567,12 @@ int main(void)
     int bmc_ret = ptp_bmc_start(iface);
     if (bmc_ret < 0) {
         LOG_ERR("Failed to start PTP BMC: %d", bmc_ret);
+    }
+
+    /* ---- Start AES67 SAP/SDP announcements ---- */
+    int sap_ret = sap_sdp_start(iface);
+    if (sap_ret < 0) {
+        LOG_ERR("Failed to start SAP/SDP: %d", sap_ret);
     }
 
     /* ---- Start PPB measurement / PLL correction thread ---- */

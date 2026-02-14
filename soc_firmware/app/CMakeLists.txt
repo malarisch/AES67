@@ -26,4 +26,5 @@ target_sources(app PRIVATE
   src/main.c
   src/ui_display.c
   src/ptp_bmc.c
+  src/sap_sdp.c
 )
