@@ -73,9 +73,10 @@ entity fmc_ethernet_client is
     ptp_is_leader_o               : out STD_ULOGIC;
     ptp_is_follower_o             : out STD_ULOGIC;
 
-    -- Audio stream destination (written via 0x57, 6 bytes: 4 IP + 2 port)
-    audio_dst_ip_o                : out std_ulogic_vector(31 downto 0);
-    audio_dst_port_o              : out std_ulogic_vector(15 downto 0)
+    -- TX stream config (written via 0x58, 16 bytes per stream -> tx_router config RAM)
+    tx_stream_config_wr_en_o      : out std_ulogic;
+    tx_stream_config_wr_addr_o    : out std_ulogic_vector(7 downto 0);
+    tx_stream_config_wr_data_o    : out std_ulogic_vector(7 downto 0)
   );
 end entity;
 
@@ -204,9 +205,9 @@ architecture rtl of fmc_ethernet_client is
   -- PPB measurement start handshake
   signal ppb_start_reg : std_ulogic := '0';
 
-  -- Audio destination registers (6 bytes: 4 IP + 2 port)
-  signal audio_dst_ip_reg   : std_ulogic_vector(31 downto 0) := (others => '0');
-  signal audio_dst_port_reg : std_ulogic_vector(15 downto 0) := (others => '0');
+  -- TX stream config state (0x58 write, 16 bytes per stream)
+  signal stream_cfg_byte_count : unsigned(3 downto 0) := (others => '0');
+  signal stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
 
 
 
@@ -226,8 +227,6 @@ begin
 
   -- Concurrent output assignments for status/control ports
   pll_ppb_measurement_start_o <= ppb_start_reg;
-  audio_dst_ip_o   <= audio_dst_ip_reg;
-  audio_dst_port_o <= audio_dst_port_reg;
 
 
   -- Config RAM read address: combinational so data is ready when latched
@@ -466,12 +465,16 @@ begin
       system_config_wr_data <= (others => '0');
       system_config_done_o <= '0';
       ppb_start_reg         <= '0';
-      audio_dst_ip_reg      <= (others => '0');
-      audio_dst_port_reg    <= (others => '0');
+      stream_cfg_byte_count <= (others => '0');
+      stream_cfg_base_addr  <= (others => '0');
+      tx_stream_config_wr_en_o   <= '0';
+      tx_stream_config_wr_addr_o <= (others => '0');
+      tx_stream_config_wr_data_o <= (others => '0');
       read_byte_count       <= (others => '0');
       read_reg_addr_prev    <= (others => '0');
     elsif rising_edge(clk_sys_i) then
       system_config_wr_en <= '0';
+      tx_stream_config_wr_en_o <= '0';
       txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
@@ -590,20 +593,23 @@ begin
                 register_byte_count <= register_byte_count + 1;
               end if;
             null;
-          when "1010111" =>  -- 0x57 Audio destination write (6 bytes: 4 IP + 2 port)
-              case register_byte_count is
-                when x"0" => audio_dst_ip_reg(31 downto 24) <= wr_cap_data;
-                when x"1" => audio_dst_ip_reg(23 downto 16) <= wr_cap_data;
-                when x"2" => audio_dst_ip_reg(15 downto 8)  <= wr_cap_data;
-                when x"3" => audio_dst_ip_reg(7 downto 0)   <= wr_cap_data;
-                when x"4" => audio_dst_port_reg(15 downto 8) <= wr_cap_data;
-                when x"5" => audio_dst_port_reg(7 downto 0)  <= wr_cap_data;
-                when others => null;
-              end case;
-              if (register_byte_count >= 5) then
-                register_byte_count <= (others => '0');
+          when "1011000" =>  -- 0x58 TX stream config write (16 bytes per stream -> tx_router config RAM)
+              -- Byte 0 is stream_id: latch base address = stream_id * 16
+              -- Bytes 0..15 are written to config_ram[base + byte_offset]
+              tx_stream_config_wr_en_o <= '1';
+              tx_stream_config_wr_data_o <= wr_cap_data;
+              if stream_cfg_byte_count = 0 then
+                -- First byte: stream_id -> compute base addr and write to offset 0
+                stream_cfg_base_addr <= unsigned(wr_cap_data(3 downto 0)) & "0000";
+                tx_stream_config_wr_addr_o <= std_ulogic_vector(unsigned(wr_cap_data(3 downto 0)) & "0000");
               else
-                register_byte_count <= register_byte_count + 1;
+                -- Subsequent bytes: use latched base addr + offset
+                tx_stream_config_wr_addr_o <= std_ulogic_vector(stream_cfg_base_addr + resize(stream_cfg_byte_count, 8));
+              end if;
+              if stream_cfg_byte_count >= 15 then
+                stream_cfg_byte_count <= (others => '0');
+              else
+                stream_cfg_byte_count <= stream_cfg_byte_count + 1;
               end if;
           when others =>
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then

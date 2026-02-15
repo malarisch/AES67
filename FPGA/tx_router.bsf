@@ -1,0 +1,172 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 2025  Altera Corporation. All rights reserved.
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and any partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, the Altera Quartus Prime License Agreement,
+the Altera IP License Agreement, or other applicable license
+agreement, including, without limitation, that your use is for
+the sole purpose of programming logic devices manufactured by
+Altera and sold by Altera or its authorized distributors.  Please
+refer to the Altera Software License Subscription Agreements 
+on the Quartus Prime software download page.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 408 256)
+	(text "tx_router" (rect 5 0 41 12)(font "Arial" ))
+	(text "inst" (rect 8 224 20 236)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "sys_clk_i" (rect 0 0 38 12)(font "Arial" ))
+		(text "sys_clk_i" (rect 21 27 59 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "reset_n" (rect 0 0 30 12)(font "Arial" ))
+		(text "reset_n" (rect 21 43 51 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "sample_buffer_wr_ptr_i[15..0]" (rect 0 0 121 12)(font "Arial" ))
+		(text "sample_buffer_wr_ptr_i[15..0]" (rect 21 59 142 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "packet_time_i[31..0]" (rect 0 0 79 12)(font "Arial" ))
+		(text "packet_time_i[31..0]" (rect 21 75 100 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 3))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "config_wr_addr_i[7..0]" (rect 0 0 89 12)(font "Arial" ))
+		(text "config_wr_addr_i[7..0]" (rect 21 91 110 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 3))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "config_wr_data_i[7..0]" (rect 0 0 88 12)(font "Arial" ))
+		(text "config_wr_data_i[7..0]" (rect 21 107 109 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "config_wr_en_i" (rect 0 0 61 12)(font "Arial" ))
+		(text "config_wr_en_i" (rect 21 123 82 135)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 1))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "streams_configured_i[7..0]" (rect 0 0 107 12)(font "Arial" ))
+		(text "streams_configured_i[7..0]" (rect 21 139 128 151)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 3))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "sample_ready_i" (rect 0 0 64 12)(font "Arial" ))
+		(text "sample_ready_i" (rect 21 155 85 167)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160)(line_width 1))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "tx_en_i" (rect 0 0 29 12)(font "Arial" ))
+		(text "tx_en_i" (rect 21 171 50 183)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176)(line_width 1))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "config_wr_clk_i" (rect 0 0 62 12)(font "Arial" ))
+		(text "config_wr_clk_i" (rect 21 187 83 199)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 1))
+	)
+	(port
+		(pt 392 32)
+		(output)
+		(text "ip_addr_o[31..0]" (rect 0 0 63 12)(font "Arial" ))
+		(text "ip_addr_o[31..0]" (rect 308 27 371 39)(font "Arial" ))
+		(line (pt 392 32)(pt 376 32)(line_width 3))
+	)
+	(port
+		(pt 392 48)
+		(output)
+		(text "channel_count_o[7..0]" (rect 0 0 87 12)(font "Arial" ))
+		(text "channel_count_o[7..0]" (rect 284 43 371 55)(font "Arial" ))
+		(line (pt 392 48)(pt 376 48)(line_width 3))
+	)
+	(port
+		(pt 392 64)
+		(output)
+		(text "samples_per_packet_per_channel_o[7..0]" (rect 0 0 168 12)(font "Arial" ))
+		(text "samples_per_packet_per_channel_o[7..0]" (rect 203 59 371 71)(font "Arial" ))
+		(line (pt 392 64)(pt 376 64)(line_width 3))
+	)
+	(port
+		(pt 392 80)
+		(output)
+		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 0 0 153 12)(font "Arial" ))
+		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 218 75 371 87)(font "Arial" ))
+		(line (pt 392 80)(pt 376 80)(line_width 3))
+	)
+	(port
+		(pt 392 96)
+		(output)
+		(text "packet_time_o[31..0]" (rect 0 0 82 12)(font "Arial" ))
+		(text "packet_time_o[31..0]" (rect 289 91 371 103)(font "Arial" ))
+		(line (pt 392 96)(pt 376 96)(line_width 3))
+	)
+	(port
+		(pt 392 112)
+		(output)
+		(text "ch_ids_o[63..0]" (rect 0 0 61 12)(font "Arial" ))
+		(text "ch_ids_o[63..0]" (rect 310 107 371 119)(font "Arial" ))
+		(line (pt 392 112)(pt 376 112)(line_width 3))
+	)
+	(port
+		(pt 392 128)
+		(output)
+		(text "audio_packet_tx_start_o" (rect 0 0 99 12)(font "Arial" ))
+		(text "audio_packet_tx_start_o" (rect 272 123 371 135)(font "Arial" ))
+		(line (pt 392 128)(pt 376 128)(line_width 1))
+	)
+	(parameter
+		"samples_per_channel_depth"
+		"48"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"global_channel_count"
+		"16"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"bytes_per_sample"
+		"3"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 376 224)(line_width 1))
+	)
+	(annotation_block (parameter)(rect 408 -64 508 16))
+)

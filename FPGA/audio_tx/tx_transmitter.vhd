@@ -62,8 +62,8 @@ architecture Behavioral of tx_transmitter is
     signal PACKET_LENGTH : integer := 0;
     signal UDP_PAYLOAD_LENGTH : integer := 0;
 	-- Types
-	type t_SM_Ethernet is (s_Idle, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum, s_PrimeTx, s_Transmit, s_End);
-    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload);
+	type t_SM_Ethernet is (s_Idle, s_PrimeTx, s_Transmit, s_End);
+    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
 	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
     
     signal SM_AssemblePacket    : t_SM_AssemblePacket := s_A_Idle;
@@ -241,7 +241,15 @@ architecture Behavioral of tx_transmitter is
     signal start_i_sync1 : std_logic := '0';
     signal channel_counter: integer range 0 to 7 := 0;
     signal byte_counter : integer range 0 to 2 := 0;
+    signal sample_index : integer range 0 to samples_per_channel_depth - 1 := 0;
 
+    signal tx_ack: std_logic := '0';
+    signal tx_ack_sync1: std_logic := '0';
+    signal tx_ack_sync2: std_logic := '0';
+
+    signal tx_frame_start    : std_logic := '0';
+    signal tx_frame_start_sync1 : std_logic := '0';
+    signal tx_frame_start_sync2 : std_logic := '0';
 begin
 
 
@@ -263,10 +271,13 @@ begin
         if rising_edge(sys_clk) then
             -- sync start_i to sys_clk domain
             start_i_sync1 <= start_i;
+
+            tx_ack_sync1 <= tx_ack;
+            tx_ack_sync2 <= tx_ack_sync1;
             case SM_AssemblePacket is
                 when s_A_Idle =>
                     if (start_i_sync1 = '1') then
-                        SM_AssemblePacket <= s_A_PrepFrame;
+                        SM_AssemblePacket <= s_A_CalcValues;
 
                         -- calc dynamic lengths based on input parameters
                         UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
@@ -280,9 +291,7 @@ begin
 						audio_payload_index <= 0;
 						sample_read_addr <= 0;
 						checksum_write_index <= 0;
-								prime_wait <= 0;
-						tx_bytes_remaining <= 0;
-						tx_read_pointer <= 0;
+
 
 						packet_counter <= packet_counter + 1;
 						ip_checksum_acc <= (others => '0');
@@ -334,7 +343,7 @@ begin
 
 
 						packet_wr_data <= sample_ram_data_in_i;
-						sample_ram_read_addr_o <= std_logic_vector(unsigned(sample_buffer_tx_start_addr_i) + unsigned(ch_ids_i(channel_counter * 8 + 7 downto channel_counter *8)) + byte_counter);
+						sample_ram_read_addr_o <= std_logic_vector(unsigned(sample_buffer_tx_start_addr_i) + (sample_index * bytes_per_sample) + unsigned(ch_ids_i(channel_counter * 8 + 7 downto channel_counter *8)) + byte_counter);
 						
                         if (byte_counter < bytes_per_sample - 1) then
                             byte_counter <= byte_counter + 1;
@@ -344,6 +353,11 @@ begin
                                 channel_counter <= channel_counter + 1;
                             else
                                 channel_counter <= 0;
+                                if (sample_index < to_integer(unsigned(samples_per_packet_per_channel_i)) - 1) then
+                                    sample_index <= sample_index + 1;
+                                else
+                                    sample_index <= 0;
+                                end if;
                             end if;
                         end if;
 
@@ -361,49 +375,12 @@ begin
 						end if;
 						udp_checksum_data_valid <= '0';
 						packet_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
-						s_SM_Ethernet <= s_CalcUdpChecksum;
+						SM_AssemblePacket <= s_CalcUdpChecksum;
 					else
 						frame_write_index <= frame_write_index + 1;
 					end if;
 
-
-
-                    if (frame_start = '0') then
-                        frame_start <= '1';
-                    end if;
-                    if (frame_start = '1') then
-                        SM_AssemblePacket <= s_A_Payload;
-                    end if;
-                when s_A_Payload =>
-                    if (frame_start = '1') then
-                        frame_start <= '0';
-                        SM_AssemblePacket <= s_A_Idle;
-                    end if;
-            end case;
-        end if;
-    end process sys_clock_process;
-
-
-	tx_process : process(tx_clk)
-		variable header_data		: std_logic_vector(7 downto 0);
-		variable pseudo_header_sum	: unsigned(31 downto 0);
-	begin
-		if falling_edge(tx_clk) then
-			packet_wr_en <= '0';
-
-
-
-			case s_SM_Ethernet is
-				when s_Idle =>
-					tx_enable <= '0';
-					if (frame_start = '1') then
-						frame_start <= '0';
-						
-							s_SM_Ethernet <= s_CalcUdpChecksum;
-						end if;
-
-				
-				when s_CalcUdpChecksum =>
+                when s_CalcUdpChecksum =>
 					if (udp_checksum_data_valid = '1') then
 						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, packet_rd_data);
 						if (udp_checksum_bytes_remaining > 0) then
@@ -413,9 +390,9 @@ begin
 
 					if ((udp_checksum_data_valid = '1') and (udp_checksum_bytes_remaining = 1)) then
 						udp_checksum_data_valid <= '0';
-						s_SM_Ethernet <= s_FinalizeChecksum;
+						SM_AssemblePacket <= s_FinalizeChecksum;
 					elsif ((udp_checksum_data_valid = '0') and (udp_checksum_bytes_remaining = 0)) then
-						s_SM_Ethernet <= s_FinalizeChecksum;
+						SM_AssemblePacket <= s_FinalizeChecksum;
 					else
 						if (udp_checksum_data_valid = '0') then
 							if (udp_checksum_bytes_remaining > 0) then
@@ -431,7 +408,7 @@ begin
 				when s_FinalizeChecksum =>
 					ip_checksum_value <= finalize_checksum(ip_checksum_acc);
 					udp_checksum_value <= finalize_checksum(udp_checksum_acc);
-					s_SM_Ethernet <= s_WriteChecksum;
+					SM_AssemblePacket <= s_WriteChecksum;
 
 				when s_WriteChecksum =>
 					case checksum_write_index is
@@ -472,8 +449,45 @@ begin
 									tx_bytes_remaining <= 0;
 								end if;
 								prime_wait <= 0;
-								s_SM_Ethernet <= s_PrimeTx;
+								SM_AssemblePacket <= s_A_Payload;
 						end case;
+                when s_A_Payload =>
+                    tx_frame_start <= '1';
+                    if (tx_ack_sync1 = '0' and tx_ack_sync2 = '1') then
+                        SM_AssemblePacket <= s_A_Idle;
+                        tx_frame_start <= '0';
+                    end if;
+            end case;
+        end if;
+    end process sys_clock_process;
+
+
+	tx_process : process(tx_clk)
+		variable header_data		: std_logic_vector(7 downto 0);
+		variable pseudo_header_sum	: unsigned(31 downto 0);
+	begin
+		if falling_edge(tx_clk) then
+			packet_wr_en <= '0';
+            tx_frame_start_sync1 <= tx_frame_start;
+            tx_frame_start_sync2 <= tx_frame_start_sync1;
+
+
+			case s_SM_Ethernet is
+				when s_Idle =>
+					tx_enable <= '0';
+                    tx_ack <= '0';
+					if (tx_frame_start_sync2 = '1') then
+						tx_ack <= '1';
+						
+							s_SM_Ethernet <= s_PrimeTx;
+
+								prime_wait <= 0;
+						tx_bytes_remaining <= 0;
+						tx_read_pointer <= 0;
+						end if;
+
+				
+				
 
 				when s_PrimeTx =>
 					tx_enable <= '0';

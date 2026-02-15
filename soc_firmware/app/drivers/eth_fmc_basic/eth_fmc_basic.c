@@ -233,6 +233,35 @@ int eth_fmc_write_ptp_config(const struct device *dev,
 				 ETH_FMC_PTP_CONFIG_LEN);
 }
 
+int eth_fmc_write_tx_stream_config(const struct device *dev,
+				   uint8_t stream_id,
+				   const struct in_addr *dst_ip,
+				   uint8_t channel_count,
+				   uint8_t samples_per_pkt,
+				   const uint8_t *ch_ids,
+				   uint8_t num_ch_ids)
+{
+	uint8_t buf[ETH_FMC_TX_STREAM_CFG_LEN];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
+
+	memset(buf, 0, sizeof(buf));
+
+	buf[0]  = stream_id & 0x07;
+	buf[1]  = ip[0];
+	buf[2]  = ip[1];
+	buf[3]  = ip[2];
+	buf[4]  = ip[3];
+	buf[5]  = channel_count;
+	buf[6]  = samples_per_pkt;
+
+	for (uint8_t i = 0; i < num_ch_ids && i < 8; i++) {
+		buf[7 + i] = ch_ids[i];
+	}
+
+	return eth_fmc_reg_write(dev, ETH_FMC_REG_TX_STREAM_CFG, buf,
+				 ETH_FMC_TX_STREAM_CFG_LEN);
+}
+
 /* TX path */
 static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 {

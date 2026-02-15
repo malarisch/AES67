@@ -35,7 +35,8 @@ entity tx_router is
         sample_ready_i                  : in std_logic; -- comes from sys clk domain
 
         audio_packet_tx_start_o         : out std_logic := '0';
-        tx_en_i                         : in std_logic
+        tx_en_i                         : in std_logic;
+        config_wr_clk_i                  : in std_logic
     );
 end entity;
 
@@ -81,7 +82,14 @@ architecture Behavioral of tx_router is
     attribute PRESERVE of tx_en_sync : signal is true;
 
 begin
-
+    process (config_wr_clk_i)
+    begin
+        if rising_edge(config_wr_clk_i) then
+            if config_wr_en_i = '1' then
+                config_ram(to_integer(unsigned(config_wr_addr_i))) <= config_wr_data_i;
+            end if;
+        end if;
+    end process;
     -- Sample counting + FIFO write process
     process(sys_clk_i, reset_n)
         variable base : integer;
@@ -98,10 +106,6 @@ begin
         elsif rising_edge(sys_clk_i) then
             sample_ready_sync <= sample_ready_i;
 
-            -- Config RAM write
-            if config_wr_en_i = '1' then
-                config_ram(to_integer(unsigned(config_wr_addr_i))) <= config_wr_data_i;
-            end if;
 
             -- Rising edge of sample_ready
             if sample_ready_i = '1' and sample_ready_sync = '0' then

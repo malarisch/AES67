@@ -47,8 +47,12 @@ static bool announce_enabled = true;
 static struct k_sem sap_ip_sem;
 static struct k_mutex sap_mutex;
 
-/* ---- Local stream configuration ---- */
+/* ---- Local stream configuration (legacy single-stream) ---- */
 static struct aes67_stream_config local_config;
+
+/* ---- TX stream table ---- */
+static struct aes67_tx_stream tx_streams[AES67_MAX_TX_STREAMS];
+static volatile bool force_announce;
 
 /* ---- Foreign stream table ---- */
 static struct sap_foreign_stream foreign_streams[SAP_MAX_FOREIGN_STREAMS];
@@ -135,6 +139,108 @@ static int build_sdp(char *buf, size_t buf_size)
 		return -ENOMEM;
 	}
 	return n;
+}
+
+/* ================================================================
+ * Build SDP body for a TX stream from the tx_streams table
+ * ================================================================ */
+static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
+				   const struct aes67_tx_stream *stream)
+{
+	char ip_str[INET_ADDRSTRLEN];
+	char mcast_str[INET_ADDRSTRLEN];
+	char clock_id_str[32];
+
+	zsock_inet_ntop(AF_INET, &my_ip_addr, ip_str, sizeof(ip_str));
+	zsock_inet_ntop(AF_INET, &stream->dst_ip, mcast_str, sizeof(mcast_str));
+	format_ptp_clock_id(clock_id_str, sizeof(clock_id_str), my_clock_id);
+
+	uint32_t ptime_us = (uint32_t)stream->samples_per_packet *
+			    1000000U / AES67_DEFAULT_SAMPLE_RATE;
+
+	/* Use stream_id to create distinct session IDs */
+	uint32_t session_id = sys_be32_to_cpu(my_ip_addr.s_addr) +
+			      stream->stream_id;
+
+	int n = snprintf(buf, buf_size,
+		"v=0\r\n"
+		"o=- %u %u IN IP4 %s\r\n"
+		"s=AES67 Stream %u\r\n"
+		"i=%uch %ubit %uHz\r\n"
+		"c=IN IP4 %s/32\r\n"
+		"t=0 0\r\n"
+		"m=audio %u RTP/AVP %u\r\n"
+		"a=rtpmap:%u L%u/%u/%u\r\n"
+		"a=ptime:%u.%03u\r\n"
+		"a=ts-refclk:ptp=IEEE1588-2008:%s\r\n"
+		"a=mediaclk:direct=0\r\n",
+		session_id, stream->stream_id, ip_str,
+		stream->stream_id,
+		stream->channel_count, AES67_DEFAULT_BIT_DEPTH,
+		AES67_DEFAULT_SAMPLE_RATE,
+		mcast_str,
+		AES67_DEFAULT_PORT, AES67_DEFAULT_PAYLOAD_TYPE,
+		AES67_DEFAULT_PAYLOAD_TYPE, AES67_DEFAULT_BIT_DEPTH,
+		AES67_DEFAULT_SAMPLE_RATE, stream->channel_count,
+		ptime_us / 1000, ptime_us % 1000,
+		clock_id_str);
+
+	if (n < 0 || (size_t)n >= buf_size) {
+		return -ENOMEM;
+	}
+	return n;
+}
+
+/* ================================================================
+ * Send a SAP announcement for a specific TX stream
+ * ================================================================ */
+static int send_sap_announce_stream(int sock, const struct sockaddr_in *dst,
+				    const struct aes67_tx_stream *stream)
+{
+	static uint8_t tx_buf[SAP_TX_BUF_SIZE];
+	int offset = 0;
+
+	/* Use stream_id to create unique msg_id per stream */
+	uint16_t stream_msg_id = sap_msg_id_hash + stream->stream_id;
+
+	/* SAP header */
+	tx_buf[0] = 0x20;
+	tx_buf[1] = 0x00;
+	tx_buf[2] = (uint8_t)(stream_msg_id >> 8);
+	tx_buf[3] = (uint8_t)(stream_msg_id & 0xFF);
+	memcpy(&tx_buf[4], &my_ip_addr.s_addr, 4);
+	offset = SAP_HEADER_SIZE;
+
+	/* Content type */
+	size_t ct_len = strlen(SAP_CONTENT_TYPE) + 1;
+
+	if (offset + ct_len >= SAP_TX_BUF_SIZE) {
+		return -ENOMEM;
+	}
+	memcpy(&tx_buf[offset], SAP_CONTENT_TYPE, ct_len);
+	offset += ct_len;
+
+	/* SDP body */
+	int sdp_len = build_sdp_for_tx_stream((char *)&tx_buf[offset],
+					      SAP_TX_BUF_SIZE - offset,
+					      stream);
+	if (sdp_len < 0) {
+		return sdp_len;
+	}
+	offset += sdp_len;
+
+	ssize_t sent = zsock_sendto(sock, tx_buf, offset, 0,
+				     (const struct sockaddr *)dst,
+				     sizeof(*dst));
+	if (sent < 0) {
+		LOG_WRN("SAP: sendto stream %u failed: %d",
+			stream->stream_id, errno);
+		return -errno;
+	}
+
+	LOG_DBG("SAP: Sent stream %u announcement (%d bytes)",
+		stream->stream_id, offset);
+	return 0;
 }
 
 /* ================================================================
@@ -533,13 +639,24 @@ static void sap_thread_fn(void *p1, void *p2, void *p3)
 	while (1) {
 		int64_t now = k_uptime_get();
 
-		/* Send announcement if interval elapsed */
+		/* Send announcements if interval elapsed or forced */
 		if (announce_enabled &&
-		    (now - last_announce_ms) >= SAP_ANNOUNCE_INTERVAL_S * 1000) {
-			ret = send_sap_announce(sock, &sap_dst);
-			if (ret == 0) {
-				last_announce_ms = now;
+		    (force_announce ||
+		     (now - last_announce_ms) >= SAP_ANNOUNCE_INTERVAL_S * 1000)) {
+			force_announce = false;
+
+			/* Announce TX streams */
+			k_mutex_lock(&sap_mutex, K_FOREVER);
+			for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
+				if (tx_streams[i].active) {
+					send_sap_announce_stream(sock,
+								 &sap_dst,
+								 &tx_streams[i]);
+				}
 			}
+			k_mutex_unlock(&sap_mutex);
+
+			last_announce_ms = now;
 		}
 
 		/* Compute remaining time until next announcement */
@@ -616,6 +733,38 @@ static int cmd_aes67_status(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "Pkt samples:  %u", local_config.samples_per_packet);
 	shell_print(sh, "Payload type: %u", local_config.payload_type);
 	shell_print(sh, "SAP announce: %s", announce_enabled ? "ON" : "OFF");
+
+	/* TX streams */
+	shell_print(sh, "\n=== TX Streams ===");
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	{
+		int tx_count = 0;
+
+		for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
+			if (tx_streams[i].active) {
+				char dst_str[INET_ADDRSTRLEN];
+
+				zsock_inet_ntop(AF_INET, &tx_streams[i].dst_ip,
+						dst_str, sizeof(dst_str));
+				shell_print(sh, "  [%u] dst=%s ch=%u spp=%u ids=[",
+					    tx_streams[i].stream_id, dst_str,
+					    tx_streams[i].channel_count,
+					    tx_streams[i].samples_per_packet);
+				for (int j = 0; j < tx_streams[i].channel_count; j++) {
+					shell_print(sh, "    %u%s",
+						    tx_streams[i].ch_ids[j],
+						    j < tx_streams[i].channel_count - 1
+						    ? "," : "");
+				}
+				shell_print(sh, "  ]");
+				tx_count++;
+			}
+		}
+		if (tx_count == 0) {
+			shell_print(sh, "  (none)");
+		}
+	}
+	k_mutex_unlock(&sap_mutex);
 
 	/* Discovered streams */
 	shell_print(sh, "\n=== Discovered Streams ===");
@@ -716,6 +865,86 @@ static int cmd_aes67_announce(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_aes67_txstream(const struct shell *sh, size_t argc, char **argv)
+{
+	/* aes67 txstream <stream_id> <dst_ip> <ch_count> <samples_per_pkt> <ch0> [ch1] ... */
+	if (argc < 6) {
+		shell_error(sh, "Usage: aes67 txstream <id 0-7> <dst_ip> "
+			    "<ch_count 1-8> <samples_per_pkt> <ch0> [ch1..ch7]");
+		return -EINVAL;
+	}
+
+	unsigned long id = strtoul(argv[1], NULL, 10);
+
+	if (id > 7) {
+		shell_error(sh, "stream_id must be 0..7");
+		return -EINVAL;
+	}
+
+	struct in_addr dst;
+
+	if (zsock_inet_pton(AF_INET, argv[2], &dst) != 1) {
+		shell_error(sh, "Invalid IP: %s", argv[2]);
+		return -EINVAL;
+	}
+
+	unsigned long ch_count = strtoul(argv[3], NULL, 10);
+
+	if (ch_count < 1 || ch_count > 8) {
+		shell_error(sh, "ch_count must be 1..8");
+		return -EINVAL;
+	}
+
+	unsigned long spp = strtoul(argv[4], NULL, 10);
+
+	if (spp < 1 || spp > 255) {
+		shell_error(sh, "samples_per_pkt must be 1..255");
+		return -EINVAL;
+	}
+
+	/* Remaining args are channel IDs */
+	int num_ch_args = argc - 5;
+
+	if (num_ch_args < (int)ch_count) {
+		shell_error(sh, "Expected %lu channel IDs, got %d", ch_count, num_ch_args);
+		return -EINVAL;
+	}
+
+	uint8_t ch_ids[8] = {0};
+
+	for (int i = 0; i < (int)ch_count && i < 8; i++) {
+		unsigned long cid = strtoul(argv[5 + i], NULL, 10);
+
+		if (cid > 255) {
+			shell_error(sh, "Channel ID must be 0..255");
+			return -EINVAL;
+		}
+		ch_ids[i] = (uint8_t)cid;
+	}
+
+	int ret = sap_sdp_configure_tx_stream((uint8_t)id, &dst,
+					      (uint8_t)ch_count,
+					      (uint8_t)spp,
+					      ch_ids, (uint8_t)ch_count);
+	if (ret < 0) {
+		shell_error(sh, "Failed to configure stream: %d", ret);
+		return ret;
+	}
+
+	char addr_str[INET_ADDRSTRLEN];
+
+	zsock_inet_ntop(AF_INET, &dst, addr_str, sizeof(addr_str));
+	shell_print(sh, "TX stream %lu: dst=%s ch=%lu spp=%lu channels=[",
+		    id, addr_str, ch_count, spp);
+	for (int i = 0; i < (int)ch_count; i++) {
+		shell_print(sh, "  %u%s", ch_ids[i],
+			    i < (int)ch_count - 1 ? "," : "");
+	}
+	shell_print(sh, "]");
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 	SHELL_CMD(status, NULL, "Show AES67 stream config and discovered streams",
 		  cmd_aes67_status),
@@ -723,6 +952,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 		  cmd_aes67_mcast),
 	SHELL_CMD(announce, NULL, "Enable/disable SAP: aes67 announce [on|off]",
 		  cmd_aes67_announce),
+	SHELL_CMD(txstream, NULL,
+		  "Configure TX stream: aes67 txstream <id> <ip> <ch_count> <spp> <ch0> [ch1..7]",
+		  cmd_aes67_txstream),
 	SHELL_SUBCMD_SET_END
 );
 
@@ -767,6 +999,8 @@ int sap_sdp_start(struct net_if *iface)
 	k_sem_init(&sap_ip_sem, 0, 1);
 	k_mutex_init(&sap_mutex);
 	memset(foreign_streams, 0, sizeof(foreign_streams));
+	memset(tx_streams, 0, sizeof(tx_streams));
+	force_announce = false;
 	ip_ready = false;
 
 	/* Start SAP thread */
@@ -809,26 +1043,6 @@ int sap_sdp_set_mcast(const struct in_addr *addr, uint16_t port)
 
 	k_mutex_unlock(&sap_mutex);
 
-	/* Write audio destination to FPGA register 0x57 (6 bytes: 4 IP + 2 port) */
-	const struct device *fmc = device_get_binding("eth_fmc0");
-
-	if (fmc) {
-		uint8_t buf[ETH_FMC_AUDIO_DST_LEN];
-
-		/* IP in network byte order (already stored that way in in_addr) */
-		memcpy(&buf[0], &addr->s_addr, 4);
-		/* Port in big-endian */
-		buf[4] = (uint8_t)(effective_port >> 8);
-		buf[5] = (uint8_t)(effective_port & 0xFF);
-
-		int ret = eth_fmc_reg_write(fmc, ETH_FMC_REG_AUDIO_DST,
-					    buf, ETH_FMC_AUDIO_DST_LEN);
-		if (ret < 0) {
-			LOG_ERR("SAP: Failed to write audio dst to FPGA: %d",
-				ret);
-		}
-	}
-
 	char addr_str[INET_ADDRSTRLEN];
 
 	zsock_inet_ntop(AF_INET, addr, addr_str, sizeof(addr_str));
@@ -857,4 +1071,64 @@ const struct sap_foreign_stream *sap_sdp_get_foreign_streams(int *count)
 		*count = n;
 	}
 	return foreign_streams;
+}
+
+int sap_sdp_configure_tx_stream(uint8_t stream_id,
+				const struct in_addr *dst_ip,
+				uint8_t channel_count,
+				uint8_t samples_per_pkt,
+				const uint8_t *ch_ids,
+				uint8_t num_ch_ids)
+{
+	if (stream_id >= AES67_MAX_TX_STREAMS || !dst_ip) {
+		return -EINVAL;
+	}
+
+	/* Write to FPGA */
+	const struct device *fmc = device_get_binding("eth_fmc0");
+
+	if (!fmc) {
+		LOG_ERR("SAP: FMC device not found");
+		return -ENODEV;
+	}
+
+	int ret = eth_fmc_write_tx_stream_config(fmc, stream_id, dst_ip,
+						 channel_count,
+						 samples_per_pkt,
+						 ch_ids, num_ch_ids);
+	if (ret < 0) {
+		LOG_ERR("SAP: Failed to write stream %u to FPGA: %d",
+			stream_id, ret);
+		return ret;
+	}
+
+	/* Update local table */
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	tx_streams[stream_id].active = true;
+	tx_streams[stream_id].stream_id = stream_id;
+	memcpy(&tx_streams[stream_id].dst_ip, dst_ip, sizeof(*dst_ip));
+	tx_streams[stream_id].channel_count = channel_count;
+	tx_streams[stream_id].samples_per_packet = samples_per_pkt;
+	memset(tx_streams[stream_id].ch_ids, 0,
+	       sizeof(tx_streams[stream_id].ch_ids));
+	for (uint8_t i = 0; i < num_ch_ids && i < AES67_MAX_CH_PER_STREAM; i++) {
+		tx_streams[stream_id].ch_ids[i] = ch_ids[i];
+	}
+	k_mutex_unlock(&sap_mutex);
+
+	/* Force immediate SAP announcement */
+	force_announce = true;
+
+	char addr_str[INET_ADDRSTRLEN];
+
+	zsock_inet_ntop(AF_INET, dst_ip, addr_str, sizeof(addr_str));
+	LOG_INF("SAP: TX stream %u configured: dst=%s ch=%u spp=%u",
+		stream_id, addr_str, channel_count, samples_per_pkt);
+
+	return 0;
+}
+
+const struct aes67_tx_stream *sap_sdp_get_tx_streams(void)
+{
+	return tx_streams;
 }

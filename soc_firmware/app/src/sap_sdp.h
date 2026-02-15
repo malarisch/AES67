@@ -52,6 +52,20 @@ struct aes67_stream_config {
 	uint8_t  payload_type;
 };
 
+/* ---- TX stream table (up to 8 streams, matching tx_router) ---- */
+
+#define AES67_MAX_TX_STREAMS  8
+#define AES67_MAX_CH_PER_STREAM  8
+
+struct aes67_tx_stream {
+	bool     active;
+	uint8_t  stream_id;
+	struct in_addr dst_ip;
+	uint8_t  channel_count;
+	uint8_t  samples_per_packet;
+	uint8_t  ch_ids[AES67_MAX_CH_PER_STREAM];
+};
+
 /* ---- Discovered foreign streams (SAP RX) ---- */
 
 #define SAP_MAX_FOREIGN_STREAMS  8
@@ -109,6 +123,32 @@ int sap_sdp_set_mcast(const struct in_addr *addr, uint16_t port);
  * @brief Enable or disable SAP announcements.
  */
 void sap_sdp_set_announce(bool enable);
+
+/**
+ * @brief Configure a TX audio stream.
+ *
+ * Writes the stream config to the FPGA via FMC and registers it
+ * for SAP/SDP announcement. Triggers an immediate SAP announce.
+ *
+ * @param stream_id        Stream index (0..7)
+ * @param dst_ip           Destination multicast IP
+ * @param channel_count    Number of channels (1..8)
+ * @param samples_per_pkt  Samples per packet per channel
+ * @param ch_ids           Array of channel IDs
+ * @param num_ch_ids       Number of entries in ch_ids
+ * @return 0 on success, negative errno on error
+ */
+int sap_sdp_configure_tx_stream(uint8_t stream_id,
+				const struct in_addr *dst_ip,
+				uint8_t channel_count,
+				uint8_t samples_per_pkt,
+				const uint8_t *ch_ids,
+				uint8_t num_ch_ids);
+
+/**
+ * @brief Get the TX stream table.
+ */
+const struct aes67_tx_stream *sap_sdp_get_tx_streams(void);
 
 /**
  * @brief Get the table of discovered foreign streams.

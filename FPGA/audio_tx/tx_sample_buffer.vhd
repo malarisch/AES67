@@ -31,10 +31,10 @@ entity tx_sample_buffer is
 		audio_ch15_in			: in std_logic_vector(23 downto 0);
 		fs_clk_i      				: in std_logic;
 		
-		wr_ptr_o					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
+		wr_ptr_o					: out std_logic_vector(15 downto 0) := (others => '0'); -- data-octet
         wr_ready_o					: out std_logic := '0';
 
-        read0Addr		: in unsigned(10 downto 0); -- 0..1531
+        read0Addr		: in unsigned(15 downto 0);
 		data0_out		: out std_logic_vector(7 downto 0) -- 8 bit
 
 		
@@ -106,7 +106,7 @@ begin
                     when others => data_latch := (others => '0');
                 end case;
 
-                sample_ram(sample_wr_ptr + current_channel_id + byte_count) <= data_latch(byte_count*8 + 7 downto byte_count*8);
+                sample_ram(sample_wr_ptr + current_channel_id * bytes_per_sample + byte_count) <= data_latch(byte_count*8 + 7 downto byte_count*8);
                 byte_count <= byte_count + 1;
                 if byte_count = bytes_per_sample - 1 then
                     byte_count <= 0;
