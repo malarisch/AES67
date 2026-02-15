@@ -24,10 +24,10 @@ On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified 
 - Audio Routing Matrix
 - Receive Audio Packets
 - Audio Buffer
-- RTCP, SDP, SAP (mDNS?) on the MCU
+- RTCP, SDP, SAP (mDNS?) on the MCU (DONE)
 - Tune PI Controller on the FPGA further (currently, it reaches a solid lock but jitters at +-50ns difference)
-- PTP outlier rejection
-- PTP reject other leaders that are not "my leader" (lol)
+- PTP outlier rejection (DONE)
+- PTP reject other leaders that are not "my leader" (lol) (DONE)
 - Priority-Based arbiter for Ethernet TX on the FPGA (PTP first, Audio second, everything else third), as well as filtering out packets that are not relevant to the MCU in the RX Path
 - FPGA optimizations - current design uses quite a lot of ressources
   - PTP implementation - use RAM for Packet generation instead of Registers
@@ -36,7 +36,7 @@ On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified 
 - RGMII Support on the Ethernet MAC (my entire testing and development is done via an LAN8720 via RMII)
 - Custom RMII -> MII Converter (I'm using the Altera IP for now but want the project to be as vendor independent as possible)
 - FPGA bitstream upload
-- IGMP
+- IGMP (DONE)
 - Proper bootup sequence:
   - MCU boots
   - Bitstream upload & wait for FPGA ready signal (that means we have ethernet)

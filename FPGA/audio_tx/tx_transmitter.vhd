@@ -10,91 +10,81 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
 
-entity udp_audio_packet is
-	
+entity tx_transmitter is
+    generic
+    (
+        samples_per_channel_depth : integer := 48; -- number of samples per channel to buffer
+        global_channel_count : integer := 16; -- number of channels to buffer
+        bytes_per_sample : integer := 3 -- number of bytes per sample (e.g., 3 for 24-bit audio)
+    );
 	port
 	(
+        sys_clk                    : in std_logic;
 		src_mac_address		: in std_logic_vector(47 downto 0);
 		src_ip_address			: in std_logic_vector(31 downto 0);
-		dst_mac_address		: in std_logic_vector(47 downto 0);
 		dst_ip_address			: in std_logic_vector(31 downto 0);
-		src_udp_port			: in std_logic_vector(15 downto 0);
-		dst_udp_port			: in std_logic_vector(15 downto 0);
 		tx_clk					: in std_logic;
 		tx_busy					: in std_logic;
 		tx_byte_sent			: in std_logic;
-		audio_ch0_in			: in std_logic_vector(23 downto 0);
-		audio_ch1_in			: in std_logic_vector(23 downto 0);
-		audio_ch2_in			: in std_logic_vector(23 downto 0);
-		audio_ch3_in			: in std_logic_vector(23 downto 0);
-		audio_ch4_in			: in std_logic_vector(23 downto 0);
-		audio_ch5_in			: in std_logic_vector(23 downto 0);
-		audio_ch6_in			: in std_logic_vector(23 downto 0);
-		audio_ch7_in			: in std_logic_vector(23 downto 0);
-		audio_ch8_in			: in std_logic_vector(23 downto 0);
-		audio_ch9_in			: in std_logic_vector(23 downto 0);
-		audio_ch10_in			: in std_logic_vector(23 downto 0);
-		audio_ch11_in			: in std_logic_vector(23 downto 0);
-		audio_ch12_in			: in std_logic_vector(23 downto 0);
-		audio_ch13_in			: in std_logic_vector(23 downto 0);
-		audio_ch14_in			: in std_logic_vector(23 downto 0);
-		audio_ch15_in			: in std_logic_vector(23 downto 0);
-		audio_sync				: in std_logic;
 		
 		sample_counter			: in std_logic_vector(31 downto 0) := (others => '0');
 		
 		tx_enable				: out std_logic := '0';  -- TX valid
 		tx_data					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
-		samples_since_last_packet_out	: out integer range 0 to 100 := 0
+		
+        channel_count_i                 : in std_logic_vector(7 downto 0) := (others => '0');
+        samples_per_packet_per_channel_i : in std_logic_vector(7 downto 0) := (others => '0');
+        sample_buffer_tx_start_addr_i   : in std_logic_vector(15 downto 0) := (others => '0');
+
+        sample_ram_read_addr_o         : out std_logic_vector(15 downto 0) := (others => '0');
+        sample_ram_data_in_i          : in std_logic_vector(7 downto 0);
+
+        -- max 8 channels per stream
+        ch_ids_i                        : in std_logic_vector(63 downto 0) := (others => '0');
+        ssrc_i                       : in std_logic_vector(31 downto 0) := (others => '0');
+
+        start_i : in std_logic := '0'
 		
 	);
 end entity;
 
 
-architecture Behavioral of udp_audio_packet is
-	-- Some general thoughts remain the same as in the original description.  All timing
-	-- now funnels through small synchronous RAM helpers so the synthesizer can infer
-	-- block RAMs for the heavy buffers.
-
-	-- Constants
-	constant BUFFERED_AUDIO_SAMPLES	: integer := 48; -- keep limit of 1460 bytes per UDP-frame in mind
-	constant AUDIO_CHANNELS			: integer := 2; -- keep audio-channels factor of two if using 24-bit per sample. Otherwise we will get uneven byte-numbers due to 3-byte-samples
-	constant BYTES_PER_SAMPLE		: integer := 3; -- 2 (16-bit), 3 (24-bit) or 4 (32-bit)
-	constant AUDIO_START_SIGNAL	: integer := 8;
-	constant AUDIO_BUFFER_LENGTH	: integer := BUFFERED_AUDIO_SAMPLES * AUDIO_CHANNELS * BYTES_PER_SAMPLE;
+architecture Behavioral of tx_transmitter is
 
 	constant MAC_HEADER_LENGTH			: integer := 14;
 	constant IP_HEADER_LENGTH			: integer := 5 * (32 / 8); -- Header length always 20 bytes (5 * 32 bit words)
-	
+	constant AUDIO_START_SIGNAL	: integer := 8; -- 8 bytes at the beginning of the UDP payload reserved for RTP header (version, payload type, packet counter, sample counter, ssrc)
 	constant UDP_HEADER_LENGTH		: integer := 12;
-	constant UDP_PAYLOAD_LENGTH	: integer := AUDIO_START_SIGNAL + AUDIO_BUFFER_LENGTH; -- 8 start-bytes + x bytes for audio
-	constant PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH;
+	-- calc dynamically constant UDP_PAYLOAD_LENGTH	: integer := AUDIO_START_SIGNAL + AUDIO_BUFFER_LENGTH; -- 8 start-bytes + x bytes for audio
+	-- calc dynammically constant PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH;
 	constant PACKET_HEADER_LENGTH	: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL;
-	constant AUDIO_BYTES_PER_SAMPLE_GROUP	: integer := AUDIO_CHANNELS * BYTES_PER_SAMPLE;
-	constant SAMPLE_WRAP_GUARD	: integer := AUDIO_BUFFER_LENGTH - (2 * AUDIO_BYTES_PER_SAMPLE_GROUP);
 
+    signal PACKET_LENGTH : integer := 0;
+    signal UDP_PAYLOAD_LENGTH : integer := 0;
 	-- Types
-	type t_SM_Ethernet is (s_Idle, s_PrepFrame, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum, s_PrimeTx, s_Transmit, s_End);
-	type t_sample_ram is array (0 to AUDIO_BUFFER_LENGTH - 1) of std_logic_vector(7 downto 0);
-	type t_packet_ram is array (0 to PACKET_LENGTH - 1) of std_logic_vector(7 downto 0);
-	type t_pending_bytes is array (0 to AUDIO_BYTES_PER_SAMPLE_GROUP - 1) of std_logic_vector(7 downto 0);
-
+	type t_SM_Ethernet is (s_Idle, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum, s_PrimeTx, s_Transmit, s_End);
+    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload);
+	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
+    
+    signal SM_AssemblePacket    : t_SM_AssemblePacket := s_A_Idle;
 	
-
+    signal sample_read_addr : integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample - 1 := 0;
 	-- Helper declarations
 	function get_header_byte(
 		idx				: integer;
 		src_mac		: std_logic_vector(47 downto 0);
-		dst_mac		: std_logic_vector(47 downto 0);
 		src_ip		: std_logic_vector(31 downto 0);
 		dst_ip		: std_logic_vector(31 downto 0);
-		src_port		: std_logic_vector(15 downto 0);
-		dst_port		: std_logic_vector(15 downto 0);
 		packet_ctr	: unsigned(15 downto 0);
-		sample_ctr	: std_logic_vector(31 downto 0)
+		sample_ctr	: std_logic_vector(31 downto 0);
+        samples_per_ch_per_pkt : std_logic_vector(7 downto 0);
+        channel_count : std_logic_vector(7 downto 0);
+        ssrc: std_logic_vector(31 downto 0);
+        total_length : std_logic_vector(15 downto 0);
+        udp_length : std_logic_vector(15 downto 0)
 	) return std_logic_vector is
-		constant total_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
-		constant udp_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
+		--constant total_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
+		--constant udp_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
 		constant pkt_cnt	: std_logic_vector(15 downto 0) := std_logic_vector(packet_ctr);
 		constant smpl_cnt : std_logic_vector(31 downto 0) := std_logic_vector(sample_ctr);
 	begin
@@ -139,10 +129,10 @@ architecture Behavioral of udp_audio_packet is
 			when 33=> return dst_ip(7 downto 0);
 			
 			-- udp
-			when 34=> return src_port(15 downto 8);
-			when 35=> return src_port(7 downto 0);
-			when 36=> return dst_port(15 downto 8);
-			when 37=> return dst_port(7 downto 0);
+			when 34=> return x"13";
+			when 35=> return x"8c";
+			when 36=> return x"13";
+			when 37=> return x"8c";
 			when 38=> return udp_length(15 downto 8);
 			when 39=> return udp_length(7 downto 0);
 			when 40=> return x"00";
@@ -169,10 +159,10 @@ architecture Behavioral of udp_audio_packet is
 			when  48=> return smpl_cnt(15 downto 8);
 			when  49=> return smpl_cnt(7 downto 0);
 			-- ssrc
-			when 50=> return x"de";
-			when 51=> return x"ad";
-			when 52=> return x"be";
-			when 53=> return x"ef";
+			when 50=> return ssrc(31 downto 24);
+			when 51=> return ssrc(23 downto 16);
+			when 52=> return ssrc(15 downto 8);
+			when 53=> return ssrc(7 downto 0);
 
 			when others => return x"00";
 		end case;
@@ -205,57 +195,34 @@ architecture Behavioral of udp_audio_packet is
 	end function;
 
 	-- Double-buffered (ping-pong) sample RAMs
-	signal sample_ram_0		: t_sample_ram := (others => (others => '0'));
-	signal sample_ram_1		: t_sample_ram := (others => (others => '0'));
 	signal packet_ram		: t_packet_ram := (others => (others => '0'));
 
-	-- Write-side buffer select: '0' = writing to ram_0, '1' = writing to ram_1
-	signal wr_buf_sel		: std_logic := '0';
 
-	signal sample_wr_en		: std_logic := '0';
-	signal sample_wr_addr	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-	signal sample_wr_data	: std_logic_vector(7 downto 0) := (others => '0');
-	signal sample_rd_addr	: integer range 0 to AUDIO_BUFFER_LENGTH := 0;
-	signal sample_rd_data	: std_logic_vector(7 downto 0) := (others => '0');
 
 	signal packet_wr_en		: std_logic := '0';
-	signal packet_wr_addr	: integer range 0 to PACKET_LENGTH - 1 := 0;
+	signal packet_wr_addr	: integer range 0 to 1518 - 1 := 0;
 	signal packet_wr_data	: std_logic_vector(7 downto 0) := (others => '0');
-	signal packet_rd_addr	: integer range 0 to PACKET_LENGTH - 1 := 0;
+	signal packet_rd_addr	: integer range 0 to 1518 - 1 := 0;
 	signal packet_rd_data	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_packet_byte	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_tx_byte_pending	: std_logic := '0';
-	signal samples_since_last_packet	: integer range 0 to 100 := 0;
+	
 	attribute ram_style : string;
-	attribute ram_style of sample_ram_0 : signal is "block";
-	attribute ram_style of sample_ram_1 : signal is "block";
+
 	attribute ram_style of packet_ram : signal is "block";
 
-	-- General control signals
-	signal audio_sync_sync1	: std_logic := '0';
-	signal audio_sync_sync2	: std_logic := '0';
-	signal zaudio_sync		: std_logic := '0';
 	signal frame_start		: std_logic := '0';
-	-- rd_buf_sel latches the buffer to read from when frame_start fires
-	signal rd_buf_sel		: std_logic := '0';
-	signal audio_buffer_ptr	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-	signal next_audio_ptr	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-	signal sample_write_active	: std_logic := '0';
-	signal sample_write_index	: integer range 0 to AUDIO_BYTES_PER_SAMPLE_GROUP := 0;
-	signal sample_write_base	: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-	signal pending_bytes		: t_pending_bytes := (others => (others => '0'));
-	signal pending_buf_swap		: std_logic := '0';
+
 
 	signal s_SM_Ethernet	: t_SM_Ethernet := s_Idle;
-	signal frame_write_index	: integer range 0 to PACKET_LENGTH := 0;
-	signal audio_payload_index	: integer range 0 to AUDIO_BUFFER_LENGTH := 0;
+	signal frame_write_index	: integer range 0 to 1518 := 0;
+	signal audio_payload_index	: integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample := 0;
 	signal checksum_write_index	: integer range 0 to 4 := 0;
 	signal prime_wait		: integer range 0 to 2 := 0;
-	signal tx_bytes_remaining	: integer range 0 to PACKET_LENGTH := 0;
-	signal tx_read_pointer	: integer range 0 to PACKET_LENGTH := 0;
+	signal tx_bytes_remaining	: integer range 0 to 1518 := 0;
+	signal tx_read_pointer	: integer range 0 to 1518 := 0;
 
 	signal packet_counter		: unsigned(15 downto 0) := to_unsigned(1, 16);
-	signal active_packet_counter	: unsigned(15 downto 0) := to_unsigned(1, 16);
 
 	signal ip_checksum_acc	: unsigned(31 downto 0) := (others => '0');
 	signal ip_checksum_upper_byte	: std_logic_vector(7 downto 0) := (others => '0');
@@ -267,31 +234,17 @@ architecture Behavioral of udp_audio_packet is
 	signal udp_checksum_byte_phase	: std_logic := '0';
 	signal udp_checksum_value	: std_logic_vector(15 downto 0) := (others => '0');
 	signal udp_pseudo_header_sum	: unsigned(31 downto 0) := (others => '0');
-	signal udp_checksum_bytes_remaining	: integer range 0 to UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH := 0;
-	signal udp_checksum_request_count	: integer range 0 to UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH := 0;
+	signal udp_checksum_bytes_remaining	: integer range 0 to 1500 := 0;
+	signal udp_checksum_request_count	: integer range 0 to 1500 := 0;
 	signal udp_checksum_data_valid	: std_logic := '0';
+
+    signal start_i_sync1 : std_logic := '0';
+    signal channel_counter: integer range 0 to 7 := 0;
+    signal byte_counter : integer range 0 to 2 := 0;
+
 begin
 
-	samples_since_last_packet_out <= samples_since_last_packet;
 
-	-- Ping-pong sample RAM: write to wr_buf_sel, read from rd_buf_sel
-	sample_ram_process : process(tx_clk)
-	begin
-		if falling_edge(tx_clk) then
-			if (sample_wr_en = '1') then
-				if (wr_buf_sel = '0') then
-					sample_ram_0(sample_wr_addr) <= sample_wr_data;
-				else
-					sample_ram_1(sample_wr_addr) <= sample_wr_data;
-				end if;
-			end if;
-			if (rd_buf_sel = '0') then
-				sample_rd_data <= sample_ram_0(sample_rd_addr);
-			else
-				sample_rd_data <= sample_ram_1(sample_rd_addr);
-			end if;
-		end if;
-	end process sample_ram_process;
 
 	packet_ram_process : process(tx_clk)
 	begin
@@ -303,75 +256,34 @@ begin
 		end if;
 	end process packet_ram_process;
 
-	main_proc : process(tx_clk)
-		variable header_data		: std_logic_vector(7 downto 0);
+    sys_clock_process : process(sys_clk)
+    		variable header_data		: std_logic_vector(7 downto 0);
 		variable pseudo_header_sum	: unsigned(31 downto 0);
-	begin
-		if falling_edge(tx_clk) then
-			sample_wr_en <= '0';
-			packet_wr_en <= '0';
+    begin
+        if rising_edge(sys_clk) then
+            -- sync start_i to sys_clk domain
+            start_i_sync1 <= start_i;
+            case SM_AssemblePacket is
+                when s_A_Idle =>
+                    if (start_i_sync1 = '1') then
+                        SM_AssemblePacket <= s_A_PrepFrame;
 
-			-- synchronize audio_sync into tx_clk domain
-			audio_sync_sync1 <= audio_sync;
-			audio_sync_sync2 <= audio_sync_sync1;
-			zaudio_sync <= audio_sync_sync2;
+                        -- calc dynamic lengths based on input parameters
+                        UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
+                        PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
 
-			-- capture audio words — always runs (never blocked by TX)
-			if ((audio_sync_sync2 = '1') and (zaudio_sync = '0') and (sample_write_active = '0')) then
-				samples_since_last_packet <= samples_since_last_packet + 1;
-				-- AES67 L24: network byte order (MSB first)
-				pending_bytes(0) <= audio_ch0_in(23 downto 16);
-				pending_bytes(1) <= audio_ch0_in(15 downto 8);
-				pending_bytes(2) <= audio_ch0_in(7 downto 0);
-				pending_bytes(3) <= audio_ch1_in(23 downto 16);
-				pending_bytes(4) <= audio_ch1_in(15 downto 8);
-				pending_bytes(5) <= audio_ch1_in(7 downto 0);
-				sample_write_base <= audio_buffer_ptr;
-				sample_write_index <= 0;
-				sample_write_active <= '1';
-				if (audio_buffer_ptr <= SAMPLE_WRAP_GUARD) then
-					next_audio_ptr <= audio_buffer_ptr + AUDIO_BYTES_PER_SAMPLE_GROUP;
-				else
-					next_audio_ptr <= 0;
-					frame_start <= '1';
-					samples_since_last_packet <= 0;
-					-- Defer buffer swap until last sample write-back completes
-					pending_buf_swap <= '1';
-				end if;
-			end if;
-
-			if (sample_write_active = '1') then
-				sample_wr_en <= '1';
-				sample_wr_addr <= sample_write_base + sample_write_index;
-				sample_wr_data <= pending_bytes(sample_write_index);
-				if (sample_write_index = AUDIO_BYTES_PER_SAMPLE_GROUP - 1) then
-					sample_write_active <= '0';
-					audio_buffer_ptr <= next_audio_ptr;
-					-- Complete deferred buffer swap after last byte is written
-					if (pending_buf_swap = '1') then
-						wr_buf_sel <= not wr_buf_sel;
-						pending_buf_swap <= '0';
-					end if;
-				else
-					sample_write_index <= sample_write_index + 1;
-				end if;
-			end if;
-
-			case s_SM_Ethernet is
-				when s_Idle =>
-					tx_enable <= '0';
-					if (frame_start = '1') then
-						frame_start <= '0';
+                    end if;
+                when s_A_CalcValues =>                        
 						-- Latch the buffer that was just completed for reading
-						rd_buf_sel <= not wr_buf_sel;
+						
 						frame_write_index <= 0;
 						audio_payload_index <= 0;
-						sample_rd_addr <= 0;
+						sample_read_addr <= 0;
 						checksum_write_index <= 0;
 								prime_wait <= 0;
 						tx_bytes_remaining <= 0;
 						tx_read_pointer <= 0;
-						active_packet_counter <= packet_counter;
+
 						packet_counter <= packet_counter + 1;
 						ip_checksum_acc <= (others => '0');
 						ip_checksum_upper_byte <= (others => '0');
@@ -386,33 +298,55 @@ begin
 							+ resize(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32);
 						udp_checksum_acc <= pseudo_header_sum;
 						udp_pseudo_header_sum <= pseudo_header_sum;
-							s_SM_Ethernet <= s_PrepFrame;
-						end if;
 
-				when s_PrepFrame =>
-					packet_wr_en <= '1';
+
+                        SM_AssemblePacket <= s_A_PrepFrame;
+                        
+                when s_A_PrepFrame =>
+
+                    packet_wr_en <= '1';
 					packet_wr_addr <= frame_write_index;
-						if (frame_write_index < PACKET_HEADER_LENGTH) then
-							header_data := get_header_byte(frame_write_index, src_mac_address, dst_mac_address, src_ip_address, dst_ip_address, src_udp_port, dst_udp_port, active_packet_counter, sample_counter);
-							packet_wr_data <= header_data;
-							if (frame_write_index = 0) then
-								first_packet_byte <= header_data;
-							end if;
+					if (frame_write_index < PACKET_HEADER_LENGTH) then
+							
+                        header_data := get_header_byte(frame_write_index, src_mac_address, src_ip_address, 
+                            dst_ip_address, packet_counter, sample_counter, samples_per_packet_per_channel_i,
+                            channel_count_i, ssrc_i, std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)), 
+                            std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)));
+
+						packet_wr_data <= header_data;
+						if (frame_write_index = 0) then
+							first_packet_byte <= header_data;
+						end if;
 						if ((frame_write_index >= MAC_HEADER_LENGTH) and (frame_write_index < MAC_HEADER_LENGTH + IP_HEADER_LENGTH)) then
 							feed_checksum(ip_checksum_upper_byte, ip_checksum_byte_phase, ip_checksum_acc, header_data);
 						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
 							
-							--audio_payload_index <= 1;
-							sample_rd_addr <= 1;
+							-- point to MSB of the first audio sample for the first channel
+							sample_read_addr <= to_integer(unsigned(sample_buffer_tx_start_addr_i) + unsigned(ch_ids_i(7 downto 0)));
+                            byte_counter <= 1;
+                            channel_counter <= 0;
+                            SM_AssemblePacket <= s_A_Payload;
 						end if;
 					else
-						packet_wr_data <= sample_rd_data;
-						if (sample_rd_addr < AUDIO_BUFFER_LENGTH - 1) then
-							sample_rd_addr <= sample_rd_addr + 1;
-						end if;
+
+                        -- AUDIO PAYLOAD ASSEMBLY!
+
+
+						packet_wr_data <= sample_ram_data_in_i;
+						sample_ram_read_addr_o <= std_logic_vector(unsigned(sample_buffer_tx_start_addr_i) + unsigned(ch_ids_i(channel_counter * 8 + 7 downto channel_counter *8)) + byte_counter);
 						
-						--audio_payload_index <= audio_payload_index + 1;
+                        if (byte_counter < bytes_per_sample - 1) then
+                            byte_counter <= byte_counter + 1;
+                        else
+                            byte_counter <= 0;
+                            if (channel_counter < to_integer(unsigned(channel_count_i)) - 1) then
+                                channel_counter <= channel_counter + 1;
+                            else
+                                channel_counter <= 0;
+                            end if;
+                        end if;
+
 					end if;
 					if (frame_write_index = PACKET_LENGTH - 1) then
 						packet_wr_en <= '0';
@@ -432,6 +366,43 @@ begin
 						frame_write_index <= frame_write_index + 1;
 					end if;
 
+
+
+                    if (frame_start = '0') then
+                        frame_start <= '1';
+                    end if;
+                    if (frame_start = '1') then
+                        SM_AssemblePacket <= s_A_Payload;
+                    end if;
+                when s_A_Payload =>
+                    if (frame_start = '1') then
+                        frame_start <= '0';
+                        SM_AssemblePacket <= s_A_Idle;
+                    end if;
+            end case;
+        end if;
+    end process sys_clock_process;
+
+
+	tx_process : process(tx_clk)
+		variable header_data		: std_logic_vector(7 downto 0);
+		variable pseudo_header_sum	: unsigned(31 downto 0);
+	begin
+		if falling_edge(tx_clk) then
+			packet_wr_en <= '0';
+
+
+
+			case s_SM_Ethernet is
+				when s_Idle =>
+					tx_enable <= '0';
+					if (frame_start = '1') then
+						frame_start <= '0';
+						
+							s_SM_Ethernet <= s_CalcUdpChecksum;
+						end if;
+
+				
 				when s_CalcUdpChecksum =>
 					if (udp_checksum_data_valid = '1') then
 						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, packet_rd_data);
@@ -540,5 +511,5 @@ begin
 					s_SM_Ethernet <= s_Idle;
 			end case;
 		end if;
-	end process main_proc;
+	end process tx_process;
 end Behavioral;
