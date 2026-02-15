@@ -213,6 +213,10 @@ architecture Behavioral of tx_transmitter is
 
 	signal frame_start		: std_logic := '0';
 
+	-- Split packet_rd_addr into two domains: assembly (sys_clk) and transmit (tx_clk)
+	signal asm_rd_addr		: integer range 0 to 1518 - 1 := 0;
+	signal tx_rd_addr		: integer range 0 to 1518 - 1 := 0;
+	signal rd_addr_sel		: std_logic := '0'; -- '0' = asm (sys_clk), '1' = tx (tx_clk)
 
 	signal s_SM_Ethernet	: t_SM_Ethernet := s_Idle;
 	signal frame_write_index	: integer range 0 to 1518 := 0;
@@ -252,7 +256,8 @@ architecture Behavioral of tx_transmitter is
     signal tx_frame_start_sync2 : std_logic := '0';
 begin
 
-
+	-- Mux packet_rd_addr between assembly domain (checksum calc) and TX domain (transmit readout)
+	packet_rd_addr <= tx_rd_addr when rd_addr_sel = '1' else asm_rd_addr;
 
 	packet_ram_process : process(tx_clk)
 	begin
@@ -269,6 +274,8 @@ begin
 		variable pseudo_header_sum	: unsigned(31 downto 0);
     begin
         if rising_edge(sys_clk) then
+            packet_wr_en <= '0'; -- default: no write (overridden when needed)
+
             -- sync start_i to sys_clk domain
             start_i_sync1 <= start_i;
 
@@ -335,7 +342,6 @@ begin
 							sample_read_addr <= to_integer(unsigned(sample_buffer_tx_start_addr_i) + unsigned(ch_ids_i(7 downto 0)));
                             byte_counter <= 1;
                             channel_counter <= 0;
-                            SM_AssemblePacket <= s_A_Payload;
 						end if;
 					else
 
@@ -374,7 +380,7 @@ begin
 							udp_checksum_request_count <= 0;
 						end if;
 						udp_checksum_data_valid <= '0';
-						packet_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
+						asm_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
 						SM_AssemblePacket <= s_CalcUdpChecksum;
 					else
 						frame_write_index <= frame_write_index + 1;
@@ -400,7 +406,7 @@ begin
 							end if;
 						end if;
 						if (udp_checksum_request_count < (UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH)) then
-							packet_rd_addr <= packet_rd_addr + 1;
+							asm_rd_addr <= asm_rd_addr + 1;
 							udp_checksum_request_count <= udp_checksum_request_count + 1;
 						end if;
 					end if;
@@ -433,22 +439,8 @@ begin
 							packet_wr_data <= udp_checksum_value(7 downto 0);
 							checksum_write_index <= 4;
 							when others =>
-								first_tx_byte_pending <= '1';
-								if (PACKET_LENGTH > 0) then
-									tx_data <= first_packet_byte;
-								else
-									tx_data <= (others => '0');
-								end if;
-								if (PACKET_LENGTH > 1) then
-									packet_rd_addr <= 1;
-									tx_read_pointer <= 2;
-									tx_bytes_remaining <= PACKET_LENGTH - 1;
-								else
-									packet_rd_addr <= 0;
-									tx_read_pointer <= 0;
-									tx_bytes_remaining <= 0;
-								end if;
-								prime_wait <= 0;
+								-- Hand over packet_rd_addr bus to TX domain
+								rd_addr_sel <= '1';
 								SM_AssemblePacket <= s_A_Payload;
 						end case;
                 when s_A_Payload =>
@@ -456,6 +448,7 @@ begin
                     if (tx_ack_sync1 = '0' and tx_ack_sync2 = '1') then
                         SM_AssemblePacket <= s_A_Idle;
                         tx_frame_start <= '0';
+                        rd_addr_sel <= '0'; -- return address bus to assembly domain
                     end if;
             end case;
         end if;
@@ -467,7 +460,6 @@ begin
 		variable pseudo_header_sum	: unsigned(31 downto 0);
 	begin
 		if falling_edge(tx_clk) then
-			packet_wr_en <= '0';
             tx_frame_start_sync1 <= tx_frame_start;
             tx_frame_start_sync2 <= tx_frame_start_sync1;
 
@@ -478,13 +470,25 @@ begin
                     tx_ack <= '0';
 					if (tx_frame_start_sync2 = '1') then
 						tx_ack <= '1';
-						
-							s_SM_Ethernet <= s_PrimeTx;
-
-								prime_wait <= 0;
-						tx_bytes_remaining <= 0;
-						tx_read_pointer <= 0;
+						s_SM_Ethernet <= s_PrimeTx;
+						-- Initialize TX state from sys-domain latched values (stable by now)
+						if (PACKET_LENGTH > 0) then
+							tx_data <= first_packet_byte;
+						else
+							tx_data <= (others => '0');
 						end if;
+						first_tx_byte_pending <= '1';
+						if (PACKET_LENGTH > 1) then
+							tx_rd_addr <= 1;
+							tx_read_pointer <= 2;
+							tx_bytes_remaining <= PACKET_LENGTH - 1;
+						else
+							tx_rd_addr <= 0;
+							tx_read_pointer <= 0;
+							tx_bytes_remaining <= 0;
+						end if;
+						prime_wait <= 0;
+					end if;
 
 				
 				
@@ -511,7 +515,7 @@ begin
 						else
 							tx_data <= packet_rd_data;
 							if (tx_read_pointer < PACKET_LENGTH) then
-								packet_rd_addr <= tx_read_pointer;
+								tx_rd_addr <= tx_read_pointer;
 								tx_read_pointer <= tx_read_pointer + 1;
 							end if;
 							tx_bytes_remaining <= tx_bytes_remaining - 1;

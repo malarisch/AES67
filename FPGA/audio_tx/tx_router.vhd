@@ -96,7 +96,6 @@ begin
         variable num_streams : integer;
     begin
         if reset_n = '0' then
-            config_ram <= (others => (others => '0'));
             sample_count <= (others => (others => '0'));
             fifo_stream <= (others => (others => '0'));
             fifo_wrptr <= (others => (others => '0'));

@@ -114,7 +114,7 @@ begin
                         -- reset to first channel and move write pointer forward by one sample (all channels)
                         current_channel_id <= 0;
                         sample_wr_ptr <= sample_wr_ptr + global_channel_count * bytes_per_sample;
-                        wr_ptr_o <= std_logic_vector(to_unsigned(sample_wr_ptr + global_channel_count * bytes_per_sample, 8));
+                        wr_ptr_o <= std_logic_vector(to_unsigned(sample_wr_ptr + global_channel_count * bytes_per_sample, 16));
                         write_active <= '0';
                         wr_ready_o <= '1';
                     else

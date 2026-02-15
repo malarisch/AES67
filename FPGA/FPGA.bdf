@@ -6228,18 +6228,6 @@ on the Quartus Prime software download page.
 	(bus)
 )
 (connector
-	(text "lol2[31..0]" (rect -46 1424 3 1435)(font "DejaVu Sans Condensed" ))
-	(pt -80 1440)
-	(pt -16 1440)
-	(bus)
-)
-(connector
-	(text "lol2[31..0]" (rect 984 1688 1033 1699)(font "DejaVu Sans Condensed" ))
-	(pt 1000 1704)
-	(pt 976 1704)
-	(bus)
-)
-(connector
 	(text "mac_address[47..0]" (rect 936 1496 1031 1507)(font "DejaVu Sans Condensed" ))
 	(pt 1000 1512)
 	(pt 928 1512)
@@ -6378,6 +6366,18 @@ on the Quartus Prime software download page.
 	(text "mac_tx_byte_sent" (rect 981 1576 1067 1587)(font "DejaVu Sans Condensed" ))
 	(pt 952 1592)
 	(pt 1000 1592)
+)
+(connector
+	(text "loll[31..0]" (rect 984 1688 1030 1699)(font "DejaVu Sans Condensed" ))
+	(pt 1000 1704)
+	(pt 976 1704)
+	(bus)
+)
+(connector
+	(text "loll[31..0]" (rect -46 1424 0 1435)(font "DejaVu Sans Condensed" ))
+	(pt -80 1440)
+	(pt -16 1440)
+	(bus)
 )
 (junction (pt 4288 504))
 (junction (pt 3776 568))
