@@ -41,7 +41,7 @@ entity tx_transmitter is
 
         -- max 8 channels per stream
         ch_ids_i                        : in std_logic_vector(63 downto 0) := (others => '0');
-        ssrc_i                       : in std_logic_vector(15 downto 0) := (others => '0');
+        ssrc_i                       : in std_logic_vector(31 downto 0) := (others => '0');
 
         start_i : in std_logic := '0'
 		
@@ -58,18 +58,17 @@ architecture Behavioral of tx_transmitter is
 	-- calc dynamically constant UDP_PAYLOAD_LENGTH	: integer := AUDIO_START_SIGNAL + AUDIO_BUFFER_LENGTH; -- 8 start-bytes + x bytes for audio
 	-- calc dynammically constant PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH;
 	constant PACKET_HEADER_LENGTH	: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL;
-	constant AUDIO_BUFFER_LENGTH	: integer := samples_per_channel_depth * global_channel_count * bytes_per_sample * 2;
 
     signal PACKET_LENGTH : integer := 0;
     signal UDP_PAYLOAD_LENGTH : integer := 0;
 	-- Types
-	type t_SM_Ethernet is (s_Idle, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
-    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
+	type t_SM_Ethernet is (s_Idle, s_PrimeTx, s_Transmit, s_End);
+    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
 	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
     
     signal SM_AssemblePacket    : t_SM_AssemblePacket := s_A_Idle;
 	
-    signal read_base : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+    signal sample_read_addr : integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample - 1 := 0;
 	-- Helper declarations
 	function get_header_byte(
 		idx				: integer;
@@ -80,7 +79,7 @@ architecture Behavioral of tx_transmitter is
 		sample_ctr	: std_logic_vector(31 downto 0);
         samples_per_ch_per_pkt : std_logic_vector(7 downto 0);
         channel_count : std_logic_vector(7 downto 0);
-        ssrc: std_logic_vector(15 downto 0);
+        ssrc: std_logic_vector(31 downto 0);
         total_length : std_logic_vector(15 downto 0);
         udp_length : std_logic_vector(15 downto 0)
 	) return std_logic_vector is
@@ -160,8 +159,8 @@ architecture Behavioral of tx_transmitter is
 			when  48=> return smpl_cnt(15 downto 8);
 			when  49=> return smpl_cnt(7 downto 0);
 			-- ssrc
-			when 50=> return x"00";
-			when 51=> return x"00";
+			when 50=> return ssrc(31 downto 24);
+			when 51=> return ssrc(23 downto 16);
 			when 52=> return ssrc(15 downto 8);
 			when 53=> return ssrc(7 downto 0);
 
@@ -203,20 +202,21 @@ architecture Behavioral of tx_transmitter is
 	signal packet_wr_en		: std_logic := '0';
 	signal packet_wr_addr	: integer range 0 to 1518 - 1 := 0;
 	signal packet_wr_data	: std_logic_vector(7 downto 0) := (others => '0');
+	signal packet_rd_addr	: integer range 0 to 1518 - 1 := 0;
+	signal packet_rd_data	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_packet_byte	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_tx_byte_pending	: std_logic := '0';
-
+	
 	attribute ram_style : string;
 
 	attribute ram_style of packet_ram : signal is "block";
 
 	signal frame_start		: std_logic := '0';
 
-	-- True dual-port RAM signals: Port A (sys_clk) for write + checksum read, Port B (tx_clk) for TX read
+	-- Split packet_rd_addr into two domains: assembly (sys_clk) and transmit (tx_clk)
 	signal asm_rd_addr		: integer range 0 to 1518 - 1 := 0;
-	signal asm_rd_data		: std_logic_vector(7 downto 0) := (others => '0');
 	signal tx_rd_addr		: integer range 0 to 1518 - 1 := 0;
-	signal tx_rd_data		: std_logic_vector(7 downto 0) := (others => '0');
+	signal rd_addr_sel		: std_logic := '0'; -- '0' = asm (sys_clk), '1' = tx (tx_clk)
 
 	signal s_SM_Ethernet	: t_SM_Ethernet := s_Idle;
 	signal frame_write_index	: integer range 0 to 1518 := 0;
@@ -256,32 +256,22 @@ architecture Behavioral of tx_transmitter is
     signal tx_frame_start_sync2 : std_logic := '0';
 begin
 
-	-- True dual-port packet RAM
-	-- Port A (sys_clk): write + checksum read
-	packet_ram_port_a : process(sys_clk)
+	-- Mux packet_rd_addr between assembly domain (checksum calc) and TX domain (transmit readout)
+	packet_rd_addr <= tx_rd_addr when rd_addr_sel = '1' else asm_rd_addr;
+
+	packet_ram_process : process(tx_clk)
 	begin
-		if rising_edge(sys_clk) then
+		if falling_edge(tx_clk) then
 			if (packet_wr_en = '1') then
 				packet_ram(packet_wr_addr) <= packet_wr_data;
 			end if;
-			asm_rd_data <= packet_ram(asm_rd_addr);
+			packet_rd_data <= packet_ram(packet_rd_addr);
 		end if;
-	end process packet_ram_port_a;
-
-	-- Port B (tx_clk): TX read
-	packet_ram_port_b : process(tx_clk)
-	begin
-		if falling_edge(tx_clk) then
-			tx_rd_data <= packet_ram(tx_rd_addr);
-		end if;
-	end process packet_ram_port_b;
+	end process packet_ram_process;
 
     sys_clock_process : process(sys_clk)
     		variable header_data		: std_logic_vector(7 downto 0);
 		variable pseudo_header_sum	: unsigned(31 downto 0);
-		variable rd_offset		: integer;
-		variable raw_addr		: integer;
-		variable ch_id			: integer;
     begin
         if rising_edge(sys_clk) then
             packet_wr_en <= '0'; -- default: no write (overridden when needed)
@@ -301,17 +291,12 @@ begin
                         PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
 
                     end if;
-                when s_A_CalcValues =>
-						-- Compute read base: go back samples_per_packet sample periods from write pointer
-						rd_offset := to_integer(unsigned(samples_per_packet_per_channel_i)) * global_channel_count * bytes_per_sample;
-						if to_integer(unsigned(sample_buffer_tx_start_addr_i)) >= rd_offset then
-							read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset;
-						else
-							read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset + AUDIO_BUFFER_LENGTH;
-						end if;
-
+                when s_A_CalcValues =>                        
+						-- Latch the buffer that was just completed for reading
+						
 						frame_write_index <= 0;
 						audio_payload_index <= 0;
+						sample_read_addr <= 0;
 						checksum_write_index <= 0;
 
 
@@ -351,58 +336,21 @@ begin
 						if ((frame_write_index >= MAC_HEADER_LENGTH) and (frame_write_index < MAC_HEADER_LENGTH + IP_HEADER_LENGTH)) then
 							feed_checksum(ip_checksum_upper_byte, ip_checksum_byte_phase, ip_checksum_acc, header_data);
 						end if;
-						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
-							-- Pre-fetch 1: set address for FIRST audio byte (MSB of ch0, sample 0)
-							raw_addr := read_base
-								+ to_integer(unsigned(ch_ids_i(63 downto 56))) * bytes_per_sample
-								+ (bytes_per_sample - 1); -- MSB byte
-							if raw_addr >= AUDIO_BUFFER_LENGTH then
-								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
-							end if;
-							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
-						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
-							-- Pre-fetch 2: set address for SECOND audio byte (middle of ch0, sample 0)
-							raw_addr := read_base
-								+ to_integer(unsigned(ch_ids_i(63 downto 56))) * bytes_per_sample
-								+ (bytes_per_sample - 1 - 1); -- middle byte
-							if raw_addr >= AUDIO_BUFFER_LENGTH then
-								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
-							end if;
-							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
-                            byte_counter <= 2; -- payload loop starts 2 positions ahead
+							
+							-- point to MSB of the first audio sample for the first channel
+							sample_read_addr <= to_integer(unsigned(sample_buffer_tx_start_addr_i) + unsigned(ch_ids_i(7 downto 0)));
+                            byte_counter <= 1;
                             channel_counter <= 0;
-                            sample_index <= 0;
 						end if;
 					else
 
-                        -- AUDIO PAYLOAD ASSEMBLY
-                        -- Data written here is from the address set 2 cycles ago (registered sample RAM read)
+                        -- AUDIO PAYLOAD ASSEMBLY!
+
+
 						packet_wr_data <= sample_ram_data_in_i;
-
-						-- Extract ch_id for current channel (MSB-first bit ordering in ch_ids_i)
-						case channel_counter is
-							when 0 => ch_id := to_integer(unsigned(ch_ids_i(63 downto 56)));
-							when 1 => ch_id := to_integer(unsigned(ch_ids_i(55 downto 48)));
-							when 2 => ch_id := to_integer(unsigned(ch_ids_i(47 downto 40)));
-							when 3 => ch_id := to_integer(unsigned(ch_ids_i(39 downto 32)));
-							when 4 => ch_id := to_integer(unsigned(ch_ids_i(31 downto 24)));
-							when 5 => ch_id := to_integer(unsigned(ch_ids_i(23 downto 16)));
-							when 6 => ch_id := to_integer(unsigned(ch_ids_i(15 downto 8)));
-							when 7 => ch_id := to_integer(unsigned(ch_ids_i(7 downto 0)));
-							when others => ch_id := 0;
-						end case;
-
-						-- Address = read_base + sample_period_offset + channel_offset + byte (MSB first)
-						raw_addr := read_base
-							+ sample_index * global_channel_count * bytes_per_sample
-							+ ch_id * bytes_per_sample
-							+ (bytes_per_sample - 1 - byte_counter); -- reverse for big-endian
-						if raw_addr >= AUDIO_BUFFER_LENGTH then
-							raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
-						end if;
-						sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
-
+						sample_ram_read_addr_o <= std_logic_vector(unsigned(sample_buffer_tx_start_addr_i) + (sample_index * bytes_per_sample) + unsigned(ch_ids_i(channel_counter * 8 + 7 downto channel_counter *8)) + byte_counter);
+						
                         if (byte_counter < bytes_per_sample - 1) then
                             byte_counter <= byte_counter + 1;
                         else
@@ -421,8 +369,7 @@ begin
 
 					end if;
 					if (frame_write_index = PACKET_LENGTH - 1) then
-						-- Note: packet_wr_en stays '1' this cycle so last byte is written to RAM.
-						-- It returns to '0' next cycle via the process default.
+						packet_wr_en <= '0';
 						udp_checksum_acc <= udp_pseudo_header_sum;
 						udp_checksum_upper_byte <= (others => '0');
 						udp_checksum_byte_phase <= '0';
@@ -441,7 +388,7 @@ begin
 
                 when s_CalcUdpChecksum =>
 					if (udp_checksum_data_valid = '1') then
-						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, asm_rd_data);
+						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, packet_rd_data);
 						if (udp_checksum_bytes_remaining > 0) then
 							udp_checksum_bytes_remaining <= udp_checksum_bytes_remaining - 1;
 						end if;
@@ -492,20 +439,16 @@ begin
 							packet_wr_data <= udp_checksum_value(7 downto 0);
 							checksum_write_index <= 4;
 							when others =>
+								-- Hand over packet_rd_addr bus to TX domain
+								rd_addr_sel <= '1';
 								SM_AssemblePacket <= s_A_Payload;
 						end case;
                 when s_A_Payload =>
                     tx_frame_start <= '1';
-                    -- Phase 3: tx_process saw our request and acked
-                    if (tx_ack_sync2 = '1') then
-                        tx_frame_start <= '0'; -- deassert request
-                        SM_AssemblePacket <= s_A_WaitAckDone;
-                    end if;
-
-                when s_A_WaitAckDone =>
-                    -- Phase 5: wait for tx_process to confirm deassert by lowering ack
-                    if (tx_ack_sync2 = '0') then
+                    if (tx_ack_sync1 = '0' and tx_ack_sync2 = '1') then
                         SM_AssemblePacket <= s_A_Idle;
+                        tx_frame_start <= '0';
+                        rd_addr_sel <= '0'; -- return address bus to assembly domain
                     end if;
             end case;
         end if;
@@ -553,7 +496,7 @@ begin
 				when s_PrimeTx =>
 					tx_enable <= '0';
 					if (prime_wait = 0) then
-						-- allow one cycle for tx_rd_data to capture the next byte from RAM
+						-- allow one cycle for packet_rd_data to capture the next byte from RAM
 						prime_wait <= 1;
 							else
 								if (tx_busy = '0') then
@@ -570,7 +513,7 @@ begin
 						elsif (first_tx_byte_pending = '1') then
 							first_tx_byte_pending <= '0';
 						else
-							tx_data <= tx_rd_data;
+							tx_data <= packet_rd_data;
 							if (tx_read_pointer < PACKET_LENGTH) then
 								tx_rd_addr <= tx_read_pointer;
 								tx_read_pointer <= tx_read_pointer + 1;
@@ -583,14 +526,7 @@ begin
 					tx_enable <= '0';
 					tx_data <= (others => '0');
 					first_tx_byte_pending <= '0';
-					s_SM_Ethernet <= s_WaitDeassert;
-
-				when s_WaitDeassert =>
-					-- Phase 4: wait for sys_clock_process to deassert tx_frame_start
-					if (tx_frame_start_sync2 = '0') then
-						tx_ack <= '0'; -- signal completion
-						s_SM_Ethernet <= s_Idle;
-					end if;
+					s_SM_Ethernet <= s_Idle;
 			end case;
 		end if;
 	end process tx_process;

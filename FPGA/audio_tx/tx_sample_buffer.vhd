@@ -54,6 +54,9 @@ architecture Behavioral of tx_sample_buffer is
     signal current_channel_id : integer range 0 to global_channel_count - 1 := 0;
     signal write_active : std_logic := '0';
     signal byte_count : integer range 0 to bytes_per_sample - 1 := 0;
+    
+    -- Delayed wr_ready to ensure wr_ptr_o is stable when consumer reads it
+    signal wr_ready_pending : std_logic := '0';
 
 
 begin
@@ -71,10 +74,14 @@ begin
             write_active <= '0';
             byte_count <= 0;
             wr_ready_o <= '0';
+            wr_ready_pending <= '0';
         elsif rising_edge(sys_clk) then
             
-
-            wr_ready_o <= '0';
+            -- Delay wr_ready by 1 clock: wr_ready_pending -> wr_ready_o
+            -- This ensures wr_ptr_o is stable when downstream logic reads it
+            wr_ready_o <= wr_ready_pending;
+            wr_ready_pending <= '0';
+            
             -- cdc for fs_clk_i to sys_clk domain
             fs_clk_i_sync1 <= fs_clk_i;
             fs_clk_i_sync2 <= fs_clk_i_sync1;
@@ -112,10 +119,17 @@ begin
                     if current_channel_id = global_channel_count - 1 then
                         -- reset to first channel and move write pointer forward by one sample (all channels)
                         current_channel_id <= 0;
-                        sample_wr_ptr <= sample_wr_ptr + global_channel_count * bytes_per_sample;
-                        wr_ptr_o <= std_logic_vector(to_unsigned(sample_wr_ptr + global_channel_count * bytes_per_sample, 16));
+                        if sample_wr_ptr + global_channel_count * bytes_per_sample >= AUDIO_BUFFER_LENGTH then
+                            sample_wr_ptr <= sample_wr_ptr + global_channel_count * bytes_per_sample - AUDIO_BUFFER_LENGTH;
+                            wr_ptr_o <= std_logic_vector(to_unsigned(sample_wr_ptr + global_channel_count * bytes_per_sample - AUDIO_BUFFER_LENGTH, 16));
+                        else
+                            sample_wr_ptr <= sample_wr_ptr + global_channel_count * bytes_per_sample;
+                            wr_ptr_o <= std_logic_vector(to_unsigned(sample_wr_ptr + global_channel_count * bytes_per_sample, 16));
+                        end if;
                         write_active <= '0';
-                        wr_ready_o <= '1';
+                        -- Set pending flag - actual wr_ready_o will be set next clock
+                        -- This ensures wr_ptr_o is stable when downstream logic samples it
+                        wr_ready_pending <= '1';
                     else
                         current_channel_id <= current_channel_id + 1;
                     end if;    

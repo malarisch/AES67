@@ -48,8 +48,29 @@ architecture Behavioral of tx_router is
     -- 0x06       samples per packet per channel
     -- 0x07-0x0E  channel ids (max 8)
     -- 0x0F       reserved
+    
+    -- Block RAM for configuration storage (True Dual Port)
+    -- Port A: Write from config_wr_clk_i domain
+    -- Port B: Read from sys_clk_i domain (registered output for BRAM inference)
     type t_config_ram is array (0 to 255) of std_logic_vector(7 downto 0);
     signal config_ram : t_config_ram := (others => (others => '0'));
+    
+    -- Synthesis attributes for Block RAM inference (Intel/Altera)
+    attribute ramstyle : string;
+    attribute ramstyle of config_ram : signal is "M10K";
+    
+    -- Registered read address and data for Block RAM (Port B - sys_clk domain)
+    signal ram_rd_addr   : unsigned(7 downto 0) := (others => '0');
+    signal ram_rd_data   : std_logic_vector(7 downto 0) := (others => '0');
+    
+    -- Shadow registers for samples_per_packet (offset 0x06 in each stream config)
+    -- These are updated on config write and used by sample counting logic
+    -- Avoids multi-port RAM access from sample counting process
+    type t_samples_per_packet_shadow is array (0 to 7) of std_logic_vector(7 downto 0);
+    signal samples_per_packet_shadow : t_samples_per_packet_shadow := (others => (others => '0'));
+    
+    -- CDC synchronizer for shadow registers (config_wr_clk -> sys_clk)
+    signal samples_per_packet_sync : t_samples_per_packet_shadow := (others => (others => '0'));
 
     type t_sample_count is array (0 to 7) of unsigned(7 downto 0);
     signal sample_count : t_sample_count := (others => (others => '0'));
@@ -67,12 +88,24 @@ architecture Behavioral of tx_router is
 
     signal sample_ready_sync : std_logic := '0';
 
-    type t_tx_state is (IDLE, LOAD_OUTPUTS, ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_EN_LOW);
+    -- Extended state machine with sequential RAM read states
+    type t_tx_state is (
+        IDLE, 
+        LOAD_IP1, LOAD_IP2, LOAD_IP3, LOAD_IP4,
+        LOAD_CH_COUNT, LOAD_SAMPLES_PER_PKT,
+        LOAD_CH0, LOAD_CH1, LOAD_CH2, LOAD_CH3,
+        LOAD_CH4, LOAD_CH5, LOAD_CH6, LOAD_CH7,
+        ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_EN_LOW
+    );
     signal tx_state : t_tx_state := IDLE;
 
     signal current_stream    : unsigned(2 downto 0) := (others => '0');
     signal current_wr_ptr    : std_logic_vector(15 downto 0) := (others => '0');
     signal current_time      : std_logic_vector(31 downto 0) := (others => '0');
+    
+    -- Latched configuration outputs (built up sequentially from RAM reads)
+    signal ip_addr_latch     : std_logic_vector(31 downto 0) := (others => '0');
+    signal ch_ids_latch      : std_logic_vector(63 downto 0) := (others => '0');
 
     -- CDC synchronizer for tx_en_i (crosses clock domain)
     signal tx_en_meta        : std_logic := '0';
@@ -82,18 +115,60 @@ architecture Behavioral of tx_router is
     attribute PRESERVE of tx_en_sync : signal is true;
 
 begin
+
+    -- ==========================================================================
+    -- Config RAM Write Process (Port A - config_wr_clk_i domain)
+    -- Also updates shadow registers for samples_per_packet
+    -- ==========================================================================
     process (config_wr_clk_i)
+        variable stream_idx : integer;
+        variable offset     : integer;
     begin
         if rising_edge(config_wr_clk_i) then
             if config_wr_en_i = '1' then
                 config_ram(to_integer(unsigned(config_wr_addr_i))) <= config_wr_data_i;
+                
+                -- Update shadow register when samples_per_packet (offset 0x06) is written
+                stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 4)));
+                offset := to_integer(unsigned(config_wr_addr_i(3 downto 0)));
+                if offset = 6 and stream_idx < 8 then
+                    samples_per_packet_shadow(stream_idx) <= config_wr_data_i;
+                end if;
             end if;
         end if;
     end process;
+    
+    -- ==========================================================================
+    -- Config RAM Read Process (Port B - sys_clk_i domain)
+    -- Registered read output for proper Block RAM inference
+    -- ==========================================================================
+    process (sys_clk_i)
+    begin
+        if rising_edge(sys_clk_i) then
+            ram_rd_data <= config_ram(to_integer(ram_rd_addr));
+        end if;
+    end process;
+    
+    -- ==========================================================================
+    -- CDC Synchronizer for shadow registers (config_wr_clk -> sys_clk)
+    -- Simple register stage - values change slowly (config writes)
+    -- ==========================================================================
+    process (sys_clk_i, reset_n)
+    begin
+        if reset_n = '0' then
+            samples_per_packet_sync <= (others => (others => '0'));
+        elsif rising_edge(sys_clk_i) then
+            samples_per_packet_sync <= samples_per_packet_shadow;
+        end if;
+    end process;
+
+    -- ==========================================================================
     -- Sample counting + FIFO write process
+    -- Uses shadow registers instead of direct RAM access
+    -- ==========================================================================
     process(sys_clk_i, reset_n)
-        variable base : integer;
         variable num_streams : integer;
+        variable spp : unsigned(7 downto 0);
     begin
         if reset_n = '0' then
             sample_count <= (others => (others => '0'));
@@ -105,15 +180,15 @@ begin
         elsif rising_edge(sys_clk_i) then
             sample_ready_sync <= sample_ready_i;
 
-
             -- Rising edge of sample_ready
             if sample_ready_i = '1' and sample_ready_sync = '0' then
                 num_streams := to_integer(unsigned(streams_configured_i));
                 for i in 0 to 7 loop
                     if i < num_streams then
-                        base := i * 16;
-                        if unsigned(config_ram(base + 6)) /= 0 then
-                            if sample_count(i) >= unsigned(config_ram(base + 6)) - 1 then
+                        -- Use shadow register instead of RAM access
+                        spp := unsigned(samples_per_packet_sync(i));
+                        if spp /= 0 then
+                            if sample_count(i) >= spp - 1 then
                                 sample_count(i) <= (others => '0');
                                 -- Enqueue into parallel FIFOs with snapshot of current state
                                 fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
@@ -131,7 +206,9 @@ begin
         end if;
     end process;
 
+    -- ==========================================================================
     -- CDC synchronizer for tx_en_i
+    -- ==========================================================================
     process(sys_clk_i, reset_n)
     begin
         if reset_n = '0' then
@@ -143,9 +220,12 @@ begin
         end if;
     end process;
 
+    -- ==========================================================================
     -- TX state machine + FIFO read process
+    -- Sequential RAM reads (one byte per clock) for Block RAM compatibility
+    -- ==========================================================================
     process(sys_clk_i, reset_n)
-        variable base : integer;
+        variable base : unsigned(7 downto 0);
     begin
         if reset_n = '0' then
             fifo_rd_ptr <= (others => '0');
@@ -160,6 +240,9 @@ begin
             sample_buffer_tx_start_addr_o <= (others => '0');
             packet_time_o <= (others => '0');
             ch_ids_o <= (others => '0');
+            ram_rd_addr <= (others => '0');
+            ip_addr_latch <= (others => '0');
+            ch_ids_latch <= (others => '0');
         elsif rising_edge(sys_clk_i) then
 
             case tx_state is
@@ -169,21 +252,90 @@ begin
                         current_wr_ptr <= fifo_wrptr(to_integer(fifo_rd_ptr));
                         current_time <= fifo_time(to_integer(fifo_rd_ptr));
                         fifo_rd_ptr <= fifo_rd_ptr + 1;
-                        tx_state <= LOAD_OUTPUTS;
+                        -- Setup first RAM read address (IP byte 1 at offset 1)
+                        ram_rd_addr <= ("0" & fifo_stream(to_integer(fifo_rd_ptr)) & "0000") + 1;
+                        tx_state <= LOAD_IP1;
                     end if;
 
-                when LOAD_OUTPUTS =>
-                    base := to_integer(current_stream) * 16;
-                    ip_addr_o <= config_ram(base + 1) & config_ram(base + 2) & config_ram(base + 3) & config_ram(base + 4);
-                    channel_count_o <= config_ram(base + 5);
-                    samples_per_packet_per_channel_o <= config_ram(base + 6);
-                    ch_ids_o <= config_ram(base + 7) & config_ram(base + 8) & config_ram(base + 9) & config_ram(base + 10)
-                              & config_ram(base + 11) & config_ram(base + 12) & config_ram(base + 13) & config_ram(base + 14);
-                    sample_buffer_tx_start_addr_o <= current_wr_ptr;
-                    packet_time_o <= current_time;
+                -- Sequential IP address loading (4 bytes)
+                when LOAD_IP1 =>
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 2;
+                    tx_state <= LOAD_IP2;
+                    
+                when LOAD_IP2 =>
+                    ip_addr_latch(31 downto 24) <= ram_rd_data;  -- IP byte 1
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 3;
+                    tx_state <= LOAD_IP3;
+                    
+                when LOAD_IP3 =>
+                    ip_addr_latch(23 downto 16) <= ram_rd_data;  -- IP byte 2
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 4;
+                    tx_state <= LOAD_IP4;
+                    
+                when LOAD_IP4 =>
+                    ip_addr_latch(15 downto 8) <= ram_rd_data;   -- IP byte 3
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 5;
+                    tx_state <= LOAD_CH_COUNT;
+                    
+                -- Channel count
+                when LOAD_CH_COUNT =>
+                    ip_addr_latch(7 downto 0) <= ram_rd_data;    -- IP byte 4
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 6;
+                    tx_state <= LOAD_SAMPLES_PER_PKT;
+                    
+                -- Samples per packet
+                when LOAD_SAMPLES_PER_PKT =>
+                    channel_count_o <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 7;
+                    tx_state <= LOAD_CH0;
+                    
+                -- Channel IDs (8 bytes)
+                when LOAD_CH0 =>
+                    samples_per_packet_per_channel_o <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 8;
+                    tx_state <= LOAD_CH1;
+                    
+                when LOAD_CH1 =>
+                    ch_ids_latch(63 downto 56) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 9;
+                    tx_state <= LOAD_CH2;
+                    
+                when LOAD_CH2 =>
+                    ch_ids_latch(55 downto 48) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 10;
+                    tx_state <= LOAD_CH3;
+                    
+                when LOAD_CH3 =>
+                    ch_ids_latch(47 downto 40) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 11;
+                    tx_state <= LOAD_CH4;
+                    
+                when LOAD_CH4 =>
+                    ch_ids_latch(39 downto 32) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 12;
+                    tx_state <= LOAD_CH5;
+                    
+                when LOAD_CH5 =>
+                    ch_ids_latch(31 downto 24) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 13;
+                    tx_state <= LOAD_CH6;
+                    
+                when LOAD_CH6 =>
+                    ch_ids_latch(23 downto 16) <= ram_rd_data;
+                    ram_rd_addr <= ("0" & current_stream & "0000") + 14;
+                    tx_state <= LOAD_CH7;
+                    
+                when LOAD_CH7 =>
+                    ch_ids_latch(15 downto 8) <= ram_rd_data;
                     tx_state <= ASSERT_START;
 
                 when ASSERT_START =>
+                    ch_ids_latch(7 downto 0) <= ram_rd_data;
+                    -- Commit all latched values to outputs
+                    ip_addr_o <= ip_addr_latch;
+                    ch_ids_o <= ch_ids_latch(63 downto 8) & ram_rd_data;
+                    sample_buffer_tx_start_addr_o <= current_wr_ptr;
+                    packet_time_o <= current_time;
                     audio_packet_tx_start_o <= '1';
                     tx_state <= WAIT_TX_EN_HIGH;
 
