@@ -44,16 +44,17 @@ extern "C" {
 #define ETH_FMC_REG_PTP_CONFIG 0x55
 #define ETH_FMC_PTP_CONFIG_LEN 12  /* 11 data bytes + 1 dummy to trigger FPGA latch */
 
-/* Write register 0x58 - TX stream config (16-byte auto-increment write)
- * Byte  0:     stream_id (0..7) — FPGA computes base addr = stream_id * 16
+/* Write register 0x58 - TX stream config (20-byte auto-increment write)
+ * Byte  0:     stream_id (0..7) — FPGA computes base addr = stream_id * 32
  * Bytes 1..4:  Destination IP address (network byte order, MSB first)
  * Byte  5:     Channel count (1..8)
  * Byte  6:     Samples per packet per channel
  * Bytes 7..14: Channel IDs (up to 8, one byte each)
  * Byte  15:    Reserved
+ * Bytes 16..19: SSRC (32-bit, big-endian, for RTP header)
  */
 #define ETH_FMC_REG_TX_STREAM_CFG  0x58
-#define ETH_FMC_TX_STREAM_CFG_LEN  16
+#define ETH_FMC_TX_STREAM_CFG_LEN  20
 
 /* Read register 0x50 - clocking flags */
 #define ETH_FMC_REG_STATUS_CLK 0x50
@@ -174,7 +175,7 @@ int eth_fmc_write_ptp_config(const struct device *dev,
 /**
  * @brief Write TX stream configuration to FPGA register 0x58.
  *
- * Sends a 16-byte auto-increment write to configure one TX audio stream
+ * Sends a 20-byte auto-increment write to configure one TX audio stream
  * in the tx_router's config RAM.
  *
  * @param dev              The FMC Ethernet bridge device
@@ -184,6 +185,7 @@ int eth_fmc_write_ptp_config(const struct device *dev,
  * @param samples_per_pkt  Samples per packet per channel
  * @param ch_ids           Array of channel IDs (up to 8)
  * @param num_ch_ids       Number of entries in ch_ids
+ * @param ssrc             32-bit SSRC for RTP header (host byte order)
  * @return 0 on success, negative errno on error
  */
 int eth_fmc_write_tx_stream_config(const struct device *dev,
@@ -192,7 +194,8 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 				   uint8_t channel_count,
 				   uint8_t samples_per_pkt,
 				   const uint8_t *ch_ids,
-				   uint8_t num_ch_ids);
+				   uint8_t num_ch_ids,
+				   uint32_t ssrc);
 
 #ifdef __cplusplus
 }

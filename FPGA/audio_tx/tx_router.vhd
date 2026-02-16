@@ -25,6 +25,9 @@ entity tx_router is
 
         -- max 8 channels per stream
         ch_ids_o                        : out std_logic_vector(63 downto 0) := (others => '0');
+        
+        -- SSRC for RTP header
+        ssrc_o                          : out std_logic_vector(31 downto 0) := (others => '0');
 
         config_wr_addr_i                : in std_logic_vector(7 downto 0);
         config_wr_data_i                : in std_logic_vector(7 downto 0);
@@ -41,13 +44,14 @@ entity tx_router is
 end entity;
 
 architecture Behavioral of tx_router is
-    -- config ram layout per stream (16 bytes each, base = stream_index * 16):
+    -- config ram layout per stream (20 bytes each, base = stream_index * 32):
     -- 0x00       stream_id (0-7)
     -- 0x01-0x04  IP address (4 bytes)
     -- 0x05       channel count
     -- 0x06       samples per packet per channel
     -- 0x07-0x0E  channel ids (max 8)
     -- 0x0F       reserved
+    -- 0x10-0x13  SSRC (4 bytes, big-endian)
     
     -- Block RAM for configuration storage (True Dual Port)
     -- Port A: Write from config_wr_clk_i domain
@@ -95,6 +99,7 @@ architecture Behavioral of tx_router is
         LOAD_CH_COUNT, LOAD_SAMPLES_PER_PKT,
         LOAD_CH0, LOAD_CH1, LOAD_CH2, LOAD_CH3,
         LOAD_CH4, LOAD_CH5, LOAD_CH6, LOAD_CH7,
+        LOAD_SSRC1, LOAD_SSRC2, LOAD_SSRC3, LOAD_SSRC4,
         ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_EN_LOW
     );
     signal tx_state : t_tx_state := IDLE;
@@ -106,6 +111,7 @@ architecture Behavioral of tx_router is
     -- Latched configuration outputs (built up sequentially from RAM reads)
     signal ip_addr_latch     : std_logic_vector(31 downto 0) := (others => '0');
     signal ch_ids_latch      : std_logic_vector(63 downto 0) := (others => '0');
+    signal ssrc_latch        : std_logic_vector(31 downto 0) := (others => '0');
 
     -- CDC synchronizer for tx_en_i (crosses clock domain)
     signal tx_en_meta        : std_logic := '0';
@@ -129,8 +135,9 @@ begin
                 config_ram(to_integer(unsigned(config_wr_addr_i))) <= config_wr_data_i;
                 
                 -- Update shadow register when samples_per_packet (offset 0x06) is written
-                stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 4)));
-                offset := to_integer(unsigned(config_wr_addr_i(3 downto 0)));
+                -- Base address = stream_id * 32, so stream_idx = addr[7:5], offset = addr[4:0]
+                stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 5)));
+                offset := to_integer(unsigned(config_wr_addr_i(4 downto 0)));
                 if offset = 6 and stream_idx < 8 then
                     samples_per_packet_shadow(stream_idx) <= config_wr_data_i;
                 end if;
@@ -240,9 +247,11 @@ begin
             sample_buffer_tx_start_addr_o <= (others => '0');
             packet_time_o <= (others => '0');
             ch_ids_o <= (others => '0');
+            ssrc_o <= (others => '0');
             ram_rd_addr <= (others => '0');
             ip_addr_latch <= (others => '0');
             ch_ids_latch <= (others => '0');
+            ssrc_latch <= (others => '0');
         elsif rising_edge(sys_clk_i) then
 
             case tx_state is
@@ -253,87 +262,110 @@ begin
                         current_time <= fifo_time(to_integer(fifo_rd_ptr));
                         fifo_rd_ptr <= fifo_rd_ptr + 1;
                         -- Setup first RAM read address (IP byte 1 at offset 1)
-                        ram_rd_addr <= ("0" & fifo_stream(to_integer(fifo_rd_ptr)) & "0000") + 1;
+                        -- Base address = stream_index * 32 (5 zero bits)
+                        ram_rd_addr <= (fifo_stream(to_integer(fifo_rd_ptr)) & "00000") + 1;
                         tx_state <= LOAD_IP1;
                     end if;
 
                 -- Sequential IP address loading (4 bytes)
                 when LOAD_IP1 =>
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 2;
+                    ram_rd_addr <= (current_stream & "00000") + 2;
                     tx_state <= LOAD_IP2;
                     
                 when LOAD_IP2 =>
                     ip_addr_latch(31 downto 24) <= ram_rd_data;  -- IP byte 1
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 3;
+                    ram_rd_addr <= (current_stream & "00000") + 3;
                     tx_state <= LOAD_IP3;
                     
                 when LOAD_IP3 =>
                     ip_addr_latch(23 downto 16) <= ram_rd_data;  -- IP byte 2
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 4;
+                    ram_rd_addr <= (current_stream & "00000") + 4;
                     tx_state <= LOAD_IP4;
                     
                 when LOAD_IP4 =>
                     ip_addr_latch(15 downto 8) <= ram_rd_data;   -- IP byte 3
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 5;
+                    ram_rd_addr <= (current_stream & "00000") + 5;
                     tx_state <= LOAD_CH_COUNT;
                     
                 -- Channel count
                 when LOAD_CH_COUNT =>
                     ip_addr_latch(7 downto 0) <= ram_rd_data;    -- IP byte 4
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 6;
+                    ram_rd_addr <= (current_stream & "00000") + 6;
                     tx_state <= LOAD_SAMPLES_PER_PKT;
                     
                 -- Samples per packet
                 when LOAD_SAMPLES_PER_PKT =>
                     channel_count_o <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 7;
+                    ram_rd_addr <= (current_stream & "00000") + 7;
                     tx_state <= LOAD_CH0;
                     
                 -- Channel IDs (8 bytes)
                 when LOAD_CH0 =>
                     samples_per_packet_per_channel_o <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 8;
+                    ram_rd_addr <= (current_stream & "00000") + 8;
                     tx_state <= LOAD_CH1;
                     
                 when LOAD_CH1 =>
                     ch_ids_latch(63 downto 56) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 9;
+                    ram_rd_addr <= (current_stream & "00000") + 9;
                     tx_state <= LOAD_CH2;
                     
                 when LOAD_CH2 =>
                     ch_ids_latch(55 downto 48) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 10;
+                    ram_rd_addr <= (current_stream & "00000") + 10;
                     tx_state <= LOAD_CH3;
                     
                 when LOAD_CH3 =>
                     ch_ids_latch(47 downto 40) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 11;
+                    ram_rd_addr <= (current_stream & "00000") + 11;
                     tx_state <= LOAD_CH4;
                     
                 when LOAD_CH4 =>
                     ch_ids_latch(39 downto 32) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 12;
+                    ram_rd_addr <= (current_stream & "00000") + 12;
                     tx_state <= LOAD_CH5;
                     
                 when LOAD_CH5 =>
                     ch_ids_latch(31 downto 24) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 13;
+                    ram_rd_addr <= (current_stream & "00000") + 13;
                     tx_state <= LOAD_CH6;
                     
                 when LOAD_CH6 =>
                     ch_ids_latch(23 downto 16) <= ram_rd_data;
-                    ram_rd_addr <= ("0" & current_stream & "0000") + 14;
+                    ram_rd_addr <= (current_stream & "00000") + 14;
                     tx_state <= LOAD_CH7;
                     
                 when LOAD_CH7 =>
                     ch_ids_latch(15 downto 8) <= ram_rd_data;
+                    ram_rd_addr <= (current_stream & "00000") + 16; -- SSRC byte 1 at offset 0x10
+                    tx_state <= LOAD_SSRC1;
+                    
+                -- SSRC (4 bytes, big-endian)
+                when LOAD_SSRC1 =>
+                    ch_ids_latch(7 downto 0) <= ram_rd_data;
+                    ram_rd_addr <= (current_stream & "00000") + 17;
+                    tx_state <= LOAD_SSRC2;
+                    
+                when LOAD_SSRC2 =>
+                    ssrc_latch(31 downto 24) <= ram_rd_data;  -- SSRC byte 1
+                    ram_rd_addr <= (current_stream & "00000") + 18;
+                    tx_state <= LOAD_SSRC3;
+                    
+                when LOAD_SSRC3 =>
+                    ssrc_latch(23 downto 16) <= ram_rd_data;  -- SSRC byte 2
+                    ram_rd_addr <= (current_stream & "00000") + 19;
+                    tx_state <= LOAD_SSRC4;
+                    
+                when LOAD_SSRC4 =>
+                    ssrc_latch(15 downto 8) <= ram_rd_data;   -- SSRC byte 3
                     tx_state <= ASSERT_START;
 
                 when ASSERT_START =>
-                    ch_ids_latch(7 downto 0) <= ram_rd_data;
+                    ssrc_latch(7 downto 0) <= ram_rd_data;    -- SSRC byte 4
                     -- Commit all latched values to outputs
                     ip_addr_o <= ip_addr_latch;
-                    ch_ids_o <= ch_ids_latch(63 downto 8) & ram_rd_data;
+                    ch_ids_o <= ch_ids_latch;
+                    ssrc_o <= ssrc_latch(31 downto 8) & ram_rd_data;
                     sample_buffer_tx_start_addr_o <= current_wr_ptr;
                     packet_time_o <= current_time;
                     audio_packet_tx_start_o <= '1';

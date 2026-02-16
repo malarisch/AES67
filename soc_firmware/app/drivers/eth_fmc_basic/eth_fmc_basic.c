@@ -239,7 +239,8 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 				   uint8_t channel_count,
 				   uint8_t samples_per_pkt,
 				   const uint8_t *ch_ids,
-				   uint8_t num_ch_ids)
+				   uint8_t num_ch_ids,
+				   uint32_t ssrc)
 {
 	uint8_t buf[ETH_FMC_TX_STREAM_CFG_LEN];
 	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
@@ -257,6 +258,12 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 	for (uint8_t i = 0; i < num_ch_ids && i < 8; i++) {
 		buf[7 + i] = ch_ids[i];
 	}
+
+	/* Byte 15 reserved, bytes 16-19: SSRC (big-endian) */
+	buf[16] = (ssrc >> 24) & 0xFF;
+	buf[17] = (ssrc >> 16) & 0xFF;
+	buf[18] = (ssrc >> 8) & 0xFF;
+	buf[19] = ssrc & 0xFF;
 
 	return eth_fmc_reg_write(dev, ETH_FMC_REG_TX_STREAM_CFG, buf,
 				 ETH_FMC_TX_STREAM_CFG_LEN);

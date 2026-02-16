@@ -41,7 +41,7 @@ entity tx_transmitter is
 
         -- max 8 channels per stream
         ch_ids_i                        : in std_logic_vector(63 downto 0) := (others => '0');
-        ssrc_i                       : in std_logic_vector(15 downto 0) := (others => '0');
+        ssrc_i                       : in std_logic_vector(31 downto 0) := (others => '0');
 
         start_i : in std_logic := '0'
 		
@@ -80,7 +80,7 @@ architecture Behavioral of tx_transmitter is
 		sample_ctr	: std_logic_vector(31 downto 0);
         samples_per_ch_per_pkt : std_logic_vector(7 downto 0);
         channel_count : std_logic_vector(7 downto 0);
-        ssrc: std_logic_vector(15 downto 0);
+        ssrc: std_logic_vector(31 downto 0);
         total_length : std_logic_vector(15 downto 0);
         udp_length : std_logic_vector(15 downto 0)
 	) return std_logic_vector is
@@ -160,8 +160,8 @@ architecture Behavioral of tx_transmitter is
 			when  48=> return smpl_cnt(15 downto 8);
 			when  49=> return smpl_cnt(7 downto 0);
 			-- ssrc
-			when 50=> return x"00";
-			when 51=> return x"00";
+			when 50=> return ssrc(31 downto 24);
+			when 51=> return ssrc(23 downto 16);
 			when 52=> return ssrc(15 downto 8);
 			when 53=> return ssrc(7 downto 0);
 

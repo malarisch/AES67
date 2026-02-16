@@ -754,7 +754,8 @@ static int apply_tx_stream_json(const char *json, size_t len)
 	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &dst,
 					   (uint8_t)channel_count,
 					   (uint8_t)samples_per_pkt,
-					   ch_ids, (uint8_t)channel_count);
+					   ch_ids, (uint8_t)channel_count,
+					   0); /* SSRC: auto-generate */
 }
 
 /* ================================================================
@@ -772,7 +773,7 @@ static int delete_tx_stream(int stream_id)
 	uint8_t zero_ch[8] = {0};
 
 	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &zero_ip,
-					   0, 0, zero_ch, 0);
+					   0, 0, zero_ch, 0, 0);
 }
 
 /* ================================================================

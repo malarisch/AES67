@@ -73,7 +73,7 @@ entity fmc_ethernet_client is
     ptp_is_leader_o               : out STD_ULOGIC;
     ptp_is_follower_o             : out STD_ULOGIC;
 
-    -- TX stream config (written via 0x58, 16 bytes per stream -> tx_router config RAM)
+    -- TX stream config (written via 0x58, 20 bytes per stream -> tx_router config RAM)
     tx_stream_config_wr_en_o      : out std_ulogic;
     tx_stream_config_wr_addr_o    : out std_ulogic_vector(7 downto 0);
     tx_stream_config_wr_data_o    : out std_ulogic_vector(7 downto 0)
@@ -205,8 +205,8 @@ architecture rtl of fmc_ethernet_client is
   -- PPB measurement start handshake
   signal ppb_start_reg : std_ulogic := '0';
 
-  -- TX stream config state (0x58 write, 16 bytes per stream)
-  signal stream_cfg_byte_count : unsigned(3 downto 0) := (others => '0');
+  -- TX stream config state (0x58 write, 20 bytes per stream)
+  signal stream_cfg_byte_count : unsigned(7 downto 0) := (others => '0');
   signal stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
 
 
@@ -593,20 +593,20 @@ begin
                 register_byte_count <= register_byte_count + 1;
               end if;
             null;
-          when "1011000" =>  -- 0x58 TX stream config write (16 bytes per stream -> tx_router config RAM)
-              -- Byte 0 is stream_id: latch base address = stream_id * 16
-              -- Bytes 0..15 are written to config_ram[base + byte_offset]
+          when "1011000" =>  -- 0x58 TX stream config write (20 bytes per stream -> tx_router config RAM)
+              -- Byte 0 is stream_id: latch base address = stream_id * 32
+              -- Bytes 0..19 are written to config_ram[base + byte_offset]
               tx_stream_config_wr_en_o <= '1';
               tx_stream_config_wr_data_o <= wr_cap_data;
               if stream_cfg_byte_count = 0 then
                 -- First byte: stream_id -> compute base addr and write to offset 0
-                stream_cfg_base_addr <= unsigned(wr_cap_data(3 downto 0)) & "0000";
-                tx_stream_config_wr_addr_o <= std_ulogic_vector(unsigned(wr_cap_data(3 downto 0)) & "0000");
+                stream_cfg_base_addr <= unsigned(wr_cap_data(2 downto 0)) & "00000";
+                tx_stream_config_wr_addr_o <= std_ulogic_vector(unsigned(wr_cap_data(2 downto 0)) & "00000");
               else
                 -- Subsequent bytes: use latched base addr + offset
                 tx_stream_config_wr_addr_o <= std_ulogic_vector(stream_cfg_base_addr + resize(stream_cfg_byte_count, 8));
               end if;
-              if stream_cfg_byte_count >= 15 then
+              if stream_cfg_byte_count >= 19 then
                 stream_cfg_byte_count <= (others => '0');
               else
                 stream_cfg_byte_count <= stream_cfg_byte_count + 1;

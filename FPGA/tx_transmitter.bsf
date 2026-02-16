@@ -118,8 +118,8 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 240)
 		(input)
-		(text "ssrc_i[15..0]" (rect 0 0 48 12)(font "Arial" ))
-		(text "ssrc_i[15..0]" (rect 21 235 69 247)(font "Arial" ))
+		(text "ssrc_i[31..0]" (rect 0 0 48 12)(font "Arial" ))
+		(text "ssrc_i[31..0]" (rect 21 235 69 247)(font "Arial" ))
 		(line (pt 0 240)(pt 16 240)(line_width 3))
 	)
 	(port

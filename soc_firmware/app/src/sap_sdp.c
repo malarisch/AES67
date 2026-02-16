@@ -177,7 +177,8 @@ static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
 		"a=rtpmap:%u L%u/%u/%u\r\n"
 		"a=ptime:%u.%03u\r\n"
 		"a=ts-refclk:ptp=IEEE1588-2008:%s\r\n"
-		"a=mediaclk:direct=0\r\n",
+		"a=mediaclk:direct=0\r\n"
+		"a=ssrc:%u cname:aes67@%s\r\n",
 		session_id, stream->stream_id, ip_str,
 		stream->stream_id,
 		stream->channel_count, AES67_DEFAULT_BIT_DEPTH,
@@ -187,7 +188,8 @@ static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
 		AES67_DEFAULT_PAYLOAD_TYPE, AES67_DEFAULT_BIT_DEPTH,
 		AES67_DEFAULT_SAMPLE_RATE, stream->channel_count,
 		ptime_us / 1000, ptime_us % 1000,
-		clock_id_str);
+		clock_id_str,
+		stream->ssrc, ip_str);
 
 	if (n < 0 || (size_t)n >= buf_size) {
 		return -ENOMEM;
@@ -926,7 +928,8 @@ static int cmd_aes67_txstream(const struct shell *sh, size_t argc, char **argv)
 	int ret = sap_sdp_configure_tx_stream((uint8_t)id, &dst,
 					      (uint8_t)ch_count,
 					      (uint8_t)spp,
-					      ch_ids, (uint8_t)ch_count);
+					      ch_ids, (uint8_t)ch_count,
+					      0); /* SSRC: auto-generate */
 	if (ret < 0) {
 		shell_error(sh, "Failed to configure stream: %d", ret);
 		return ret;
@@ -1079,10 +1082,19 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 				uint8_t channel_count,
 				uint8_t samples_per_pkt,
 				const uint8_t *ch_ids,
-				uint8_t num_ch_ids)
+				uint8_t num_ch_ids,
+				uint32_t ssrc)
 {
 	if (stream_id >= AES67_MAX_TX_STREAMS || !dst_ip) {
 		return -EINVAL;
+	}
+
+	/* Auto-generate SSRC if not provided (use IP + stream_id as seed) */
+	uint32_t effective_ssrc = ssrc;
+	if (effective_ssrc == 0) {
+		effective_ssrc = sys_be32_to_cpu(dst_ip->s_addr) ^ 
+				 (stream_id << 24) ^
+				 sys_be32_to_cpu(my_ip_addr.s_addr);
 	}
 
 	/* Write to FPGA */
@@ -1096,7 +1108,8 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	int ret = eth_fmc_write_tx_stream_config(fmc, stream_id, dst_ip,
 						 channel_count,
 						 samples_per_pkt,
-						 ch_ids, num_ch_ids);
+						 ch_ids, num_ch_ids,
+						 effective_ssrc);
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write stream %u to FPGA: %d",
 			stream_id, ret);
@@ -1115,6 +1128,7 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	for (uint8_t i = 0; i < num_ch_ids && i < AES67_MAX_CH_PER_STREAM; i++) {
 		tx_streams[stream_id].ch_ids[i] = ch_ids[i];
 	}
+	tx_streams[stream_id].ssrc = effective_ssrc;
 	k_mutex_unlock(&sap_mutex);
 
 	/* Force immediate SAP announcement */
@@ -1123,8 +1137,8 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	char addr_str[INET_ADDRSTRLEN];
 
 	zsock_inet_ntop(AF_INET, dst_ip, addr_str, sizeof(addr_str));
-	LOG_INF("SAP: TX stream %u configured: dst=%s ch=%u spp=%u",
-		stream_id, addr_str, channel_count, samples_per_pkt);
+	LOG_INF("SAP: TX stream %u configured: dst=%s ch=%u spp=%u ssrc=0x%08x",
+		stream_id, addr_str, channel_count, samples_per_pkt, effective_ssrc);
 
 	return 0;
 }

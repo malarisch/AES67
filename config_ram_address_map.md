@@ -54,6 +54,18 @@ Byte 4: Destination UDP Port MSB
 Byte 5: Destination UDP Port LSB
 Output: audio_dst_ip_o(31..0), audio_dst_port_o(15..0)
 
+# Write Registers - TX Stream Config
+
+Write Register 0x58 -- TX Stream Config - 20 Byte Write (per stream, base = stream_id * 32)
+Byte 0:     stream_id (0..7)
+Bytes 1-4:  Destination IP address (network byte order, MSB first)
+Byte 5:     Channel count (1..8)
+Byte 6:     Samples per packet per channel
+Bytes 7-14: Channel IDs (up to 8, one byte each)
+Byte 15:    Reserved
+Bytes 16-19: SSRC (32-bit, big-endian, for RTP header)
+Output: tx_stream_config_wr_en_o, tx_stream_config_wr_addr_o, tx_stream_config_wr_data_o
+
 # Status Registers
 
 Write Register 0x50 - Flag Bitmask

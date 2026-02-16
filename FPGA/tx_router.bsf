@@ -146,9 +146,16 @@ on the Quartus Prime software download page.
 	(port
 		(pt 392 128)
 		(output)
+		(text "ssrc_o[31..0]" (rect 0 0 51 12)(font "Arial" ))
+		(text "ssrc_o[31..0]" (rect 320 123 371 135)(font "Arial" ))
+		(line (pt 392 128)(pt 376 128)(line_width 3))
+	)
+	(port
+		(pt 392 144)
+		(output)
 		(text "audio_packet_tx_start_o" (rect 0 0 99 12)(font "Arial" ))
-		(text "audio_packet_tx_start_o" (rect 272 123 371 135)(font "Arial" ))
-		(line (pt 392 128)(pt 376 128)(line_width 1))
+		(text "audio_packet_tx_start_o" (rect 272 139 371 151)(font "Arial" ))
+		(line (pt 392 144)(pt 376 144)(line_width 1))
 	)
 	(parameter
 		"samples_per_channel_depth"

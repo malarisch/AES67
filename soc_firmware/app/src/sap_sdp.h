@@ -64,6 +64,7 @@ struct aes67_tx_stream {
 	uint8_t  channel_count;
 	uint8_t  samples_per_packet;
 	uint8_t  ch_ids[AES67_MAX_CH_PER_STREAM];
+	uint32_t ssrc;  /* SSRC for RTP header, must match SDP announcement */
 };
 
 /* ---- Discovered foreign streams (SAP RX) ---- */
@@ -130,12 +131,16 @@ void sap_sdp_set_announce(bool enable);
  * Writes the stream config to the FPGA via FMC and registers it
  * for SAP/SDP announcement. Triggers an immediate SAP announce.
  *
+ * The same SSRC is written to the FPGA (for RTP packets) and included
+ * in the SDP announcement to ensure consistency.
+ *
  * @param stream_id        Stream index (0..7)
  * @param dst_ip           Destination multicast IP
  * @param channel_count    Number of channels (1..8)
  * @param samples_per_pkt  Samples per packet per channel
  * @param ch_ids           Array of channel IDs
  * @param num_ch_ids       Number of entries in ch_ids
+ * @param ssrc             SSRC for RTP (0 = auto-generate from IP+stream_id)
  * @return 0 on success, negative errno on error
  */
 int sap_sdp_configure_tx_stream(uint8_t stream_id,
@@ -143,7 +148,8 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 				uint8_t channel_count,
 				uint8_t samples_per_pkt,
 				const uint8_t *ch_ids,
-				uint8_t num_ch_ids);
+				uint8_t num_ch_ids,
+				uint32_t ssrc);
 
 /**
  * @brief Get the TX stream table.
