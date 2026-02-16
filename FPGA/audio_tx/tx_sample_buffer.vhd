@@ -62,7 +62,6 @@ begin
     variable data_latch : std_logic_vector(23 downto 0);
     begin
         if reset_n = '0' then
-            sample_ram <= (others => (others => '0'));
             wr_ptr_o <= (others => '0');
             sample_wr_ptr <= 0;
             fs_clk_i_sync1 <= '0';
@@ -125,5 +124,12 @@ begin
         end if;
     end process;
 
-    data0_out <= sample_ram(to_integer(read0Addr)); -- output to packet assembler
+    -- Registered read required for block RAM inference
+    process(sys_clk)
+    begin
+        if rising_edge(sys_clk) then
+            data0_out <= sample_ram(to_integer(read0Addr));
+        end if;
+    end process;
+
 end Behavioral;

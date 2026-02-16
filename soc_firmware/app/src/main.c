@@ -15,6 +15,8 @@
 #include "ui_display.h"
 #include "ptp_bmc.h"
 #include "sap_sdp.h"
+#include "webserver.h"
+#include "aes67_config.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -241,25 +243,12 @@ static int fpga_read_32(const struct device *fmc, uint8_t reg, int32_t *val)
  *
  * Controller output = Kp * error + Ki * integral(error)
  *
- * Gains are expressed as fixed-point fractions to avoid floating point:
- *   Kp = PI_KP_NUM / PI_KP_DEN   (proportional gain)
- *   Ki = PI_KI_NUM / PI_KI_DEN   (integral gain per sample)
+ * Gains are now read from the global runtime configuration object
+ * (aes67_config) so they can be changed at runtime via the REST API.
  *
- * Typical tuning:
- *   Kp = 1/4 = 0.25  → convergence in ~4 steps, no overshoot
- *   Ki = 1/32 = 0.03  → slowly eliminates residual offset
- *
- * Anti-windup: integrator clamped to ±PI_IMAX ppb
- * Outlier rejection: samples > PI_OUTLIER_PPB rejected after warm-up
+ * Anti-windup: integrator clamped to ±pi_imax ppb
+ * Outlier rejection: samples > pi_outlier_ppb rejected after warm-up
  * ===================================================================== */
-
-#define PI_KP_NUM          1       /* Proportional numerator */
-#define PI_KP_DEN          4       /* Proportional denominator (Kp = 0.25) */
-#define PI_KI_NUM          1       /* Integral numerator */
-#define PI_KI_DEN          32      /* Integral denominator   (Ki = 0.03125) */
-#define PI_IMAX            500000  /* Anti-windup: max integrator magnitude (ppb) */
-#define PI_OUTLIER_PPB     50000000   /* Max plausible single-measurement error (ppb) */
-#define PI_WARMUP_CYCLES   3       /* First N cycles: no outlier rejection */
 
 /* PI controller state */
 static struct {
@@ -442,10 +431,12 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		}
 
 		/* ---- Outlier rejection (after warm-up) ---- */
-		if (pi_state.cycle >= PI_WARMUP_CYCLES) {
+		const struct aes67_device_config *cfg = aes67_config_get();
+
+		if (pi_state.cycle >= cfg->pi_warmup_cycles) {
 			int32_t abs_meas = (ppb_measured < 0) ? -ppb_measured
 							      : ppb_measured;
-			if (abs_meas > PI_OUTLIER_PPB) {
+			if (abs_meas > cfg->pi_outlier_ppb) {
 				pi_state.outliers++;
 				LOG_WRN("PPB outlier rejected: %d  "
 					"(outliers=%u cycle=%u)",
@@ -472,17 +463,24 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		 */
 		int32_t error = ppb_measured;
 
+		/* Read PI gains from global config */
+		int32_t kp_num = cfg->pi_kp_num;
+		int32_t kp_den = cfg->pi_kp_den;
+		int32_t ki_num = cfg->pi_ki_num;
+		int32_t ki_den = cfg->pi_ki_den;
+		int32_t imax   = cfg->pi_imax;
+
 		/* Proportional term */
-		int32_t p_term = (int32_t)(((int64_t)error * PI_KP_NUM) / PI_KP_DEN);
+		int32_t p_term = (int32_t)(((int64_t)error * kp_num) / kp_den);
 
 		/* Integral term with anti-windup */
 		pi_state.integrator += error;
-		if (pi_state.integrator > (int64_t)PI_IMAX * PI_KI_DEN) {
-			pi_state.integrator = (int64_t)PI_IMAX * PI_KI_DEN;
-		} else if (pi_state.integrator < -(int64_t)PI_IMAX * PI_KI_DEN) {
-			pi_state.integrator = -(int64_t)PI_IMAX * PI_KI_DEN;
+		if (pi_state.integrator > (int64_t)imax * ki_den) {
+			pi_state.integrator = (int64_t)imax * ki_den;
+		} else if (pi_state.integrator < -(int64_t)imax * ki_den) {
+			pi_state.integrator = -(int64_t)imax * ki_den;
 		}
-		int32_t i_term = (int32_t)(pi_state.integrator * PI_KI_NUM / PI_KI_DEN);
+		int32_t i_term = (int32_t)(pi_state.integrator * ki_num / ki_den);
 
 		/* Apply combined correction (subtract because positive error = too fast) */
 		pi_state.output -= (p_term + i_term);
@@ -573,6 +571,12 @@ int main(void)
     int sap_ret = sap_sdp_start(iface);
     if (sap_ret < 0) {
         LOG_ERR("Failed to start SAP/SDP: %d", sap_ret);
+    }
+
+    /* ---- Start HTTP server (REST API + Web UI) ---- */
+    int web_ret = webserver_start();
+    if (web_ret < 0) {
+        LOG_ERR("Failed to start HTTP server: %d", web_ret);
     }
 
     /* ---- Start PPB measurement / PLL correction thread ---- */

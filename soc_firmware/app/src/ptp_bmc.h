@@ -153,6 +153,21 @@ enum ptp_bmc_role ptp_bmc_get_role(void);
  */
 int ptp_bmc_get_best_master_id(uint8_t out[8]);
 
+/**
+ * @brief Get the foreign master table.
+ *
+ * @param count  Output: number of valid entries
+ * @return Pointer to the foreign master table (PTP_MAX_FOREIGN_MASTERS entries)
+ */
+const struct ptp_announce_dataset *ptp_bmc_get_foreign_masters(int *count);
+
+/**
+ * @brief Get our own clock identity.
+ *
+ * @param out  Buffer to receive 8-byte clock identity
+ */
+void ptp_bmc_get_clock_identity(uint8_t out[8]);
+
 #ifdef __cplusplus
 }
 #endif

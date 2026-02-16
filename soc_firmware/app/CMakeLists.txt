@@ -22,9 +22,32 @@ project(app)
 
 add_subdirectory(drivers)
 
+# ---------- HTTP server: register per-service resource linker sections ----------
+zephyr_linker_sources(SECTIONS sections-rom.ld)
+zephyr_linker_section(NAME http_resource_desc_aes67_http
+                      KVMA RAM_REGION GROUP RODATA_REGION)
+
+# ---------- Generate gzipped web UI include at build time ----------
+set(WEB_SRC  ${CMAKE_CURRENT_SOURCE_DIR}/src/web/index.html)
+set(WEB_GZ   ${CMAKE_CURRENT_BINARY_DIR}/index.html.gz)
+set(WEB_INC  ${CMAKE_CURRENT_SOURCE_DIR}/src/index.html.gz.inc)
+
+add_custom_command(
+  OUTPUT  ${WEB_INC}
+  COMMAND gzip -c -9 ${WEB_SRC} > ${WEB_GZ}
+  COMMAND xxd -i < ${WEB_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${WEB_INC}
+  DEPENDS ${WEB_SRC}
+  COMMENT "Generating gzipped web UI include"
+)
+add_custom_target(web_assets DEPENDS ${WEB_INC})
+
 target_sources(app PRIVATE
   src/main.c
   src/ui_display.c
   src/ptp_bmc.c
   src/sap_sdp.c
+  src/aes67_config.c
+  src/webserver.c
 )
+
+add_dependencies(app web_assets)

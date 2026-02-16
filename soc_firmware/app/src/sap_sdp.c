@@ -47,6 +47,10 @@ static bool announce_enabled = true;
 static struct k_sem sap_ip_sem;
 static struct k_mutex sap_mutex;
 
+/* ---- SAP packet constants ---- */
+#define SAP_CONTENT_TYPE  "application/sdp"
+#define SAP_TX_BUF_SIZE   512
+
 /* ---- Local stream configuration (legacy single-stream) ---- */
 static struct aes67_stream_config local_config;
 
@@ -256,9 +260,6 @@ static int send_sap_announce_stream(int sock, const struct sockaddr_in *dst,
  * Then: "application/sdp\0" content type
  * Then: SDP body
  * ================================================================ */
-#define SAP_CONTENT_TYPE  "application/sdp"
-#define SAP_TX_BUF_SIZE   512
-
 static int send_sap_announce(int sock, const struct sockaddr_in *dst)
 {
 	static uint8_t tx_buf[SAP_TX_BUF_SIZE];

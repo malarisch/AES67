@@ -314,7 +314,6 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
                                         struct gpio_callback *cb,
                                         gpio_port_pins_t pins)
 {
-	//printf("GPIO IRQ\n");
     struct eth_fmc_basic_data *data = 
         CONTAINER_OF(cb, struct eth_fmc_basic_data, gpio_cb);
 	const struct eth_fmc_basic_config *cfg = data->dev->config;
@@ -324,35 +323,36 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
     ARG_UNUSED(pins);
 
 	key = k_spin_lock(&data->lock);
-	
-	/* Read Status immediately to satisfy latency requirement */
+
+	/* Read status immediately to satisfy latency requirement */
 	uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
-	//printf("GPIO IRQ: STATUS 0x%02x\n", status);
-	if (status & RX_STATUS_READY ) {
-	//printf("GPIO IRQ: RX READY\n");
+	if (status & RX_STATUS_READY) {
 		uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 		uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 		uint16_t pkt_len = ((uint16_t)len_h << 8) | len_l;
-		//printf("GPIO IRQ: RX LEN %u\n", pkt_len);
+
 		if (pkt_len <= ETH_FMC_MAX_PKT_SIZE + 4) {
-			/* Read Data in ISR to eliminate context switch latency gap */
+			/* Read data in ISR to eliminate context switch latency gap */
 			fmc_read_block(cfg->base, REG_RX_WINDOW, data->rx_buf, pkt_len);
-			
+
 			data->rx_status_cached = status;
 			data->rx_len_cached = pkt_len;
 			data->rx_cached_valid = true;
 		}
-		
-		/* Clear Status to acknowledge IRQ */
+
+		/* Clear status to acknowledge IRQ — one write covers both
+		 * READY and OVF bits since the FPGA resets both on
+		 * rx_clear_mac_pulse. */
 		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
-		
+
 		k_sem_give(&data->int_sem);
-	}
-	if (status & RX_STATUS_OVF) {
+	} else if (status & RX_STATUS_OVF) {
+		/* Overflow without a ready frame — clear and wake the
+		 * RX thread so it can re-poll.  Do NOT log here (ISR
+		 * context) to avoid looping if the FPGA keeps the
+		 * interrupt asserted across the CDC delay. */
 		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
-		LOG_WRN("RX overflow detected in ISR");
-		/* Clear overflow */
-		
+		k_sem_give(&data->int_sem);
 	}	
 	
 	k_spin_unlock(&data->lock, key);
@@ -379,17 +379,24 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 			}
 		}
 
-		/* Loop while interrupt pin is active or first pass */
+		/* Loop while interrupt pin is active or first pass.
+		 * Limit iterations to avoid starving other threads if
+		 * the FPGA keeps asserting the interrupt (e.g. during
+		 * sustained overflow). */
+		int burst = 0;
+		const int max_burst = 16;
 		bool first_pass = true;
-		while (first_pass || (data->use_interrupt && gpio_pin_get_dt(&cfg->interrupt) == 1)) {
+		while ((first_pass || (data->use_interrupt && gpio_pin_get_dt(&cfg->interrupt) == 1))
+		       && burst < max_burst) {
 			first_pass = false;
+			burst++;
 
 			uint16_t pkt_len;
 			uint8_t status;
 			bool from_isr = false;
 
 			key = k_spin_lock(&data->lock);
-			
+
 			/* Check if we have cached data from ISR */
 			if (data->rx_cached_valid) {
 				pkt_len = data->rx_len_cached;
@@ -398,24 +405,27 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 				from_isr = true;
 			} else {
 				/* Polling or subsequent packet in burst */
-				//LOG_INF("Polling RX status, no cached Data");
 				uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
 				uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 				status = fmc_read8(cfg->base, REG_RX_STATUS);
 				pkt_len = ((uint16_t)len_h << 8) | len_l;
-				//LOG_INF("Polled RX status 0x%02x, len %u (low: %02x, high: %02x)", status, pkt_len, len_l, len_h);
 			}
-			
+
 			if (!from_isr && !(status & RX_STATUS_READY)) {
 				if (status & RX_STATUS_OVF) {
-					LOG_WRN("RX overflow detected");
+					LOG_WRN("RX overflow detected (poll)");
 					fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
+					/* Give the FPGA a few µs for the CDC
+					 * clear to propagate before re-reading */
+					k_spin_unlock(&data->lock, key);
+					k_busy_wait(5);
+					continue;
 				}
 				k_spin_unlock(&data->lock, key);
 				break;
 			}
 			if (status & RX_STATUS_OVF) {
-				LOG_WRN("RX overflow detected");
+				LOG_WRN("RX overflow (frame also ready)");
 			}
 			
 			if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {

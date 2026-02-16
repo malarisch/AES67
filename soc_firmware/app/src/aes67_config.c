@@ -1,0 +1,87 @@
+/*
+ * Copyright (c) 2025
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Global runtime configuration – implementation.
+ */
+
+#include "aes67_config.h"
+#include <string.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(aes67_config, LOG_LEVEL_INF);
+
+/* ---- Mutex protecting the config struct ---- */
+static struct k_mutex cfg_mutex;
+static bool cfg_mutex_inited;
+
+/* ---- The single global config instance ---- */
+static struct aes67_device_config g_config;
+
+/* ---- Compiled-in defaults (match previous #defines) ---- */
+
+void aes67_config_reset_defaults(void)
+{
+	memset(&g_config, 0, sizeof(g_config));
+
+	/* Device */
+	strncpy(g_config.device_name, "AES67 Node",
+		AES67_DEVICE_NAME_MAX - 1);
+
+	/* AES67 audio */
+	strncpy(g_config.default_mcast_addr, "239.69.0.1",
+		sizeof(g_config.default_mcast_addr) - 1);
+	g_config.default_port            = 5004;
+	g_config.default_channels        = 2;
+	g_config.default_bit_depth       = 24;
+	g_config.default_sample_rate     = 48000;
+	g_config.default_samples_per_pkt = 48;
+	g_config.default_payload_type    = 97;
+
+	/* PTP */
+	g_config.ptp_domain                = 0;
+	g_config.ptp_priority1             = 248;
+	g_config.ptp_priority2             = 248;
+	g_config.ptp_log_sync_interval     = -3;
+	g_config.ptp_log_announce_interval = 0;
+
+	/* PI controller */
+	g_config.pi_kp_num        = 1;
+	g_config.pi_kp_den        = 4;
+	g_config.pi_ki_num        = 1;
+	g_config.pi_ki_den        = 32;
+	g_config.pi_imax           = 500000;
+	g_config.pi_outlier_ppb    = 50000000;
+	g_config.pi_warmup_cycles  = 3;
+
+	/* SAP */
+	g_config.sap_announce_interval_s = 30;
+	g_config.sap_announce_enabled    = true;
+
+	LOG_INF("Configuration reset to defaults");
+}
+
+struct aes67_device_config *aes67_config_get(void)
+{
+	if (!cfg_mutex_inited) {
+		k_mutex_init(&cfg_mutex);
+		aes67_config_reset_defaults();
+		cfg_mutex_inited = true;
+	}
+	return &g_config;
+}
+
+void aes67_config_lock(void)
+{
+	if (!cfg_mutex_inited) {
+		k_mutex_init(&cfg_mutex);
+		aes67_config_reset_defaults();
+		cfg_mutex_inited = true;
+	}
+	k_mutex_lock(&cfg_mutex, K_FOREVER);
+}
+
+void aes67_config_unlock(void)
+{
+	k_mutex_unlock(&cfg_mutex);
+}

@@ -790,3 +790,16 @@ int ptp_bmc_get_best_master_id(uint8_t out[8])
 	memcpy(out, current_best_master_id, 8);
 	return 0;
 }
+
+const struct ptp_announce_dataset *ptp_bmc_get_foreign_masters(int *count)
+{
+	if (count) {
+		*count = foreign_master_count;
+	}
+	return foreign_masters;
+}
+
+void ptp_bmc_get_clock_identity(uint8_t out[8])
+{
+	memcpy(out, my_clock_id, 8);
+}
