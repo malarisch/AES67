@@ -18,14 +18,17 @@ On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified 
 - Si5351A Driver
 - Sending RTP Audio Packets
 - Single I2S Audio in
+- Webserver for device config
+- I2S in 48k/24bit
+- Audio TX for 48k/24bit; max packet time 1ms (just increase the audio buffer size)
   
 ## Todo list
 
-- Audio Routing Matrix
+- Audio Routing Matrix (TX Path Done)
 - Receive Audio Packets
-- Audio Buffer
+- Audio Buffer (TX Path Done)
 - RTCP, SDP, SAP (mDNS?) on the MCU (DONE)
-- Tune PI Controller on the FPGA further (currently, it reaches a solid lock but jitters at +-50ns difference)
+- Tune PI Controller on the FPGA further (currently, it reaches a solid lock but jitters at +-30ns difference)
 - PTP outlier rejection (DONE)
 - PTP reject other leaders that are not "my leader" (lol) (DONE)
 - Priority-Based arbiter for Ethernet TX on the FPGA (PTP first, Audio second, everything else third), as well as filtering out packets that are not relevant to the MCU in the RX Path
