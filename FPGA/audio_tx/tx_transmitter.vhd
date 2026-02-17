@@ -397,7 +397,7 @@ begin
 						raw_addr := read_base
 							+ sample_index * global_channel_count * bytes_per_sample
 							+ ch_id * bytes_per_sample
-							+ (bytes_per_sample - 1 - byte_counter); -- reverse for big-endian
+							+ byte_counter; -- direct byte order (RAM stores MSB first)
 						if raw_addr >= AUDIO_BUFFER_LENGTH then
 							raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 						end if;
