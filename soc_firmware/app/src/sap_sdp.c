@@ -120,7 +120,7 @@ static int build_sdp(char *buf, size_t buf_size)
 	int n = snprintf(buf, buf_size,
 		"v=0\r\n"
 		"o=- %u 1 IN IP4 %s\r\n"
-		"s=AES67 Stream\r\n"
+		"s=Der geile Hecht\r\n"
 		"i=%uch %ubit %uHz\r\n"
 		"c=IN IP4 %s/32\r\n"
 		"t=0 0\r\n"

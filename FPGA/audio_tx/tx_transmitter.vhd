@@ -393,11 +393,13 @@ begin
 							when others => ch_id := 0;
 						end case;
 
-						-- Address = read_base + sample_period_offset + channel_offset + byte (MSB first)
+						-- Address = read_base + sample_period_offset + channel_offset + byte
+						-- RAM stores LSB at offset 0, MSB at offset (bytes_per_sample-1)
+						-- AES67 requires Big-Endian (MSB first), so read in reverse order
 						raw_addr := read_base
 							+ sample_index * global_channel_count * bytes_per_sample
 							+ ch_id * bytes_per_sample
-							+ byte_counter; -- direct byte order (RAM stores MSB first)
+							+ (bytes_per_sample - 1 - byte_counter); -- Big-Endian: MSB first
 						if raw_addr >= AUDIO_BUFFER_LENGTH then
 							raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 						end if;

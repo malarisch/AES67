@@ -55,8 +55,10 @@ architecture rtl of i2s_in is
 
   -- I2S Domain Signale
   signal shift_reg       : std_logic_vector(width - 1 downto 0);
-  signal s_parallel_load : std_logic;
   signal s_current_lr    : std_logic;
+  
+  -- Bit counter: nur die ersten 'width' Bits erfassen (für Left-justified bei 64*fs)
+  signal bit_count       : integer range 0 to 63;
 
   -- Interne Datenregister (BIT_CLK Domain)
   signal data_l_int     : std_logic_vector(width - 1 downto 0);
@@ -81,9 +83,12 @@ architecture rtl of i2s_in is
 begin
 
   -------------------------------------------------------------------------
-  -- I2S Serial to Parallel (BIT_CLK Domain - unverändert)
+  -- I2S Serial to Parallel (BIT_CLK Domain)
+  -- Standard I2S: MSB is delayed by 1 BCLK after LRCLK edge
+  -- Compatible with AD1941 DSP at BCLK = 64*fs (32 clocks per channel)
+  -- Only captures first 'width' bits, ignores padding bits (8 bits at 64*fs)
   -------------------------------------------------------------------------
-  i2s_in : process (RESET, BIT_CLK, LR_CLK, DIN)
+  i2s_in : process (RESET, BIT_CLK)
   begin
     if (RESET = '0') then
 
@@ -92,70 +97,44 @@ begin
       shift_reg  <= (others => '0');
 
       s_current_lr    <= '0';
-      s_parallel_load <= '0';
       data_rdy_l_int  <= '0';
       data_rdy_r_int  <= '0';
+      bit_count       <= 0;
 
-    elsif (BIT_CLK'event and BIT_CLK = '1') then
-      -- Clear ready signals first (they should be pulses, not level signals)
+    elsif rising_edge(BIT_CLK) then
+      -- Clear ready signals (pulses)
       data_rdy_l_int <= '0';
       data_rdy_r_int <= '0';
 
-      -- Load data from shift register BEFORE shifting to avoid race condition
-      -- This ensures we capture the complete word before it gets corrupted by shifting
-      if (s_parallel_load = '1') then
-        -- Load the complete word that was just received
-        if (s_current_lr = '0') then
-          --Output Right Channel
-          data_r_int     <= shift_reg;
-          data_rdy_r_int <= '1'; -- Pulse ready signal when data is loaded
-        else
-          --Output Left Channel
-          data_l_int     <= shift_reg;
-          data_rdy_l_int <= '1'; -- Pulse ready signal when data is loaded
-        end if;
-        s_parallel_load <= '0';
-      end if;
-
-      -- Check for channel change BEFORE loading/shifting
+      -- Check for channel change (LRCLK edge)
       if (s_current_lr /= LR_CLK) then
-        -- Channel changed - load the PREVIOUS complete word (using old s_current_lr)
-        if (s_parallel_load = '1') then
-          -- Load the complete word that was just received for the previous channel
-          if (s_current_lr = '0') then
-            --Output Right Channel (previous word)
-            data_r_int     <= shift_reg;
-            data_rdy_r_int <= '1'; -- Pulse ready signal when data is loaded
-          else
-            --Output Left Channel (previous word)
-            data_l_int     <= shift_reg;
-            data_rdy_l_int <= '1'; -- Pulse ready signal when data is loaded
-          end if;
+        -- Channel changed - load the completed word from previous channel
+        if (s_current_lr = '0') then
+          -- Previous was Right channel
+          data_r_int     <= shift_reg;
+          data_rdy_r_int <= '1';
+        else
+          -- Previous was Left channel
+          data_l_int     <= shift_reg;
+          data_rdy_l_int <= '1';
         end if;
 
-        -- Now shift and start new word
-        shift_reg(width - 1 downto 1) <= shift_reg(width - 2 downto 0);
-        shift_reg(0)                  <= DIN;
-        s_current_lr                  <= LR_CLK;
+        -- Reset for new channel
+        s_current_lr <= LR_CLK;
+        bit_count    <= 0;  -- I2S: First bit comes AFTER this clock (1 BCLK delay)
+        
+        -- I2S standard: Do NOT shift on LRCLK edge - first data bit arrives next BCLK
 
-        -- Setup for parallel register load when new word is complete (after 24 bits)
-        s_parallel_load <= '1';
       else
-        shift_reg(width - 1 downto 1) <= shift_reg(width - 2 downto 0);
-        shift_reg(0)                  <= DIN;
-        -- Load data if parallel_load is set (this should not happen during normal operation,
-        -- but handle it for safety)
-        if (s_parallel_load = '1') then
-          if (s_current_lr = '0') then
-            --Output Right Channel
-            data_r_int     <= shift_reg;
-            data_rdy_r_int <= '1';
-          else
-            --Output Left Channel
-            data_l_int     <= shift_reg;
-            data_rdy_l_int <= '1';
-          end if;
-          s_parallel_load <= '0';
+        -- Same channel - shift data bits
+        if (bit_count < width) then
+          -- Shift in data bit (I2S: MSB first, 1 BCLK after LRCLK edge)
+          shift_reg(width - 1 downto 1) <= shift_reg(width - 2 downto 0);
+          shift_reg(0)                  <= DIN;
+        end if;
+        -- Always increment counter (even during padding)
+        if (bit_count < 63) then
+          bit_count <= bit_count + 1;
         end if;
       end if;
     end if;

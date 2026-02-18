@@ -12,6 +12,9 @@
 
 #include "../drivers/si5351a/si5351a.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#ifdef CONFIG_MI_CARD
+#include "../drivers/mi_card/mi_card.h"
+#endif
 #include "ui_display.h"
 #include "ptp_bmc.h"
 #include "sap_sdp.h"
@@ -548,6 +551,30 @@ int main(void)
 
         LOG_INF("Si5351A clocks configured: CLK0=24.576 MHz");
     }
+
+#ifdef CONFIG_MI_CARD
+    /* ---- MI Card 8-Channel ADC Preamp Setup ---- */
+#ifdef CONFIG_MI_CARD_NRST_GPIO
+    /* Initialize nRST GPIO first */
+    if (mi_card_nrst_gpio_init() < 0) {
+        LOG_WRN("MI card nRST GPIO init failed (hw reset unavailable)");
+    }
+#endif
+    const struct device *mi_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+    if (!device_is_ready(mi_i2c)) {
+        LOG_ERR("MI card I2C bus (i2c2) not ready");
+    } else {
+        int mi_ret = mi_card_init(mi_i2c);
+        if (mi_ret < 0) {
+            LOG_WRN("MI card init failed: %d (board may not be connected)", mi_ret);
+        } else {
+            LOG_INF("MI card initialized successfully");
+            /* Example: Set channel 0 to 20 dB gain, enable HPF */
+            /* mi_card_set_gain(0, 20); */
+            /* mi_card_set_hpf(true); */
+        }
+    }
+#endif
 
     /* ---- Write MAC address to FPGA ---- */
     fpga_write_mac_address(iface);

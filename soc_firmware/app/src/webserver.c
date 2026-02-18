@@ -27,6 +27,9 @@
 #include "sap_sdp.h"
 #include "ui_display.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#ifdef CONFIG_MI_CARD
+#include "../drivers/mi_card/mi_card.h"
+#endif
 
 /* local_memmem is a GNU extension not available in picolibc / Zephyr */
 static void *local_memmem(const void *haystack, size_t haystacklen,
@@ -804,6 +807,107 @@ static int build_full_status(char *buf, size_t sz)
 	return p;
 }
 
+#ifdef CONFIG_MI_CARD
+/* ================================================================
+ * MI Card (8-channel preamp) status/control
+ * ================================================================ */
+
+static int build_mi_status(char *buf, size_t sz)
+{
+	int p = json_start_object(buf, sz);
+
+	/* Global settings */
+	int hpf = mi_card_get_hpf();
+	int f96 = mi_card_get_96khz();
+
+	p = json_add_bool(buf, sz, p, "hpf", (hpf > 0));
+	p = json_add_bool(buf, sz, p, "f96khz", (f96 > 0));
+
+	/* Per-channel settings */
+	p = json_add_key(buf, sz, p, "channels");
+	p = json_start_array(buf, sz, p);
+
+	for (int ch = 0; ch < MI_NUM_CHANNELS; ch++) {
+		p += snprintf(buf + p, sz - p, "{");
+		p = json_add_uint(buf, sz, p, "id", ch);
+
+		int gain = mi_card_get_gain(ch);
+		int phantom = mi_card_get_phantom(ch);
+		int muted = mi_card_get_mute(ch);
+
+		p = json_add_int(buf, sz, p, "gain", gain);
+		p = json_add_bool(buf, sz, p, "phantom", (phantom > 0));
+		p = json_add_bool(buf, sz, p, "muted", (muted > 0));
+
+		/* Remove trailing comma and close */
+		if (p > 1 && buf[p - 1] == ',') {
+			p--;
+		}
+		p += snprintf(buf + p, sz - p, "},");
+	}
+
+	p = json_end_array(buf, sz, p);
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+static int apply_mi_channel_json(int channel, const char *json, size_t len)
+{
+	int32_t val;
+	bool bval;
+	int ret = 0;
+
+	if (channel < 0 || channel >= MI_NUM_CHANNELS) {
+		return -EINVAL;
+	}
+
+	if (json_find_int(json, len, "gain", &val)) {
+		ret = mi_card_set_gain((uint8_t)channel, (int8_t)val);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (json_find_bool(json, len, "phantom", &bval)) {
+		ret = mi_card_set_phantom((uint8_t)channel, bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (json_find_bool(json, len, "muted", &bval)) {
+		ret = mi_card_set_mute((uint8_t)channel, bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int apply_mi_global_json(const char *json, size_t len)
+{
+	bool bval;
+	int ret = 0;
+
+	if (json_find_bool(json, len, "hpf", &bval)) {
+		ret = mi_card_set_hpf(bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (json_find_bool(json, len, "f96khz", &bval)) {
+		ret = mi_card_set_96khz(bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+#endif /* CONFIG_MI_CARD */
+
 /* ================================================================
  * POST body accumulator
  * ================================================================ */
@@ -881,6 +985,22 @@ static int api_handler(struct http_client_ctx *client,
 							JSON_BUF_SIZE);
 		} else if (strcmp(url, "/api/config") == 0) {
 			json_len = build_config_json(json_buf, JSON_BUF_SIZE);
+#ifdef CONFIG_MI_CARD
+		} else if (strcmp(url, "/api/mi") == 0) {
+			json_len = build_mi_status(json_buf, JSON_BUF_SIZE);
+		} else if (strcmp(url, "/api/mi/reset") == 0) {
+			/* GET /api/mi/reset returns board info */
+			struct mi_board_info info;
+			if (mi_card_detect(&info)) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"soft_id\":%d,\"board_id\":%d,\"rev\":%d}",
+					info.soft_id, info.board_id, info.hard_rev);
+			} else {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"error\":\"board not detected\"}");
+				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
+			}
+#endif
 		} else {
 			/* 404 */
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
@@ -915,6 +1035,35 @@ static int api_handler(struct http_client_ctx *client,
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,
 						    "{\"ok\":true}");
 			}
+#ifdef CONFIG_MI_CARD
+		} else if (strcmp(url, "/api/mi") == 0) {
+			/* Global MI settings (HPF, 96kHz) */
+			ret = apply_mi_global_json(post_body, post_body_len);
+			if (ret == 0) {
+				json_len = build_mi_status(json_buf,
+							   JSON_BUF_SIZE);
+			}
+		} else if (strncmp(url, "/api/mi/channel/", 16) == 0) {
+			/* Per-channel settings: /api/mi/channel/0 */
+			int ch = atoi(url + 16);
+			ret = apply_mi_channel_json(ch, post_body,
+						    post_body_len);
+			if (ret == 0) {
+				json_len = build_mi_status(json_buf,
+							   JSON_BUF_SIZE);
+			}
+		} else if (strcmp(url, "/api/mi/reset") == 0) {
+			/* POST /api/mi/reset triggers hardware reset */
+#ifdef CONFIG_MI_CARD_NRST_GPIO
+			ret = mi_card_hw_reset();
+#else
+			ret = mi_card_reset();
+#endif
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":\"Board reset complete\"}");
+			}
+#endif
 		} else {
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
 					    "{\"error\":\"not found\"}");

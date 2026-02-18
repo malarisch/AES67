@@ -92,11 +92,6 @@ on the Quartus Prime software download page.
 		"24"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"fifo_addrbits"
-		"3"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
 		(rectangle (rect 16 16 224 128)(line_width 1))
 	)

@@ -51,3 +51,4 @@ external/
 
 **/node_modules/
 *.stp
+datasheets/AD1940_1941.pdf
