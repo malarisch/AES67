@@ -76,7 +76,10 @@ entity fmc_ethernet_client is
     -- TX stream config (written via 0x58, 20 bytes per stream -> tx_router config RAM)
     tx_stream_config_wr_en_o      : out std_ulogic;
     tx_stream_config_wr_addr_o    : out std_ulogic_vector(7 downto 0);
-    tx_stream_config_wr_data_o    : out std_ulogic_vector(7 downto 0)
+    tx_stream_config_wr_data_o    : out std_ulogic_vector(7 downto 0);
+
+    tx_allow_req_o : out std_ulogic;
+    tx_allow_i : in std_ulogic
   );
 end entity;
 
@@ -139,7 +142,7 @@ architecture rtl of fmc_ethernet_client is
   signal tx_clear_mac_pulse  : std_ulogic := '0';
   signal mac_tx_preamble_bytes_sent : unsigned(3 downto 0) := (others => '0');
 
-  type t_tx_SM is (s_Idle, s_PrimeTx, s_Transmit, s_End);
+  type t_tx_SM is (s_Idle, s_waitForAllow, s_PrimeTx, s_Transmit, s_End);
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
 
   -- RX bookkeeping
@@ -751,7 +754,16 @@ begin
         when s_Idle =>
           mac_tx_data_o   <= (others => '0');
           mac_tx_enable_o <= '0';
+          tx_allow_req_o <= '0';
           if (tx_start_pulse = '1') and (mac_tx_active = '0') then
+            if txfifo_rd_empty = '0' then
+              sm_tx_ethernet <= s_waitForAllow;
+              tx_allow_req_o <= '1';
+            end if;
+          end if;
+        when s_waitForAllow =>
+          if tx_allow_i = '1' then
+            
             if txfifo_rd_empty = '0' then
               sm_tx_ethernet <= s_PrimeTx;
               mac_tx_data_o <= txfifo_rd_data;
@@ -759,8 +771,8 @@ begin
               tx_prefetch_valid <= '1';
             end if;
           end if;
-
         when s_PrimeTx =>
+          
           mac_tx_preamble_bytes_sent <= mac_tx_preamble_bytes_sent + 1;
           mac_tx_active <= '1';
           tx_prefetch_valid <= '1';
@@ -775,7 +787,7 @@ begin
             end if;
           end if;
           mac_tx_data_o <= txfifo_rd_data;
-
+          
         when s_Transmit =>
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then

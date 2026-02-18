@@ -6,12 +6,6 @@
 -- Released under GNU General Public License v3
 -- Source: https://www.github.com/xn--nding-jua/AES50_Transmitter
 --
--- This file contains an ethernet-packet-generator to send individual bytes to an EthernetMAC directly.
---
--- when not using ARP, set ARP-entry in Windows manually using
--- netsh interface ipv4 add neighbors "Ethernet 1" 192.168.0.42 00-1c-23-17-4a-cb
--- To delete this entry, use the following command:
--- arp -d 192.168.0.42
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -40,7 +34,10 @@ entity ptpv2_sender is
         message_type_i : in std_logic_vector(3 downto 0) := "0000";
 		tx_ready_o			: out std_logic := '0';
 		ptp_time_source_i : in std_logic_vector(7 downto 0);
-		ptp_log_interval_i : in std_logic_vector(7 downto 0)
+		ptp_log_interval_i : in std_logic_vector(7 downto 0);
+
+		tx_allow_req_o : out std_logic := '0';
+		tx_allow_i : in std_logic
 	);
 end entity;
 
@@ -101,7 +98,7 @@ architecture Behavioral of ptpv2_sender is
 	signal udp_calc_new_checksum		: std_logic := '0';
 
 	-- Other signals used in this file
-	type t_SM_Ethernet is (s_Idle, s_CalcChecksum, s_WaitChecksum, s_Start, s_Wait, s_Transmit, s_End);
+	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_CalcChecksum, s_WaitChecksum, s_Start, s_Wait, s_Transmit, s_End);
 	signal s_SM_Ethernet					: t_SM_Ethernet := s_Idle;
 	signal byte_counter					: integer range 0 to 1600 := 0; -- one ethernet-frame cannot take more than 1500 bytes + header
 	signal packet_counter				: integer range 0 to 65535 := 0;
@@ -207,6 +204,9 @@ begin
 		if (falling_edge(tx_clk)) then
 			zframe_start <= frame_start_sync;
 			tx_ready_o <= '0';
+			if (s_SM_Ethernet = s_Idle) then
+				tx_allow_req_o <= '0'; -- default: do not request to send
+			end if;
 			if ((frame_start_sync = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
 				-- prepare begin of packet
 				packet_counter <= packet_counter + 1; -- increment packet counter
@@ -437,9 +437,13 @@ begin
 				
 				-- if both checksum are ready, go to next state
 				if ((calculating_checksum = '0') and (udp_calculating_checksum = '0')) then
+					s_SM_Ethernet <= s_waitForAllow;
+					tx_allow_req_o <= '1'; -- request permission to send from outside (e.g. to avoid collisions)
+				end if;
+			elsif (s_SM_Ethernet = s_waitForAllow) then
+				if (tx_allow_i = '1') then
 					s_SM_Ethernet <= s_Start;
 				end if;
-				
 			elsif (s_SM_Ethernet = s_Start) then
 				-- wait until MAC is ready again
 				if (tx_busy = '0') then
@@ -457,6 +461,7 @@ begin
 			
 			elsif (s_SM_Ethernet = s_Transmit) then
 				-- wait until previous byte is sent
+				
 				if (tx_byte_sent = '1') then
 					-- send next byte and increment byte_counter
 					tx_data <= udp_frame(byte_counter);
@@ -474,6 +479,7 @@ begin
 				tx_data <= "00000000";
                 tx_ready_o <= '1';
 				s_SM_Ethernet <= s_Idle;
+				tx_allow_req_o <= '0'; -- default: do not request to send
 			end if;
 		end if;
 	end process;

@@ -27,6 +27,7 @@ entity tx_transmitter is
 		tx_busy					: in std_logic;
 		tx_byte_sent			: in std_logic;
 		
+		
 		sample_counter			: in std_logic_vector(31 downto 0) := (others => '0');
 		
 		tx_enable				: out std_logic := '0';  -- TX valid
@@ -43,8 +44,11 @@ entity tx_transmitter is
         ch_ids_i                        : in std_logic_vector(63 downto 0) := (others => '0');
         ssrc_i                       : in std_logic_vector(31 downto 0) := (others => '0');
 
-        start_i : in std_logic := '0'
+        start_i : in std_logic := '0';
 		
+		tx_req_o				: out std_logic := '0';
+		tx_allow_i				: in std_logic := '0'
+
 	);
 end entity;
 
@@ -63,7 +67,7 @@ architecture Behavioral of tx_transmitter is
     signal PACKET_LENGTH : integer := 0;
     signal UDP_PAYLOAD_LENGTH : integer := 0;
 	-- Types
-	type t_SM_Ethernet is (s_Idle, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
+	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_LatchCDC, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
     type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
 	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
     
@@ -204,7 +208,6 @@ architecture Behavioral of tx_transmitter is
 	signal packet_wr_addr	: integer range 0 to 1518 - 1 := 0;
 	signal packet_wr_data	: std_logic_vector(7 downto 0) := (others => '0');
 	signal first_packet_byte	: std_logic_vector(7 downto 0) := (others => '0');
-	signal first_tx_byte_pending	: std_logic := '0';
 
 	attribute ram_style : string;
 
@@ -515,10 +518,8 @@ begin
 
 
 	tx_process : process(tx_clk)
-		variable header_data		: std_logic_vector(7 downto 0);
-		variable pseudo_header_sum	: unsigned(31 downto 0);
 	begin
-		if falling_edge(tx_clk) then
+		if rising_edge(tx_clk) then
             tx_frame_start_sync1 <= tx_frame_start;
             tx_frame_start_sync2 <= tx_frame_start_sync1;
 
@@ -527,30 +528,34 @@ begin
 				when s_Idle =>
 					tx_enable <= '0';
                     tx_ack <= '0';
+					tx_req_o <= '0';
 					if (tx_frame_start_sync2 = '1') then
 						tx_ack <= '1';
-						s_SM_Ethernet <= s_PrimeTx;
-						-- Initialize TX state from sys-domain latched values (stable by now)
-						if (PACKET_LENGTH > 0) then
-							tx_data <= first_packet_byte;
-						else
-							tx_data <= (others => '0');
-						end if;
-						first_tx_byte_pending <= '1';
+						s_SM_Ethernet <= s_waitForAllow;
+						tx_req_o <= '1'; -- signal packet ready for transmission
+						
+					end if;
+				when s_waitForAllow =>
+					if (tx_allow_i = '1') then
+						s_SM_Ethernet <= s_LatchCDC;
+					end if;
+				when s_LatchCDC =>
+					-- wait one cycle to all latched valus are stable
+					-- Initialize TX state from sys-domain latched values (stable by now)
+						tx_data <= first_packet_byte;
+						
 						if (PACKET_LENGTH > 1) then
 							tx_rd_addr <= 1;
 							tx_read_pointer <= 2;
 							tx_bytes_remaining <= PACKET_LENGTH - 1;
+							s_SM_Ethernet <= s_PrimeTx;
 						else
 							tx_rd_addr <= 0;
 							tx_read_pointer <= 0;
 							tx_bytes_remaining <= 0;
+							s_SM_Ethernet <= s_End; -- no bytes to send, skip directly to end state
 						end if;
 						prime_wait <= 0;
-					end if;
-
-				
-				
 
 				when s_PrimeTx =>
 					tx_enable <= '0';
@@ -565,12 +570,11 @@ begin
 							end if;
 
 				when s_Transmit =>
+					
 					tx_enable <= '1';
 					if (tx_byte_sent = '1') then
 						if (tx_bytes_remaining = 0) then
 							s_SM_Ethernet <= s_End;
-						elsif (first_tx_byte_pending = '1') then
-							first_tx_byte_pending <= '0';
 						else
 							tx_data <= tx_rd_data;
 							if (tx_read_pointer < PACKET_LENGTH) then
@@ -580,13 +584,12 @@ begin
 							tx_bytes_remaining <= tx_bytes_remaining - 1;
 						end if;
 					end if;
-
+					
 				when s_End =>
 					tx_enable <= '0';
 					tx_data <= (others => '0');
-					first_tx_byte_pending <= '0';
 					s_SM_Ethernet <= s_WaitDeassert;
-
+					tx_req_o <= '0'; 
 				when s_WaitDeassert =>
 					-- Phase 4: wait for sys_clock_process to deassert tx_frame_start
 					if (tx_frame_start_sync2 = '0') then

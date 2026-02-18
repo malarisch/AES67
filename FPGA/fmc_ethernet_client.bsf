@@ -214,6 +214,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 448)(pt 16 448)(line_width 3))
 	)
 	(port
+		(pt 0 464)
+		(input)
+		(text "tx_allow_i" (rect 0 0 37 12)(font "Arial" ))
+		(text "tx_allow_i" (rect 21 459 58 471)(font "Arial" ))
+		(line (pt 0 464)(pt 16 464)(line_width 1))
+	)
+	(port
 		(pt 360 48)
 		(output)
 		(text "fmc_int_o" (rect 0 0 41 12)(font "Arial" ))
@@ -331,6 +338,13 @@ on the Quartus Prime software download page.
 		(text "tx_stream_config_wr_data_o[7..0]" (rect 0 0 139 12)(font "Arial" ))
 		(text "tx_stream_config_wr_data_o[7..0]" (rect 200 299 339 311)(font "Arial" ))
 		(line (pt 360 304)(pt 344 304)(line_width 3))
+	)
+	(port
+		(pt 360 320)
+		(output)
+		(text "tx_allow_req_o" (rect 0 0 60 12)(font "Arial" ))
+		(text "tx_allow_req_o" (rect 279 315 339 327)(font "Arial" ))
+		(line (pt 360 320)(pt 344 320)(line_width 1))
 	)
 	(port
 		(pt 360 32)

@@ -130,6 +130,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 256)(pt 16 256)(line_width 1))
 	)
 	(port
+		(pt 0 272)
+		(input)
+		(text "tx_allow_i" (rect 0 0 37 12)(font "Arial" ))
+		(text "tx_allow_i" (rect 21 267 58 279)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 1))
+	)
+	(port
 		(pt 400 32)
 		(output)
 		(text "tx_enable" (rect 0 0 37 12)(font "Arial" ))
@@ -149,6 +156,13 @@ on the Quartus Prime software download page.
 		(text "sample_ram_read_addr_o[15..0]" (rect 0 0 132 12)(font "Arial" ))
 		(text "sample_ram_read_addr_o[15..0]" (rect 247 59 379 71)(font "Arial" ))
 		(line (pt 400 64)(pt 384 64)(line_width 3))
+	)
+	(port
+		(pt 400 80)
+		(output)
+		(text "tx_req_o" (rect 0 0 36 12)(font "Arial" ))
+		(text "tx_req_o" (rect 343 75 379 87)(font "Arial" ))
+		(line (pt 400 80)(pt 384 80)(line_width 1))
 	)
 	(parameter
 		"samples_per_channel_depth"
