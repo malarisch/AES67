@@ -150,6 +150,49 @@ int eth_fmc_status_set_bits(const struct device *dev, uint8_t bits);
  */
 int eth_fmc_status_clear_bits(const struct device *dev, uint8_t bits);
 
+/* ---- FPGA Ready State Management ---- */
+
+/**
+ * @brief Callback type for FPGA recovery events.
+ *
+ * Called when the FPGA transitions from NOT_PROGRAMMED or RESETTING
+ * to READY state. Use this to re-write configuration registers.
+ *
+ * @param dev        The FMC Ethernet bridge device
+ * @param user_data  User-provided context pointer
+ */
+typedef void (*eth_fmc_fpga_recover_cb_t)(const struct device *dev, void *user_data);
+
+/**
+ * @brief Check if FPGA is ready (has valid FMC responses).
+ *
+ * @return true if FPGA is programmed and operational, false otherwise
+ */
+bool eth_fmc_is_fpga_ready(void);
+
+/**
+ * @brief Wait for FPGA to become ready by polling FMC status.
+ *
+ * Polls the RX status registers. If all reads return 0xFF, the FPGA
+ * is considered not programmed. Once valid data is read, FPGA is ready.
+ *
+ * @param timeout_ms  Maximum time to wait in milliseconds (0 = no timeout)
+ * @return 0 if FPGA ready, -ETIMEDOUT on timeout
+ */
+int eth_fmc_wait_for_fpga_ready(uint32_t timeout_ms);
+
+/**
+ * @brief Register a callback for FPGA recovery events.
+ *
+ * The callback is invoked when the FPGA transitions to READY state
+ * after being in NOT_PROGRAMMED or RESETTING state. This allows the
+ * application to re-write all configuration registers.
+ *
+ * @param cb         Callback function (NULL to unregister)
+ * @param user_data  User-provided context pointer passed to callback
+ */
+void eth_fmc_register_fpga_recover_cb(eth_fmc_fpga_recover_cb_t cb, void *user_data);
+
 /**
  * @brief Write PTP configuration to FPGA register 0x55.
  *

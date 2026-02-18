@@ -1,7 +1,7 @@
 /*
  * Input Card Driver - 8-Channel ADC Preamp Board
  *
- * I2C control interface for the Input preamp board.
+ * I2C control interface for the Input preamp board. Protocol reverse engineered.
  *
  */
 
@@ -11,6 +11,10 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
+
+#if defined(CONFIG_DISPLAY_CTRL_AUTO_SYNC_MI_CARD)
+#include "../display_ctrl/display_ctrl.h"
+#endif
 
 #if defined(CONFIG_MI_CARD_NRST_GPIO)
 #include <zephyr/drivers/gpio.h>
@@ -496,6 +500,13 @@ int mi_card_set_phantom(uint8_t channel, bool enable)
 	if (ret == 0) {
 		LOG_INF("Channel %d phantom %s", channel,
 			enable ? "enabled" : "disabled");
+
+#if defined(CONFIG_DISPLAY_CTRL_AUTO_SYNC_MI_CARD)
+		/* Sync 48V LED with phantom power state */
+		if (display_ctrl_ready()) {
+			display_ctrl_set_48v_led(channel, enable);
+		}
+#endif
 	}
 
 	return ret;
@@ -544,6 +555,13 @@ int mi_card_set_mute(uint8_t channel, bool mute)
 
 	if (ret == 0) {
 		LOG_INF("Channel %d %s", channel, mute ? "muted" : "unmuted");
+
+#if defined(CONFIG_DISPLAY_CTRL_AUTO_SYNC_MI_CARD)
+		/* Sync Mute LED with mute state */
+		if (display_ctrl_ready()) {
+			display_ctrl_set_mute_led(channel, mute);
+		}
+#endif
 	}
 
 	return ret;

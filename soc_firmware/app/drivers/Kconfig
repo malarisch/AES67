@@ -3,6 +3,7 @@ rsource "eth_spi_basic/Kconfig.spi_basic"
 rsource "eth_fmc_basic/Kconfig.fmc_basic"
 rsource "si5351a/Kconfig.si5351a"
 rsource "mi_card/Kconfig.mi_card"
+rsource "display_ctrl/Kconfig.display_ctrl"
 endmenu
 mainmenu "Networking packet socket sample application"
 

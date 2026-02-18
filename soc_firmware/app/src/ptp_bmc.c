@@ -776,6 +776,42 @@ void ptp_bmc_notify_ip_ready(void)
 	LOG_INF("BMC: IP-ready notification received");
 }
 
+void ptp_bmc_notify_fpga_ready(void)
+{
+	LOG_INF("BMC: FPGA-ready notification - re-applying BMC state");
+
+	k_mutex_lock(&fm_mutex, K_FOREVER);
+
+	if (bmc_decision_valid) {
+		/* Determine the time source based on role */
+		uint8_t time_source;
+
+		if (current_role == PTP_ROLE_LEADER) {
+			/* We are leader - use internal oscillator */
+			time_source = PTP_TIME_SRC_INTERNAL_OSC;
+		} else {
+			/* We are follower - find master's time source if available */
+			time_source = PTP_TIME_SRC_INTERNAL_OSC; /* default */
+			for (int i = 0; i < foreign_master_count; i++) {
+				if (clock_id_cmp(current_best_master_id,
+						 foreign_masters[i].gm_identity) == 0) {
+					time_source = foreign_masters[i].time_source;
+					break;
+				}
+			}
+		}
+
+		fpga_apply_bmc_decision(current_role, current_best_master_id,
+					time_source,
+					AES67_LOG_MSG_INTERVAL_SYNC,
+					AES67_LOG_MSG_INTERVAL_ANNOUNCE);
+	} else {
+		LOG_WRN("BMC: No valid BMC decision yet - FPGA not configured");
+	}
+
+	k_mutex_unlock(&fm_mutex);
+}
+
 enum ptp_bmc_role ptp_bmc_get_role(void)
 {
 	return current_role;

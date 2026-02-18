@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config DISPLAY_CTRL
+	bool "Display Controller (LEDs, Buttons, 7-Segment)"
+	depends on UART_INTERRUPT_DRIVEN
+	help
+	  Enable driver for the front panel display controller.
+	  
+	  Communication is via UART at 115200 baud.
+
+if DISPLAY_CTRL
+
+config DISPLAY_CTRL_LOG_LEVEL
+	int "Display controller log level"
+	default 3
+	range 0 4
+	help
+	  Log level for display controller driver.
+	  0 = OFF, 1 = ERR, 2 = WRN, 3 = INF, 4 = DBG
+
+config DISPLAY_CTRL_INIT_PRIORITY
+	int "Display controller initialization priority"
+	default 85
+	help
+	  Device driver initialization priority.
+	  Must be initialized after UART.
+
+config DISPLAY_CTRL_UART_BAUD
+	int "UART baud rate"
+	default 115200
+	help
+	  Baud rate for communication with the display controller.
+
+config DISPLAY_CTRL_AUTO_SYNC_MI_CARD
+	bool "Auto-sync with MI card driver"
+	default y
+	depends on MI_CARD
+	help
+	  Automatically update 48V and Mute LEDs when MI card
+	  phantom and mute states change.
+
+config DISPLAY_CTRL_NRST_GPIO
+	bool "Enable hardware reset via nRST GPIO"
+	default y
+	depends on GPIO
+	help
+	  Enable hardware reset functionality via a dedicated GPIO pin.
+	  The GPIO is active-low (asserted low to reset the display controller).
+
+config DISPLAY_CTRL_NRST_PULSE_MS
+	int "nRST pulse duration in milliseconds"
+	default 50
+	range 1 500
+	depends on DISPLAY_CTRL_NRST_GPIO
+	help
+	  Duration of the reset pulse in milliseconds.
+
+config DISPLAY_CTRL_NRST_RECOVERY_MS
+	int "Post-reset recovery time in milliseconds"
+	default 200
+	range 10 1000
+	depends on DISPLAY_CTRL_NRST_GPIO
+	help
+	  Time to wait after releasing reset before UART communication.
+
+endif # DISPLAY_CTRL

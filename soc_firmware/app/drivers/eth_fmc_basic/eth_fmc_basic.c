@@ -19,29 +19,79 @@
 
 LOG_MODULE_REGISTER(eth_fmc_basic, CONFIG_ETHERNET_LOG_LEVEL);
 
-/* FPGA Ready Pin */
-static const struct gpio_dt_spec fpga_ready = GPIO_DT_SPEC_GET(DT_NODELABEL(fpga_ready), gpios);
+/* ---- FPGA Ready State Management ---- */
+typedef enum {
+	FPGA_STATE_UNKNOWN,      /* Initial state, not yet polled */
+	FPGA_STATE_NOT_PROGRAMMED, /* Reading 0xFF - FPGA not configured */
+	FPGA_STATE_RESETTING,    /* Detected 65535 length - FPGA resetting */
+	FPGA_STATE_READY,        /* Valid data - FPGA operational */
+} fpga_state_t;
 
-bool fpga_ready_status = false;
+static fpga_state_t fpga_state = FPGA_STATE_UNKNOWN;
+static eth_fmc_fpga_recover_cb_t fpga_recover_callback = NULL;
+static void *fpga_recover_user_data = NULL;
+static struct k_spinlock fpga_state_lock;
+
+/* Forward declaration */
+static const struct eth_fmc_basic_config eth_fmc_basic_cfg_0;
+
+/**
+ * @brief Check if FMC reads indicate FPGA not programmed (all 0xFF)
+ */
+static bool fmc_reads_all_ff(uintptr_t base)
+{
+	uint8_t status = *((volatile uint8_t *)(base + 0x22)); /* REG_RX_STATUS */
+	uint8_t len_l  = *((volatile uint8_t *)(base + 0x20)); /* REG_RX_LEN_L */
+	uint8_t len_h  = *((volatile uint8_t *)(base + 0x21)); /* REG_RX_LEN_H */
+	
+	/* If all reads return 0xFF, FPGA is not programmed */
+	return (status == 0xFF && len_l == 0xFF && len_h == 0xFF);
+}
+
+/**
+ * @brief Update FPGA state based on FMC read results
+ * @return true if state changed to READY (trigger reconfiguration)
+ */
+static bool update_fpga_state(uintptr_t base, uint16_t rx_len, uint8_t rx_status)
+{
+	k_spinlock_key_t key = k_spin_lock(&fpga_state_lock);
+	fpga_state_t prev_state = fpga_state;
+	fpga_state_t new_state = prev_state;
+	bool trigger_recover = false;
+	
+	/* Check for FPGA not programmed (all 0xFF) */
+	if (rx_status == 0xFF && (rx_len == 0xFFFF || rx_len == 65535)) {
+		new_state = FPGA_STATE_NOT_PROGRAMMED;
+	}
+	/* Check for FPGA resetting (overflow with len 65535) */
+	else if (rx_len == 65535 && (rx_status & 0x02)) { /* RX_STATUS_OVF */
+		new_state = FPGA_STATE_RESETTING;
+	}
+	/* Valid data - FPGA is ready */
+	else if (rx_status != 0xFF) {
+		new_state = FPGA_STATE_READY;
+		/* Trigger recovery callback if transitioning TO ready */
+		if (prev_state != FPGA_STATE_READY && prev_state != FPGA_STATE_UNKNOWN) {
+			trigger_recover = true;
+		}
+	}
+	
+	if (new_state != prev_state) {
+		fpga_state = new_state;
+		const char *state_names[] = {"UNKNOWN", "NOT_PROGRAMMED", "RESETTING", "READY"};
+		LOG_INF("FPGA state: %s -> %s", state_names[prev_state], state_names[new_state]);
+	}
+	
+	k_spin_unlock(&fpga_state_lock, key);
+	return trigger_recover;
+}
 
 static bool is_fpga_ready(void)
 {
-	if (!gpio_is_ready_dt(&fpga_ready)) {
-		if (fpga_ready_status) {
-			fpga_ready_status = false;
-			LOG_ERR("FPGA got unavailable");
-
-		}
-		LOG_INF("FPGA is down");
-		return false;
-	}
-	if(!fpga_ready_status) {
-		LOG_INF("FPGA got up");
-		fpga_ready_status = true;
-	}
-	
-	
-	return gpio_pin_get_dt(&fpga_ready) > 0;
+	k_spinlock_key_t key = k_spin_lock(&fpga_state_lock);
+	bool ready = (fpga_state == FPGA_STATE_READY);
+	k_spin_unlock(&fpga_state_lock, key);
+	return ready;
 }
 
 /* Register map identical to SPI bridge */
@@ -174,6 +224,60 @@ int eth_fmc_reg_read_block(const struct device *dev, uint8_t reg,
 	k_spin_unlock(&drv_data->lock, key);
 
 	return 0;
+}
+
+/* ---- Public FPGA state API ---- */
+
+bool eth_fmc_is_fpga_ready(void)
+{
+	return is_fpga_ready();
+}
+
+int eth_fmc_wait_for_fpga_ready(uint32_t timeout_ms)
+{
+	uintptr_t base = eth_fmc_basic_cfg_0.base;
+	uint32_t elapsed = 0;
+	const uint32_t poll_interval_ms = 100;
+	
+	LOG_INF("Waiting for FPGA (polling FMC status)...");
+	
+	while (1) {
+		/* Read RX status registers */
+		uint8_t len_l  = *((volatile uint8_t *)(base + 0x20));
+		uint8_t len_h  = *((volatile uint8_t *)(base + 0x21));
+		uint8_t status = *((volatile uint8_t *)(base + 0x22));
+		uint16_t rx_len = ((uint16_t)len_h << 8) | len_l;
+		
+		/* Update state machine */
+		update_fpga_state(base, rx_len, status);
+		
+		if (is_fpga_ready()) {
+			LOG_INF("FPGA ready after %u ms", elapsed);
+			return 0;
+		}
+		
+		if (timeout_ms > 0 && elapsed >= timeout_ms) {
+			LOG_ERR("Timeout waiting for FPGA (%u ms)", timeout_ms);
+			return -ETIMEDOUT;
+		}
+		
+		k_msleep(poll_interval_ms);
+		elapsed += poll_interval_ms;
+		
+		/* Log progress every 5 seconds */
+		if (elapsed % 5000 == 0) {
+			LOG_INF("Still waiting for FPGA... (%u ms, status=0x%02x len=%u)",
+				elapsed, status, rx_len);
+		}
+	}
+}
+
+void eth_fmc_register_fpga_recover_cb(eth_fmc_fpga_recover_cb_t cb, void *user_data)
+{
+	k_spinlock_key_t key = k_spin_lock(&fpga_state_lock);
+	fpga_recover_callback = cb;
+	fpga_recover_user_data = user_data;
+	k_spin_unlock(&fpga_state_lock, key);
 }
 
 /* ---- Convenience helpers ---- */
@@ -381,9 +485,22 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 			(void)atomic_inc(&data->rx_wake_count);
 		} else {
 			k_sleep(K_MSEC(CONFIG_ETH_FMC_POLL_INTERVAL_MS));
-			if (!is_fpga_ready()) {
-				continue;
+		}
+		
+		/* Skip RX processing if FPGA not ready */
+		if (!is_fpga_ready()) {
+			/* Poll FMC to update state */
+			uint8_t len_l = fmc_read8(cfg->base, REG_RX_LEN_L);
+			uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
+			uint8_t status = fmc_read8(cfg->base, REG_RX_STATUS);
+			uint16_t rx_len = ((uint16_t)len_h << 8) | len_l;
+			
+			bool trigger_recover = update_fpga_state(cfg->base, rx_len, status);
+			if (trigger_recover && fpga_recover_callback) {
+				LOG_INF("FPGA recovered - triggering reconfiguration");
+				fpga_recover_callback(dev, fpga_recover_user_data);
 			}
+			continue;
 		}
 
 		/* Loop while interrupt pin is active or first pass.
@@ -416,6 +533,17 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 				uint8_t len_h = fmc_read8(cfg->base, REG_RX_LEN_H);
 				status = fmc_read8(cfg->base, REG_RX_STATUS);
 				pkt_len = ((uint16_t)len_h << 8) | len_l;
+				
+				/* Check for FPGA reset condition: len=65535 with overflow */
+				if (pkt_len == 65535 && (status & RX_STATUS_OVF)) {
+					bool trigger_recover = update_fpga_state(cfg->base, pkt_len, status);
+					k_spin_unlock(&data->lock, key);
+					if (trigger_recover && fpga_recover_callback) {
+						LOG_INF("FPGA recovered from reset - triggering reconfiguration");
+						fpga_recover_callback(dev, fpga_recover_user_data);
+					}
+					break;
+				}
 			}
 
 			if (!from_isr && !(status & RX_STATUS_READY)) {
@@ -552,11 +680,8 @@ static int eth_fmc_basic_init(const struct device *dev)
 	LOG_INF("Initializing FMC Ethernet Bridge at 0x%lx", 
 		cfg->base);
 
-	if (!gpio_is_ready_dt(&fpga_ready)) {
-		LOG_ERR("FPGA Ready GPIO not ready");
-		return -ENODEV;
-	}
-	gpio_pin_configure_dt(&fpga_ready, GPIO_INPUT);
+	/* Initialize FPGA state to unknown - will be determined by FMC reads */
+	fpga_state = FPGA_STATE_UNKNOWN;
 
 	//k_mutex_init(&data->io_lock);
 	k_sem_init(&data->int_sem, 0, 1);

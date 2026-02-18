@@ -130,6 +130,21 @@
 	};
 };
 
+/* ---- Display Controller nRST GPIO (PA9 active-low) ---- */
+/ {
+	display_ctrl_gpios {
+		compatible = "gpio-leds";
+		dc_nrst: dc_nrst {
+			gpios = <&gpioa 9 GPIO_ACTIVE_LOW>;
+			label = "Display Ctrl nRST";
+		};
+	};
+
+	aliases {
+		dc-nrst = &dc_nrst;
+	};
+};
+
 /* Disable user_button to prevent conflict on PC13 */
 &user_button {
 	status = "disabled";
@@ -196,6 +211,15 @@
 	status = "okay";
 };
 
+/* Display Controller UART (UART4 on PC10/PC11) - 115200 baud */
+/* Controls front panel LEDs, buttons, and 7-segment displays */
+&uart4 {
+	pinctrl-0 = <&uart4_tx_pc10 &uart4_rx_pc11>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
 /* 
  * Define an MPU region for the FMC bank 1 (0x60000000).
  * This is critical to prevent speculative access crashes on Cortex-M7
@@ -216,6 +240,10 @@
 		zephyr,console = &usart3;
 		zephyr,shell-uart = &usart3;
 		zephyr,display = &ssd1306;
+	};
+
+	aliases {
+		display-ctrl-uart = &uart4;
 	};
 
 	fpga_ctrl {

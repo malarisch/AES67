@@ -1,5 +1,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/net/net_mgmt.h>
@@ -15,6 +16,9 @@
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
+#ifdef CONFIG_DISPLAY_CTRL
+#include "../drivers/display_ctrl/display_ctrl.h"
+#endif
 #include "ui_display.h"
 #include "ptp_bmc.h"
 #include "sap_sdp.h"
@@ -22,6 +26,12 @@
 #include "aes67_config.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+
+/* Forward declarations for FPGA recovery */
+static void fpga_reconfigure(const struct device *dev, void *user_data);
+static struct net_if *g_iface; /* Cached for recovery callback */
+static struct in_addr g_my_ip; /* Cached IP address for recovery */
+static bool g_ip_valid;        /* true after DHCP bound */
 
 /* ---- FPGA configuration helpers ---- */
 
@@ -124,6 +134,10 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 	LOG_INF("DHCP bound: %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 
+	/* Cache IP for FPGA recovery */
+	g_my_ip = dhcpv4->requested_ip;
+	g_ip_valid = true;
+
 	/* Push the new IP address to the FPGA */
 	fpga_write_ip_address(&dhcpv4->requested_ip);
 	ui_display_set_ip(&dhcpv4->requested_ip);
@@ -131,8 +145,46 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 	/* Unblock the BMC thread now that we have a valid IP on the FPGA */
 	ptp_bmc_notify_ip_ready();
 
+#ifdef CONFIG_DISPLAY_CTRL
+	/* Update display to show PTP listening status */
+	if (display_ctrl_ready()) {
+		display_ctrl_show_status("L  PTP");
+	}
+#endif
+
 	/* Notify SAP/SDP module of the assigned IP */
 	sap_sdp_notify_ip_ready(&dhcpv4->requested_ip);
+}
+
+/* ---- FPGA Recovery Callback ---- */
+
+/**
+ * @brief Re-write all FPGA configuration registers after FPGA reset.
+ *
+ * Called by the FMC driver when it detects the FPGA transitioning from
+ * NOT_PROGRAMMED or RESETTING to READY state.
+ */
+static void fpga_reconfigure(const struct device *dev, void *user_data)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+
+	LOG_INF("FPGA recovery: re-writing configuration registers");
+
+	if (g_iface) {
+		/* Re-write MAC address */
+		fpga_write_mac_address(g_iface);
+
+		/* Re-write IP address if we have one */
+		if (g_ip_valid) {
+			fpga_write_ip_address(&g_my_ip);
+		}
+	}
+
+	/* Re-notify PTP BMC to re-send leader config if applicable */
+	ptp_bmc_notify_fpga_ready();
+
+	LOG_INF("FPGA recovery complete");
 }
 
 /* ---- Legacy test code (unused) ---- */
@@ -264,6 +316,7 @@ static struct {
 /**
  * @brief Called by the BMC whenever the PTP state changes (role or leader).
  *        Resets the PI controller warm-up so outlier rejection re-arms.
+ *        Updates status LEDs to reflect current PTP role.
  */
 static void on_bmc_change(enum ptp_bmc_role new_role)
 {
@@ -272,6 +325,36 @@ static void on_bmc_change(enum ptp_bmc_role new_role)
 	pi_state.output     = 0;
 	pi_state.cycle      = 0;
 	pi_state.outliers   = 0;
+
+#ifdef CONFIG_DISPLAY_CTRL
+	/* Update status LEDs and display based on PTP role */
+	if (display_ctrl_ready()) {
+		switch (new_role) {
+		case PTP_ROLE_LEADER:
+			/* Master mode: Master LED ON, Ext LED OFF */
+			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_ON);
+			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
+			display_ctrl_show_status("LEADDR");
+			LOG_INF("LED: Master ON, Ext OFF");
+			break;
+		case PTP_ROLE_FOLLOWER:
+			/* Follower mode: Master LED OFF, Ext LED ON */
+			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_OFF);
+			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_ON);
+			display_ctrl_show_status("SYNCNG");
+			LOG_INF("LED: Master OFF, Ext ON");
+			break;
+		case PTP_ROLE_LISTENING:
+		default:
+			/* Listening: Both LEDs blink */
+			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_BLINK1);
+			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
+			display_ctrl_show_status("L  PTP");
+			LOG_INF("LED: Master BLINK, Ext OFF (listening)");
+			break;
+		}
+	}
+#endif
 }
 
 static struct ui_fpga_metrics disp_metrics = {
@@ -352,11 +435,12 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				unsigned speed_code = (eth_status &
 						       ETH_FMC_ETH_SPEED_MASK) >>
 						      ETH_FMC_ETH_SPEED_SHIFT;
-				const char *speed_str =
-					(speed_code == 0) ? "10M" :
-					(speed_code == 1) ? "100M" :
-					(speed_code == 2) ? "1G" : "?";
+				ARG_UNUSED(speed_code); /* Used conditionally below */
 
+				//const char *speed_str =
+				//	(speed_code == 0) ? "10M" :
+				//	(speed_code == 1) ? "100M" :
+				//	(speed_code == 2) ? "1G" : "?";
 				//LOG_INF("ETH flags: link_up=%d speed=%s",
 				//	!!(eth_status & ETH_FMC_ETH_LINK_UP),
 				//	speed_str);
@@ -365,6 +449,28 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					!!(eth_status & ETH_FMC_ETH_LINK_UP);
 				disp_metrics.speed_code = speed_code;
 			}
+
+#ifdef CONFIG_DISPLAY_CTRL
+			/* Update status LEDs based on FPGA status */
+			if (display_ctrl_ready()) {
+				static bool prev_wc_locked = false;
+				static bool prev_link_up = false;
+
+				/* 48K LED: ON when wallclock is locked */
+				if (disp_metrics.wc_locked != prev_wc_locked) {
+					display_ctrl_set_sys_led(DC_SYSLED_48K,
+						disp_metrics.wc_locked ? DC_SYSLED_ON : DC_SYSLED_OFF);
+					prev_wc_locked = disp_metrics.wc_locked;
+				}
+
+				/* LIP LED: ON when Ethernet link is up */
+				if (disp_metrics.link_up != prev_link_up) {
+					display_ctrl_set_sys_led(DC_SYSLED_LIP,
+						disp_metrics.link_up ? DC_SYSLED_ON : DC_SYSLED_OFF);
+					prev_link_up = disp_metrics.link_up;
+				}
+			}
+#endif
 
 			/* 0x52 - Path delay */
 			int32_t path_delay;
@@ -510,29 +616,11 @@ static struct k_thread ppb_poll_thread_data;
 
 int main(void)
 {
-	struct net_if *iface = net_if_get_default();
-	// uint8_t seq = 0;
+	LOG_INF("AES67 System starting...");
 
-	LOG_INF("Starting raw Ethernet TX demo");
-
-	printk("MAIN: Starting loop\n");
-
-    if (!iface) {
-        LOG_ERR("No network interface found");
-        return -1;
-    }
-
+	/* ---- Early Initialization (before FPGA ready) ---- */
 	ui_display_init();
-	/*while (1) {
-		static uint8_t seq = 0;
-		if (send_raw_frame(iface, seq) == 0) {
-			LOG_INF("Sent raw Ethernet frame with seq %u and length %u", seq, frame_len);
-			seq++;
-		} else {
-			LOG_ERR("Failed to send raw Ethernet frame");
-		}
-		k_msleep(SEND_INTERVAL_MS);
-	}'*/
+
     /* ---- Si5351A Clock Generator Setup ---- */
     const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
 
@@ -576,8 +664,62 @@ int main(void)
     }
 #endif
 
+#ifdef CONFIG_DISPLAY_CTRL
+    /* ---- Display Controller (LEDs, Buttons, 7-Segment) Setup ---- */
+#ifdef CONFIG_DISPLAY_CTRL_NRST_GPIO
+    /* Initialize nRST GPIO first */
+    if (display_ctrl_nrst_gpio_init() < 0) {
+        LOG_WRN("Display controller nRST GPIO init failed (hw reset unavailable)");
+    } else {
+        /* Perform hardware reset to ensure clean state */
+        display_ctrl_hw_reset();
+    }
+#endif
+    const struct device *dc_uart = DEVICE_DT_GET(DT_ALIAS(display_ctrl_uart));
+    if (!device_is_ready(dc_uart)) {
+        LOG_WRN("Display controller UART not ready");
+    } else {
+        int dc_ret = display_ctrl_init(dc_uart);
+        if (dc_ret < 0) {
+            LOG_WRN("Display controller init failed: %d", dc_ret);
+        } else {
+            LOG_INF("Display controller initialized");
+            /* Clear all LEDs and displays on startup */
+            display_ctrl_all_off();
+            /* Show boot status: waiting for FPGA */
+            display_ctrl_show_status("  FPGA");
+        }
+    }
+#endif
+
+    /* ---- Wait for FPGA to be ready before network operations ---- */
+    if (eth_fmc_wait_for_fpga_ready(30000) < 0) {
+        LOG_ERR("FPGA not ready after 30s - network services will not start");
+        return -1;
+    }
+
+    /* ---- Network Initialization (after FPGA ready) ---- */
+    struct net_if *iface = net_if_get_default();
+    if (!iface) {
+        LOG_ERR("No network interface found");
+        return -1;
+    }
+    
+    /* Cache interface for FPGA recovery callback */
+    g_iface = iface;
+    
+    /* Register FPGA recovery callback for automatic reconfiguration */
+    eth_fmc_register_fpga_recover_cb(fpga_reconfigure, NULL);
+
     /* ---- Write MAC address to FPGA ---- */
     fpga_write_mac_address(iface);
+
+#ifdef CONFIG_DISPLAY_CTRL
+    /* Update display: waiting for DHCP */
+    if (display_ctrl_ready()) {
+        display_ctrl_show_status("  DHCP");
+    }
+#endif
 
     /* ---- Register DHCP event handler to push IP to FPGA ---- */
     net_mgmt_init_event_callback(&dhcp_cb, on_dhcp_bound,

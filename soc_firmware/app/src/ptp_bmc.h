@@ -141,6 +141,12 @@ void ptp_bmc_register_change_cb(ptp_bmc_change_cb_t cb);
 void ptp_bmc_notify_ip_ready(void);
 
 /**
+ * @brief Notify the BMC that the FPGA has recovered (after reset/reprogram).
+ *        Re-sends leader configuration to FPGA if we are currently leader.
+ */
+void ptp_bmc_notify_fpga_ready(void);
+
+/**
  * @brief Get the current BMC role.
  */
 enum ptp_bmc_role ptp_bmc_get_role(void);
