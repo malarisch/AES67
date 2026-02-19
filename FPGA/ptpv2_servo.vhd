@@ -78,8 +78,8 @@ end entity;
 
 architecture Behavioral of ptpv2_servo is
 
-    -- Filtered offset - full 32 bits to handle offsets up to PHASE_JUMP_THRESHOLD
-    signal filtered_offset : signed(31 downto 0) := (others => '0');
+    -- Filtered offset - 25 bits handles offsets up to PHASE_JUMP_THRESHOLD (10M < 16M)
+    signal filtered_offset : signed(24 downto 0) := (others => '0');
     
     -- PI controller state - narrowed to 20 bits
     -- Both are clamped to ±500,000; 2^19 = 524,288 > 500,000
@@ -106,17 +106,20 @@ architecture Behavioral of ptpv2_servo is
     
     -- ============================================
     -- Median filter for outlier rejection (5 samples)
+    -- OPTIMIZATION: 25-bit buffer since values > PHASE_JUMP_THRESHOLD (10M)
+    -- trigger immediate phase jump. 25 bits handles ±16M with saturation.
     -- ============================================
     constant MEDIAN_SIZE : integer := 5;
-    type sample_buffer_t is array(0 to MEDIAN_SIZE-1) of signed(31 downto 0);
+    constant MEDIAN_SAT_LIMIT : signed(24 downto 0) := to_signed(10_000_000, 25);  -- Match PHASE_JUMP_THRESHOLD
+    type sample_buffer_t is array(0 to MEDIAN_SIZE-1) of signed(24 downto 0);
     
     -- Sample buffer (circular) - only offset needs median filtering
     signal offset_buffer      : sample_buffer_t := (others => (others => '0'));
     signal buffer_write_idx   : integer range 0 to MEDIAN_SIZE-1 := 0;
     signal buffer_fill_count  : integer range 0 to MEDIAN_SIZE := 0;
     
-    -- Median-filtered values
-    signal median_offset      : signed(31 downto 0) := (others => '0');
+    -- Median-filtered values (25 bits; values > PHASE_JUMP_THRESHOLD trigger phase jump)
+    signal median_offset      : signed(24 downto 0) := (others => '0');
     signal median_valid       : std_logic := '0';
     
     -- Sanity check: reject obviously invalid measurements (> 1s)
@@ -135,29 +138,61 @@ architecture Behavioral of ptpv2_servo is
     -- The combinational sorting network was the critical timing path (~23ns).
     -- Pipeline spreads the 5-element sort over 5 clock cycles (~3ns per stage).
     -- calc_valid pulses arrive millions of cycles apart, so latency is invisible.
+    -- OPTIMIZATION: Only 25 bits needed since values > 10M trigger phase jump anyway.
     type median_state_t is (M_IDLE, M_STAGE1, M_STAGE2, M_STAGE3, M_SELECT);
     signal median_state   : median_state_t := M_IDLE;
-    signal sort_a, sort_b, sort_c, sort_d, sort_e : signed(31 downto 0) := (others => '0');
+    signal sort_a, sort_b, sort_c, sort_d, sort_e : signed(24 downto 0) := (others => '0');
     signal median_trigger : std_logic := '0';
     
     -- ============================================
     -- Pipelined PI controller signals
     -- The combinational path filtered_offset -> freq_correction was ~15ns.
-    -- Pipeline spreads the PI calculation over 5 clock cycles.
+    -- Pipeline spreads the PI calculation over 4 clock cycles.
     -- calc_valid pulses arrive millions of cycles apart (1-8 Hz), so latency is invisible.
+    --
+    -- OPTIMIZATION: Register widths are minimized based on:
+    --   - Output clamped to ±500,000 (needs 20 bits)
+    --   - Max useful input: 500,000 * 64 / 13 ≈ 2,500,000 (needs 22 bits)
+    --   - Multiply 22-bit × 4-bit = 26 bits (KP/KI max ~16)
+    --   - After shift by 6: 20 bits
     -- ============================================
-    type pi_state_t is (PI_IDLE, PI_MULT, PI_SHIFT, PI_CLAMP, PI_OUTPUT);
+    type pi_state_t is (PI_IDLE, PI_MULT, PI_CLAMP, PI_OUTPUT);
     signal pi_state       : pi_state_t := PI_IDLE;
     signal pi_trigger     : std_logic := '0';
     
-    -- Pipeline registers for PI calculation
-    signal pi_input       : signed(31 downto 0) := (others => '0');  -- Latched filtered_offset
-    signal pi_mult_p      : signed(47 downto 0) := (others => '0');  -- KP multiplication result
-    signal pi_mult_i      : signed(47 downto 0) := (others => '0');  -- KI multiplication result
-    signal pi_shifted_p   : signed(47 downto 0) := (others => '0');  -- Shifted P term
-    signal pi_shifted_i   : signed(47 downto 0) := (others => '0');  -- Shifted I term
+    -- Clamped input limit: values beyond this saturate the output anyway
+    constant PI_INPUT_LIMIT : signed(21 downto 0) := to_signed(2_500_000, 22);
+    
+    -- Pipeline registers for PI calculation (optimized widths)
+    signal pi_input       : signed(21 downto 0) := (others => '0');  -- Clamped input (22 bit)
+    signal pi_mult_p      : signed(25 downto 0) := (others => '0');  -- 22 + 4 bit for KP
+    signal pi_mult_i      : signed(25 downto 0) := (others => '0');  -- 22 + 4 bit for KI
     signal pi_proportional: signed(19 downto 0) := (others => '0');  -- Clamped proportional
     signal pi_int_update  : signed(19 downto 0) := (others => '0');  -- Integral update value
+    
+    -- ============================================
+    -- INPUT PROCESSING PIPELINE
+    -- Critical timing path was: buffer_fill_count → offset_sample mux →
+    -- offset_abs calculation → phase_jump decision → offset_buffer reset
+    -- This 4-stage pipeline breaks the 11ns path into ~3ns stages.
+    -- ============================================
+    type input_state_t is (INP_IDLE, INP_SELECT, INP_DECIDE, INP_ACTION);
+    signal input_state       : input_state_t := INP_IDLE;
+    
+    -- Stage 1 registers: Captured and saturated input
+    signal inp_offset_sat    : signed(24 downto 0) := (others => '0');  -- Saturated input
+    signal inp_write_idx     : integer range 0 to MEDIAN_SIZE-1 := 0;   -- Where to write
+    signal inp_fill_was_full : std_logic := '0';                        -- Was buffer full?
+    
+    -- Stage 2 registers: Selected offset and absolute value
+    signal inp_offset_selected : signed(31 downto 0) := (others => '0');
+    signal inp_offset_abs      : signed(31 downto 0) := (others => '0');
+    signal inp_valid_meas      : std_logic := '0';  -- offset_abs < MAX_VALID_OFFSET
+    
+    -- Stage 3 registers: Decision results
+    signal inp_do_phase_jump   : std_logic := '0';
+    signal inp_phase_jump_val  : signed(31 downto 0) := (others => '0');
+    signal inp_do_normal_op    : std_logic := '0';
     
 begin
 
@@ -183,9 +218,7 @@ begin
 
     
     servo_proc: process(clk, reset_n)
-        variable offset_sample   : signed(31 downto 0);
-        variable offset_abs      : signed(31 downto 0);
-        variable filter_delta    : signed(31 downto 0);  -- Same width as filtered_offset
+        variable filter_delta    : signed(24 downto 0);  -- Same width as filtered_offset
     begin
         if reset_n = '0' then
             filtered_offset <= (others => '0');
@@ -219,10 +252,19 @@ begin
             pi_input <= (others => '0');
             pi_mult_p <= (others => '0');
             pi_mult_i <= (others => '0');
-            pi_shifted_p <= (others => '0');
-            pi_shifted_i <= (others => '0');
             pi_proportional <= (others => '0');
             pi_int_update <= (others => '0');
+            -- Input processing pipeline reset
+            input_state <= INP_IDLE;
+            inp_offset_sat <= (others => '0');
+            inp_write_idx <= 0;
+            inp_fill_was_full <= '0';
+            inp_offset_selected <= (others => '0');
+            inp_offset_abs <= (others => '0');
+            inp_valid_meas <= '0';
+            inp_do_phase_jump <= '0';
+            inp_phase_jump_val <= (others => '0');
+            inp_do_normal_op <= '0';
             
         elsif rising_edge(clk) then
             -- Default: no phase jump this cycle, clear timeout pulse
@@ -295,46 +337,44 @@ begin
             
             -- ============================================
             -- PIPELINED PI CONTROLLER
-            -- Spreads the PI calculation over 4 clock cycles:
-            --   PI_MULT:   Perform 32x16 multiplications
-            --   PI_SHIFT:  Shift results for gain scaling
-            --   PI_CLAMP:  Clamp P term, calculate I update
+            -- Spreads the PI calculation over 3 clock cycles:
+            --   PI_MULT:   Clamp input, perform multiplications
+            --   PI_CLAMP:  Shift, clamp P term, calculate I update
             --   PI_OUTPUT: Add P+I, clamp final output
+            --
+            -- OPTIMIZATION: Input is pre-clamped to ±2.5M so multiply
+            -- results fit in 26 bits. This saves ~44 LUTs per 48→26 bit.
             -- ============================================
             pi_trigger <= '0';  -- Default: clear trigger each cycle
             
             case pi_state is
                 when PI_IDLE =>
                     if pi_trigger = '1' then
-                        -- Latch filtered_offset and start multiplication
-                        pi_input <= filtered_offset;
+                        -- Clamp filtered_offset to useful range before multiplication
+                        -- Values beyond PI_INPUT_LIMIT would saturate output anyway
+                        if filtered_offset > resize(PI_INPUT_LIMIT, 25) then
+                            pi_input <= PI_INPUT_LIMIT;
+                        elsif filtered_offset < -resize(PI_INPUT_LIMIT, 25) then
+                            pi_input <= -PI_INPUT_LIMIT;
+                        else
+                            pi_input <= resize(filtered_offset, 22);
+                        end if;
                         pi_state <= PI_MULT;
                     end if;
                     
                 when PI_MULT =>
-                    -- Perform both multiplications (32-bit × 16-bit = 48-bit)
-                    pi_mult_p <= pi_input * to_signed(KP_GAIN, 16);
-                    pi_mult_i <= pi_input * to_signed(KI_GAIN, 16);
-                    pi_state <= PI_SHIFT;
-                    
-                when PI_SHIFT =>
-                    -- Shift for gain scaling
-                    pi_shifted_p <= shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT);
-                    pi_shifted_i <= shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + 2);
+                    -- Perform both multiplications (22-bit × 4-bit = 26-bit)
+                    pi_mult_p <= pi_input * to_signed(KP_GAIN, 4);
+                    pi_mult_i <= pi_input * to_signed(KI_GAIN, 4);
                     pi_state <= PI_CLAMP;
                     
                 when PI_CLAMP =>
-                    -- Clamp proportional term to ±500,000 (and negate)
-                    if pi_shifted_p > to_signed(500_000, 48) then
-                        pi_proportional <= to_signed(-500_000, 20);
-                    elsif pi_shifted_p < to_signed(-500_000, 48) then
-                        pi_proportional <= to_signed(500_000, 20);
-                    else
-                        pi_proportional <= -resize(pi_shifted_p, 20);
-                    end if;
+                    -- Shift and clamp proportional term (negate for correction direction)
+                    -- After shift by 6, result fits in 20 bits due to input clamping
+                    pi_proportional <= -resize(shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT), 20);
                     
                     -- Calculate integral update (will clamp in next stage)
-                    pi_int_update <= integral_sum - resize(pi_shifted_i, 20);
+                    pi_int_update <= integral_sum - resize(shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + 2), 20);
                     pi_state <= PI_OUTPUT;
                     
                 when PI_OUTPUT =>
@@ -413,143 +453,189 @@ begin
                 end if;
             end if;
             
-            if calc_valid_i = '1' then
-                -- ============================================
-                -- MEDIAN FILTER: Store samples and calculate median
-                -- ============================================
-                
-                -- Store new offset sample in circular buffer
-                offset_buffer(buffer_write_idx) <= offset_from_master_i;
-                
-                -- Update write index (circular)
-                if buffer_write_idx = MEDIAN_SIZE - 1 then
-                    buffer_write_idx <= 0;
-                else
-                    buffer_write_idx <= buffer_write_idx + 1;
-                end if;
-                
-                -- Track how many samples we have
-                if buffer_fill_count < MEDIAN_SIZE then
-                    buffer_fill_count <= buffer_fill_count + 1;
-                end if;
-                
-                -- Calculate median when buffer is full
-                if buffer_fill_count >= MEDIAN_SIZE - 1 then  -- Will be MEDIAN_SIZE after this cycle
-                    -- Trigger pipelined median computation (result in ~5 clock cycles)
-                    median_trigger <= '1';
-                else
-                    -- Not enough samples yet - use raw value directly
-                    median_offset <= offset_from_master_i;
-                    median_valid  <= '0';
-                end if;
-                
-                -- Use median-filtered offset for processing
-                if buffer_fill_count >= MEDIAN_SIZE then
-                    offset_sample := median_offset;
-                else
-                    offset_sample := offset_from_master_i;
-                end if;
-                
-                -- Calculate absolute offset for threshold comparisons
-                if offset_sample < 0 then
-                    offset_abs := -offset_sample;
-                else
-                    offset_abs := offset_sample;
-                end if;
-                
-                -- ============================================
-                -- SANITY CHECK: Reject invalid measurements
-                -- ============================================
-                if offset_abs < MAX_VALID_OFFSET then
-                    
-                    -- Count valid samples (only up to warmup threshold + 1)
-                    if sample_count <= WARMUP_SAMPLES then
-                        sample_count <= sample_count + 1;
+            -- ============================================
+            -- PIPELINED INPUT PROCESSING
+            -- Breaks the critical path: buffer_fill_count → offset_buffer
+            -- into 4 stages with ~3ns each (was ~11ns combinational).
+            --
+            -- Stage 1 (CAPTURE): Register input, write buffer, update indices
+            -- Stage 2 (SELECT):  Choose median vs raw, compute abs value
+            -- Stage 3 (DECIDE):  Determine phase_jump vs normal operation
+            -- Stage 4 (ACTION):  Execute the decided action
+            -- ============================================
+            case input_state is
+                when INP_IDLE =>
+                    if calc_valid_i = '1' then
+                        -- ========== STAGE 1: CAPTURE ==========
+                        -- Saturate input to 25-bit and store metadata
+                        if offset_from_master_i > resize(MEDIAN_SAT_LIMIT, 32) then
+                            inp_offset_sat <= MEDIAN_SAT_LIMIT;
+                        elsif offset_from_master_i < -resize(MEDIAN_SAT_LIMIT, 32) then
+                            inp_offset_sat <= -MEDIAN_SAT_LIMIT;
+                        else
+                            inp_offset_sat <= resize(offset_from_master_i, 25);
+                        end if;
+                        
+                        -- Capture current write index before updating
+                        inp_write_idx <= buffer_write_idx;
+                        
+                        -- Remember if buffer was full (for median vs raw selection)
+                        if buffer_fill_count >= MEDIAN_SIZE then
+                            inp_fill_was_full <= '1';
+                        else
+                            inp_fill_was_full <= '0';
+                        end if;
+                        
+                        -- Update write index (circular) - will take effect next cycle
+                        if buffer_write_idx = MEDIAN_SIZE - 1 then
+                            buffer_write_idx <= 0;
+                        else
+                            buffer_write_idx <= buffer_write_idx + 1;
+                        end if;
+                        
+                        -- Update fill count
+                        if buffer_fill_count < MEDIAN_SIZE then
+                            buffer_fill_count <= buffer_fill_count + 1;
+                        end if;
+                        
+                        input_state <= INP_SELECT;
                     end if;
                     
-                    -- ============================================
-                    -- PHASE JUMP: If offset is too large for frequency correction
-                    -- ============================================
-                    if offset_abs > PHASE_JUMP_THRESHOLD then
-                        -- Large offset: apply phase jump to quickly correct
-                        -- Limit phase jump to ±2^30 ns (~1 second) per jump
-                        if offset_sample > to_signed(2**30 - 1, 32) then
-                            phase_jump_reg <= to_signed(-(2**30 - 1), 32);  -- Negative to slow down
-                        elsif offset_sample < to_signed(-(2**30 - 1), 32) then
-                            phase_jump_reg <= to_signed(2**30 - 1, 32);     -- Positive to speed up
-                        else
-                            phase_jump_reg <= -offset_sample;   -- Exact correction (negated)
-                        end if;
-                        phase_jump_valid_reg <= '1';
-                        
-                        -- Reset filter and integrator after phase jump
-                        filtered_offset <= (others => '0');
-                        integral_sum <= (others => '0');
-                        freq_correction <= (others => '0');
-                        sample_count <= 0;  -- Restart warmup
-                        locked <= '0';
-                        lock_counter <= 0;
-                        -- Reset median filter buffer and pipeline
-                        offset_buffer <= (others => (others => '0'));
-                        buffer_write_idx  <= 0;
-                        buffer_fill_count <= 0;
-                        median_valid <= '0';
-                        median_state <= M_IDLE;
-                        median_trigger <= '0';
-                        -- Reset PI pipeline
-                        pi_state <= PI_IDLE;
-                        pi_trigger <= '0';
-                        
+                when INP_SELECT =>
+                    -- ========== STAGE 2: WRITE BUFFER & SELECT ==========
+                    -- Write saturated sample to buffer (using captured index)
+                    offset_buffer(inp_write_idx) <= inp_offset_sat;
+                    
+                    -- Trigger median computation if buffer is now full
+                    if buffer_fill_count >= MEDIAN_SIZE then
+                        median_trigger <= '1';
+                    end if;
+                    
+                    -- Select between median-filtered or raw offset
+                    -- Use inp_fill_was_full (registered) to avoid timing path
+                    if inp_fill_was_full = '1' then
+                        inp_offset_selected <= resize(median_offset, 32);
                     else
-                        -- ============================================
-                        -- Normal operation: frequency correction
-                        -- ============================================
-                        
-                        -- ============================================
-                        -- Low-pass filter the offset
-                        -- First sample: initialize filter directly
-                        -- Subsequent: exponential moving average
-                        -- ============================================
-                        if sample_count = 0 then
-                            -- First sample: initialize filter
-                            filtered_offset <= offset_sample;
+                        inp_offset_selected <= resize(inp_offset_sat, 32);
+                    end if;
+                    
+                    -- Pre-calculate absolute value of the raw/saturated input
+                    -- (We'll use this for decisions in next stage)
+                    if inp_fill_was_full = '1' then
+                        if median_offset < 0 then
+                            inp_offset_abs <= resize(-median_offset, 32);
                         else
-                            -- EMA: filtered = filtered + (sample - filtered) >> FILTER_SHIFT
-                            filter_delta := shift_right(offset_sample - filtered_offset, FILTER_SHIFT);
-                            filtered_offset <= filtered_offset + filter_delta;
+                            inp_offset_abs <= resize(median_offset, 32);
                         end if;
-
-                        -- ============================================
-                        -- PI Controller (only after warmup)
-                        -- Trigger the pipelined PI calculation.
-                        -- Result will be available in ~4 clock cycles.
-                        -- ============================================
-                        if sample_count >= WARMUP_SAMPLES then
-                            pi_trigger <= '1';
-                            
-                            -- ============================================
-                            -- Lock detection
-                            -- ============================================
-                            if offset_abs < to_signed(LOCK_THRESHOLD_NS, 32) then
-                                if lock_counter < LOCK_COUNT_THRESHOLD then
-                                    lock_counter <= lock_counter + 1;
-                                else
-                                    locked <= '1';
-                                end if;
+                    else
+                        if inp_offset_sat < 0 then
+                            inp_offset_abs <= resize(-inp_offset_sat, 32);
+                        else
+                            inp_offset_abs <= resize(inp_offset_sat, 32);
+                        end if;
+                    end if;
+                    
+                    input_state <= INP_DECIDE;
+                    
+                when INP_DECIDE =>
+                    -- ========== STAGE 3: DECIDE ==========
+                    -- Determine what action to take based on registered values
+                    inp_do_phase_jump <= '0';
+                    inp_do_normal_op <= '0';
+                    
+                    -- Sanity check: reject obviously invalid measurements
+                    if inp_offset_abs < MAX_VALID_OFFSET then
+                        inp_valid_meas <= '1';
+                        
+                        -- Phase jump decision
+                        if inp_offset_abs > PHASE_JUMP_THRESHOLD then
+                            inp_do_phase_jump <= '1';
+                            -- Pre-calculate phase jump value
+                            if inp_offset_selected > to_signed(2**30 - 1, 32) then
+                                inp_phase_jump_val <= to_signed(-(2**30 - 1), 32);
+                            elsif inp_offset_selected < to_signed(-(2**30 - 1), 32) then
+                                inp_phase_jump_val <= to_signed(2**30 - 1, 32);
                             else
-                                if offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32) then
-                                    locked <= '0';
-                                end if;
-                                lock_counter <= 0;
+                                inp_phase_jump_val <= -inp_offset_selected;
+                            end if;
+                        else
+                            inp_do_normal_op <= '1';
+                        end if;
+                    else
+                        inp_valid_meas <= '0';
+                    end if;
+                    
+                    input_state <= INP_ACTION;
+                    
+                when INP_ACTION =>
+                    -- ========== STAGE 4: ACTION ==========
+                    -- Execute the decided action using registered decision signals
+                    
+                    if inp_valid_meas = '1' then
+                        -- Count valid samples
+                        if sample_count <= WARMUP_SAMPLES then
+                            sample_count <= sample_count + 1;
+                        end if;
+                        
+                        if inp_do_phase_jump = '1' then
+                            -- Apply phase jump
+                            phase_jump_reg <= inp_phase_jump_val;
+                            phase_jump_valid_reg <= '1';
+                            
+                            -- Reset filter and integrator
+                            filtered_offset <= (others => '0');
+                            integral_sum <= (others => '0');
+                            freq_correction <= (others => '0');
+                            sample_count <= 0;
+                            locked <= '0';
+                            lock_counter <= 0;
+                            
+                            -- Reset median filter
+                            offset_buffer <= (others => (others => '0'));
+                            buffer_write_idx <= 0;
+                            buffer_fill_count <= 0;
+                            median_valid <= '0';
+                            median_state <= M_IDLE;
+                            median_trigger <= '0';
+                            
+                            -- Reset PI pipeline
+                            pi_state <= PI_IDLE;
+                            pi_trigger <= '0';
+                            
+                        elsif inp_do_normal_op = '1' then
+                            -- Normal frequency correction operation
+                            
+                            -- Low-pass filter the offset
+                            if sample_count = 0 then
+                                filtered_offset <= resize(inp_offset_selected, 25);
+                            else
+                                filter_delta := resize(shift_right(resize(inp_offset_selected, 25) - filtered_offset, FILTER_SHIFT), 25);
+                                filtered_offset <= filtered_offset + filter_delta;
                             end if;
                             
-                        end if;  -- warmup complete
-                        
-                    end if;  -- phase jump vs normal operation
+                            -- PI Controller (after warmup)
+                            if sample_count >= WARMUP_SAMPLES then
+                                pi_trigger <= '1';
+                                
+                                -- Lock detection
+                                if inp_offset_abs < to_signed(LOCK_THRESHOLD_NS, 32) then
+                                    if lock_counter < LOCK_COUNT_THRESHOLD then
+                                        lock_counter <= lock_counter + 1;
+                                    else
+                                        locked <= '1';
+                                    end if;
+                                else
+                                    if inp_offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32) then
+                                        locked <= '0';
+                                    end if;
+                                    lock_counter <= 0;
+                                end if;
+                            end if;
+                        end if;
+                    end if;
                     
-                end if;  -- sanity check passed
-                
-            end if;  -- calc_valid
+                    input_state <= INP_IDLE;
+            end case;
         end if;  -- rising_edge
     end process;
 

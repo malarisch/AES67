@@ -114,6 +114,10 @@ architecture Behavioral of wallclock is
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
     signal media_init_done  : std_logic := '0';
     
+    -- Pipeline registers for media clock computation
+    -- Breaks nsec_reg → media_clock_reg path (~11ns) into 2 stages (~5ns each)
+    signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');  -- Stage 1: multiply result
+    
     -- ============================================================
     -- Pipeline registers to break freq_correction → sec_reg critical path.
     -- Original single-cycle chain (~17ns):
@@ -190,15 +194,19 @@ begin
     -- ============================================================
     -- Media Clock Computation Process (AES67)
     -- Epoch-aligned: media_clock = (sec * 48000 + sample_in_sec) mod 2^32
+    -- 
+    -- PIPELINED to meet 125 MHz timing:
+    --   Stage 1: ns_times_recip = nsec_reg * MEDIA_CLK_RECIP (32×18 multiply)
+    --   Stage 2: media_clock_reg = media_base + ns_times_recip[47:32]
     -- ============================================================
     media_proc: process(clk, reset_n)
-        variable ns_times_recip : unsigned(49 downto 0);  -- 32 × 18 = 50 bits
         variable sample_in_sec  : unsigned(15 downto 0);  -- 0..47999
     begin
         if reset_n = '0' then
             media_base      <= (others => '0');
             media_clock_reg <= (others => '0');
             media_init_done <= '0';
+            media_mult_reg  <= (others => '0');
         elsif rising_edge(clk) then
             if wallclock_set_i = '1' then
                 -- Hard set: compute base from new seconds value
@@ -210,11 +218,12 @@ begin
                 media_base <= media_base + to_unsigned(audio_fs, 32);
             end if;
 
+            -- ===== STAGE 1: Multiply (32×18 = 50 bits) =====
             -- sample_in_sec = floor(nanoseconds * MEDIA_CLK_RECIP / 2^32)
-            ns_times_recip := unsigned(nsec_reg) * MEDIA_CLK_RECIP;
-            sample_in_sec  := ns_times_recip(47 downto 32);
-
-            -- Output: base + offset within second
+            media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
+            
+            -- ===== STAGE 2: Add (uses PREVIOUS cycle's multiply result) =====
+            sample_in_sec := media_mult_reg(47 downto 32);
             media_clock_reg <= media_base + resize(sample_in_sec, 32);
         end if;
     end process media_proc;

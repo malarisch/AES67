@@ -33,7 +33,11 @@ entity ptpv2_controller is
         ptp_log_message_interval_i : in std_logic_vector(7 downto 0);
         ptp_announce_log_message_interval_i : in std_logic_vector(7 downto 0);
         t3_valid_o: out std_logic;
-		  ptp_log_interval_o: out std_logic_vector(7 downto 0)
+		ptp_log_interval_o: out std_logic_vector(7 downto 0);
+
+        config_valid_i: in std_logic
+
+
     );
     type t_state_leader is (s_Idle,
                             s_Send_Sync, s_Wait_for_Sync_Ack, s_Wait_for_Sync_Done, s_Latch_Sync_Timestamp,
@@ -230,7 +234,6 @@ begin
             tx_en_i_meta            <= tx_en_i;
             tx_en_i_sync            <= tx_en_i_meta;
             tx_en_i_prev            <= tx_en_i_sync;  -- Stage 3 for edge detection
-
         end if;
     end process cdc_sync_proc;
 
@@ -348,7 +351,7 @@ begin
                             leader_state <= s_Send_Delay_Resp;
                         elsif (sync_time_reached = '1') then
                             leader_state <= s_Send_Sync;
-									 								ptp_log_interval_o <= ptp_log_message_interval_i;
+											 							ptp_log_interval_o <= ptp_log_message_interval_i;
 
                             -- Advance sync timer: next = wallclock + interval
                             ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns);
@@ -361,7 +364,7 @@ begin
                             end if;
                         elsif (announce_time_reached = '1') then
                             leader_state <= s_Send_Announce;
-										ptp_log_interval_o <= ptp_announce_log_message_interval_i;
+											ptp_log_interval_o <= ptp_announce_log_message_interval_i;
 
                             -- Advance announce timer: next = wallclock + interval
                             ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns);
@@ -378,7 +381,7 @@ begin
                     -- SYNC MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Sync =>
-								ptp_log_interval_o <= ptp_log_message_interval_i;
+										ptp_log_interval_o <= ptp_log_message_interval_i;
                         tx_message_type_o <= "0000";
                         sync_sequence_id <= sync_sequence_id + 1;
                         sequence_id_o <= sync_sequence_id + 1;
@@ -416,7 +419,7 @@ begin
                     -- FOLLOW-UP MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Follow_Up =>
-								ptp_log_interval_o <= ptp_log_message_interval_i;
+										ptp_log_interval_o <= ptp_log_message_interval_i;
                         tx_message_type_o <= x"8";
                         sequence_id_o <= sync_sequence_id;
                         frame_start_o <= '1';
@@ -441,7 +444,7 @@ begin
                     -- ANNOUNCE MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Announce =>
-								ptp_log_interval_o <= ptp_announce_log_message_interval_i;
+										ptp_log_interval_o <= ptp_announce_log_message_interval_i;
                         tx_message_type_o <= x"B";  -- Announce message type
                         announce_sequence_id <= announce_sequence_id + 1;
                         sequence_id_o <= announce_sequence_id + 1;
@@ -467,11 +470,7 @@ begin
                     -- DELAY RESPONSE MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Delay_Resp =>
-								ptp_log_interval_o <= ptp_log_message_interval_i;
-
-                        tx_message_type_o <= "1001";
-                        sequence_id_o <= sequence_id_i_latched;
-                        request_port_identity_o <= request_port_identity_i_latched;
+										ptp_log_interval_o <= ptp_log_message_interval_i;
                         timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i_latched;
                         timestamp_seconds_o <= rx_timestamp_seconds_i_latched;
                         frame_start_o <= '1';

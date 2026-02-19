@@ -53,7 +53,10 @@ architecture rtl of clock_ppb_meter is
         S_IDLE,        -- Waiting for start_i
         S_WAIT_PULSE,  -- Waiting for first second-pulse (alignment)
         S_COUNTING,    -- Counting edges between two second-pulses
-        S_CALC_PREP,   -- Compute |diff|*1e9, prepare divider
+        S_CALC_DIFF,   -- Pipeline stage 1: compute |diff|, determine sign
+        S_CALC_MULT1,  -- Pipeline stage 2a: register multiply inputs
+        S_CALC_MULT2,  -- Pipeline stage 2b: capture multiply result
+        S_CALC_SETUP,  -- Pipeline stage 3: setup divider registers
         S_DIVIDING,    -- Restoring binary long division (52 cycles)
         S_DONE         -- Apply sign, output result
     );
@@ -91,6 +94,13 @@ architecture rtl of clock_ppb_meter is
     signal rem_reg    : unsigned(22 downto 0)          := (others => '0');
     signal div_step   : integer range 0 to DIV_BITS-1  := 0;
     signal result_neg : std_logic                      := '0';
+    
+    -- ======================================================================
+    -- Pipeline registers for CALC stages (split long combinatorial paths)
+    -- ======================================================================
+    signal diff_reg   : unsigned(21 downto 0)          := (others => '0');  -- |count_pll - count_wc|
+    signal mult_in_reg: unsigned(21 downto 0)          := (others => '0');  -- DSP input pipeline
+    signal product_reg: unsigned(51 downto 0)          := (others => '0');  -- diff * 1e9
 
     -- ======================================================================
     -- Output registers
@@ -137,21 +147,22 @@ begin
     -- ==================================================================
     p_fsm : process(sys_clk, reset_n)
         variable v_rem     : unsigned(22 downto 0);
-        variable v_diff    : unsigned(21 downto 0);
-        variable v_product : unsigned(51 downto 0);   -- 22 + 30 = 52 bits
     begin
         if reset_n = '0' then
-            state      <= S_IDLE;
-            valid_reg  <= '0';
-            ppb_reg    <= (others => '0');
-            count_wc   <= (others => '0');
-            count_pll  <= (others => '0');
-            dividend   <= (others => '0');
-            divisor    <= (others => '0');
-            quotient   <= (others => '0');
-            rem_reg    <= (others => '0');
-            result_neg <= '0';
-            div_step   <= 0;
+            state       <= S_IDLE;
+            valid_reg   <= '0';
+            ppb_reg     <= (others => '0');
+            count_wc    <= (others => '0');
+            count_pll   <= (others => '0');
+            dividend    <= (others => '0');
+            divisor     <= (others => '0');
+            quotient    <= (others => '0');
+            rem_reg     <= (others => '0');
+            result_neg  <= '0';
+            div_step    <= 0;
+            diff_reg    <= (others => '0');
+            mult_in_reg <= (others => '0');
+            product_reg <= (others => '0');
 
         elsif rising_edge(sys_clk) then
             case state is
@@ -164,7 +175,6 @@ begin
                         valid_reg <= '0';
                         state     <= S_WAIT_PULSE;
                     end if;
-
                 -- =====================================================
                 -- WAIT_PULSE – align to the next second boundary
                 -- =====================================================
@@ -187,54 +197,84 @@ begin
                     end if;
 
                     if sec_rise = '1' then
-                        state <= S_CALC_PREP;
+                        state <= S_CALC_DIFF;
                     end if;
 
                 -- =====================================================
-                -- CALC_PREP – compute |diff| * 1 000 000 000 and set
-                --             up the restoring divider
+                -- CALC_DIFF – Pipeline stage 1: compute |diff|, sign
+                -- Critical path: 22-bit comparison + 22-bit subtraction
                 -- =====================================================
-                when S_CALC_PREP =>
+                when S_CALC_DIFF =>
                     -- Determine sign and absolute difference
                     if count_pll >= count_wc then
-                        v_diff     := count_pll - count_wc;
+                        diff_reg   <= count_pll - count_wc;
                         result_neg <= '0';
                     else
-                        v_diff     := count_wc - count_pll;
+                        diff_reg   <= count_wc - count_pll;
                         result_neg <= '1';
                     end if;
-
-                    -- 22-bit × 30-bit = 52-bit product
-                    v_product := v_diff * ONE_BILLION;
-
-                    dividend <= resize(v_product, DIV_BITS);
-                    divisor  <= count_wc;
-                    quotient <= (others => '0');
-                    rem_reg  <= (others => '0');
-                    div_step <= DIV_BITS - 1;
-
-                    -- Guard against division by zero
+                    
+                    -- Latch divisor now (count_wc won't change)
+                    divisor <= count_wc;
+                    
+                    -- Check for division by zero early
                     if count_wc = 0 then
                         ppb_reg   <= (others => '0');
                         valid_reg <= '1';
                         state     <= S_IDLE;
                     else
-                        state <= S_DIVIDING;
+                        state <= S_CALC_MULT1;
                     end if;
 
                 -- =====================================================
+                -- CALC_MULT1 – Pipeline stage 2a: register multiply inputs
+                -- Places diff_reg value adjacent to DSP block input
+                -- =====================================================
+                when S_CALC_MULT1 =>
+                    mult_in_reg <= diff_reg;
+                    state       <= S_CALC_MULT2;
+
+                -- =====================================================
+                -- CALC_MULT2 – Pipeline stage 2b: multiply and capture
+                -- Critical path: 22×30 = 52-bit multiplication (uses DSP)
+                -- Input is now from local mult_in_reg for better placement
+                -- =====================================================
+                when S_CALC_MULT2 =>
+                    product_reg <= mult_in_reg * ONE_BILLION;
+                    state       <= S_CALC_SETUP;
+
+                -- =====================================================
+                -- CALC_SETUP – Pipeline stage 3: setup divider registers
+                -- Critical path: register assignments only
+                -- =====================================================
+                when S_CALC_SETUP =>
+                    -- Load dividend MSB-first for shift-based division
+                    dividend <= resize(product_reg, DIV_BITS);
+                    quotient <= (others => '0');
+                    rem_reg  <= (others => '0');
+                    div_step <= DIV_BITS - 1;
+                    state    <= S_DIVIDING;
+
+                -- =====================================================
                 -- DIVIDING – restoring binary long division (1 bit/clk)
+                --   OPTIMIZATION: Uses shift register instead of MUX.
+                --   dividend shifts left each cycle, MSB feeds into rem.
                 --   Iterates DIV_BITS (52) cycles.
                 -- =====================================================
                 when S_DIVIDING =>
-                    -- Shift remainder left and bring in next dividend bit
-                    v_rem := rem_reg(21 downto 0) & dividend(div_step);
+                    -- Shift remainder left and bring in MSB of dividend
+                    v_rem := rem_reg(21 downto 0) & dividend(DIV_BITS-1);
+                    
+                    -- Shift dividend left for next iteration
+                    dividend <= dividend(DIV_BITS-2 downto 0) & '0';
 
                     if v_rem >= resize(divisor, 23) then
                         v_rem := v_rem - resize(divisor, 23);
-                        if div_step <= 31 then
-                            quotient(div_step) <= '1';
-                        end if;
+                        -- Shift quotient left with 1
+                        quotient <= quotient(30 downto 0) & '1';
+                    else
+                        -- Shift quotient left with 0
+                        quotient <= quotient(30 downto 0) & '0';
                     end if;
 
                     rem_reg <= v_rem;
