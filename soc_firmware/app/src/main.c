@@ -448,6 +448,17 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				disp_metrics.link_up =
 					!!(eth_status & ETH_FMC_ETH_LINK_UP);
 				disp_metrics.speed_code = speed_code;
+
+				/* ---- Link up detection for multicast rejoin ---- */
+				static bool mcast_prev_link_up = false;
+
+				if (disp_metrics.link_up && !mcast_prev_link_up && g_ip_valid) {
+					/* Link just came up and we have valid IP - rejoin multicast groups */
+					LOG_INF("Link up detected - rejoining multicast groups");
+					ptp_bmc_notify_link_up();
+					sap_sdp_notify_link_up();
+				}
+				mcast_prev_link_up = disp_metrics.link_up;
 			}
 
 #ifdef CONFIG_DISPLAY_CTRL

@@ -147,6 +147,12 @@ void ptp_bmc_notify_ip_ready(void);
 void ptp_bmc_notify_fpga_ready(void);
 
 /**
+ * @brief Notify the BMC that Ethernet link has come up.
+ *        Re-joins the PTP multicast group to re-establish IGMP membership.
+ */
+void ptp_bmc_notify_link_up(void);
+
+/**
  * @brief Get the current BMC role.
  */
 enum ptp_bmc_role ptp_bmc_get_role(void);

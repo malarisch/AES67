@@ -107,6 +107,12 @@ int sap_sdp_start(struct net_if *iface);
 void sap_sdp_notify_ip_ready(const struct in_addr *addr);
 
 /**
+ * @brief Notify the SAP module that Ethernet link has come up.
+ *        Re-joins the SAP multicast group to re-establish IGMP membership.
+ */
+void sap_sdp_notify_link_up(void);
+
+/**
  * @brief Get the current local stream configuration.
  */
 const struct aes67_stream_config *sap_sdp_get_config(void);

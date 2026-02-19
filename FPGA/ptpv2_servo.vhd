@@ -131,41 +131,33 @@ architecture Behavioral of ptpv2_servo is
     signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
     signal phase_jump_valid_reg : std_logic := '0';
     
+    -- Pipelined median computation signals
+    -- The combinational sorting network was the critical timing path (~23ns).
+    -- Pipeline spreads the 5-element sort over 5 clock cycles (~3ns per stage).
+    -- calc_valid pulses arrive millions of cycles apart, so latency is invisible.
+    type median_state_t is (M_IDLE, M_STAGE1, M_STAGE2, M_STAGE3, M_SELECT);
+    signal median_state   : median_state_t := M_IDLE;
+    signal sort_a, sort_b, sort_c, sort_d, sort_e : signed(31 downto 0) := (others => '0');
+    signal median_trigger : std_logic := '0';
+    
     -- ============================================
-    -- Function: Find median of 5 signed values
-    -- Uses a sorting network approach (simple for 5 elements)
+    -- Pipelined PI controller signals
+    -- The combinational path filtered_offset -> freq_correction was ~15ns.
+    -- Pipeline spreads the PI calculation over 5 clock cycles.
+    -- calc_valid pulses arrive millions of cycles apart (1-8 Hz), so latency is invisible.
     -- ============================================
-    function median5(buf : sample_buffer_t) return signed is
-        variable a, b, c, d, e : signed(31 downto 0);
-        variable t : signed(31 downto 0);
-    begin
-        -- Load values
-        a := buf(0); b := buf(1); c := buf(2); d := buf(3); e := buf(4);
-        
-        -- Sorting network for 5 elements to find median
-        -- Step 1: Compare and swap pairs
-        if a > b then t := a; a := b; b := t; end if;
-        if c > d then t := c; c := d; d := t; end if;
-        
-        -- Step 2: Move smaller of (a,c) and larger of (b,d)
-        if a > c then t := a; a := c; c := t; end if;
-        if b > d then t := b; b := d; d := t; end if;
-        
-        -- Step 3: Insert e and find median
-        -- Median is max(min(b,c), min(max(a,e), max(c,d)))
-        if b > c then t := b; b := c; c := t; end if;
-        if a > e then t := a; a := e; e := t; end if;
-        
-        -- Now a <= b <= c, a <= e, c <= d
-        -- Median candidates: b, c, or e
-        if e > c then
-            return c;
-        elsif e < b then
-            return b;
-        else
-            return e;
-        end if;
-    end function;
+    type pi_state_t is (PI_IDLE, PI_MULT, PI_SHIFT, PI_CLAMP, PI_OUTPUT);
+    signal pi_state       : pi_state_t := PI_IDLE;
+    signal pi_trigger     : std_logic := '0';
+    
+    -- Pipeline registers for PI calculation
+    signal pi_input       : signed(31 downto 0) := (others => '0');  -- Latched filtered_offset
+    signal pi_mult_p      : signed(47 downto 0) := (others => '0');  -- KP multiplication result
+    signal pi_mult_i      : signed(47 downto 0) := (others => '0');  -- KI multiplication result
+    signal pi_shifted_p   : signed(47 downto 0) := (others => '0');  -- Shifted P term
+    signal pi_shifted_i   : signed(47 downto 0) := (others => '0');  -- Shifted I term
+    signal pi_proportional: signed(19 downto 0) := (others => '0');  -- Clamped proportional
+    signal pi_int_update  : signed(19 downto 0) := (others => '0');  -- Integral update value
     
 begin
 
@@ -193,13 +185,7 @@ begin
     servo_proc: process(clk, reset_n)
         variable offset_sample   : signed(31 downto 0);
         variable offset_abs      : signed(31 downto 0);
-        variable proportional    : signed(19 downto 0);  -- Same width as freq_correction
-        variable pi_output       : signed(19 downto 0);  -- Same width as freq_correction
         variable filter_delta    : signed(31 downto 0);  -- Same width as filtered_offset
-        variable scaled_offset   : signed(31 downto 0);  -- Full width offset for PI input
-        variable mult_result     : signed(47 downto 0);  -- 32 * 16-bit = 48 bits for wide multiply
-        variable timeout_cycles  : unsigned(31 downto 0);  -- Calculated timeout
-        variable integral_update : signed(19 downto 0);  -- Same width as integral_sum
     begin
         if reset_n = '0' then
             filtered_offset <= (others => '0');
@@ -220,11 +206,159 @@ begin
             buffer_fill_count <= 0;
             median_offset <= (others => '0');
             median_valid  <= '0';
+            median_state  <= M_IDLE;
+            sort_a <= (others => '0');
+            sort_b <= (others => '0');
+            sort_c <= (others => '0');
+            sort_d <= (others => '0');
+            sort_e <= (others => '0');
+            median_trigger <= '0';
+            -- PI pipeline reset
+            pi_state <= PI_IDLE;
+            pi_trigger <= '0';
+            pi_input <= (others => '0');
+            pi_mult_p <= (others => '0');
+            pi_mult_i <= (others => '0');
+            pi_shifted_p <= (others => '0');
+            pi_shifted_i <= (others => '0');
+            pi_proportional <= (others => '0');
+            pi_int_update <= (others => '0');
             
         elsif rising_edge(clk) then
             -- Default: no phase jump this cycle, clear timeout pulse
             phase_jump_valid_reg <= '0';
             sync_timeout <= '0';
+            median_trigger <= '0';  -- Default: clear trigger pulse each cycle
+            
+            -- ============================================
+            -- PIPELINED MEDIAN SORT
+            -- Sorting network for 5 elements spread over 5 clock cycles.
+            -- Each stage does at most one 32-bit compare-swap per element,
+            -- easily meeting 125 MHz timing (~3ns combinational depth).
+            -- ============================================
+            case median_state is
+                when M_IDLE =>
+                    if median_trigger = '1' then
+                        -- Load sort registers from buffer (buffer was updated
+                        -- on the previous cycle, so it includes the latest sample)
+                        sort_a <= offset_buffer(0);
+                        sort_b <= offset_buffer(1);
+                        sort_c <= offset_buffer(2);
+                        sort_d <= offset_buffer(3);
+                        sort_e <= offset_buffer(4);
+                        median_state <= M_STAGE1;
+                    end if;
+                    
+                when M_STAGE1 =>
+                    -- Compare-swap pairs: (a,b) and (c,d) in parallel
+                    if sort_a > sort_b then
+                        sort_a <= sort_b; sort_b <= sort_a;
+                    end if;
+                    if sort_c > sort_d then
+                        sort_c <= sort_d; sort_d <= sort_c;
+                    end if;
+                    median_state <= M_STAGE2;
+                    
+                when M_STAGE2 =>
+                    -- Cross compare-swap: (a,c) and (b,d) in parallel
+                    if sort_a > sort_c then
+                        sort_a <= sort_c; sort_c <= sort_a;
+                    end if;
+                    if sort_b > sort_d then
+                        sort_b <= sort_d; sort_d <= sort_b;
+                    end if;
+                    median_state <= M_STAGE3;
+                    
+                when M_STAGE3 =>
+                    -- Final swaps: (b,c) and (a,e) in parallel
+                    if sort_b > sort_c then
+                        sort_b <= sort_c; sort_c <= sort_b;
+                    end if;
+                    if sort_a > sort_e then
+                        sort_a <= sort_e; sort_e <= sort_a;
+                    end if;
+                    median_state <= M_SELECT;
+                    
+                when M_SELECT =>
+                    -- Median is among sort_b, sort_c, sort_e
+                    -- After sorting: a <= b <= c <= d, a <= e
+                    if sort_e > sort_c then
+                        median_offset <= sort_c;
+                    elsif sort_e < sort_b then
+                        median_offset <= sort_b;
+                    else
+                        median_offset <= sort_e;
+                    end if;
+                    median_valid <= '1';
+                    median_state <= M_IDLE;
+            end case;
+            
+            -- ============================================
+            -- PIPELINED PI CONTROLLER
+            -- Spreads the PI calculation over 4 clock cycles:
+            --   PI_MULT:   Perform 32x16 multiplications
+            --   PI_SHIFT:  Shift results for gain scaling
+            --   PI_CLAMP:  Clamp P term, calculate I update
+            --   PI_OUTPUT: Add P+I, clamp final output
+            -- ============================================
+            pi_trigger <= '0';  -- Default: clear trigger each cycle
+            
+            case pi_state is
+                when PI_IDLE =>
+                    if pi_trigger = '1' then
+                        -- Latch filtered_offset and start multiplication
+                        pi_input <= filtered_offset;
+                        pi_state <= PI_MULT;
+                    end if;
+                    
+                when PI_MULT =>
+                    -- Perform both multiplications (32-bit × 16-bit = 48-bit)
+                    pi_mult_p <= pi_input * to_signed(KP_GAIN, 16);
+                    pi_mult_i <= pi_input * to_signed(KI_GAIN, 16);
+                    pi_state <= PI_SHIFT;
+                    
+                when PI_SHIFT =>
+                    -- Shift for gain scaling
+                    pi_shifted_p <= shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT);
+                    pi_shifted_i <= shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + 2);
+                    pi_state <= PI_CLAMP;
+                    
+                when PI_CLAMP =>
+                    -- Clamp proportional term to ±500,000 (and negate)
+                    if pi_shifted_p > to_signed(500_000, 48) then
+                        pi_proportional <= to_signed(-500_000, 20);
+                    elsif pi_shifted_p < to_signed(-500_000, 48) then
+                        pi_proportional <= to_signed(500_000, 20);
+                    else
+                        pi_proportional <= -resize(pi_shifted_p, 20);
+                    end if;
+                    
+                    -- Calculate integral update (will clamp in next stage)
+                    pi_int_update <= integral_sum - resize(pi_shifted_i, 20);
+                    pi_state <= PI_OUTPUT;
+                    
+                when PI_OUTPUT =>
+                    -- Clamp and update integral (for next iteration)
+                    if pi_int_update > to_signed(500_000, 20) then
+                        integral_sum <= to_signed(500_000, 20);
+                    elsif pi_int_update < to_signed(-500_000, 20) then
+                        integral_sum <= to_signed(-500_000, 20);
+                    else
+                        integral_sum <= pi_int_update;
+                    end if;
+                    
+                    -- Calculate and clamp final PI output
+                    -- Note: Uses OLD integral_sum (matching original behavior)
+                    if pi_proportional + integral_sum > to_signed(500_000, 20) then
+                        freq_correction <= to_signed(500_000, 20);
+                    elsif pi_proportional + integral_sum < to_signed(-500_000, 20) then
+                        freq_correction <= to_signed(-500_000, 20);
+                    else
+                        freq_correction <= pi_proportional + integral_sum;
+                    end if;
+                    
+                    pi_state <= PI_IDLE;
+            end case;
             
             -- ============================================
             -- UPDATE MESSAGE INTERVAL (separate from calc_valid!)
@@ -301,10 +435,10 @@ begin
                 
                 -- Calculate median when buffer is full
                 if buffer_fill_count >= MEDIAN_SIZE - 1 then  -- Will be MEDIAN_SIZE after this cycle
-                    median_offset <= median5(offset_buffer);
-                    median_valid  <= '1';
+                    -- Trigger pipelined median computation (result in ~5 clock cycles)
+                    median_trigger <= '1';
                 else
-                    -- Not enough samples yet - use raw value
+                    -- Not enough samples yet - use raw value directly
                     median_offset <= offset_from_master_i;
                     median_valid  <= '0';
                 end if;
@@ -355,11 +489,16 @@ begin
                         sample_count <= 0;  -- Restart warmup
                         locked <= '0';
                         lock_counter <= 0;
-                        -- Reset median filter buffer
+                        -- Reset median filter buffer and pipeline
                         offset_buffer <= (others => (others => '0'));
                         buffer_write_idx  <= 0;
                         buffer_fill_count <= 0;
                         median_valid <= '0';
+                        median_state <= M_IDLE;
+                        median_trigger <= '0';
+                        -- Reset PI pipeline
+                        pi_state <= PI_IDLE;
+                        pi_trigger <= '0';
                         
                     else
                         -- ============================================
@@ -382,46 +521,11 @@ begin
 
                         -- ============================================
                         -- PI Controller (only after warmup)
+                        -- Trigger the pipelined PI calculation.
+                        -- Result will be available in ~4 clock cycles.
                         -- ============================================
                         if sample_count >= WARMUP_SAMPLES then
-
-                            scaled_offset := filtered_offset;
-
-                            -- Proportional: -Kp * scaled_offset / 2^GAIN_SHIFT
-                            -- 32-bit * 16-bit = 48-bit, shift right, clamp to ±500,000
-                            mult_result := scaled_offset * to_signed(KP_GAIN, 16);
-                            if shift_right(mult_result, EFFECTIVE_GAIN_SHIFT) > to_signed(500_000, 48) then
-                                proportional := to_signed(-500_000, 20);
-                            elsif shift_right(mult_result, EFFECTIVE_GAIN_SHIFT) < to_signed(-500_000, 48) then
-                                proportional := to_signed(500_000, 20);
-                            else
-                                proportional := -resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT), 20);
-                            end if;
-
-                            -- Integral: accumulate -Ki * offset / 2^(GAIN_SHIFT+2)
-                            mult_result := scaled_offset * to_signed(KI_GAIN, 16);
-                            integral_update := integral_sum - resize(shift_right(mult_result, EFFECTIVE_GAIN_SHIFT + 2), 20);
-                            
-                            -- Clamp integral to anti-windup limits ±500,000 PPB
-                            if integral_update > to_signed(500_000, 20) then
-                                integral_sum <= to_signed(500_000, 20);
-                            elsif integral_update < to_signed(-500_000, 20) then
-                                integral_sum <= to_signed(-500_000, 20);
-                            else
-                                integral_sum <= integral_update;
-                            end if;
-                            
-                            -- Combined PI output
-                            pi_output := proportional + integral_sum;
-                            
-                            -- Limit frequency correction to ±500 PPM = ±500,000 PPB
-                            if pi_output > to_signed(500_000, 20) then
-                                freq_correction <= to_signed(500_000, 20);
-                            elsif pi_output < to_signed(-500_000, 20) then
-                                freq_correction <= to_signed(-500_000, 20);
-                            else
-                                freq_correction <= pi_output;
-                            end if;
+                            pi_trigger <= '1';
                             
                             -- ============================================
                             -- Lock detection

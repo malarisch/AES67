@@ -114,6 +114,22 @@ architecture Behavioral of wallclock is
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
     signal media_init_done  : std_logic := '0';
     
+    -- ============================================================
+    -- Pipeline registers to break freq_correction → sec_reg critical path.
+    -- Original single-cycle chain (~17ns):
+    --   multiply → frac_add → overflow → ns_adjust → nsec_add
+    --   → compare_1e9 → 48-bit sec_increment
+    -- Pipelined into 4 stages (≤7ns each):
+    --   Stage 1: multiply → frac_increment_reg
+    --   Stage 2: frac_add + overflow → ns_adjust_pipe
+    --   Stage 3: nsec_add + compare → sec_adj_pipe
+    --   Stage 4: 48-bit sec_increment
+    -- Total latency: 3 extra cycles (24ns). Invisible at PTP rate (≤128 Hz).
+    -- ============================================================
+    signal frac_increment_reg : signed(31 downto 0) := (others => '0');
+    signal ns_adjust_pipe     : integer range -1 to 1 := 0;
+    signal sec_adj_pipe       : integer range -1 to 1 := 0;
+    
 begin
 
     -- Output assignments
@@ -204,88 +220,104 @@ begin
     end process media_proc;
 
     -- ============================================================
-    -- Main Wallclock Timekeeping Process
+    -- Main Wallclock Timekeeping Process (4-stage pipeline)
+    --
+    -- Pipeline stages (signal reads get PREVIOUS cycle's value):
+    --   Stage 1: freq_correction → multiply → frac_increment_reg  (~5ns)
+    --   Stage 2: frac_increment_reg → frac_add → overflow → ns_adjust_pipe  (~6ns)
+    --   Stage 3: ns_adjust_pipe → nsec_add → compare_1e9 → sec_adj_pipe  (~7ns)
+    --   Stage 4: sec_adj_pipe → 48-bit sec increment  (~5ns)
+    --
+    -- Latency: 3 extra cycles (24ns) from freq_correction change to sec_reg.
+    -- This is invisible: freq_correction changes at ≤128 Hz (millions of
+    -- cycles apart), and the ±1ns fractional adjust being 1 cycle late
+    -- or the second pulse being 1 cycle late (8ns) are both negligible.
     -- ============================================================
     process(clk, reset_n)
-        variable frac_increment : signed(31 downto 0);
-        variable new_frac       : signed(31 downto 0);
-        variable ns_adjust      : integer range -1 to 1;
-        variable new_nsec       : signed(31 downto 0);
-        variable sec_inc        : integer range -1 to 1;
+        variable new_frac  : signed(31 downto 0);
+        variable new_nsec  : signed(31 downto 0);
     begin
         if reset_n = '0' then
-            second_pulse_int <= '0';
-            nsec_reg       <= (others => '0');
-            sec_reg        <= (others => '0');
-            frac_ns_accum  <= (others => '0');
+            second_pulse_int   <= '0';
+            nsec_reg           <= (others => '0');
+            sec_reg            <= (others => '0');
+            frac_ns_accum      <= (others => '0');
+            frac_increment_reg <= (others => '0');
+            ns_adjust_pipe     <= 0;
+            sec_adj_pipe       <= 0;
 
         elsif rising_edge(clk) then
             second_pulse_int <= '0';
-            sec_inc := 0;
 
+            -- ===== STAGE 1: Pre-compute multiply (always, independent) =====
+            -- freq_correction changes at PTP rate — 1 cycle delay invisible.
+            -- 12-bit × 20-bit = 32-bit; fits easily in one cycle (~5ns).
+            frac_increment_reg <= to_signed(increment_interval, 12)
+                                  * freq_correction_ppb_i(19 downto 0);
+
+            -- ===== STAGE 4: Apply delayed seconds rollover =====
+            -- sec_adj_pipe was written by Stage 3 in the PREVIOUS cycle.
+            -- VHDL signal semantics: we read the old value here.
+            if sec_adj_pipe = 1 then
+                sec_reg <= sec_reg + 1;
+                second_pulse_int <= '1';
+            elsif sec_adj_pipe = -1 then
+                sec_reg <= sec_reg - 1;
+            end if;
+            -- Default for this cycle (may be overwritten below)
+            sec_adj_pipe <= 0;
+
+            -- ===== OVERRIDE PATHS =====
             if wallclock_set_i = '1' then
-                -- Hard set of time
-                nsec_reg <= signed(wallclock_nanoseconds_i);
-                sec_reg  <= wallclock_seconds_i;
+                -- Hard set of time — overrides Stage 4's sec_reg write
+                -- (last assignment in process wins)
+                nsec_reg      <= signed(wallclock_nanoseconds_i);
+                sec_reg       <= wallclock_seconds_i;
                 frac_ns_accum <= (others => '0');
-                
+                ns_adjust_pipe <= 0;
+                sec_adj_pipe   <= 0;
+
             elsif phase_jump_valid_i = '1' then
-                -- Apply one-time phase correction
+                -- One-time phase correction; sec update via pipeline
                 new_nsec := nsec_reg + resize(phase_jump_ns_i, 32);
-                
-                -- Handle wrap-around
                 if new_nsec >= NS_PER_SEC then
-                    nsec_reg <= new_nsec - NS_PER_SEC;
-                    sec_reg  <= sec_reg + 1;
-                    second_pulse_int <= '1';
+                    nsec_reg     <= new_nsec - NS_PER_SEC;
+                    sec_adj_pipe <= 1;   -- Stage 4 applies next cycle
                 elsif new_nsec < 0 then
-                    nsec_reg <= new_nsec + NS_PER_SEC;
-                    sec_reg  <= sec_reg - 1;
+                    nsec_reg     <= new_nsec + NS_PER_SEC;
+                    sec_adj_pipe <= -1;
                 else
                     nsec_reg <= new_nsec;
                 end if;
-                
+                ns_adjust_pipe <= 0;
+
             else
-                -- ============================================
-                -- Normal tick with frequency correction
-                -- ============================================
-                -- PPB correction: frac_increment = increment_interval * ppb
-                -- Scale: when frac_ns_accum reaches ±2^30, adjust by ±1 ns
-                -- This gives effective resolution of ~1 PPB
-                
-                -- Calculate fractional increment: increment_interval * ppb
-                -- For ±500,000 PPB max: 8 * 500,000 = 4M, fits in 32 bits
-                -- Use 12-bit * 20-bit = 32-bit multiply (no truncation)
-                -- freq(19:0) covers ±524,287 PPB — sufficient for servo's ±500,000 limit
-                frac_increment := to_signed(increment_interval, 12) *
-                                  freq_correction_ppb_i(19 downto 0);
-                
-                -- Accumulate and check overflow
-                new_frac := frac_ns_accum + frac_increment;
-                ns_adjust := 0;
-                
+                -- ===== STAGE 2: Fractional accumulation + overflow =====
+                -- Uses frac_increment_reg from Stage 1 of PREVIOUS cycle.
+                new_frac := frac_ns_accum + frac_increment_reg;
+                ns_adjust_pipe <= 0;  -- default
+
                 if new_frac >= FRAC_OVERFLOW then
-                    new_frac := new_frac - FRAC_OVERFLOW;
-                    ns_adjust := 1;
+                    frac_ns_accum  <= new_frac - FRAC_OVERFLOW;
+                    ns_adjust_pipe <= 1;
                 elsif new_frac <= FRAC_UNDERFLOW then
-                    new_frac := new_frac - FRAC_UNDERFLOW;  -- Subtracting negative = adding
-                    ns_adjust := -1;
+                    frac_ns_accum  <= new_frac - FRAC_UNDERFLOW;
+                    ns_adjust_pipe <= -1;
+                else
+                    frac_ns_accum <= new_frac;
                 end if;
-                
-                frac_ns_accum <= new_frac;
-                
-                -- Update nanoseconds
-                new_nsec := nsec_reg + to_signed(increment_interval + ns_adjust, 32);
-                
-                -- Handle second rollover
+
+                -- ===== STAGE 3: Nanosecond tick + rollover detect =====
+                -- ns_adjust_pipe read here is from Stage 2 of PREVIOUS cycle
+                -- (VHDL signal semantics: deferred write = automatic pipeline).
+                new_nsec := nsec_reg + to_signed(increment_interval + ns_adjust_pipe, 32);
+
                 if new_nsec >= NS_PER_SEC then
-                    nsec_reg <= new_nsec - NS_PER_SEC;
-                    sec_reg  <= sec_reg + 1;
-                    second_pulse_int <= '1';
+                    nsec_reg     <= new_nsec - NS_PER_SEC;
+                    sec_adj_pipe <= 1;
                 elsif new_nsec < 0 then
-                    -- Can happen with negative adjustment at nsec=0
-                    nsec_reg <= new_nsec + NS_PER_SEC;
-                    sec_reg  <= sec_reg - 1;
+                    nsec_reg     <= new_nsec + NS_PER_SEC;
+                    sec_adj_pipe <= -1;
                 else
                     nsec_reg <= new_nsec;
                 end if;

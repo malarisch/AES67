@@ -54,6 +54,7 @@ static ptp_bmc_change_cb_t bmc_change_cb;
 
 /* ---- Network resources ---- */
 static struct net_if *bmc_iface;
+static int bmc_sock = -1;  /* Socket for multicast rejoin */
 
 /* ---- IP-ready gate ---- */
 static struct k_sem ip_ready_sem;
@@ -526,7 +527,7 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	int sock;
+	int sock = -1;
 	struct sockaddr_in bind_addr;
 	uint8_t rx_buf[256];
 	int ret;
@@ -549,6 +550,7 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 		LOG_ERR("BMC: Failed to create socket: %d", errno);
 		return;
 	}
+	bmc_sock = sock;  /* Store for multicast rejoin */
 
 	/* Bind to PTP general port */
 	memset(&bind_addr, 0, sizeof(bind_addr));
@@ -838,4 +840,33 @@ const struct ptp_announce_dataset *ptp_bmc_get_foreign_masters(int *count)
 void ptp_bmc_get_clock_identity(uint8_t out[8])
 {
 	memcpy(out, my_clock_id, 8);
+}
+
+/* ================================================================
+ * Rejoin PTP multicast group after link up
+ *
+ * Called when Ethernet link transitions from down to up to ensure
+ * IGMP membership is re-established.
+ * ================================================================ */
+void ptp_bmc_notify_link_up(void)
+{
+	if (bmc_sock < 0 || !bmc_iface) {
+		LOG_DBG("BMC: link_up notify ignored (no socket yet)");
+		return;
+	}
+
+	struct ip_mreqn mreq;
+
+	memset(&mreq, 0, sizeof(mreq));
+	zsock_inet_pton(AF_INET, PTP_MULTICAST_ADDR, &mreq.imr_multiaddr);
+	mreq.imr_ifindex = net_if_get_by_iface(bmc_iface);
+
+	int ret = zsock_setsockopt(bmc_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+				   &mreq, sizeof(mreq));
+	if (ret < 0 && errno != EADDRINUSE) {
+		LOG_WRN("BMC: Failed to rejoin multicast %s: %d",
+			PTP_MULTICAST_ADDR, errno);
+	} else {
+		LOG_INF("BMC: Rejoined PTP multicast group %s", PTP_MULTICAST_ADDR);
+	}
 }

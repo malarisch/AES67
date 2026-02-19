@@ -40,6 +40,7 @@ static struct k_thread sap_thread_data;
 
 /* ---- State ---- */
 static struct net_if *sap_iface;
+static int sap_sock = -1;  /* Socket for multicast rejoin */
 static struct in_addr my_ip_addr;
 static uint8_t my_clock_id[8];
 static bool ip_ready;
@@ -594,6 +595,7 @@ static void sap_thread_fn(void *p1, void *p2, void *p3)
 		LOG_ERR("SAP: Failed to create socket: %d", errno);
 		return;
 	}
+	sap_sock = sock;  /* Store for multicast rejoin */
 
 	/* Bind to SAP port for receiving */
 	struct sockaddr_in bind_addr;
@@ -1146,4 +1148,33 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 const struct aes67_tx_stream *sap_sdp_get_tx_streams(void)
 {
 	return tx_streams;
+}
+
+/* ================================================================
+ * Rejoin SAP multicast group after link up
+ *
+ * Called when Ethernet link transitions from down to up to ensure
+ * IGMP membership is re-established.
+ * ================================================================ */
+void sap_sdp_notify_link_up(void)
+{
+	if (sap_sock < 0 || !sap_iface) {
+		LOG_DBG("SAP: link_up notify ignored (no socket yet)");
+		return;
+	}
+
+	struct ip_mreqn mreq;
+
+	memset(&mreq, 0, sizeof(mreq));
+	zsock_inet_pton(AF_INET, SAP_MULTICAST_ADDR, &mreq.imr_multiaddr);
+	mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
+
+	int ret = zsock_setsockopt(sap_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+				   &mreq, sizeof(mreq));
+	if (ret < 0 && errno != EADDRINUSE) {
+		LOG_WRN("SAP: Failed to rejoin multicast %s: %d",
+			SAP_MULTICAST_ADDR, errno);
+	} else {
+		LOG_INF("SAP: Rejoined SAP multicast group %s", SAP_MULTICAST_ADDR);
+	}
 }
