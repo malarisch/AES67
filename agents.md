@@ -1,5 +1,7 @@
 # Agent Documentation: AES67 Project
 
+Constraint: You can NEVER edit the graphical BSF and BDF files for the quartus project! All adjustments in these files will be made by the user.
+
 ## Subsystem: FMC Ethernet Driver (`eth_fmc_basic`)
 
 ### Overview

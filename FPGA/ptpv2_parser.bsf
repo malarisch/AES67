@@ -116,6 +116,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 224)(pt 16 224)(line_width 1))
 	)
 	(port
+		(pt 0 240)
+		(input)
+		(text "ptp_locked_i" (rect 0 0 49 12)(font "Arial" ))
+		(text "ptp_locked_i" (rect 21 235 70 247)(font "Arial" ))
+		(line (pt 0 240)(pt 16 240)(line_width 1))
+	)
+	(port
 		(pt 448 32)
 		(output)
 		(text "ram_read_address[10..0]" (rect 0 0 101 12)(font "Arial" ))
@@ -227,7 +234,13 @@ on the Quartus Prime software download page.
 		(text "clock_configure_timestamp_nanoseconds_o[31..0]" (rect 226 267 427 279)(font "Arial" ))
 		(line (pt 448 272)(pt 432 272)(line_width 3))
 	)
+	(parameter
+		"MIN_FILTER_DEPTH"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
 		(rectangle (rect 16 16 432 288)(line_width 1))
 	)
+	(annotation_block (parameter)(rect 464 -64 564 16))
 )
