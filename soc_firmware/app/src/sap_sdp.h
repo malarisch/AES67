@@ -54,7 +54,8 @@ struct aes67_stream_config {
 
 /* ---- TX stream table (up to 8 streams, matching tx_router) ---- */
 
-#define AES67_MAX_TX_STREAMS  8
+#define AES67_MAX_TX_STREAMS     8
+#define AES67_MAX_RX_STREAMS     8
 #define AES67_MAX_CH_PER_STREAM  8
 
 struct aes67_tx_stream {
@@ -65,6 +66,17 @@ struct aes67_tx_stream {
 	uint8_t  samples_per_packet;
 	uint8_t  ch_ids[AES67_MAX_CH_PER_STREAM];
 	uint32_t ssrc;  /* SSRC for RTP header, must match SDP announcement */
+};
+
+/* ---- RX stream table (configured receive streams -> rx_ringbuffer) ---- */
+
+struct aes67_rx_stream {
+	bool    active;
+	uint8_t stream_id;
+	uint32_t ssrc;
+	uint8_t  ch_map[AES67_MAX_CH_PER_STREAM]; /* output channel per input ch */
+	uint8_t  channel_count;
+	uint8_t  output_delay;
 };
 
 /* ---- Discovered foreign streams (SAP RX) ---- */
@@ -161,6 +173,30 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
  * @brief Get the TX stream table.
  */
 const struct aes67_tx_stream *sap_sdp_get_tx_streams(void);
+
+/**
+ * @brief Configure an RX audio stream.
+ *
+ * Writes the stream config to the FPGA rx_ringbuffer stream_ram via FMC
+ * and stores it in the local RX stream table.
+ *
+ * @param stream_id      Stream index (0..AES67_MAX_RX_STREAMS-1)
+ * @param ssrc           SSRC to match in incoming RTP packets
+ * @param ch_map         Output channel map (ch_map[i] = output channel for input ch i)
+ * @param channel_count  Number of channels (1..8)
+ * @param output_delay   Output delay in samples
+ * @return 0 on success, negative errno on error
+ */
+int sap_sdp_configure_rx_stream(uint8_t stream_id,
+				uint32_t ssrc,
+				const uint8_t *ch_map,
+				uint8_t channel_count,
+				uint8_t output_delay);
+
+/**
+ * @brief Get the RX stream table.
+ */
+const struct aes67_rx_stream *sap_sdp_get_rx_streams(void);
 
 /**
  * @brief Get the table of discovered foreign streams.

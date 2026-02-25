@@ -420,6 +420,41 @@ static int build_status_streams(char *buf, size_t sz)
 
 	p = json_end_array(buf, sz, p);
 
+	/* RX streams */
+	const struct aes67_rx_stream *rxs = sap_sdp_get_rx_streams();
+
+	p = json_add_key(buf, sz, p, "rx_streams");
+	p = json_start_array(buf, sz, p);
+
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		if (!rxs[i].active) {
+			continue;
+		}
+		p += snprintf(buf + p, sz - p, "{");
+		p = json_add_uint(buf, sz, p, "stream_id", rxs[i].stream_id);
+		p += snprintf(buf + p, sz - p, "\"ssrc\":\"%08X\",",
+			      rxs[i].ssrc);
+		p = json_add_uint(buf, sz, p, "channel_count",
+				   rxs[i].channel_count);
+		p = json_add_uint(buf, sz, p, "output_delay",
+				   rxs[i].output_delay);
+
+		p = json_add_key(buf, sz, p, "ch_map");
+		p = json_start_array(buf, sz, p);
+		for (int j = 0; j < rxs[i].channel_count; j++) {
+			p += snprintf(buf + p, sz - p, "%u,",
+				      rxs[i].ch_map[j]);
+		}
+		p = json_end_array(buf, sz, p);
+
+		if (p > 1 && buf[p - 1] == ',') {
+			p--;
+		}
+		p += snprintf(buf + p, sz - p, "},");
+	}
+
+	p = json_end_array(buf, sz, p);
+
 	/* Discovered (foreign) streams */
 	int sap_count = 0;
 	const struct sap_foreign_stream *foreign =
@@ -762,12 +797,73 @@ static int apply_tx_stream_json(const char *json, size_t len)
 }
 
 /* ================================================================
+ * Apply RX stream POST body
+ * ================================================================ */
+
+static int apply_rx_stream_json(const char *json, size_t len)
+{
+	int32_t stream_id = -1;
+	int32_t channel_count = 0;
+	int32_t output_delay = 0;
+	int32_t ssrc_val = 0;
+
+	if (!json_find_int(json, len, "stream_id", &stream_id) ||
+	    stream_id < 0 || stream_id >= AES67_MAX_RX_STREAMS) {
+		return -EINVAL;
+	}
+
+	/* SSRC can be provided as decimal integer or hex string */
+	char ssrc_str[12] = {0};
+	if (json_find_str(json, len, "ssrc", ssrc_str, sizeof(ssrc_str)) > 0) {
+		ssrc_val = (int32_t)strtoul(ssrc_str, NULL, 16);
+	} else if (!json_find_int(json, len, "ssrc", &ssrc_val)) {
+		return -EINVAL;
+	}
+
+	json_find_int(json, len, "channel_count", &channel_count);
+	json_find_int(json, len, "output_delay", &output_delay);
+
+	if (channel_count < 1 || channel_count > AES67_MAX_CH_PER_STREAM) {
+		channel_count = 2;
+	}
+
+	/* Parse ch_map from "ch_map":[0,1,...] */
+	uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = {0};
+	char ch_needle[] = "\"ch_map\":[";
+	const char *arr = local_memmem(json, len, ch_needle, strlen(ch_needle));
+
+	if (arr) {
+		arr += strlen(ch_needle);
+		for (int i = 0; i < channel_count && i < AES67_MAX_CH_PER_STREAM; i++) {
+			while (*arr == ' ') {
+				arr++;
+			}
+			ch_map[i] = (uint8_t)strtol(arr, (char **)&arr, 10);
+			if (*arr == ',') {
+				arr++;
+			}
+		}
+	} else {
+		/* Default: identity mapping */
+		for (int i = 0; i < channel_count; i++) {
+			ch_map[i] = (uint8_t)i;
+		}
+	}
+
+	return sap_sdp_configure_rx_stream((uint8_t)stream_id,
+					   (uint32_t)ssrc_val,
+					   ch_map,
+					   (uint8_t)channel_count,
+					   (uint8_t)output_delay);
+}
+
+/* ================================================================
  * DELETE TX stream
  * ================================================================ */
 
 static int delete_tx_stream(int stream_id)
 {
-	if (stream_id < 0 || stream_id > 7) {
+	if (stream_id < 0 || stream_id >= AES67_MAX_TX_STREAMS) {
 		return -EINVAL;
 	}
 
@@ -777,6 +873,23 @@ static int delete_tx_stream(int stream_id)
 
 	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &zero_ip,
 					   0, 0, zero_ch, 0, 0);
+}
+
+/* ================================================================
+ * DELETE RX stream
+ * ================================================================ */
+
+static int delete_rx_stream(int stream_id)
+{
+	if (stream_id < 0 || stream_id >= AES67_MAX_RX_STREAMS) {
+		return -EINVAL;
+	}
+
+	/* Zero-SSRC config effectively disables the stream in the FPGA */
+	uint8_t zero_map[AES67_MAX_CH_PER_STREAM] = {0};
+
+	return sap_sdp_configure_rx_stream((uint8_t)stream_id, 0,
+					   zero_map, 1, 0);
 }
 
 /* ================================================================
@@ -1035,6 +1148,12 @@ static int api_handler(struct http_client_ctx *client,
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,
 						    "{\"ok\":true}");
 			}
+		} else if (strcmp(url, "/api/streams/rx") == 0) {
+			ret = apply_rx_stream_json(post_body, post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+						    "{\"ok\":true}");
+			}
 #ifdef CONFIG_MI_CARD
 		} else if (strcmp(url, "/api/mi") == 0) {
 			/* Global MI settings (HPF, 96kHz) */
@@ -1099,6 +1218,10 @@ static int api_handler(struct http_client_ctx *client,
 			int sid = atoi(url + 16);
 
 			ret = delete_tx_stream(sid);
+		} else if (strncmp(url, "/api/streams/rx/", 16) == 0) {
+			int sid = atoi(url + 16);
+
+			ret = delete_rx_stream(sid);
 		}
 
 		post_body_len = 0;

@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
 
-entity rx_sample_buffer is
+entity rx_ringbuffer is
     generic
     (
         audio_buffer_sample_depth : integer := 96; -- number of samples per channel to buffer
@@ -34,7 +34,7 @@ entity rx_sample_buffer is
 		
 		media_clock_i: in std_logic_vector(31 downto 0);
 
-		eth_read_addr_o		: out unsigned(11 downto 0);
+		eth_read_addr_o		: out unsigned(10 downto 0);
         eth_read_data_i		: in std_logic_vector(7 downto 0);
 
         packet_ready_i : in std_logic;
@@ -46,7 +46,7 @@ entity rx_sample_buffer is
 	);
 end entity;
 
-architecture Behavioral of rx_sample_buffer is
+architecture Behavioral of rx_ringbuffer is
     constant AUDIO_BUFFER_LENGTH : integer := audio_buffer_sample_depth * global_channel_count * bytes_per_sample * 2; -- total number of bytes in the buffer
     type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData, s_End);
     signal packetParserState : t_s_parsePacket := s_Idle;
@@ -98,6 +98,7 @@ begin
     process(sys_clk, reset_n)
         variable data_latch : std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
         variable comp_byte: integer range 0 to 32 := 0;
+        variable raw_addr : integer;
     begin
         if reset_n = '0' then
             eth_read_addr_o <= (others => '0');
@@ -142,10 +143,10 @@ begin
                         media_clock_latch <= media_clock_i;
                         packetParserState <= s_readHeader;
                         packet_read_index <= 16;
-                        eth_read_addr_o <= to_unsigned(16, 12); -- start at index 16, we don't care for the rest so far
+                        eth_read_addr_o <= to_unsigned(16, 11); -- start at index 16, we don't care for the rest so far
                     end if;
                 when s_readHeader =>
-                    eth_read_addr_o <= to_unsigned(packet_read_index, 12);
+                    eth_read_addr_o <= to_unsigned(packet_read_index, 11);
                     packet_read_index <= packet_read_index + 1;
                     case packet_read_index is
                         when 16 => current_packet_length(15 downto 8) <= eth_read_data_i;
@@ -192,10 +193,14 @@ begin
                                 current_packet_samples_per_channel <= to_integer(unsigned(stream_ram(config_ram_read_ptr + 13)));
                                 prepare_step <= 4;
                             when 4 =>
-                                wr_ptr_start <= (to_integer(unsigned(current_packet_media_clock) - unsigned(media_clock_latch)) + to_integer(unsigned(stream_ram(config_ram_read_ptr + 13)))) * global_channel_count * bytes_per_sample;
+                                raw_addr := (to_integer(unsigned(current_packet_media_clock) - unsigned(media_clock_latch)) + to_integer(unsigned(stream_ram(config_ram_read_ptr + 13)))) * global_channel_count * bytes_per_sample;
+                                if raw_addr >= AUDIO_BUFFER_LENGTH then
+                                    raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+                                end if;
+                                wr_ptr_start <= raw_addr;
                                 packetParserState <= s_readSampleData;
                                 packet_read_index <= 54;
-                                eth_read_addr_o <= to_unsigned(54, 12);
+                                eth_read_addr_o <= to_unsigned(54, 11);
                                 byte_count_parser <= 0;
 
                             when others =>
@@ -231,10 +236,14 @@ begin
                         end if;
 
 
-                        eth_read_addr_o <= to_unsigned(packet_read_index + 1, 12);
+                        eth_read_addr_o <= to_unsigned(packet_read_index + 1, 11);
                         packet_read_index <= packet_read_index + 1;
-                        
-                        sample_ram(wr_ptr_start + current_packet_sample_index * global_channel_count * bytes_per_sample + to_integer(unsigned(stream_ram(config_ram_read_ptr + 4 + current_read_channel_index))) * bytes_per_sample + (bytes_per_sample - 1 - byte_count_parser)) <= eth_read_data_i;
+
+                        raw_addr := wr_ptr_start + current_packet_sample_index * global_channel_count * bytes_per_sample + to_integer(unsigned(stream_ram(config_ram_read_ptr + 4 + current_read_channel_index))) * bytes_per_sample + (bytes_per_sample - 1 - byte_count_parser);
+                        if raw_addr >= AUDIO_BUFFER_LENGTH then
+                            raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+                        end if;
+                        sample_ram(raw_addr) <= eth_read_data_i;
                         
 
 

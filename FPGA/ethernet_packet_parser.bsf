@@ -227,6 +227,13 @@ on the Quartus Prime software download page.
 		(text "parse_ptp_packet" (rect 196 219 267 231)(font "Arial" ))
 		(line (pt 288 224)(pt 272 224)(line_width 1))
 	)
+	(port
+		(pt 288 240)
+		(output)
+		(text "parse_rtp_packet" (rect 0 0 70 12)(font "Arial" ))
+		(text "parse_rtp_packet" (rect 197 235 267 247)(font "Arial" ))
+		(line (pt 288 240)(pt 272 240)(line_width 1))
+	)
 	(parameter
 		"udp_port"
 		"4023"
@@ -240,6 +247,11 @@ on the Quartus Prime software download page.
 	(parameter
 		"udp_port_ptpv2_general"
 		"320"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"udp_port_rtp"
+		"5004"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing

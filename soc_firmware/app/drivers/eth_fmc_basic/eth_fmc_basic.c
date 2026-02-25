@@ -373,6 +373,37 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 				 ETH_FMC_TX_STREAM_CFG_LEN);
 }
 
+int eth_fmc_write_rx_stream_config(const struct device *dev,
+				   uint8_t stream_id,
+				   uint32_t ssrc,
+				   const uint8_t *ch_map,
+				   uint8_t channel_count,
+				   uint8_t output_delay)
+{
+	uint8_t buf[ETH_FMC_RX_STREAM_CFG_LEN];
+
+	memset(buf, 0, sizeof(buf));
+
+	/* Byte 0: base address = stream_id * 32 */
+	buf[0] = (uint8_t)(stream_id * 32);
+	/* Bytes 1..4: SSRC big-endian */
+	buf[1] = (ssrc >> 24) & 0xFF;
+	buf[2] = (ssrc >> 16) & 0xFF;
+	buf[3] = (ssrc >>  8) & 0xFF;
+	buf[4] =  ssrc        & 0xFF;
+	/* Bytes 5..12: output channel map (up to 8 channels) */
+	for (uint8_t i = 0; i < 8 && i < channel_count; i++) {
+		buf[5 + i] = ch_map[i];
+	}
+	/* Byte 13: channel count */
+	buf[13] = channel_count;
+	/* Byte 14: output delay in samples */
+	buf[14] = output_delay;
+
+	return eth_fmc_reg_write(dev, ETH_FMC_REG_RX_STREAM_CFG, buf,
+				 ETH_FMC_RX_STREAM_CFG_LEN);
+}
+
 /* TX path */
 static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 {

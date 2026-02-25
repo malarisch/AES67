@@ -347,6 +347,27 @@ on the Quartus Prime software download page.
 		(line (pt 360 320)(pt 344 320)(line_width 1))
 	)
 	(port
+		(pt 360 336)
+		(output)
+		(text "rx_stream_config_wr_clk_o" (rect 0 0 114 12)(font "Arial" ))
+		(text "rx_stream_config_wr_clk_o" (rect 225 331 339 343)(font "Arial" ))
+		(line (pt 360 336)(pt 344 336)(line_width 1))
+	)
+	(port
+		(pt 360 352)
+		(output)
+		(text "rx_stream_config_wr_addr_o[7..0]" (rect 0 0 141 12)(font "Arial" ))
+		(text "rx_stream_config_wr_addr_o[7..0]" (rect 198 347 339 359)(font "Arial" ))
+		(line (pt 360 352)(pt 344 352)(line_width 3))
+	)
+	(port
+		(pt 360 368)
+		(output)
+		(text "rx_stream_config_wr_data_o[7..0]" (rect 0 0 140 12)(font "Arial" ))
+		(text "rx_stream_config_wr_data_o[7..0]" (rect 199 363 339 375)(font "Arial" ))
+		(line (pt 360 368)(pt 344 368)(line_width 3))
+	)
+	(port
 		(pt 360 32)
 		(bidir)
 		(text "fmc_data_io[7..0]" (rect 0 0 70 12)(font "Arial" ))

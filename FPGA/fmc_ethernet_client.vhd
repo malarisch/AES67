@@ -79,7 +79,12 @@ entity fmc_ethernet_client is
     tx_stream_config_wr_data_o    : out std_ulogic_vector(7 downto 0);
 
     tx_allow_req_o : out std_ulogic;
-    tx_allow_i : in std_ulogic
+    tx_allow_i : in std_ulogic;
+
+    -- RX stream config (written via 0x59, 15 bytes per stream -> rx_ringbuffer stream_ram)
+    rx_stream_config_wr_clk_o  : out std_ulogic;
+    rx_stream_config_wr_addr_o : out std_ulogic_vector(7 downto 0);
+    rx_stream_config_wr_data_o : out std_ulogic_vector(7 downto 0)
   );
 end entity;
 
@@ -212,6 +217,11 @@ architecture rtl of fmc_ethernet_client is
   signal stream_cfg_byte_count : unsigned(7 downto 0) := (others => '0');
   signal stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
 
+  -- RX stream config state (0x59 write, 15 bytes per stream -> rx_ringbuffer stream_ram)
+  signal rx_stream_cfg_byte_count : unsigned(7 downto 0) := (others => '0');
+  signal rx_stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
+  signal rx_stream_cfg_wr_en      : std_ulogic := '0';
+
 
 
   -- Read byte counter for multi-byte registers (0x52..0x54)
@@ -230,6 +240,9 @@ begin
 
   -- Concurrent output assignments for status/control ports
   pll_ppb_measurement_start_o <= ppb_start_reg;
+
+  -- RX stream config clock: gate clk_sys_i with wr_en so rx_ringbuffer sees a rising edge per write
+  rx_stream_config_wr_clk_o <= clk_sys_i and rx_stream_cfg_wr_en;
 
 
   -- Config RAM read address: combinational so data is ready when latched
@@ -473,11 +486,17 @@ begin
       tx_stream_config_wr_en_o   <= '0';
       tx_stream_config_wr_addr_o <= (others => '0');
       tx_stream_config_wr_data_o <= (others => '0');
+      rx_stream_cfg_byte_count   <= (others => '0');
+      rx_stream_cfg_base_addr    <= (others => '0');
+      rx_stream_cfg_wr_en        <= '0';
+      rx_stream_config_wr_addr_o <= (others => '0');
+      rx_stream_config_wr_data_o <= (others => '0');
       read_byte_count       <= (others => '0');
       read_reg_addr_prev    <= (others => '0');
     elsif rising_edge(clk_sys_i) then
       system_config_wr_en <= '0';
       tx_stream_config_wr_en_o <= '0';
+      rx_stream_cfg_wr_en <= '0';
       txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
@@ -613,6 +632,24 @@ begin
                 stream_cfg_byte_count <= (others => '0');
               else
                 stream_cfg_byte_count <= stream_cfg_byte_count + 1;
+              end if;
+          when "1011001" =>  -- 0x59 RX stream config write (15 bytes per stream -> rx_ringbuffer stream_ram)
+              -- Byte 0 is the base address in stream_ram (caller computes stream_id * 32)
+              -- Bytes 0..14 are written to stream_ram[base + byte_offset]
+              rx_stream_cfg_wr_en <= '1';
+              rx_stream_config_wr_data_o <= wr_cap_data;
+              if rx_stream_cfg_byte_count = 0 then
+                -- First byte: base address (stream_id * 32), latch and write to offset 0
+                rx_stream_cfg_base_addr    <= unsigned(wr_cap_data);
+                rx_stream_config_wr_addr_o <= wr_cap_data;
+              else
+                -- Subsequent bytes: latched base addr + offset
+                rx_stream_config_wr_addr_o <= std_ulogic_vector(rx_stream_cfg_base_addr + resize(rx_stream_cfg_byte_count, 8));
+              end if;
+              if rx_stream_cfg_byte_count >= 14 then
+                rx_stream_cfg_byte_count <= (others => '0');
+              else
+                rx_stream_cfg_byte_count <= rx_stream_cfg_byte_count + 1;
               end if;
           when others =>
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then

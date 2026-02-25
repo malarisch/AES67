@@ -59,6 +59,9 @@ static struct aes67_stream_config local_config;
 static struct aes67_tx_stream tx_streams[AES67_MAX_TX_STREAMS];
 static volatile bool force_announce;
 
+/* ---- RX stream table ---- */
+static struct aes67_rx_stream rx_streams[AES67_MAX_RX_STREAMS];
+
 /* ---- Foreign stream table ---- */
 static struct sap_foreign_stream foreign_streams[SAP_MAX_FOREIGN_STREAMS];
 
@@ -1006,6 +1009,7 @@ int sap_sdp_start(struct net_if *iface)
 	k_mutex_init(&sap_mutex);
 	memset(foreign_streams, 0, sizeof(foreign_streams));
 	memset(tx_streams, 0, sizeof(tx_streams));
+	memset(rx_streams, 0, sizeof(rx_streams));
 	force_announce = false;
 	ip_ready = false;
 
@@ -1148,6 +1152,56 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 const struct aes67_tx_stream *sap_sdp_get_tx_streams(void)
 {
 	return tx_streams;
+}
+
+int sap_sdp_configure_rx_stream(uint8_t stream_id,
+				uint32_t ssrc,
+				const uint8_t *ch_map,
+				uint8_t channel_count,
+				uint8_t output_delay)
+{
+	if (stream_id >= AES67_MAX_RX_STREAMS || !ch_map ||
+	    channel_count == 0 || channel_count > AES67_MAX_CH_PER_STREAM) {
+		return -EINVAL;
+	}
+
+	const struct device *fmc = device_get_binding("eth_fmc0");
+
+	if (!fmc) {
+		LOG_ERR("SAP: FMC device not found");
+		return -ENODEV;
+	}
+
+	int ret = eth_fmc_write_rx_stream_config(fmc, stream_id, ssrc,
+						 ch_map, channel_count,
+						 output_delay);
+	if (ret < 0) {
+		LOG_ERR("SAP: Failed to write RX stream %u to FPGA: %d",
+			stream_id, ret);
+		return ret;
+	}
+
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	rx_streams[stream_id].active = true;
+	rx_streams[stream_id].stream_id = stream_id;
+	rx_streams[stream_id].ssrc = ssrc;
+	rx_streams[stream_id].channel_count = channel_count;
+	rx_streams[stream_id].output_delay = output_delay;
+	memset(rx_streams[stream_id].ch_map, 0,
+	       sizeof(rx_streams[stream_id].ch_map));
+	for (uint8_t i = 0; i < channel_count; i++) {
+		rx_streams[stream_id].ch_map[i] = ch_map[i];
+	}
+	k_mutex_unlock(&sap_mutex);
+
+	LOG_INF("SAP: RX stream %u configured: ssrc=0x%08x ch=%u delay=%u",
+		stream_id, ssrc, channel_count, output_delay);
+	return 0;
+}
+
+const struct aes67_rx_stream *sap_sdp_get_rx_streams(void)
+{
+	return rx_streams;
 }
 
 /* ================================================================
