@@ -365,6 +365,8 @@ static int parse_sap_sdp(const uint8_t *buf, size_t len,
 	out->channels = 0;
 	out->bit_depth = 0;
 	out->sample_rate = 0;
+	out->ssrc = 0;
+	out->samples_per_packet = 0;
 	out->mcast_addr.s_addr = 0;
 
 	const char *line = sdp_start;
@@ -479,12 +481,57 @@ static int parse_sap_sdp(const uint8_t *buf, size_t len,
 				out->sample_rate = rate;
 				out->channels = (uint8_t)ch;
 			}
+		} else if (clean_len > 7 && memcmp(line, "a=ssrc:", 7) == 0) {
+			/* a=ssrc:<ssrc> cname:... -- extract 32-bit SSRC */
+			const char *p = line + 7;
+			const char *p_end = line + clean_len;
+			uint32_t ssrc_val = 0;
+
+			while (p < p_end && *p >= '0' && *p <= '9') {
+				ssrc_val = ssrc_val * 10 + (uint32_t)(*p - '0');
+				p++;
+			}
+			out->ssrc = ssrc_val;
+		} else if (clean_len > 8 && memcmp(line, "a=ptime:", 8) == 0) {
+			/* a=ptime:<ms>[.<frac>] -- store raw us, resolve after loop */
+			const char *p = line + 8;
+			const char *p_end = line + clean_len;
+			uint32_t ptime_ms = 0;
+			uint32_t ptime_frac_us = 0;
+
+			while (p < p_end && *p >= '0' && *p <= '9') {
+				ptime_ms = ptime_ms * 10 + (uint32_t)(*p - '0');
+				p++;
+			}
+			if (p < p_end && *p == '.') {
+				p++;
+				uint32_t scale = 100000U;
+
+				while (p < p_end && *p >= '0' &&
+				       *p <= '9' && scale > 0) {
+					ptime_frac_us += (*p - '0') * scale;
+					scale /= 10;
+					p++;
+				}
+			}
+			/* Store raw us as placeholder; resolved to samples below */
+			out->samples_per_packet = (uint16_t)(
+				ptime_ms * 1000U + ptime_frac_us);
 		}
 
 		if (!eol) {
 			break;
 		}
 		line = eol + 1;
+	}
+
+	/* Resolve samples_per_packet: stored above as raw ptime us,
+	 * compute samples = ptime_us * sample_rate / 1000000 */
+	if (out->samples_per_packet > 0 && out->sample_rate > 0) {
+		uint32_t ptime_us = out->samples_per_packet;
+
+		out->samples_per_packet = (uint16_t)(
+			ptime_us * out->sample_rate / 1000000U);
 	}
 
 	return 0;
@@ -1158,7 +1205,8 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 				uint32_t ssrc,
 				const uint8_t *ch_map,
 				uint8_t channel_count,
-				uint8_t output_delay)
+				uint8_t output_delay,
+				uint8_t samples_per_channel)
 {
 	if (stream_id >= AES67_MAX_RX_STREAMS || !ch_map ||
 	    channel_count == 0 || channel_count > AES67_MAX_CH_PER_STREAM) {
@@ -1174,7 +1222,8 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 
 	int ret = eth_fmc_write_rx_stream_config(fmc, stream_id, ssrc,
 						 ch_map, channel_count,
-						 output_delay);
+						 output_delay,
+						 samples_per_channel);
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write RX stream %u to FPGA: %d",
 			stream_id, ret);
@@ -1187,6 +1236,7 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 	rx_streams[stream_id].ssrc = ssrc;
 	rx_streams[stream_id].channel_count = channel_count;
 	rx_streams[stream_id].output_delay = output_delay;
+	rx_streams[stream_id].samples_per_channel = samples_per_channel;
 	memset(rx_streams[stream_id].ch_map, 0,
 	       sizeof(rx_streams[stream_id].ch_map));
 	for (uint8_t i = 0; i < channel_count; i++) {
@@ -1194,8 +1244,8 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 	}
 	k_mutex_unlock(&sap_mutex);
 
-	LOG_INF("SAP: RX stream %u configured: ssrc=0x%08x ch=%u delay=%u",
-		stream_id, ssrc, channel_count, output_delay);
+	LOG_INF("SAP: RX stream %u configured: ssrc=0x%08x ch=%u spc=%u delay=%u",
+		stream_id, ssrc, channel_count, samples_per_channel, output_delay);
 	return 0;
 }
 

@@ -378,7 +378,8 @@ int eth_fmc_write_rx_stream_config(const struct device *dev,
 				   uint32_t ssrc,
 				   const uint8_t *ch_map,
 				   uint8_t channel_count,
-				   uint8_t output_delay)
+				   uint8_t output_delay,
+				   uint8_t samples_per_channel)
 {
 	uint8_t buf[ETH_FMC_RX_STREAM_CFG_LEN];
 
@@ -399,6 +400,8 @@ int eth_fmc_write_rx_stream_config(const struct device *dev,
 	buf[13] = channel_count;
 	/* Byte 14: output delay in samples */
 	buf[14] = output_delay;
+	/* Byte 15: samples per channel per packet */
+	buf[15] = samples_per_channel;
 
 	return eth_fmc_reg_write(dev, ETH_FMC_REG_RX_STREAM_CFG, buf,
 				 ETH_FMC_RX_STREAM_CFG_LEN);
@@ -438,6 +441,18 @@ static void eth_fmc_basic_tx_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 		//LOG_INF("Sending Packet with lenght %u", len);
+
+		/* Wait for any previous TX to complete before writing new data.
+		 * REG_TX_CTRL bit 0 reflects tx_busy_sys in the FPGA — set on
+		 * start-toggle, cleared when the MAC finishes transmission. */
+		int tx_wait = 0;
+		while (fmc_read8(cfg->base, REG_TX_CTRL) & 0x01) {
+			k_busy_wait(5);
+			if (++tx_wait > 20000) { /* ~100 ms safety timeout */
+				LOG_WRN("TX busy timeout — forcing send");
+				break;
+			}
+		}
 
 		key = k_spin_lock(&data->lock);
 		fmc_write8(cfg->base, REG_TX_LEN_L, len & 0xFF);
@@ -495,7 +510,12 @@ static void eth_fmc_basic_gpio_callback(const struct device *port,
 		 * interrupt asserted across the CDC delay. */
 		fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
 		k_sem_give(&data->int_sem);
-	}	
+	} else {
+		/* IRQ fired but status reads 0 — can happen due to CDC
+		 * latency between mac_rx and clk_sys domains.  Wake the
+		 * RX thread so it can re-poll after a short delay. */
+		k_sem_give(&data->int_sem);
+	}
 	
 	k_spin_unlock(&data->lock, key);
 }

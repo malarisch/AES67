@@ -67,7 +67,7 @@ HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port, 4, 10, NULL, NULL);
  * dynamic resources in Zephyr are already serialised per-holder)
  * ================================================================ */
 
-#define JSON_BUF_SIZE 2048
+#define JSON_BUF_SIZE 4096
 static char json_buf[JSON_BUF_SIZE];
 
 /* ================================================================
@@ -438,6 +438,8 @@ static int build_status_streams(char *buf, size_t sz)
 				   rxs[i].channel_count);
 		p = json_add_uint(buf, sz, p, "output_delay",
 				   rxs[i].output_delay);
+		p = json_add_uint(buf, sz, p, "samples_per_channel",
+				   rxs[i].samples_per_channel);
 
 		p = json_add_key(buf, sz, p, "ch_map");
 		p = json_start_array(buf, sz, p);
@@ -478,6 +480,14 @@ static int build_status_streams(char *buf, size_t sz)
 				   foreign[i].bit_depth);
 		p = json_add_uint(buf, sz, p, "sample_rate",
 				   foreign[i].sample_rate);
+		p = json_add_uint(buf, sz, p, "samples_per_packet",
+				   foreign[i].samples_per_packet);
+		if (foreign[i].ssrc != 0) {
+			p += snprintf(buf + p, sz - p, "\"ssrc\":\"%08X\",",
+				      foreign[i].ssrc);
+		} else {
+			p += snprintf(buf + p, sz - p, "\"ssrc\":\"\",");
+		}
 		format_ip(tmp, sizeof(tmp), &foreign[i].origin_addr);
 		p = json_add_str(buf, sz, p, "origin_addr", tmp);
 		if (p > 1 && buf[p - 1] == ',') {
@@ -805,6 +815,7 @@ static int apply_rx_stream_json(const char *json, size_t len)
 	int32_t stream_id = -1;
 	int32_t channel_count = 0;
 	int32_t output_delay = 0;
+	int32_t samples_per_channel = 48;
 	int32_t ssrc_val = 0;
 
 	if (!json_find_int(json, len, "stream_id", &stream_id) ||
@@ -822,9 +833,13 @@ static int apply_rx_stream_json(const char *json, size_t len)
 
 	json_find_int(json, len, "channel_count", &channel_count);
 	json_find_int(json, len, "output_delay", &output_delay);
+	json_find_int(json, len, "samples_per_channel", &samples_per_channel);
 
 	if (channel_count < 1 || channel_count > AES67_MAX_CH_PER_STREAM) {
 		channel_count = 2;
+	}
+	if (samples_per_channel < 1 || samples_per_channel > 255) {
+		samples_per_channel = 48;
 	}
 
 	/* Parse ch_map from "ch_map":[0,1,...] */
@@ -854,7 +869,8 @@ static int apply_rx_stream_json(const char *json, size_t len)
 					   (uint32_t)ssrc_val,
 					   ch_map,
 					   (uint8_t)channel_count,
-					   (uint8_t)output_delay);
+					   (uint8_t)output_delay,
+					   (uint8_t)samples_per_channel);
 }
 
 /* ================================================================
@@ -889,7 +905,7 @@ static int delete_rx_stream(int stream_id)
 	uint8_t zero_map[AES67_MAX_CH_PER_STREAM] = {0};
 
 	return sap_sdp_configure_rx_stream((uint8_t)stream_id, 0,
-					   zero_map, 1, 0);
+					   zero_map, 1, 0, 0);
 }
 
 /* ================================================================

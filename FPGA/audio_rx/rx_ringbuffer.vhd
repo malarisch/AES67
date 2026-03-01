@@ -63,8 +63,19 @@ architecture Behavioral of rx_ringbuffer is
 
    	signal sample_ram		: t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram := (others => (others => '0'));
+    attribute ramstyle : string;
+    attribute ramstyle of sample_ram : signal is "M9K";
     signal sample_wr_ptr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
     signal sample_rd_ptr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+
+    -- Synchronous read port for sample_ram (required for block RAM inference)
+    signal sample_rd_addr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+    signal sample_rd_data : std_logic_vector(7 downto 0) := (others => '0');
+
+    -- Write port signals for sample_ram
+    signal sample_wr_addr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+    signal sample_wr_data : std_logic_vector(7 downto 0) := (others => '0');
+    signal sample_wr_en   : std_logic := '0';
 
     signal fs_clk_i_sync1 : std_logic := '0';
     signal fs_clk_i_sync2 : std_logic := '0';
@@ -72,12 +83,17 @@ architecture Behavioral of rx_ringbuffer is
     signal packet_ready_i_sync2 : std_logic := '0';
     signal zaudio_sync : std_logic := '0';
     signal current_read_channel_id : integer range 0 to 7 := 0;
-    signal current_playout_channel_id: integer range 0 to global_channel_count - 1 := 0;
 
-    signal byte_count : integer range 0 to bytes_per_sample - 1 := 0;
     signal byte_count_parser : integer range 0 to bytes_per_sample - 1 := 0;
-    signal start_read : std_logic := '0';
     signal output_next_sample : std_logic := '0';
+
+    -- Playout pipeline states: addr phase -> data phase
+    type t_playout_state is (ps_idle, ps_addr, ps_data);
+    signal playout_state : t_playout_state := ps_idle;
+    signal playout_channel_id : integer range 0 to global_channel_count - 1 := 0;
+    signal playout_byte : integer range 0 to bytes_per_sample - 1 := 0;
+    signal playout_data_latch : std_logic_vector(bytes_per_sample * 8 - 1 downto 0) := (others => '0');
+    signal playout_rd_base : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
 
     signal current_read_channel_index : integer range 0 to 7 := 0;
     signal current_stream_channel_count : integer range 0 to 7 := 0;
@@ -96,7 +112,6 @@ architecture Behavioral of rx_ringbuffer is
 begin
     
     process(sys_clk, reset_n)
-        variable data_latch : std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
         variable comp_byte: integer range 0 to 32 := 0;
         variable raw_addr : integer;
     begin
@@ -108,9 +123,6 @@ begin
             fs_clk_i_sync2 <= '0';
             zaudio_sync <= '0';
             current_read_channel_id <= 0;
-            current_playout_channel_id <= 0;
-            byte_count <= 0;
-            start_read <= '0';
             packet_ready_i_sync1 <= '0';
             packet_ready_i_sync2 <= '0';
             output_next_sample <= '0';
@@ -119,8 +131,13 @@ begin
             current_stream_playout_offset <= 0;
             media_clock_latch <= (others => '0');
             config_ram_read_ptr <= 0;
+            playout_state <= ps_idle;
+            playout_channel_id <= 0;
+            playout_byte <= 0;
+            playout_data_latch <= (others => '0');
+            playout_rd_base <= 0;
         elsif rising_edge(sys_clk) then
-            
+            sample_wr_en <= '0';
 
             -- cdc for fs_clk_i to sys_clk domain
             fs_clk_i_sync1 <= fs_clk_i;
@@ -243,7 +260,9 @@ begin
                         if raw_addr >= AUDIO_BUFFER_LENGTH then
                             raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
                         end if;
-                        sample_ram(raw_addr) <= eth_read_data_i;
+                        sample_wr_addr <= raw_addr;
+                        sample_wr_data <= eth_read_data_i;
+                        sample_wr_en <= '1';
                         
 
 
@@ -264,48 +283,100 @@ begin
 
 
 
-            -- playout logic
-            if output_next_sample = '1' then
-
-                data_latch(byte_count*8 + 7 downto byte_count*8) := sample_ram(sample_rd_ptr + current_playout_channel_id * bytes_per_sample + byte_count);
-                byte_count <= byte_count + 1;
-                if byte_count = bytes_per_sample - 1 then
-                    byte_count <= 0;
-
-                    case current_playout_channel_id is
-                        when 0 => audio_ch0_out <= data_latch;
-                        when 1 => audio_ch1_out <= data_latch;
-                        when 2 => audio_ch2_out <= data_latch;
-                        when 3 => audio_ch3_out <= data_latch;
-                        when 4 => audio_ch4_out <= data_latch;
-                        when 5 => audio_ch5_out <= data_latch;
-                        when 6 => audio_ch6_out <= data_latch;
-                        when 7 => audio_ch7_out <= data_latch;
-                        when 8 => audio_ch8_out <= data_latch;
-                        when 9 => audio_ch9_out <= data_latch;
-                        when 10 => audio_ch10_out <= data_latch;
-                        when 11 => audio_ch11_out <= data_latch;
-                        when 12 => audio_ch12_out <= data_latch;
-                        when 13 => audio_ch13_out <= data_latch;
-                        when 14 => audio_ch14_out <= data_latch;
-                        when 15 => audio_ch15_out <= data_latch;
-                        when others => null;
-                    end case;
-
-                    if current_playout_channel_id = global_channel_count - 1 then
-                        -- reset to first channel and move read pointer forward by one sample (all channels)
-                        current_playout_channel_id <= 0;
-                        if sample_rd_ptr + global_channel_count * bytes_per_sample >= AUDIO_BUFFER_LENGTH then
-                            sample_rd_ptr <= sample_rd_ptr + global_channel_count * bytes_per_sample - AUDIO_BUFFER_LENGTH;
-                        else
-                            sample_rd_ptr <= sample_rd_ptr + global_channel_count * bytes_per_sample;
+            -- playout logic (pipelined for synchronous RAM read)
+            case playout_state is
+                when ps_idle =>
+                    if output_next_sample = '1' then
+                        playout_state <= ps_addr;
+                        playout_channel_id <= 0;
+                        playout_byte <= 0;
+                        playout_rd_base <= sample_rd_ptr;
+                        playout_data_latch <= (others => '0');
+                        -- present first read address
+                        raw_addr := sample_rd_ptr + 0 * bytes_per_sample + (bytes_per_sample - 1 - 0);
+                        if raw_addr >= AUDIO_BUFFER_LENGTH then
+                            raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
                         end if;
-                        output_next_sample <= '0';
-                    else
-                        current_playout_channel_id <= current_playout_channel_id + 1;
+                        sample_rd_addr <= raw_addr;
                     end if;
-                end if;
+
+                when ps_addr =>
+                    -- address was presented last cycle, data will be available next cycle
+                    playout_state <= ps_data;
+
+                when ps_data =>
+                    -- capture data from synchronous read port
+                    playout_data_latch((bytes_per_sample - 1 - playout_byte)*8 + 7 downto (bytes_per_sample - 1 - playout_byte)*8) <= sample_rd_data;
+
+                    if playout_byte = bytes_per_sample - 1 then
+                        -- full sample assembled, output it
+                        -- note: MSB byte was read first (byte index bytes_per_sample-1 down to 0)
+                        -- the last byte just read completes the sample
+                        case playout_channel_id is
+                            when 0 => audio_ch0_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 1 => audio_ch1_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 2 => audio_ch2_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 3 => audio_ch3_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 4 => audio_ch4_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 5 => audio_ch5_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 6 => audio_ch6_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 7 => audio_ch7_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 8 => audio_ch8_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 9 => audio_ch9_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 10 => audio_ch10_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 11 => audio_ch11_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 12 => audio_ch12_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 13 => audio_ch13_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 14 => audio_ch14_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 15 => audio_ch15_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when others => null;
+                        end case;
+
+                        playout_byte <= 0;
+                        playout_data_latch <= (others => '0');
+
+                        if playout_channel_id = global_channel_count - 1 then
+                            -- all channels done, advance read pointer
+                            if playout_rd_base + global_channel_count * bytes_per_sample >= AUDIO_BUFFER_LENGTH then
+                                sample_rd_ptr <= playout_rd_base + global_channel_count * bytes_per_sample - AUDIO_BUFFER_LENGTH;
+                            else
+                                sample_rd_ptr <= playout_rd_base + global_channel_count * bytes_per_sample;
+                            end if;
+                            output_next_sample <= '0';
+                            playout_state <= ps_idle;
+                        else
+                            playout_channel_id <= playout_channel_id + 1;
+                            -- present next address (first byte of next channel)
+                            raw_addr := playout_rd_base + (playout_channel_id + 1) * bytes_per_sample + (bytes_per_sample - 1);
+                            if raw_addr >= AUDIO_BUFFER_LENGTH then
+                                raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+                            end if;
+                            sample_rd_addr <= raw_addr;
+                            playout_state <= ps_addr;
+                        end if;
+                    else
+                        playout_byte <= playout_byte + 1;
+                        -- present next byte address
+                        raw_addr := playout_rd_base + playout_channel_id * bytes_per_sample + (bytes_per_sample - 1 - (playout_byte + 1));
+                        if raw_addr >= AUDIO_BUFFER_LENGTH then
+                            raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+                        end if;
+                        sample_rd_addr <= raw_addr;
+                        playout_state <= ps_addr;
+                    end if;
+            end case;
+        end if;
+    end process;
+
+    -- Dedicated sample_ram process (simple dual-port: sync write + sync read)
+    -- This pattern is required for Quartus to infer block RAM (M9K)
+    process(sys_clk)
+    begin
+        if rising_edge(sys_clk) then
+            if sample_wr_en = '1' then
+                sample_ram(sample_wr_addr) <= sample_wr_data;
             end if;
+            sample_rd_data <= sample_ram(sample_rd_addr);
         end if;
     end process;
 

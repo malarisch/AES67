@@ -77,6 +77,7 @@ struct aes67_rx_stream {
 	uint8_t  ch_map[AES67_MAX_CH_PER_STREAM]; /* output channel per input ch */
 	uint8_t  channel_count;
 	uint8_t  output_delay;
+	uint8_t  samples_per_channel;
 };
 
 /* ---- Discovered foreign streams (SAP RX) ---- */
@@ -93,6 +94,8 @@ struct sap_foreign_stream {
 	uint8_t  channels;
 	uint8_t  bit_depth;
 	uint32_t sample_rate;
+	uint32_t ssrc;               /* from a=ssrc: line, 0 if not present */
+	uint16_t samples_per_packet; /* derived from a=ptime: line, 0 if unknown */
 	char     name[SAP_SDP_NAME_MAX];
 	int64_t  last_seen_ms;
 };
@@ -184,14 +187,16 @@ const struct aes67_tx_stream *sap_sdp_get_tx_streams(void);
  * @param ssrc           SSRC to match in incoming RTP packets
  * @param ch_map         Output channel map (ch_map[i] = output channel for input ch i)
  * @param channel_count  Number of channels (1..8)
- * @param output_delay   Output delay in samples
+ * @param output_delay        Output delay in samples
+ * @param samples_per_channel Samples per channel per packet
  * @return 0 on success, negative errno on error
  */
 int sap_sdp_configure_rx_stream(uint8_t stream_id,
 				uint32_t ssrc,
 				const uint8_t *ch_map,
 				uint8_t channel_count,
-				uint8_t output_delay);
+				uint8_t output_delay,
+				uint8_t samples_per_channel);
 
 /**
  * @brief Get the RX stream table.

@@ -32,6 +32,7 @@ static void fpga_reconfigure(const struct device *dev, void *user_data);
 static struct net_if *g_iface; /* Cached for recovery callback */
 static struct in_addr g_my_ip; /* Cached IP address for recovery */
 static bool g_ip_valid;        /* true after DHCP bound */
+static bool g_dhcp_running;    /* true while DHCP is active */
 
 /* ---- FPGA configuration helpers ---- */
 
@@ -105,6 +106,68 @@ static int fpga_write_ip_address(const struct in_addr *addr)
 		((const uint8_t *)&addr->s_addr)[3]);
 
 	return 0;
+}
+
+/* ---- Link-Up detection ---- */
+
+/**
+ * @brief Wait for Ethernet link-up by polling FPGA register 0x51.
+ *
+ * @param timeout_ms  Maximum time to wait (0 = no timeout)
+ * @return 0 on link-up, -ETIMEDOUT on timeout
+ */
+static int wait_for_link_up(uint32_t timeout_ms)
+{
+	const struct device *fmc = device_get_binding("eth_fmc0");
+	uint32_t elapsed = 0;
+	uint8_t eth_status;
+
+	if (!fmc) {
+		return -ENODEV;
+	}
+
+	LOG_INF("Waiting for Ethernet link...");
+
+	while (1) {
+		if (eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_ETH, &eth_status) == 0) {
+			if (eth_status & ETH_FMC_ETH_LINK_UP) {
+				LOG_INF("Link up after %u ms", elapsed);
+				return 0;
+			}
+		}
+
+		if (timeout_ms > 0 && elapsed >= timeout_ms) {
+			LOG_WRN("Link-up timeout (%u ms)", timeout_ms);
+			return -ETIMEDOUT;
+		}
+
+		k_msleep(100);
+		elapsed += 100;
+	}
+}
+
+/**
+ * @brief Restart DHCP on the cached interface.
+ *
+ * Stops any running DHCP session, invalidates the cached IP, and
+ * starts a fresh DHCP discovery.
+ */
+static void dhcp_restart(void)
+{
+	if (!g_iface) {
+		return;
+	}
+
+	LOG_INF("Restarting DHCP...");
+
+	if (g_dhcp_running) {
+		net_dhcpv4_stop(g_iface);
+		g_dhcp_running = false;
+	}
+
+	g_ip_valid = false;
+	net_dhcpv4_start(g_iface);
+	g_dhcp_running = true;
 }
 
 /* ---- DHCP event handling ---- */
@@ -449,16 +512,41 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					!!(eth_status & ETH_FMC_ETH_LINK_UP);
 				disp_metrics.speed_code = speed_code;
 
-				/* ---- Link up detection for multicast rejoin ---- */
-				static bool mcast_prev_link_up = false;
+				/* ---- Link state tracking with DHCP restart ---- */
+				static bool link_prev_up = false;
+				static int64_t link_down_since = 0; /* uptime ms when link went down */
+				static bool link_down_handled = false;
 
-				if (disp_metrics.link_up && !mcast_prev_link_up && g_ip_valid) {
-					/* Link just came up and we have valid IP - rejoin multicast groups */
-					LOG_INF("Link up detected - rejoining multicast groups");
-					ptp_bmc_notify_link_up();
-					sap_sdp_notify_link_up();
+				if (disp_metrics.link_up && !link_prev_up) {
+					/* Link just came up */
+					LOG_INF("Ethernet link up");
+
+					if (link_down_handled) {
+						/* Link was down > 1s — restart DHCP
+						 * and allow PHY to settle first */
+						k_msleep(500);
+						dhcp_restart();
+						link_down_handled = false;
+					} else if (g_ip_valid) {
+						/* Short glitch (<1s) with valid IP — just rejoin multicast */
+						LOG_INF("Short link flap — rejoining multicast groups");
+						ptp_bmc_notify_link_up();
+						sap_sdp_notify_link_up();
+					}
+				} else if (!disp_metrics.link_up && link_prev_up) {
+					/* Link just went down */
+					link_down_since = k_uptime_get();
+					link_down_handled = false;
+					LOG_INF("Ethernet link down");
+				} else if (!disp_metrics.link_up && !link_prev_up
+					   && !link_down_handled) {
+					/* Still down — check if > 1 second */
+					if ((k_uptime_get() - link_down_since) > 1000) {
+						LOG_INF("Link down > 1s — will restart DHCP on link-up");
+						link_down_handled = true;
+					}
 				}
-				mcast_prev_link_up = disp_metrics.link_up;
+				link_prev_up = disp_metrics.link_up;
 			}
 
 #ifdef CONFIG_DISPLAY_CTRL
@@ -725,20 +813,32 @@ int main(void)
     /* ---- Write MAC address to FPGA ---- */
     fpga_write_mac_address(iface);
 
-#ifdef CONFIG_DISPLAY_CTRL
-    /* Update display: waiting for DHCP */
-    if (display_ctrl_ready()) {
-        display_ctrl_show_status("  DHCP");
-    }
-#endif
-
     /* ---- Register DHCP event handler to push IP to FPGA ---- */
     net_mgmt_init_event_callback(&dhcp_cb, on_dhcp_bound,
                                  NET_EVENT_IPV4_DHCP_BOUND);
     net_mgmt_add_event_callback(&dhcp_cb);
 
+    /* ---- Wait for Ethernet link-up before starting DHCP ---- */
+#ifdef CONFIG_DISPLAY_CTRL
+    if (display_ctrl_ready()) {
+        display_ctrl_show_status("  LINK");
+    }
+#endif
+
+    wait_for_link_up(30000);
+
+    /* Allow the PHY / switch to fully settle after link-up */
+    k_msleep(500);
+
+#ifdef CONFIG_DISPLAY_CTRL
+    if (display_ctrl_ready()) {
+        display_ctrl_show_status("  DHCP");
+    }
+#endif
+
     LOG_INF("Starting DHCP...");
     net_dhcpv4_start(iface);
+    g_dhcp_running = true;
 
     /* ---- Start PTPv2 Best Master Clock algorithm ---- */
     ptp_bmc_register_change_cb(on_bmc_change);

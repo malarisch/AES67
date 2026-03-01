@@ -81,7 +81,7 @@ entity fmc_ethernet_client is
     tx_allow_req_o : out std_ulogic;
     tx_allow_i : in std_ulogic;
 
-    -- RX stream config (written via 0x59, 15 bytes per stream -> rx_ringbuffer stream_ram)
+    -- RX stream config (written via 0x59, 16 bytes per stream -> rx_ringbuffer stream_ram)
     rx_stream_config_wr_clk_o  : out std_ulogic;
     rx_stream_config_wr_addr_o : out std_ulogic_vector(7 downto 0);
     rx_stream_config_wr_data_o : out std_ulogic_vector(7 downto 0)
@@ -113,7 +113,17 @@ architecture rtl of fmc_ethernet_client is
   signal reg_rx_ready_sys    : std_ulogic := '0';
   signal reg_rx_overflow_sys : std_ulogic := '0';
 
+  -- 2-FF CDC synchronizers for reg_rx_ready and reg_rx_overflow (mac_rx -> clk_sys)
+  signal rx_ready_meta       : std_ulogic := '0';
+  signal rx_ready_sync       : std_ulogic := '0';
+  signal rx_overflow_meta    : std_ulogic := '0';
+  signal rx_overflow_sync    : std_ulogic := '0';
+  signal rx_len_latched      : unsigned(15 downto 0) := (others => '0');
+
   signal reg_tx_len_reset : std_ulogic := '0';
+
+  -- TX busy flag: set when tx_start_toggle is issued, cleared by tx_clear_sys_pulse
+  signal tx_busy_sys : std_ulogic := '0';
 
   -- TX FIFO
   signal txfifo_wr_en    : std_ulogic := '0';
@@ -217,7 +227,7 @@ architecture rtl of fmc_ethernet_client is
   signal stream_cfg_byte_count : unsigned(7 downto 0) := (others => '0');
   signal stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
 
-  -- RX stream config state (0x59 write, 15 bytes per stream -> rx_ringbuffer stream_ram)
+  -- RX stream config state (0x59 write, 16 bytes per stream -> rx_ringbuffer stream_ram)
   signal rx_stream_cfg_byte_count : unsigned(7 downto 0) := (others => '0');
   signal rx_stream_cfg_base_addr  : unsigned(7 downto 0) := (others => '0');
   signal rx_stream_cfg_wr_en      : std_ulogic := '0';
@@ -309,20 +319,37 @@ begin
       reg_rx_len_sys      <= (others => '0');
       reg_rx_ready_sys    <= '0';
       reg_rx_overflow_sys <= '0';
+      rx_ready_meta       <= '0';
+      rx_ready_sync       <= '0';
+      rx_overflow_meta    <= '0';
+      rx_overflow_sync    <= '0';
+      rx_len_latched      <= (others => '0');
 
     elsif rising_edge(clk_sys_i) then
+      -- RX clear handshake (ack from MAC domain)
       rx_clear_ack_sync1_sys <= rx_clear_ack_mac;
       rx_clear_ack_sync2_sys <= rx_clear_ack_sync1_sys;
       rx_clear_sys_pulse <= rx_clear_ack_sync1_sys and not rx_clear_ack_sync2_sys;
+
+      -- 2-FF CDC for reg_rx_ready and reg_rx_overflow (mac_rx -> clk_sys)
+      rx_ready_meta    <= reg_rx_ready;
+      rx_ready_sync    <= rx_ready_meta;
+      rx_overflow_meta <= reg_rx_overflow;
+      rx_overflow_sync <= rx_overflow_meta;
 
       if rx_clear_sys_pulse = '1' then
         reg_rx_ready_sys    <= '0';
         reg_rx_overflow_sys <= '0';
         reg_rx_len_sys      <= (others => '0');
       else
-        reg_rx_ready_sys    <= reg_rx_ready;
-        reg_rx_overflow_sys <= reg_rx_overflow;
-        reg_rx_len_sys      <= reg_rx_len;
+        reg_rx_ready_sys    <= rx_ready_sync;
+        reg_rx_overflow_sys <= rx_overflow_sync;
+        -- Latch length when ready rises — reg_rx_len is stable in the
+        -- MAC domain while reg_rx_ready is high, so sampling it a few
+        -- clk_sys cycles after the ready sync is safe.
+        if rx_ready_sync = '1' then
+          reg_rx_len_sys <= reg_rx_len;
+        end if;
       end if;
 
       tx_clear_sync_sys_1 <= tx_clear_toggle_mac;
@@ -469,6 +496,7 @@ begin
       reg_tx_start    <= '0';
       reg_tx_start_toggle <= '0';
       reg_tx_len_reset <= '0';
+      tx_busy_sys     <= '0';
       rx_clear_req_sys   <= '0';
       fmc_rx_bytes_sent <= (others => '0');
       fmc_data_out    <= (others => '0');
@@ -503,6 +531,11 @@ begin
       fmc_data_oe  <= '0';
 
 
+      -- TX busy: cleared when MAC side signals completion via toggle CDC
+      if tx_clear_sys_pulse = '1' then
+        tx_busy_sys <= '0';
+      end if;
+
       -- PPB measurement start handshake:
       -- start_o stays high until valid_i goes low (measurement accepted)
       if ppb_start_reg = '1' and ppb_valid_sync = '0' then
@@ -536,24 +569,16 @@ begin
           when "0000010" =>  -- 0x02 TX_CTRL
             if wr_cap_data(0) = '1' and reg_tx_start = '0' then
               reg_tx_start_toggle <= not reg_tx_start_toggle;
+              tx_busy_sys <= '1';
             end if;
             reg_tx_start <= wr_cap_data(0);
 
             register_byte_count <= (others => '0');
           when "0100010" =>  -- 0x22 RX_STATUS clear
             if wr_cap_data(0) = '1' then
-              if not mac_rx_frame_d = '1' then
-                rx_clear_req_sys <= '1';
-                overflow_interrupt <= '0';
-                else
-                  overflow_interrupt <= reg_rx_overflow_sys;
-                  -- Ignore clear request if MAC is still receiving a frame
-                  
-              end if;
-              --
-              
+              rx_clear_req_sys <= '1';
+              overflow_interrupt <= '0';
               fmc_rx_bytes_sent   <= (others => '0');
-
               register_byte_count <= (others => '0');
             end if;
           when "1000000" =>  -- 0x40 Write Register for MAC Address (6 Byte)
@@ -633,20 +658,19 @@ begin
               else
                 stream_cfg_byte_count <= stream_cfg_byte_count + 1;
               end if;
-          when "1011001" =>  -- 0x59 RX stream config write (15 bytes per stream -> rx_ringbuffer stream_ram)
+          when "1011001" =>  -- 0x59 RX stream config write (16 bytes per stream -> rx_ringbuffer stream_ram)
               -- Byte 0 is the base address in stream_ram (caller computes stream_id * 32)
-              -- Bytes 0..14 are written to stream_ram[base + byte_offset]
-              rx_stream_cfg_wr_en <= '1';
+              -- Bytes 1..15 are the actual config data written to stream_ram[base + 0..14]
               rx_stream_config_wr_data_o <= wr_cap_data;
               if rx_stream_cfg_byte_count = 0 then
-                -- First byte: base address (stream_id * 32), latch and write to offset 0
-                rx_stream_cfg_base_addr    <= unsigned(wr_cap_data);
-                rx_stream_config_wr_addr_o <= wr_cap_data;
+                -- First byte: base address only, do NOT write to stream_ram
+                rx_stream_cfg_base_addr <= unsigned(wr_cap_data);
               else
-                -- Subsequent bytes: latched base addr + offset
-                rx_stream_config_wr_addr_o <= std_ulogic_vector(rx_stream_cfg_base_addr + resize(rx_stream_cfg_byte_count, 8));
+                -- Subsequent bytes: actual config data at base addr + (byte_count - 1)
+                rx_stream_cfg_wr_en <= '1';
+                rx_stream_config_wr_addr_o <= std_ulogic_vector(rx_stream_cfg_base_addr + resize(rx_stream_cfg_byte_count - 1, 8));
               end if;
-              if rx_stream_cfg_byte_count >= 14 then
+              if rx_stream_cfg_byte_count >= 15 then
                 rx_stream_cfg_byte_count <= (others => '0');
               else
                 rx_stream_cfg_byte_count <= rx_stream_cfg_byte_count + 1;
@@ -678,6 +702,9 @@ begin
         end if;
 
         case fmc_addr_meta is
+          when "0000010" => -- 0x02 Read: TX status
+            fmc_read_data_lat(0) <= tx_busy_sys;
+
           when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
           when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
           when "0100010" => -- 0x22
@@ -800,12 +827,15 @@ begin
           end if;
         when s_waitForAllow =>
           if tx_allow_i = '1' then
-            
             if txfifo_rd_empty = '0' then
               sm_tx_ethernet <= s_PrimeTx;
               mac_tx_data_o <= txfifo_rd_data;
               mac_tx_enable_o <= '1';
               tx_prefetch_valid <= '1';
+            else
+              -- FIFO empty (e.g. after reset glitch) — abort back to idle
+              sm_tx_ethernet <= s_Idle;
+              tx_allow_req_o <= '0';
             end if;
           end if;
         when s_PrimeTx =>
@@ -945,6 +975,8 @@ begin
     end if;
   end process;
 
-  fmc_int_o <= (reg_rx_ready or reg_rx_overflow_sys )or overflow_interrupt;
+  -- All signals on fmc_int_o must be in the clk_sys domain to avoid
+  -- metastability glitches that can cause the MCU to miss edge-triggered IRQs.
+  fmc_int_o <= reg_rx_ready_sys or reg_rx_overflow_sys or overflow_interrupt;
 
 end architecture;

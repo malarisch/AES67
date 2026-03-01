@@ -199,7 +199,16 @@
 						  STM32_FMC_CONTINUOUS_CLOCK_SYNC_ONLY
 						  STM32_FMC_WRITE_FIFO_DISABLE
 						  STM32_FMC_PAGE_SIZE_NONE>;
-			st,timing = <8 1 8 2 3 9 STM32_FMC_ACCESS_MODE_A>;
+			/* ADDSET ADDHLD DATAST BUSTURN CLKDIV DATLAT mode
+			 * FPGA clk_sys = 250 MHz (4 ns).  Read path uses 2-FF
+			 * CDC synchronisers, so data appears on fmc_read_data_lat
+			 * ~3 clk_sys cycles (12 ns) after NOE falling edge.
+			 * DATAST=15 (62.5 ns) gives plenty of margin.
+			 * BUSTURN=4 (16.7 ns) ensures NOE deasserts long enough
+			 * for the FPGA to detect fmc_read_latched='0' and
+			 * re-arm for the next read cycle.
+			 * ADDSET=4 (16.7 ns) is sufficient for address setup. */
+			st,timing = <4 1 15 4 3 9 STM32_FMC_ACCESS_MODE_A>;
 		};
 	};
 };
