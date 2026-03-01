@@ -208,7 +208,7 @@ on the Quartus Prime software download page.
 	)
 	(parameter
 		"audio_buffer_sample_depth"
-		"96"
+		"128"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
