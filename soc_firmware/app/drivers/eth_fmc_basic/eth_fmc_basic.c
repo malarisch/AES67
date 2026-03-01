@@ -375,33 +375,38 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 
 int eth_fmc_write_rx_stream_config(const struct device *dev,
 				   uint8_t stream_id,
-				   uint32_t ssrc,
+				   const struct in_addr *dst_ip,
+				   uint16_t dst_port,
 				   const uint8_t *ch_map,
 				   uint8_t channel_count,
 				   uint8_t output_delay,
 				   uint8_t samples_per_channel)
 {
 	uint8_t buf[ETH_FMC_RX_STREAM_CFG_LEN];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
 
 	memset(buf, 0, sizeof(buf));
 
 	/* Byte 0: base address = stream_id * 32 */
 	buf[0] = (uint8_t)(stream_id * 32);
-	/* Bytes 1..4: SSRC big-endian */
-	buf[1] = (ssrc >> 24) & 0xFF;
-	buf[2] = (ssrc >> 16) & 0xFF;
-	buf[3] = (ssrc >>  8) & 0xFF;
-	buf[4] =  ssrc        & 0xFF;
-	/* Bytes 5..12: output channel map (up to 8 channels) */
+	/* Bytes 1..4: destination IP address (network byte order, big-endian) */
+	buf[1] = ip[0];
+	buf[2] = ip[1];
+	buf[3] = ip[2];
+	buf[4] = ip[3];
+	/* Bytes 5..6: destination UDP port big-endian */
+	buf[5] = (dst_port >> 8) & 0xFF;
+	buf[6] =  dst_port       & 0xFF;
+	/* Bytes 7..14: output channel map (up to 8 channels) */
 	for (uint8_t i = 0; i < 8 && i < channel_count; i++) {
-		buf[5 + i] = ch_map[i];
+		buf[7 + i] = ch_map[i];
 	}
-	/* Byte 13: channel count */
-	buf[13] = channel_count;
-	/* Byte 14: output delay in samples */
-	buf[14] = output_delay;
-	/* Byte 15: samples per channel per packet */
-	buf[15] = samples_per_channel;
+	/* Byte 15: channel count */
+	buf[15] = channel_count;
+	/* Byte 16: output delay in samples */
+	buf[16] = output_delay;
+	/* Byte 17: samples per channel per packet */
+	buf[17] = samples_per_channel;
 
 	return eth_fmc_reg_write(dev, ETH_FMC_REG_RX_STREAM_CFG, buf,
 				 ETH_FMC_RX_STREAM_CFG_LEN);

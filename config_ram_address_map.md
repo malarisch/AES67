@@ -66,6 +66,18 @@ Byte 15:    Reserved
 Bytes 16-19: SSRC (32-bit, big-endian, for RTP header)
 Output: tx_stream_config_wr_en_o, tx_stream_config_wr_addr_o, tx_stream_config_wr_data_o
 
+# Write Registers - RX Stream Config
+
+Write Register 0x59 -- RX Stream Config - 18 Byte Write (per stream)
+Byte 0:      Base address in stream_ram (caller computes stream_id * 32)
+Bytes 1-4:   Destination IP address (big-endian) -- match incoming multicast packets
+Bytes 5-6:   Destination UDP port (big-endian) -- match incoming packets
+Bytes 7-14:  Channel output map (8 bytes: output channel id per input channel)
+Byte 15:     Channel count (1..8)
+Byte 16:     Output delay in samples
+Byte 17:     Samples per channel per packet
+Output: rx_stream_config_wr_clk_o, rx_stream_config_wr_addr_o, rx_stream_config_wr_data_o
+
 # Status Registers
 
 Write Register 0x50 - Flag Bitmask

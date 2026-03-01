@@ -55,17 +55,17 @@ architecture Behavioral of rx_ringbuffer is
     type t_stream_ram is array (0 to max_streams*32 - 1) of std_logic_vector(7 downto 0);
     -- stream ram layout:
 
-    -- [0] - [3] - ssrc
-    -- [4] - [11] - channel output map (8 bytes because max 8 channels per stream, each byte is the output channel id)
-    -- [12] - channel count
-    -- [13] - output delay in samples
-    -- [14] - samples per channel
+    -- [0] - [3] - destination IP address (4 bytes, big-endian, multicast group)
+    -- [4] - [5] - destination UDP port (2 bytes, big-endian)
+    -- [6] - [13] - channel output map (8 bytes because max 8 channels per stream, each byte is the output channel id)
+    -- [14] - channel count
+    -- [15] - output delay in samples
+    -- [16] - samples per channel
 
    	signal sample_ram		: t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram := (others => (others => '0'));
     attribute ramstyle : string;
     attribute ramstyle of sample_ram : signal is "M9K";
-    signal sample_wr_ptr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
     signal sample_rd_ptr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
 
     -- Synchronous read port for sample_ram (required for block RAM inference)
@@ -82,8 +82,6 @@ architecture Behavioral of rx_ringbuffer is
     signal packet_ready_i_sync1 : std_logic := '0';
     signal packet_ready_i_sync2 : std_logic := '0';
     signal zaudio_sync : std_logic := '0';
-    signal current_read_channel_id : integer range 0 to 7 := 0;
-
     signal byte_count_parser : integer range 0 to bytes_per_sample - 1 := 0;
     signal output_next_sample : std_logic := '0';
 
@@ -97,38 +95,37 @@ architecture Behavioral of rx_ringbuffer is
 
     signal current_read_channel_index : integer range 0 to 7 := 0;
     signal current_stream_channel_count : integer range 0 to 7 := 0;
-    signal current_stream_playout_offset : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
     signal media_clock_latch : std_logic_vector(31 downto 0) := (others => '0');
     signal packet_read_index : integer range 0 to 1500 := 0;
 
     signal current_packet_sample_index : integer range 0 to 255 := 0;
     signal current_packet_length: STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
-    signal current_packet_ssrc : std_logic_vector(31 downto 0) := (others => '0');
+    signal current_packet_dst_ip : std_logic_vector(31 downto 0) := (others => '0');
+    signal current_packet_dst_port : std_logic_vector(15 downto 0) := (others => '0');
     signal current_packet_media_clock : std_logic_vector(31 downto 0) := (others => '0');
     signal current_packet_samples_per_channel : integer range 0 to 255 := 0;
     signal wr_ptr_start: integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+    signal wr_sample_offset : integer range 0 to 511 := 0;
     signal prepare_step: integer range 0 to 10 := 0;
-    signal config_ram_read_ptr: integer range 0 to max_streams*32 - 1 := 0;
+    signal config_ram_read_ptr: integer range 0 to max_streams*32 := 0;
 begin
     
     process(sys_clk, reset_n)
         variable comp_byte: integer range 0 to 32 := 0;
         variable raw_addr : integer;
+        variable clock_delta : unsigned(8 downto 0); -- 9-bit for delay + small clock diff
     begin
         if reset_n = '0' then
             eth_read_addr_o <= (others => '0');
-            sample_wr_ptr <= 0;
             sample_rd_ptr <= 0;
             fs_clk_i_sync1 <= '0';
             fs_clk_i_sync2 <= '0';
             zaudio_sync <= '0';
-            current_read_channel_id <= 0;
             packet_ready_i_sync1 <= '0';
             packet_ready_i_sync2 <= '0';
             output_next_sample <= '0';
 
             current_stream_channel_count <= 0;
-            current_stream_playout_offset <= 0;
             media_clock_latch <= (others => '0');
             config_ram_read_ptr <= 0;
             playout_state <= ps_idle;
@@ -163,62 +160,115 @@ begin
                         eth_read_addr_o <= to_unsigned(16, 11); -- start at index 16, we don't care for the rest so far
                     end if;
                 when s_readHeader =>
-                    eth_read_addr_o <= to_unsigned(packet_read_index, 11);
-                    packet_read_index <= packet_read_index + 1;
+                    -- eth_read_data_i has data for address set LAST cycle,
+                    -- so we latch based on (packet_read_index - 1) and pre-set
+                    -- the address for the NEXT read.
                     case packet_read_index is
-                        when 16 => current_packet_length(15 downto 8) <= eth_read_data_i;
-                        when 17 => current_packet_length(7 downto 0) <= eth_read_data_i; packet_read_index <= 46; -- skip to media clock, ignoring rest of header for now
-                        when 46 => current_packet_media_clock(31 downto 24) <= eth_read_data_i;
-                        when 47 => current_packet_media_clock(23 downto 16) <= eth_read_data_i;
-                        when 48 => current_packet_media_clock(15 downto 8) <= eth_read_data_i;
-                        when 49 => current_packet_media_clock(7 downto 0) <= eth_read_data_i;
-                        when 50 => current_packet_ssrc(31 downto 24) <= eth_read_data_i;
-                        when 51 => current_packet_ssrc(23 downto 16) <= eth_read_data_i;
-                        when 52 => current_packet_ssrc(15 downto 8) <= eth_read_data_i;
-                        when 53 => current_packet_ssrc(7 downto 0) <= eth_read_data_i; packetParserState <= s_prepare;
+                        -- packet_read_index tracks which address we set last cycle
+                        -- (i.e. data now available on eth_read_data_i)
+                        when 16 =>
+                            -- addr 16 was set in s_Idle, data now valid
+                            current_packet_length(15 downto 8) <= eth_read_data_i;
+                            packet_read_index <= 17;
+                            eth_read_addr_o <= to_unsigned(17, 11);
+                        when 17 =>
+                            current_packet_length(7 downto 0) <= eth_read_data_i;
+                            packet_read_index <= 30;
+                            eth_read_addr_o <= to_unsigned(30, 11); -- skip to destination IP
+                        when 30 =>
+                            current_packet_dst_ip(31 downto 24) <= eth_read_data_i;
+                            packet_read_index <= 31;
+                            eth_read_addr_o <= to_unsigned(31, 11);
+                        when 31 =>
+                            current_packet_dst_ip(23 downto 16) <= eth_read_data_i;
+                            packet_read_index <= 32;
+                            eth_read_addr_o <= to_unsigned(32, 11);
+                        when 32 =>
+                            current_packet_dst_ip(15 downto 8) <= eth_read_data_i;
+                            packet_read_index <= 33;
+                            eth_read_addr_o <= to_unsigned(33, 11);
+                        when 33 =>
+                            current_packet_dst_ip(7 downto 0) <= eth_read_data_i;
+                            packet_read_index <= 36;
+                            eth_read_addr_o <= to_unsigned(36, 11); -- skip to dest port
+                        when 36 =>
+                            current_packet_dst_port(15 downto 8) <= eth_read_data_i;
+                            packet_read_index <= 37;
+                            eth_read_addr_o <= to_unsigned(37, 11);
+                        when 37 =>
+                            current_packet_dst_port(7 downto 0) <= eth_read_data_i;
+                            packet_read_index <= 46;
+                            eth_read_addr_o <= to_unsigned(46, 11); -- skip to media clock
+                        when 46 =>
+                            current_packet_media_clock(31 downto 24) <= eth_read_data_i;
+                            packet_read_index <= 47;
+                            eth_read_addr_o <= to_unsigned(47, 11);
+                        when 47 =>
+                            current_packet_media_clock(23 downto 16) <= eth_read_data_i;
+                            packet_read_index <= 48;
+                            eth_read_addr_o <= to_unsigned(48, 11);
+                        when 48 =>
+                            current_packet_media_clock(15 downto 8) <= eth_read_data_i;
+                            packet_read_index <= 49;
+                            eth_read_addr_o <= to_unsigned(49, 11);
+                        when 49 =>
+                            current_packet_media_clock(7 downto 0) <= eth_read_data_i;
+                            packetParserState <= s_prepare;
                         when others =>
                             packetParserState <= s_End;
                     end case;
-                when s_prepare => 
+                when s_prepare =>
                         case prepare_step is
                             when 0 =>
                                 config_ram_read_ptr <= 0;
                                 comp_byte := 0;
                                 prepare_step <= 1;
                             when 1 =>
-                                -- find stream in ram
-                                if (config_ram_read_ptr  + 32 > stream_ram'length) then
+                                -- find stream in ram by destination IP [0..3] + dest port [4..5]
+                                if (config_ram_read_ptr >= max_streams * 32) then
                                     -- stream not configured for us; skip
                                     packetParserState <= s_End;
                                 else
-                                    if (stream_ram(config_ram_read_ptr + comp_byte) = current_packet_ssrc(comp_byte * 8 + 7 downto comp_byte * 8)) then
-                                        if (comp_byte = 3) then
+                                    if (comp_byte < 4 and stream_ram(config_ram_read_ptr + comp_byte) = current_packet_dst_ip(31 - comp_byte * 8 downto 24 - comp_byte * 8)) then
+                                        comp_byte := comp_byte + 1;
+                                    elsif (comp_byte >= 4 and stream_ram(config_ram_read_ptr + comp_byte) = current_packet_dst_port(15 - (comp_byte - 4) * 8 downto 8 - (comp_byte - 4) * 8)) then
+                                        if (comp_byte = 5) then
                                             -- this stream is for us!!!
                                             prepare_step <= 2;
                                             comp_byte := 0;
-                                        else 
+                                        else
                                             comp_byte := comp_byte + 1;
                                         end if;
-                                        else
-                                            config_ram_read_ptr <= config_ram_read_ptr + 32;
+                                    else
+                                        comp_byte := 0;
+                                        config_ram_read_ptr <= config_ram_read_ptr + 32;
                                     end if;
                                 end if;
                             when 2 =>
-                                current_stream_channel_count <= to_integer(unsigned(stream_ram(config_ram_read_ptr + 12)));
+                                current_stream_channel_count <= to_integer(unsigned(stream_ram(config_ram_read_ptr + 14)));
                                 prepare_step <= 3;
-                            when 3 => 
-                                current_packet_samples_per_channel <= to_integer(unsigned(stream_ram(config_ram_read_ptr + 13)));
+                            when 3 =>
+                                current_packet_samples_per_channel <= to_integer(unsigned(stream_ram(config_ram_read_ptr + 16)));
                                 prepare_step <= 4;
                             when 4 =>
-                                raw_addr := (to_integer(unsigned(current_packet_media_clock) - unsigned(media_clock_latch)) + to_integer(unsigned(stream_ram(config_ram_read_ptr + 13)))) * global_channel_count * bytes_per_sample;
-                                if raw_addr >= AUDIO_BUFFER_LENGTH then
-                                    raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+                                -- media clocks are sample counters; delta is ~0 when synced
+                                -- delay (8-bit) determines buffer write position
+                                clock_delta := resize(unsigned(current_packet_media_clock(7 downto 0)), 9)
+                                             - resize(unsigned(media_clock_latch(7 downto 0)), 9)
+                                             + resize(unsigned(stream_ram(config_ram_read_ptr + 15)), 9);
+                                wr_sample_offset <= to_integer(clock_delta);
+                                prepare_step <= 5;
+                            when 5 =>
+                                -- iterative modulo: subtract audio_buffer_sample_depth until in range
+                                if wr_sample_offset >= audio_buffer_sample_depth then
+                                    wr_sample_offset <= wr_sample_offset - audio_buffer_sample_depth;
+                                else
+                                    wr_ptr_start <= wr_sample_offset * global_channel_count * bytes_per_sample;
+                                    packetParserState <= s_readSampleData;
+                                    packet_read_index <= 54;
+                                    eth_read_addr_o <= to_unsigned(54, 11);
+                                    byte_count_parser <= 0;
                                 end if;
-                                wr_ptr_start <= raw_addr;
-                                packetParserState <= s_readSampleData;
-                                packet_read_index <= 54;
-                                eth_read_addr_o <= to_unsigned(54, 11);
-                                byte_count_parser <= 0;
 
                             when others =>
                                 packetParserState <= s_Idle;
@@ -256,7 +306,7 @@ begin
                         eth_read_addr_o <= to_unsigned(packet_read_index + 1, 11);
                         packet_read_index <= packet_read_index + 1;
 
-                        raw_addr := wr_ptr_start + current_packet_sample_index * global_channel_count * bytes_per_sample + to_integer(unsigned(stream_ram(config_ram_read_ptr + 4 + current_read_channel_index))) * bytes_per_sample + (bytes_per_sample - 1 - byte_count_parser);
+                        raw_addr := wr_ptr_start + current_packet_sample_index * global_channel_count * bytes_per_sample + to_integer(unsigned(stream_ram(config_ram_read_ptr + 6 + current_read_channel_index))) * bytes_per_sample + (bytes_per_sample - 1 - byte_count_parser);
                         if raw_addr >= AUDIO_BUFFER_LENGTH then
                             raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
                         end if;

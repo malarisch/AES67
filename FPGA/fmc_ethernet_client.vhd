@@ -658,9 +658,9 @@ begin
               else
                 stream_cfg_byte_count <= stream_cfg_byte_count + 1;
               end if;
-          when "1011001" =>  -- 0x59 RX stream config write (16 bytes per stream -> rx_ringbuffer stream_ram)
+          when "1011001" =>  -- 0x59 RX stream config write (18 bytes per stream -> rx_ringbuffer stream_ram)
               -- Byte 0 is the base address in stream_ram (caller computes stream_id * 32)
-              -- Bytes 1..15 are the actual config data written to stream_ram[base + 0..14]
+              -- Bytes 1..17 are the actual config data written to stream_ram[base + 0..16]
               rx_stream_config_wr_data_o <= wr_cap_data;
               if rx_stream_cfg_byte_count = 0 then
                 -- First byte: base address only, do NOT write to stream_ram
@@ -670,7 +670,7 @@ begin
                 rx_stream_cfg_wr_en <= '1';
                 rx_stream_config_wr_addr_o <= std_ulogic_vector(rx_stream_cfg_base_addr + resize(rx_stream_cfg_byte_count - 1, 8));
               end if;
-              if rx_stream_cfg_byte_count >= 15 then
+              if rx_stream_cfg_byte_count >= 17 then
                 rx_stream_cfg_byte_count <= (others => '0');
               else
                 rx_stream_cfg_byte_count <= rx_stream_cfg_byte_count + 1;

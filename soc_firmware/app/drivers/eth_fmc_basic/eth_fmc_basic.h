@@ -56,16 +56,17 @@ extern "C" {
 #define ETH_FMC_REG_TX_STREAM_CFG  0x58
 #define ETH_FMC_TX_STREAM_CFG_LEN  20
 
-/* Write register 0x59 - RX stream config (16-byte auto-increment write)
+/* Write register 0x59 - RX stream config (18-byte auto-increment write)
  * Byte  0:     base address in stream_ram = stream_id * 32 (caller computes)
- * Bytes 1..4:  SSRC (32-bit, big-endian) — used to match incoming RTP packets
- * Bytes 5..12: Channel output map (8 bytes: output channel id per input channel)
- * Byte  13:    Channel count (number of channels in this stream, 1..8)
- * Byte  14:    Output delay in samples
- * Byte  15:    Samples per channel per packet
+ * Bytes 1..4:  Destination IP address (big-endian, multicast group) — match incoming packets
+ * Bytes 5..6:  Destination UDP port (big-endian) — match incoming packets
+ * Bytes 7..14: Channel output map (8 bytes: output channel id per input channel)
+ * Byte  15:    Channel count (number of channels in this stream, 1..8)
+ * Byte  16:    Output delay in samples
+ * Byte  17:    Samples per channel per packet
  */
 #define ETH_FMC_REG_RX_STREAM_CFG  0x59
-#define ETH_FMC_RX_STREAM_CFG_LEN  16
+#define ETH_FMC_RX_STREAM_CFG_LEN  18
 
 /* Read register 0x50 - clocking flags */
 #define ETH_FMC_REG_STATUS_CLK 0x50
@@ -254,12 +255,13 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
 /**
  * @brief Write RX stream configuration to FPGA register 0x59.
  *
- * Sends a 15-byte auto-increment write to configure one RX audio stream
- * in the rx_ringbuffer's stream_ram.
+ * Sends an 18-byte auto-increment write to configure one RX audio stream
+ * in the rx_ringbuffer's stream_ram.  Filtering is by source IP + dest port.
  *
  * @param dev              The FMC Ethernet bridge device
  * @param stream_id        Stream index (0..N); base addr = stream_id * 32
- * @param ssrc             32-bit SSRC to match in incoming RTP packets
+ * @param dst_ip           Destination IP address to match (multicast group, network byte order)
+ * @param dst_port         Destination UDP port to match (host byte order)
  * @param ch_map           Output channel map: ch_map[i] = output channel for input ch i
  * @param channel_count    Number of channels in this stream (1..8)
  * @param output_delay        Output delay in samples
@@ -268,7 +270,8 @@ int eth_fmc_write_tx_stream_config(const struct device *dev,
  */
 int eth_fmc_write_rx_stream_config(const struct device *dev,
 				   uint8_t stream_id,
-				   uint32_t ssrc,
+				   const struct in_addr *dst_ip,
+				   uint16_t dst_port,
 				   const uint8_t *ch_map,
 				   uint8_t channel_count,
 				   uint8_t output_delay,

@@ -1202,13 +1202,14 @@ const struct aes67_tx_stream *sap_sdp_get_tx_streams(void)
 }
 
 int sap_sdp_configure_rx_stream(uint8_t stream_id,
-				uint32_t ssrc,
+				const struct in_addr *dst_ip,
+				uint16_t dst_port,
 				const uint8_t *ch_map,
 				uint8_t channel_count,
 				uint8_t output_delay,
 				uint8_t samples_per_channel)
 {
-	if (stream_id >= AES67_MAX_RX_STREAMS || !ch_map ||
+	if (stream_id >= AES67_MAX_RX_STREAMS || !ch_map || !dst_ip ||
 	    channel_count == 0 || channel_count > AES67_MAX_CH_PER_STREAM) {
 		return -EINVAL;
 	}
@@ -1220,9 +1221,9 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 		return -ENODEV;
 	}
 
-	int ret = eth_fmc_write_rx_stream_config(fmc, stream_id, ssrc,
-						 ch_map, channel_count,
-						 output_delay,
+	int ret = eth_fmc_write_rx_stream_config(fmc, stream_id, dst_ip,
+						 dst_port, ch_map,
+						 channel_count, output_delay,
 						 samples_per_channel);
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write RX stream %u to FPGA: %d",
@@ -1230,10 +1231,15 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 		return ret;
 	}
 
+	char addr_str[INET_ADDRSTRLEN];
+
+	zsock_inet_ntop(AF_INET, dst_ip, addr_str, sizeof(addr_str));
+
 	k_mutex_lock(&sap_mutex, K_FOREVER);
 	rx_streams[stream_id].active = true;
 	rx_streams[stream_id].stream_id = stream_id;
-	rx_streams[stream_id].ssrc = ssrc;
+	rx_streams[stream_id].dst_ip = *dst_ip;
+	rx_streams[stream_id].dst_port = dst_port;
 	rx_streams[stream_id].channel_count = channel_count;
 	rx_streams[stream_id].output_delay = output_delay;
 	rx_streams[stream_id].samples_per_channel = samples_per_channel;
@@ -1244,8 +1250,9 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 	}
 	k_mutex_unlock(&sap_mutex);
 
-	LOG_INF("SAP: RX stream %u configured: ssrc=0x%08x ch=%u spc=%u delay=%u",
-		stream_id, ssrc, channel_count, samples_per_channel, output_delay);
+	LOG_INF("SAP: RX stream %u configured: dst=%s port=%u ch=%u spc=%u delay=%u",
+		stream_id, addr_str, dst_port, channel_count,
+		samples_per_channel, output_delay);
 	return 0;
 }
 

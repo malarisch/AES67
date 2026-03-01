@@ -1,6 +1,7 @@
 # Agent Documentation: AES67 Project
 
 Constraint: You can NEVER edit the graphical BSF and BDF files for the quartus project! All adjustments in these files will be made by the user.
+For access to the zephyr west tool you need to source the .venv in soc_firmware: source soc_firmware/.venv/bin/activate
 
 ## Subsystem: FMC Ethernet Driver (`eth_fmc_basic`)
 

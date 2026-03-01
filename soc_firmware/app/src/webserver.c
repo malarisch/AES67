@@ -432,8 +432,9 @@ static int build_status_streams(char *buf, size_t sz)
 		}
 		p += snprintf(buf + p, sz - p, "{");
 		p = json_add_uint(buf, sz, p, "stream_id", rxs[i].stream_id);
-		p += snprintf(buf + p, sz - p, "\"ssrc\":\"%08X\",",
-			      rxs[i].ssrc);
+		format_ip(tmp, sizeof(tmp), &rxs[i].dst_ip);
+		p = json_add_str(buf, sz, p, "dst_ip", tmp);
+		p = json_add_uint(buf, sz, p, "dst_port", rxs[i].dst_port);
 		p = json_add_uint(buf, sz, p, "channel_count",
 				   rxs[i].channel_count);
 		p = json_add_uint(buf, sz, p, "output_delay",
@@ -816,20 +817,26 @@ static int apply_rx_stream_json(const char *json, size_t len)
 	int32_t channel_count = 0;
 	int32_t output_delay = 0;
 	int32_t samples_per_channel = 48;
-	int32_t ssrc_val = 0;
+	int32_t dst_port_val = 5004;
 
 	if (!json_find_int(json, len, "stream_id", &stream_id) ||
 	    stream_id < 0 || stream_id >= AES67_MAX_RX_STREAMS) {
 		return -EINVAL;
 	}
 
-	/* SSRC can be provided as decimal integer or hex string */
-	char ssrc_str[12] = {0};
-	if (json_find_str(json, len, "ssrc", ssrc_str, sizeof(ssrc_str)) > 0) {
-		ssrc_val = (int32_t)strtoul(ssrc_str, NULL, 16);
-	} else if (!json_find_int(json, len, "ssrc", &ssrc_val)) {
+	/* Destination IP address / multicast group (required) */
+	char ip_str[INET_ADDRSTRLEN] = {0};
+	struct in_addr dst_ip = {0};
+
+	if (json_find_str(json, len, "dst_ip", ip_str, sizeof(ip_str)) <= 0) {
 		return -EINVAL;
 	}
+	if (zsock_inet_pton(AF_INET, ip_str, &dst_ip) != 1) {
+		return -EINVAL;
+	}
+
+	/* Destination port */
+	json_find_int(json, len, "dst_port", &dst_port_val);
 
 	json_find_int(json, len, "channel_count", &channel_count);
 	json_find_int(json, len, "output_delay", &output_delay);
@@ -866,7 +873,8 @@ static int apply_rx_stream_json(const char *json, size_t len)
 	}
 
 	return sap_sdp_configure_rx_stream((uint8_t)stream_id,
-					   (uint32_t)ssrc_val,
+					   &dst_ip,
+					   (uint16_t)dst_port_val,
 					   ch_map,
 					   (uint8_t)channel_count,
 					   (uint8_t)output_delay,
@@ -901,10 +909,11 @@ static int delete_rx_stream(int stream_id)
 		return -EINVAL;
 	}
 
-	/* Zero-SSRC config effectively disables the stream in the FPGA */
+	/* Zero IP+port config effectively disables the stream in the FPGA */
+	struct in_addr zero_ip = {.s_addr = 0};
 	uint8_t zero_map[AES67_MAX_CH_PER_STREAM] = {0};
 
-	return sap_sdp_configure_rx_stream((uint8_t)stream_id, 0,
+	return sap_sdp_configure_rx_stream((uint8_t)stream_id, &zero_ip, 0,
 					   zero_map, 1, 0, 0);
 }
 
