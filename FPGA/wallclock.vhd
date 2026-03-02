@@ -91,6 +91,11 @@ architecture Behavioral of wallclock is
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
     signal nco_increment  : signed(31 downto 0) := NCO_BASE_INC;
     
+    -- Pipeline register to break freq_correction → nco_increment critical path
+    -- Original: 32×16 multiply + shift + add (~10ns combined)
+    -- Split: Stage 1 (multiply+shift) → Stage 2 (add)
+    signal ppb_adj_reg    : signed(31 downto 0) := (others => '0');
+    
     -- LRCK divider: count 64 BCLK rising edges → 1 sample period
     -- BCLK MSB rising edge = one BCLK cycle. 64 cycles = 1 LRCK period.
     -- Counter counts 0..63, toggles LRCK at 0 and 32 (50% duty cycle).
@@ -115,7 +120,11 @@ architecture Behavioral of wallclock is
     signal media_init_done  : std_logic := '0';
     
     -- Pipeline registers for media clock computation
-    -- Breaks nsec_reg → media_clock_reg path (~11ns) into 2 stages (~5ns each)
+    -- Breaks nsec_reg → media_clock_reg path into 3 stages:
+    --   Stage 0: nsec_reg → media_nsec_reg (register input to multiply)
+    --   Stage 1: media_nsec_reg * RECIP → media_mult_reg (32×18 multiply)
+    --   Stage 2: media_base + media_mult_reg[47:32] → media_clock_reg (add)
+    signal media_nsec_reg   : unsigned(31 downto 0) := (others => '0');  -- Stage 0: registered nsec
     signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');  -- Stage 1: multiply result
     
     -- ============================================================
@@ -123,16 +132,33 @@ architecture Behavioral of wallclock is
     -- Original single-cycle chain (~17ns):
     --   multiply → frac_add → overflow → ns_adjust → nsec_add
     --   → compare_1e9 → 48-bit sec_increment
-    -- Pipelined into 4 stages (≤7ns each):
+    -- Pipelined into 5 stages (≤6ns each):
     --   Stage 1: multiply → frac_increment_reg
     --   Stage 2: frac_add + overflow → ns_adjust_pipe
-    --   Stage 3: nsec_add + compare → sec_adj_pipe
+    --   Stage 3a: nsec_add → new_nsec_pipe (SPLIT from original Stage 3)
+    --   Stage 3b: compare_1e9 + conditional → sec_adj_pipe
     --   Stage 4: 48-bit sec_increment
-    -- Total latency: 3 extra cycles (24ns). Invisible at PTP rate (≤128 Hz).
+    -- Total latency: 4 extra cycles (32ns). Invisible at PTP rate (≤128 Hz).
     -- ============================================================
     signal frac_increment_reg : signed(31 downto 0) := (others => '0');
     signal ns_adjust_pipe     : integer range -1 to 1 := 0;
+    -- Pre-computed increment value (breaks ns_adjust_pipe → new_nsec critical path)
+    signal ns_increment_reg   : signed(31 downto 0) := to_signed(increment_interval, 32);
+    signal new_nsec_pipe      : signed(31 downto 0) := (others => '0');  -- Stage 3a output
     signal sec_adj_pipe       : integer range -1 to 1 := 0;
+    
+    -- Pre-computed rollover values to break Stage 3b timing path
+    -- These track (new_nsec_pipe - NS_PER_SEC) and (new_nsec_pipe + NS_PER_SEC)
+    -- Updated in parallel with new_nsec_pipe using ns_increment_reg
+    signal new_nsec_minus_sec : signed(31 downto 0) := -NS_PER_SEC;  -- new_nsec_pipe - NS_PER_SEC
+    signal new_nsec_plus_sec  : signed(31 downto 0) := NS_PER_SEC;   -- new_nsec_pipe + NS_PER_SEC
+    
+    -- Phase jump pipeline registers
+    -- Original: nsec_reg + phase_jump → compare → nsec_reg (~9ns in one cycle)
+    -- Pipelined: Stage A: compute sum → phase_jump_sum_reg
+    --            Stage B: compare/normalize → apply to nsec_reg, new_nsec_pipe
+    signal phase_jump_pending : std_logic := '0';
+    signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
     
 begin
 
@@ -150,25 +176,31 @@ begin
     -- BCLK (fs*64 = 3.072 MHz): NCO phase accumulator MSB
     -- LRCK (fs = 48 kHz): divide BCLK by 64
     -- Both are PTP-disciplined via freq_correction_ppb.
+    --
+    -- Pipeline (to meet timing):
+    --   Stage 1: ppb_adj_reg <= (freq_correction * NCO_PPB_SCALE) >> 16
+    --   Stage 2: nco_increment <= NCO_BASE_INC + ppb_adj_reg
     -- ============================================================
     nco_proc: process(clk, reset_n)
-        variable ppb_adj : signed(31 downto 0);
     begin
         if reset_n = '0' then
             nco_phase        <= (others => '0');
             nco_phase_prev   <= '0';
             nco_increment    <= NCO_BASE_INC;
+            ppb_adj_reg      <= (others => '0');
             bclk_cnt         <= (others => '0');
             lrck_reg         <= '0';
             sample_pulse_int <= '0';
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
             
-            -- Update NCO increment from PTP frequency correction
-            -- adj = NCO_BASE_INC * ppb / 1e9 ≈ (ppb * NCO_PPB_SCALE) >> 16
-            ppb_adj := resize(
+            -- ===== NCO INCREMENT PIPELINE =====
+            -- Stage 1: Multiply + shift (32×16 → 48 bits, keep upper 32)
+            ppb_adj_reg <= resize(
                 shift_right(freq_correction_ppb_i * NCO_PPB_SCALE, 16), 32);
-            nco_increment <= NCO_BASE_INC + ppb_adj;
+            
+            -- Stage 2: Add base increment (uses ppb_adj_reg from previous cycle)
+            nco_increment <= NCO_BASE_INC + ppb_adj_reg;
             
             -- Advance NCO phase accumulator
             nco_phase <= unsigned(signed(nco_phase) + nco_increment);
@@ -206,6 +238,7 @@ begin
             media_base      <= (others => '0');
             media_clock_reg <= (others => '0');
             media_init_done <= '0';
+            media_nsec_reg  <= (others => '0');
             media_mult_reg  <= (others => '0');
         elsif rising_edge(clk) then
             if wallclock_set_i = '1' then
@@ -218,9 +251,13 @@ begin
                 media_base <= media_base + to_unsigned(audio_fs, 32);
             end if;
 
+            -- ===== STAGE 0: Register nsec input (breaks nsec_reg → mult path) =====
+            media_nsec_reg <= unsigned(nsec_reg);
+            
             -- ===== STAGE 1: Multiply (32×18 = 50 bits) =====
             -- sample_in_sec = floor(nanoseconds * MEDIA_CLK_RECIP / 2^32)
-            media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
+            -- Uses media_nsec_reg from PREVIOUS cycle
+            media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
             
             -- ===== STAGE 2: Add (uses PREVIOUS cycle's multiply result) =====
             sample_in_sec := media_mult_reg(47 downto 32);
@@ -229,22 +266,23 @@ begin
     end process media_proc;
 
     -- ============================================================
-    -- Main Wallclock Timekeeping Process (4-stage pipeline)
+    -- Main Wallclock Timekeeping Process (5-stage pipeline)
     --
     -- Pipeline stages (signal reads get PREVIOUS cycle's value):
     --   Stage 1: freq_correction → multiply → frac_increment_reg  (~5ns)
     --   Stage 2: frac_increment_reg → frac_add → overflow → ns_adjust_pipe  (~6ns)
-    --   Stage 3: ns_adjust_pipe → nsec_add → compare_1e9 → sec_adj_pipe  (~7ns)
+    --   Stage 3a: ns_adjust_pipe → nsec_add → new_nsec_pipe  (~5ns)
+    --   Stage 3b: new_nsec_pipe → compare_1e9 → nsec_reg, sec_adj_pipe  (~6ns)
+    --            Also resets new_nsec_pipe on rollover (overwrites Stage 3a)
     --   Stage 4: sec_adj_pipe → 48-bit sec increment  (~5ns)
     --
-    -- Latency: 3 extra cycles (24ns) from freq_correction change to sec_reg.
+    -- Latency: 4 extra cycles (32ns) from freq_correction change to sec_reg.
     -- This is invisible: freq_correction changes at ≤128 Hz (millions of
-    -- cycles apart), and the ±1ns fractional adjust being 1 cycle late
-    -- or the second pulse being 1 cycle late (8ns) are both negligible.
+    -- cycles apart), and the phase/second updates being a few cycles late
+    -- (32ns) are negligible for PTP accuracy requirements.
     -- ============================================================
     process(clk, reset_n)
         variable new_frac  : signed(31 downto 0);
-        variable new_nsec  : signed(31 downto 0);
     begin
         if reset_n = '0' then
             second_pulse_int   <= '0';
@@ -253,7 +291,13 @@ begin
             frac_ns_accum      <= (others => '0');
             frac_increment_reg <= (others => '0');
             ns_adjust_pipe     <= 0;
+            ns_increment_reg   <= to_signed(increment_interval, 32);
+            new_nsec_pipe      <= (others => '0');
+            new_nsec_minus_sec <= -NS_PER_SEC;
+            new_nsec_plus_sec  <= NS_PER_SEC;
             sec_adj_pipe       <= 0;
+            phase_jump_pending <= '0';
+            phase_jump_sum_reg <= (others => '0');
 
         elsif rising_edge(clk) then
             second_pulse_int <= '0';
@@ -265,7 +309,7 @@ begin
                                   * freq_correction_ppb_i(19 downto 0);
 
             -- ===== STAGE 4: Apply delayed seconds rollover =====
-            -- sec_adj_pipe was written by Stage 3 in the PREVIOUS cycle.
+            -- sec_adj_pipe was written by Stage 3b in the PREVIOUS cycle.
             -- VHDL signal semantics: we read the old value here.
             if sec_adj_pipe = 1 then
                 sec_reg <= sec_reg + 1;
@@ -276,27 +320,48 @@ begin
             -- Default for this cycle (may be overwritten below)
             sec_adj_pipe <= 0;
 
+            -- ===== PHASE JUMP PIPELINE: Stage A (capture + add) =====
+            -- On phase_jump_valid_i pulse: compute nsec_reg + phase_jump, set pending flag
+            -- The actual application happens in Stage B next cycle.
+            if phase_jump_valid_i = '1' then
+                phase_jump_sum_reg <= nsec_reg + resize(phase_jump_ns_i, 32);
+                phase_jump_pending <= '1';
+            end if;
+
             -- ===== OVERRIDE PATHS =====
             if wallclock_set_i = '1' then
-                -- Hard set of time — overrides Stage 4's sec_reg write
-                -- (last assignment in process wins)
+                -- Hard set of time — overrides everything
                 nsec_reg      <= signed(wallclock_nanoseconds_i);
                 sec_reg       <= wallclock_seconds_i;
                 frac_ns_accum <= (others => '0');
                 ns_adjust_pipe <= 0;
+                new_nsec_pipe  <= signed(wallclock_nanoseconds_i);
+                new_nsec_minus_sec <= signed(wallclock_nanoseconds_i) - NS_PER_SEC;
+                new_nsec_plus_sec  <= signed(wallclock_nanoseconds_i) + NS_PER_SEC;
                 sec_adj_pipe   <= 0;
+                phase_jump_pending <= '0';
 
-            elsif phase_jump_valid_i = '1' then
-                -- One-time phase correction; sec update via pipeline
-                new_nsec := nsec_reg + resize(phase_jump_ns_i, 32);
-                if new_nsec >= NS_PER_SEC then
-                    nsec_reg     <= new_nsec - NS_PER_SEC;
-                    sec_adj_pipe <= 1;   -- Stage 4 applies next cycle
-                elsif new_nsec < 0 then
-                    nsec_reg     <= new_nsec + NS_PER_SEC;
-                    sec_adj_pipe <= -1;
+            elsif phase_jump_pending = '1' then
+                -- ===== PHASE JUMP PIPELINE: Stage B (normalize + apply) =====
+                -- Uses phase_jump_sum_reg from Stage A (previous cycle)
+                phase_jump_pending <= '0';
+                if phase_jump_sum_reg >= NS_PER_SEC then
+                    nsec_reg      <= phase_jump_sum_reg - NS_PER_SEC;
+                    new_nsec_pipe <= phase_jump_sum_reg - NS_PER_SEC;
+                    new_nsec_minus_sec <= phase_jump_sum_reg - NS_PER_SEC - NS_PER_SEC;
+                    new_nsec_plus_sec  <= phase_jump_sum_reg - NS_PER_SEC + NS_PER_SEC;
+                    sec_adj_pipe  <= 1;
+                elsif phase_jump_sum_reg < 0 then
+                    nsec_reg      <= phase_jump_sum_reg + NS_PER_SEC;
+                    new_nsec_pipe <= phase_jump_sum_reg + NS_PER_SEC;
+                    new_nsec_minus_sec <= phase_jump_sum_reg;
+                    new_nsec_plus_sec  <= phase_jump_sum_reg + NS_PER_SEC + NS_PER_SEC;
+                    sec_adj_pipe  <= -1;
                 else
-                    nsec_reg <= new_nsec;
+                    nsec_reg      <= phase_jump_sum_reg;
+                    new_nsec_pipe <= phase_jump_sum_reg;
+                    new_nsec_minus_sec <= phase_jump_sum_reg - NS_PER_SEC;
+                    new_nsec_plus_sec  <= phase_jump_sum_reg + NS_PER_SEC;
                 end if;
                 ns_adjust_pipe <= 0;
 
@@ -316,19 +381,41 @@ begin
                     frac_ns_accum <= new_frac;
                 end if;
 
-                -- ===== STAGE 3: Nanosecond tick + rollover detect =====
-                -- ns_adjust_pipe read here is from Stage 2 of PREVIOUS cycle
-                -- (VHDL signal semantics: deferred write = automatic pipeline).
-                new_nsec := nsec_reg + to_signed(increment_interval + ns_adjust_pipe, 32);
+                -- ===== STAGE 2.5: Pre-compute increment value =====
+                -- ns_adjust_pipe read here is from Stage 2 of PREVIOUS cycle.
+                -- This breaks the ns_adjust_pipe → new_nsec → new_nsec_minus_sec chain.
+                ns_increment_reg <= to_signed(increment_interval + ns_adjust_pipe, 32);
 
-                if new_nsec >= NS_PER_SEC then
-                    nsec_reg     <= new_nsec - NS_PER_SEC;
-                    sec_adj_pipe <= 1;
-                elsif new_nsec < 0 then
-                    nsec_reg     <= new_nsec + NS_PER_SEC;
-                    sec_adj_pipe <= -1;
+                -- ===== STAGE 3a: Update all three values in PARALLEL =====
+                -- Uses ns_increment_reg from PREVIOUS cycle (already computed).
+                -- All three adds happen in parallel - no chain!
+                new_nsec_pipe      <= new_nsec_pipe + ns_increment_reg;
+                new_nsec_minus_sec <= new_nsec_minus_sec + ns_increment_reg;
+                new_nsec_plus_sec  <= new_nsec_plus_sec + ns_increment_reg;
+
+                -- ===== STAGE 3b: Compare and MUX (minimal arithmetic) =====
+                -- Uses new_nsec_pipe from PREVIOUS cycle (reads OLD value).
+                -- Uses pre-computed minus/plus values from PREVIOUS cycle.
+                -- On rollover, reset all three values to maintain invariant:
+                --   new_nsec_minus_sec = new_nsec_pipe - NS_PER_SEC
+                --   new_nsec_plus_sec = new_nsec_pipe + NS_PER_SEC
+                -- Use constants for minus/plus since after rollover the value is near 0 or 1e9.
+                if new_nsec_pipe >= NS_PER_SEC then
+                    nsec_reg      <= new_nsec_minus_sec;
+                    -- Corrected value is ~ 0, so reset offsets to constants
+                    new_nsec_pipe      <= new_nsec_minus_sec;
+                    new_nsec_minus_sec <= -NS_PER_SEC;  -- ~0 - 1e9 = -1e9
+                    new_nsec_plus_sec  <= NS_PER_SEC;   -- ~0 + 1e9 = +1e9
+                    sec_adj_pipe  <= 1;
+                elsif new_nsec_pipe < 0 then
+                    nsec_reg      <= new_nsec_plus_sec;
+                    -- Corrected value is ~ 1e9, so reset offsets to constants
+                    new_nsec_pipe      <= new_nsec_plus_sec;
+                    new_nsec_minus_sec <= (others => '0');  -- ~1e9 - 1e9 = 0
+                    new_nsec_plus_sec  <= NS_PER_SEC + NS_PER_SEC;  -- ~1e9 + 1e9 = 2e9
+                    sec_adj_pipe  <= -1;
                 else
-                    nsec_reg <= new_nsec;
+                    nsec_reg <= new_nsec_pipe;
                 end if;
             end if;
         end if;

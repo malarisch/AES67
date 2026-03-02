@@ -65,10 +65,14 @@ architecture Behavioral of tx_transmitter is
 	constant AUDIO_BUFFER_LENGTH	: integer := samples_per_channel_depth * global_channel_count * bytes_per_sample * 2;
 
     signal PACKET_LENGTH : integer := 0;
+    signal PACKET_LENGTH_MINUS_1 : integer := 0; -- Pre-computed to break comparison critical path
     signal UDP_PAYLOAD_LENGTH : integer := 0;
+    -- Pipeline registers for audio_length multiplication (breaks channel_count_o critical path)
+    signal audio_samples_x_channels : integer range 0 to 65535 := 0; -- samples * channels (Stage 1)
+    signal audio_data_length : integer range 0 to 65535 := 0;        -- (samples * channels) * bytes (Stage 2)
 	-- Types
 	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_LatchCDC, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
-    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
+    type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcAudioLen, s_A_CalcValues, s_A_CalcChecksum, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
 	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
     
     signal SM_AssemblePacket    : t_SM_AssemblePacket := s_A_Idle;
@@ -217,7 +221,8 @@ architecture Behavioral of tx_transmitter is
 
 	-- True dual-port RAM signals: Port A (sys_clk) for write + checksum read, Port B (tx_clk) for TX read
 	signal asm_rd_addr		: integer range 0 to 1518 - 1 := 0;
-	signal asm_rd_data		: std_logic_vector(7 downto 0) := (others => '0');
+	signal asm_rd_data		: std_logic_vector(7 downto 0) := (others => '0'); -- RAM output register
+	signal asm_rd_data_r	: std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register for timing
 	signal tx_rd_addr		: integer range 0 to 1518 - 1 := 0;
 	signal tx_rd_data		: std_logic_vector(7 downto 0) := (others => '0');
 
@@ -244,11 +249,38 @@ architecture Behavioral of tx_transmitter is
 	signal udp_checksum_bytes_remaining	: integer range 0 to 1500 := 0;
 	signal udp_checksum_request_count	: integer range 0 to 1500 := 0;
 	signal udp_checksum_data_valid	: std_logic := '0';
+	signal udp_checksum_data_valid_d	: std_logic := '0'; -- Delayed by 1 cycle for RAM pipeline
 
     signal start_i_sync1 : std_logic := '0';
     signal channel_counter: integer range 0 to 7 := 0;
     signal byte_counter : integer range 0 to 2 := 0;
     signal sample_index : integer range 0 to samples_per_channel_depth - 1 := 0;
+
+    -- ============================================================
+    -- Pipeline registers to break IP checksum critical path
+    -- Original: 8-way addition in s_A_CalcValues (~12ns combinational)
+    -- Solution: Pre-compute static parts, split into two stages
+    -- ============================================================
+    signal ip_checksum_partial1 : unsigned(31 downto 0) := (others => '0');  -- src_ip + 0x8011
+    signal ip_checksum_partial2 : unsigned(31 downto 0) := (others => '0');  -- dst_ip
+
+    -- ============================================================
+    -- Pipeline registers to break sample_ram_read_addr critical path
+    -- Original: ch_id mux + 2 multiplies + 3 adds (~10ns)
+    -- Solution: Split into 2 stages:
+    --   Stage 1: ch_id mux + sample_base computation → ch_id_reg, sample_base_addr
+    --   Stage 2: Final address add + wrap → raw_addr_reg
+    -- Total: 2 extra cycles latency (compensated by earlier pre-fetch)
+    -- ============================================================
+    signal ch_id_reg        : integer range 0 to 255 := 0;  -- Selected channel ID (Stage 1)
+    signal sample_base_addr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;  -- sample_index * stride
+    signal byte_offset_reg  : integer range 0 to 2 := 0;    -- byte offset within sample
+    signal raw_addr_reg     : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;  -- Final address (Stage 2)
+    
+    -- Look-ahead counters for address pipeline (compute NEXT values one cycle early)
+    signal next_channel_counter : integer range 0 to 7 := 0;
+    signal next_byte_counter    : integer range 0 to 2 := 0;
+    signal next_sample_index    : integer range 0 to samples_per_channel_depth - 1 := 0;
 
     signal tx_ack: std_logic := '0';
     signal tx_ack_sync1: std_logic := '0';
@@ -260,14 +292,17 @@ architecture Behavioral of tx_transmitter is
 begin
 
 	-- True dual-port packet RAM
-	-- Port A (sys_clk): write + checksum read
+	-- Port A (sys_clk): write + checksum read (with pipeline register for timing)
 	packet_ram_port_a : process(sys_clk)
 	begin
 		if rising_edge(sys_clk) then
 			if (packet_wr_en = '1') then
 				packet_ram(packet_wr_addr) <= packet_wr_data;
 			end if;
+			-- Stage 1: RAM output register (M10K inference)
 			asm_rd_data <= packet_ram(asm_rd_addr);
+			-- Stage 2: Pipeline register (breaks timing path to checksum logic)
+			asm_rd_data_r <= asm_rd_data;
 		end if;
 	end process packet_ram_port_a;
 
@@ -297,13 +332,18 @@ begin
             case SM_AssemblePacket is
                 when s_A_Idle =>
                     if (start_i_sync1 = '1') then
-                        SM_AssemblePacket <= s_A_CalcValues;
-
-                        -- calc dynamic lengths based on input parameters
-                        UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
-                        PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i)) * bytes_per_sample;
-
+                        SM_AssemblePacket <= s_A_CalcAudioLen;
+                        -- Pipeline Stage 1: compute samples * channels (breaks critical path)
+                        audio_samples_x_channels <= to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i));
                     end if;
+                -- Pipeline Stage 2: multiply by bytes_per_sample and compute final lengths
+                when s_A_CalcAudioLen =>
+                    audio_data_length <= audio_samples_x_channels * bytes_per_sample;
+                    UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample;
+                    PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample;
+                    -- Pre-compute PACKET_LENGTH - 1 to remove subtraction from critical comparison path
+                    PACKET_LENGTH_MINUS_1 <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample - 1;
+                    SM_AssemblePacket <= s_A_CalcValues;
                 when s_A_CalcValues =>
 						-- Compute read base: go back samples_per_packet sample periods from write pointer
 						rd_offset := to_integer(unsigned(samples_per_packet_per_channel_i)) * global_channel_count * bytes_per_sample;
@@ -320,16 +360,16 @@ begin
 
 						packet_counter <= packet_counter + 1;
 
-						-- Pre-compute IP header checksum to avoid critical timing path
-						-- IP header words: 0x4500, total_length, pkt_counter+1, 0x0000, 0x8011, 0x0000, src_ip, dst_ip
-						ip_checksum_acc <= resize(to_unsigned(16#4500#, 16), 32) +
-							resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32) +
-							resize(packet_counter + 1, 32) +  -- pkt_counter will be incremented
-							resize(to_unsigned(16#8011#, 16), 32) +  -- TTL=0x80, proto=0x11
+						-- ===== IP CHECKSUM PIPELINE STAGE 1 =====
+						-- Split 8-way addition into two stages to meet timing
+						-- Stage 1: Compute partial sums (src_ip + 0x8011) and (dst_ip)
+						ip_checksum_partial1 <= resize(to_unsigned(16#8011#, 16), 32) +
 							resize(unsigned(src_ip_address(31 downto 16)), 32) +
-							resize(unsigned(src_ip_address(15 downto 0)), 32) +
+							resize(unsigned(src_ip_address(15 downto 0)), 32);
+						ip_checksum_partial2 <= 
 							resize(unsigned(dst_ip_address(31 downto 16)), 32) +
 							resize(unsigned(dst_ip_address(15 downto 0)), 32);
+
 						ip_checksum_upper_byte <= (others => '0');
 						ip_checksum_byte_phase <= '0';
 						udp_checksum_upper_byte <= (others => '0');
@@ -344,7 +384,16 @@ begin
 						udp_pseudo_header_sum <= pseudo_header_sum;
 
 
-                        SM_AssemblePacket <= s_A_PrepFrame;
+                        SM_AssemblePacket <= s_A_CalcChecksum;
+
+				-- ===== IP CHECKSUM PIPELINE STAGE 2 =====
+				-- Final sum using registered partial sums from Stage 1
+				when s_A_CalcChecksum =>
+					ip_checksum_acc <= ip_checksum_partial1 + ip_checksum_partial2 +
+						resize(to_unsigned(16#4500#, 16), 32) +
+						resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32) +
+						resize(packet_counter, 32);  -- already incremented in s_A_CalcValues
+					SM_AssemblePacket <= s_A_PrepFrame;
                         
                 when s_A_PrepFrame =>
 
@@ -361,79 +410,106 @@ begin
 						if (frame_write_index = 0) then
 							first_packet_byte <= header_data;
 						end if;
-						-- IP checksum is pre-computed in s_A_CalcValues, no byte-by-byte feed needed
+						
+						-- ===== ADDRESS PIPELINE PRE-FETCH (3 stages to account for pipeline latency) =====
+						-- Need 3 pre-fetch cycles: 1 for ch_id/base, 1 for address compute, 1 for RAM read
+						if (frame_write_index = PACKET_HEADER_LENGTH - 3) then
+							-- Pipeline Stage 1 setup: Initialize for first byte (MSB of ch0, sample 0)
+							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
+							sample_base_addr <= 0;  -- sample_index=0, so base=0
+							byte_offset_reg <= bytes_per_sample - 1;  -- MSB first
+						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
-							-- Pre-fetch 1: set address for FIRST audio byte (MSB of ch0, sample 0)
-							raw_addr := read_base
-								+ to_integer(unsigned(ch_ids_i(63 downto 56))) * bytes_per_sample
-								+ (bytes_per_sample - 1); -- MSB byte
+							-- Pipeline Stage 2: Compute address for first byte
+							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
-							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
+							raw_addr_reg <= raw_addr;
+							-- Setup Stage 1 for second byte
+							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
+							sample_base_addr <= 0;
+							byte_offset_reg <= bytes_per_sample - 2;  -- middle byte
 						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
-							-- Pre-fetch 2: set address for SECOND audio byte (middle of ch0, sample 0)
-							raw_addr := read_base
-								+ to_integer(unsigned(ch_ids_i(63 downto 56))) * bytes_per_sample
-								+ (bytes_per_sample - 1 - 1); -- middle byte
+							-- Output first address from Stage 2 result
+							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
+							-- Pipeline Stage 2: Compute address for second byte
+							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
-							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
-                            byte_counter <= 2; -- payload loop starts 2 positions ahead
-                            channel_counter <= 0;
+							raw_addr_reg <= raw_addr;
+							-- Setup Stage 1 for third byte (byte 2 = LSB = bytes_per_sample - 3, but we skip to next byte 0)
+							-- Actually, next is byte_counter=2 (which is the THIRD byte = LSB for 3-byte samples)
+							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
+							sample_base_addr <= 0;
+							byte_offset_reg <= 0;  -- LSB byte
+							-- Initialize counters 3 positions ahead (accounting for pipeline)
+                            byte_counter <= 0;  -- Will be at position 3 when data arrives
+                            channel_counter <= 1;  -- Next channel after ch0 byte2
                             sample_index <= 0;
+                            -- Prepare look-ahead for next iteration
+                            next_byte_counter <= 1;
+                            next_channel_counter <= 1;
+                            next_sample_index <= 0;
 						end if;
 					else
-
-                        -- AUDIO PAYLOAD ASSEMBLY
-                        -- Data written here is from the address set 2 cycles ago (registered sample RAM read)
+                        -- ===== PIPELINED AUDIO PAYLOAD ASSEMBLY =====
+                        -- Pipeline: counter → ch_id_reg+base (Stage 1) → raw_addr_reg (Stage 2) → output
+                        -- Each cycle: output data from 2 cycles ago, compute address for 2 cycles ahead
+                        
 						packet_wr_data <= sample_ram_data_in_i;
-
-						-- Extract ch_id for current channel (MSB-first bit ordering in ch_ids_i)
-						case channel_counter is
-							when 0 => ch_id := to_integer(unsigned(ch_ids_i(63 downto 56)));
-							when 1 => ch_id := to_integer(unsigned(ch_ids_i(55 downto 48)));
-							when 2 => ch_id := to_integer(unsigned(ch_ids_i(47 downto 40)));
-							when 3 => ch_id := to_integer(unsigned(ch_ids_i(39 downto 32)));
-							when 4 => ch_id := to_integer(unsigned(ch_ids_i(31 downto 24)));
-							when 5 => ch_id := to_integer(unsigned(ch_ids_i(23 downto 16)));
-							when 6 => ch_id := to_integer(unsigned(ch_ids_i(15 downto 8)));
-							when 7 => ch_id := to_integer(unsigned(ch_ids_i(7 downto 0)));
-							when others => ch_id := 0;
-						end case;
-
-						-- Address = read_base + sample_period_offset + channel_offset + byte
-						-- RAM stores LSB at offset 0, MSB at offset (bytes_per_sample-1)
-						-- AES67 requires Big-Endian (MSB first), so read in reverse order
-						raw_addr := read_base
-							+ sample_index * global_channel_count * bytes_per_sample
-							+ ch_id * bytes_per_sample
-							+ (bytes_per_sample - 1 - byte_counter); -- Big-Endian: MSB first
+						
+						-- Stage 2 OUTPUT: Address computed last cycle
+						sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
+						
+						-- Stage 2 COMPUTE: Use registered ch_id and base from Stage 1
+						raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
 						if raw_addr >= AUDIO_BUFFER_LENGTH then
 							raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 						end if;
-						sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr, 16));
+						raw_addr_reg <= raw_addr;
 
-                        if (byte_counter < bytes_per_sample - 1) then
-                            byte_counter <= byte_counter + 1;
+						-- Stage 1: Compute ch_id and base for look-ahead counters
+						case next_channel_counter is
+							when 0 => ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
+							when 1 => ch_id_reg <= to_integer(unsigned(ch_ids_i(55 downto 48)));
+							when 2 => ch_id_reg <= to_integer(unsigned(ch_ids_i(47 downto 40)));
+							when 3 => ch_id_reg <= to_integer(unsigned(ch_ids_i(39 downto 32)));
+							when 4 => ch_id_reg <= to_integer(unsigned(ch_ids_i(31 downto 24)));
+							when 5 => ch_id_reg <= to_integer(unsigned(ch_ids_i(23 downto 16)));
+							when 6 => ch_id_reg <= to_integer(unsigned(ch_ids_i(15 downto 8)));
+							when 7 => ch_id_reg <= to_integer(unsigned(ch_ids_i(7 downto 0)));
+							when others => ch_id_reg <= 0;
+						end case;
+						sample_base_addr <= next_sample_index * global_channel_count * bytes_per_sample;
+						byte_offset_reg <= bytes_per_sample - 1 - next_byte_counter;
+
+						-- Update current counters (lagging behind look-ahead by 1)
+						byte_counter <= next_byte_counter;
+						channel_counter <= next_channel_counter;
+						sample_index <= next_sample_index;
+						
+						-- Advance look-ahead counters
+                        if (next_byte_counter < bytes_per_sample - 1) then
+                            next_byte_counter <= next_byte_counter + 1;
                         else
-                            byte_counter <= 0;
-                            if (channel_counter < to_integer(unsigned(channel_count_i)) - 1) then
-                                channel_counter <= channel_counter + 1;
+                            next_byte_counter <= 0;
+                            if (next_channel_counter < to_integer(unsigned(channel_count_i)) - 1) then
+                                next_channel_counter <= next_channel_counter + 1;
                             else
-                                channel_counter <= 0;
-                                if (sample_index < to_integer(unsigned(samples_per_packet_per_channel_i)) - 1) then
-                                    sample_index <= sample_index + 1;
+                                next_channel_counter <= 0;
+                                if (next_sample_index < to_integer(unsigned(samples_per_packet_per_channel_i)) - 1) then
+                                    next_sample_index <= next_sample_index + 1;
                                 else
-                                    sample_index <= 0;
+                                    next_sample_index <= 0;
                                 end if;
                             end if;
                         end if;
 
 					end if;
-					if (frame_write_index = PACKET_LENGTH - 1) then
+					if (frame_write_index = PACKET_LENGTH_MINUS_1) then
 						-- Note: packet_wr_en stays '1' this cycle so last byte is written to RAM.
 						-- It returns to '0' next cycle via the process default.
 						udp_checksum_acc <= udp_pseudo_header_sum;
@@ -446,6 +522,7 @@ begin
 							udp_checksum_request_count <= 0;
 						end if;
 						udp_checksum_data_valid <= '0';
+						udp_checksum_data_valid_d <= '0'; -- Initialize delayed valid signal
 						asm_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
 						SM_AssemblePacket <= s_CalcUdpChecksum;
 					else
@@ -453,14 +530,19 @@ begin
 					end if;
 
                 when s_CalcUdpChecksum =>
-					if (udp_checksum_data_valid = '1') then
-						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, asm_rd_data);
+					-- Pipeline delay register for data_valid (matches asm_rd_data -> asm_rd_data_r latency)
+					udp_checksum_data_valid_d <= udp_checksum_data_valid;
+					
+					-- Note: asm_rd_data_r has 2-cycle latency from asm_rd_addr
+					-- udp_checksum_data_valid_d is delayed to match this pipeline
+					if (udp_checksum_data_valid_d = '1') then
+						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, asm_rd_data_r);
 						if (udp_checksum_bytes_remaining > 0) then
 							udp_checksum_bytes_remaining <= udp_checksum_bytes_remaining - 1;
 						end if;
 					end if;
 
-					if ((udp_checksum_data_valid = '1') and (udp_checksum_bytes_remaining = 1)) then
+					if ((udp_checksum_data_valid_d = '1') and (udp_checksum_bytes_remaining = 1)) then
 						udp_checksum_data_valid <= '0';
 						SM_AssemblePacket <= s_FinalizeChecksum;
 					elsif ((udp_checksum_data_valid = '0') and (udp_checksum_bytes_remaining = 0)) then

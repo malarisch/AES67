@@ -108,7 +108,7 @@ architecture Behavioral of ptpv2_servo is
     signal phase_jump_valid_reg : std_logic := '0';
     
     -- Pipelined PI controller
-    type pi_state_t is (PI_IDLE, PI_MULT, PI_CLAMP, PI_OUTPUT);
+    type pi_state_t is (PI_IDLE, PI_MULT, PI_CLAMP, PI_SUM, PI_OUTPUT);
     signal pi_state       : pi_state_t := PI_IDLE;
     signal pi_trigger     : std_logic := '0';
     
@@ -118,6 +118,7 @@ architecture Behavioral of ptpv2_servo is
     signal pi_mult_i      : signed(35 downto 0) := (others => '0');
     signal pi_proportional: signed(31 downto 0) := (others => '0');
     signal pi_int_update  : signed(31 downto 0) := (others => '0');
+    signal pi_sum_raw     : signed(31 downto 0) := (others => '0');  -- Added: pre-clamp sum
     
     -- Input processing pipeline
     type input_state_t is (INP_IDLE, INP_DECIDE, INP_ACTION);
@@ -165,6 +166,7 @@ begin
             pi_mult_i <= (others => '0');
             pi_proportional <= (others => '0');
             pi_int_update <= (others => '0');
+            pi_sum_raw <= (others => '0');
             -- Input processing pipeline reset
             input_state <= INP_IDLE;
             inp_offset_abs <= (others => '0');
@@ -181,7 +183,9 @@ begin
             pi_trigger <= '0';
             
             -- ============================================
-            -- PIPELINED PI CONTROLLER
+            -- PIPELINED PI CONTROLLER (5 states)
+            -- PI_IDLE → PI_MULT → PI_CLAMP → PI_SUM → PI_OUTPUT
+            -- Each state ≤ 6ns to meet 125 MHz timing.
             -- ============================================
             case pi_state is
                 when PI_IDLE =>
@@ -191,21 +195,24 @@ begin
                     end if;
                     
                 when PI_MULT =>
-                    -- Perform both multiplications
+                    -- Perform both multiplications (32×4 = 36 bits)
                     pi_mult_p <= pi_input * to_signed(KP_GAIN, 4);
                     pi_mult_i <= pi_input * to_signed(KI_GAIN, 4);
                     pi_state <= PI_CLAMP;
                     
                 when PI_CLAMP =>
-                    -- Shift and clamp proportional term (negate for correction direction)
+                    -- Shift and negate proportional term
                     pi_proportional <= -resize(shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT), 32);
-                    
-                    -- Calculate integral update
+                    -- Calculate integral update term
                     pi_int_update <= integral_sum - resize(shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + 2), 32);
-                    pi_state <= PI_OUTPUT;
+                    pi_state <= PI_SUM;
+                
+                when PI_SUM =>
+                    -- ===== NEW STAGE: Compute sum before clamping =====
+                    -- Uses pi_proportional from previous cycle, integral_sum (old value)
+                    pi_sum_raw <= pi_proportional + integral_sum;
                     
-                when PI_OUTPUT =>
-                    -- Clamp and update integral
+                    -- Clamp and update integral (can happen in parallel)
                     if pi_int_update > to_signed(500_000, 32) then
                         integral_sum <= to_signed(500_000, 32);
                     elsif pi_int_update < to_signed(-500_000, 32) then
@@ -213,14 +220,17 @@ begin
                     else
                         integral_sum <= pi_int_update;
                     end if;
+                    pi_state <= PI_OUTPUT;
                     
-                    -- Calculate and clamp final PI output
-                    if pi_proportional + integral_sum > to_signed(500_000, 32) then
+                when PI_OUTPUT =>
+                    -- ===== Clamp final output from registered sum =====
+                    -- Uses pi_sum_raw from previous cycle (already computed)
+                    if pi_sum_raw > to_signed(500_000, 32) then
                         freq_correction <= to_signed(500_000, 32);
-                    elsif pi_proportional + integral_sum < to_signed(-500_000, 32) then
+                    elsif pi_sum_raw < to_signed(-500_000, 32) then
                         freq_correction <= to_signed(-500_000, 32);
                     else
-                        freq_correction <= pi_proportional + integral_sum;
+                        freq_correction <= pi_sum_raw;
                     end if;
                     
                     pi_state <= PI_IDLE;

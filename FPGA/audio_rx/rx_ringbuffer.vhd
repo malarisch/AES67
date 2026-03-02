@@ -72,9 +72,12 @@ architecture Behavioral of rx_ringbuffer is
     attribute ramstyle : string;
     attribute ramstyle of stream_ram : signal is "M10K";
 
-    -- Synchronous read port for stream_ram (registered address -> data available next cycle)
+    -- Synchronous read port for stream_ram
+    -- Two-stage pipeline: stream_rd_data (RAM output reg) -> stream_rd_data_r (user reg)
+    -- This breaks the timing path from RAM to comparison logic
     signal stream_rd_addr : unsigned(7 downto 0) := (others => '0');
-    signal stream_rd_data : std_logic_vector(7 downto 0) := (others => '0');
+    signal stream_rd_data : std_logic_vector(7 downto 0) := (others => '0'); -- RAM output register
+    signal stream_rd_data_r : std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register for comparison
 
     -- Read pointer: derived from media_clock to maintain fixed offset from write pointer
     signal sample_rd_ptr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
@@ -122,6 +125,7 @@ architecture Behavioral of rx_ringbuffer is
     signal wr_addr_sample_base : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
 
     signal prepare_step : integer range 0 to 15 := 0;
+    signal ram_read_wait : std_logic := '0'; -- Extra wait cycle for M10K RAM read latency
     signal config_ram_read_ptr : integer range 0 to max_streams*32 := 0;
     signal channel_map_idx : integer range 0 to 7 := 0;
     signal cached_delay : unsigned(7 downto 0) := (others => '0');
@@ -158,6 +162,7 @@ begin
             wr_addr_current <= (others => '0');
             wr_addr_sample_base <= (others => '0');
             prepare_step <= 0;
+            ram_read_wait <= '0';
             channel_map_idx <= 0;
             cached_delay <= (others => '0');
         elsif rising_edge(sys_clk) then
@@ -251,8 +256,14 @@ begin
                             prepare_step <= 1;
 
                         when 1 =>
-                            -- Wait cycle: stream_rd_data will be valid next cycle
-                            prepare_step <= 2;
+                            -- Wait cycle for RAM read: M10K has 1 cycle addr reg + 1 cycle data reg
+                            -- Stay here for 2 cycles total before moving to comparison
+                            if ram_read_wait = '0' then
+                                ram_read_wait <= '1';
+                            else
+                                ram_read_wait <= '0';
+                                prepare_step <= 2;
+                            end if;
 
                         when 2 =>
                             -- Compare stream_rd_data against packet header
@@ -260,7 +271,7 @@ begin
                                 packetParserState <= s_End;
                             else
                                 if comp_byte < 4 then
-                                    if stream_rd_data = current_packet_dst_ip(31 - comp_byte * 8 downto 24 - comp_byte * 8) then
+                                    if stream_rd_data_r = current_packet_dst_ip(31 - comp_byte * 8 downto 24 - comp_byte * 8) then
                                         comp_byte := comp_byte + 1;
                                         stream_rd_addr <= to_unsigned(config_ram_read_ptr + comp_byte, 8);
                                         prepare_step <= 1;
@@ -272,7 +283,7 @@ begin
                                     end if;
                                 else
                                     -- comp_byte 4 or 5: check port
-                                    if stream_rd_data = current_packet_dst_port(15 - (comp_byte - 4) * 8 downto 8 - (comp_byte - 4) * 8) then
+                                    if stream_rd_data_r = current_packet_dst_port(15 - (comp_byte - 4) * 8 downto 8 - (comp_byte - 4) * 8) then
                                         if comp_byte = 5 then
                                             -- Match found! Start caching channel map
                                             channel_map_idx <= 0;
@@ -294,12 +305,17 @@ begin
                             end if;
 
                         when 3 =>
-                            -- Wait for stream_rd_data for channel_map entry
-                            prepare_step <= 4;
+                            -- Wait for stream_rd_data for channel_map entry (2 cycles)
+                            if ram_read_wait = '0' then
+                                ram_read_wait <= '1';
+                            else
+                                ram_read_wait <= '0';
+                                prepare_step <= 4;
+                            end if;
 
                         when 4 =>
                             -- Latch channel map entry, advance to next
-                            channel_map(channel_map_idx) <= unsigned(stream_rd_data(3 downto 0));
+                            channel_map(channel_map_idx) <= unsigned(stream_rd_data_r(3 downto 0));
                             if channel_map_idx = 7 then
                                 -- All 8 channel map entries cached, read channel_count (offset +14)
                                 stream_rd_addr <= to_unsigned(config_ram_read_ptr + 14, 8);
@@ -311,32 +327,47 @@ begin
                             end if;
 
                         when 5 =>
-                            -- Wait for channel_count data
-                            prepare_step <= 6;
+                            -- Wait for channel_count data (2 cycles)
+                            if ram_read_wait = '0' then
+                                ram_read_wait <= '1';
+                            else
+                                ram_read_wait <= '0';
+                                prepare_step <= 6;
+                            end if;
 
                         when 6 =>
                             -- Latch channel_count, read delay (offset +15)
-                            current_stream_channel_count <= to_integer(unsigned(stream_rd_data));
+                            current_stream_channel_count <= to_integer(unsigned(stream_rd_data_r));
                             stream_rd_addr <= to_unsigned(config_ram_read_ptr + 15, 8);
                             prepare_step <= 7;
 
                         when 7 =>
-                            -- Wait for delay data
-                            prepare_step <= 8;
+                            -- Wait for delay data (2 cycles)
+                            if ram_read_wait = '0' then
+                                ram_read_wait <= '1';
+                            else
+                                ram_read_wait <= '0';
+                                prepare_step <= 8;
+                            end if;
 
                         when 8 =>
                             -- Latch delay, read samples_per_channel (offset +16)
-                            cached_delay <= unsigned(stream_rd_data);
+                            cached_delay <= unsigned(stream_rd_data_r);
                             stream_rd_addr <= to_unsigned(config_ram_read_ptr + 16, 8);
                             prepare_step <= 9;
 
                         when 9 =>
-                            -- Wait for samples_per_channel data
-                            prepare_step <= 10;
+                            -- Wait for samples_per_channel data (2 cycles)
+                            if ram_read_wait = '0' then
+                                ram_read_wait <= '1';
+                            else
+                                ram_read_wait <= '0';
+                                prepare_step <= 10;
+                            end if;
 
                         when 10 =>
                             -- Latch samples_per_channel, compute write position
-                            current_packet_samples_per_channel <= to_integer(unsigned(stream_rd_data));
+                            current_packet_samples_per_channel <= to_integer(unsigned(stream_rd_data_r));
                             wr_sample_pos := unsigned(current_packet_media_clock(7 downto 0))
                                            + cached_delay;
                             wr_addr_sample_base <= resize(wr_sample_pos, ADDR_BITS) sll 6;
@@ -506,11 +537,14 @@ begin
     end process;
 
     -- Stream config RAM Read Process (Port B - sys_clk domain)
-    -- Registered read output for proper Block RAM inference
+    -- Two-stage registered read for M10K inference + timing closure
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then
+            -- Stage 1: RAM output register (required for M10K inference)
             stream_rd_data <= stream_ram(to_integer(stream_rd_addr));
+            -- Stage 2: Pipeline register (breaks timing path to comparison logic)
+            stream_rd_data_r <= stream_rd_data;
         end if;
     end process;
 

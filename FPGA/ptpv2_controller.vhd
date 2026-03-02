@@ -134,6 +134,20 @@ entity ptpv2_controller is
     signal announce_interval_sec_r : unsigned(7 downto 0)  := to_unsigned(2, 8);
     signal announce_interval_ns_r  : unsigned(31 downto 0) := (others => '0');
 
+    -- ============================================================
+    -- Precomputed next-time pipeline (breaks wc_ns_r → *_next_ns critical path)
+    -- Stage 1: ns_sum = wc_ns_r + interval_ns_r (33-bit add)
+    -- Stage 2: overflow detect, normalized values ready for use
+    -- ============================================================
+    signal sync_ns_sum_reg     : unsigned(32 downto 0) := (others => '0');
+    signal announce_ns_sum_reg : unsigned(32 downto 0) := (others => '0');
+    signal sync_next_ns_pre    : unsigned(31 downto 0) := (others => '0');
+    signal sync_next_sec_pre   : unsigned(3 downto 0)  := (others => '0');
+    signal sync_overflow       : std_logic := '0';
+    signal announce_next_ns_pre  : unsigned(31 downto 0) := (others => '0');
+    signal announce_next_sec_pre : unsigned(3 downto 0)  := (others => '0');
+    signal announce_overflow     : std_logic := '0';
+
 
     end entity;
 architecture Behavioral of ptpv2_controller is
@@ -264,6 +278,42 @@ begin
     end process announce_interval_decode;
 
     -- ============================================================
+    -- Next-time precomputation pipeline (continuous)
+    -- Stage 1: Compute 33-bit sums: wc_ns_r + sync_interval_ns_r
+    -- Stage 2: Normalize (subtract 1e9 if overflow) + compute sec offset
+    -- These values are sampled by the state machine when scheduling.
+    -- ============================================================
+    next_time_precompute: process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Stage 1: 33-bit adds
+            sync_ns_sum_reg     <= ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
+            announce_ns_sum_reg <= ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
+            
+            -- Stage 2: Overflow detect and normalize (uses PREVIOUS cycle's sums)
+            if sync_ns_sum_reg >= ('0' & ONE_SECOND_NS) then
+                sync_next_ns_pre  <= sync_ns_sum_reg(31 downto 0) - ONE_SECOND_NS;
+                sync_next_sec_pre <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
+                sync_overflow     <= '1';
+            else
+                sync_next_ns_pre  <= sync_ns_sum_reg(31 downto 0);
+                sync_next_sec_pre <= wc_sec_r + resize(sync_interval_sec_r, 4);
+                sync_overflow     <= '0';
+            end if;
+            
+            if announce_ns_sum_reg >= ('0' & ONE_SECOND_NS) then
+                announce_next_ns_pre  <= announce_ns_sum_reg(31 downto 0) - ONE_SECOND_NS;
+                announce_next_sec_pre <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
+                announce_overflow     <= '1';
+            else
+                announce_next_ns_pre  <= announce_ns_sum_reg(31 downto 0);
+                announce_next_sec_pre <= wc_sec_r + resize(announce_interval_sec_r, 4);
+                announce_overflow     <= '0';
+            end if;
+        end if;
+    end process next_time_precompute;
+
+    -- ============================================================
     -- Wallclock time comparisons (modular 4-bit wrapping)
     -- diff = wc - target; reached when diff is in [1..7] (past)
     -- or diff=0 and ns >= target_ns (same second, ns reached)
@@ -290,7 +340,6 @@ begin
     end process cdc_sync_proc;
 
     process(clk, reset_n)
-        variable ns_sum : unsigned(32 downto 0);  -- 33-bit for overflow detection
     begin
         if reset_n = '0' then
             tx_message_type_o       <= (others => '0');
@@ -373,26 +422,12 @@ begin
 
                 -- Initialize timers on leader mode entry
                 if was_leader = '0' then
-                    -- First cycle as leader: schedule first send from registered wallclock
-                    -- Do NOT run the state machine this cycle (else branch)
-                    -- to prevent it from clobbering these init values.
-                    -- Use pipelined interval values (_r suffixed) to meet timing.
-                    ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
-                    if ns_sum >= ('0' & ONE_SECOND_NS) then
-                        sync_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
-                    else
-                        sync_next_ns  <= ns_sum(31 downto 0);
-                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4);
-                    end if;
-                    ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
-                    if ns_sum >= ('0' & ONE_SECOND_NS) then
-                        announce_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
-                    else
-                        announce_next_ns  <= ns_sum(31 downto 0);
-                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4);
-                    end if;
+                    -- First cycle as leader: schedule first send using precomputed values
+                    -- The precompute pipeline already has valid values from continuous operation.
+                    sync_next_ns  <= sync_next_ns_pre;
+                    sync_next_sec <= sync_next_sec_pre;
+                    announce_next_ns  <= announce_next_ns_pre;
+                    announce_next_sec <= announce_next_sec_pre;
                 else
 
                 -- Leader logic - simple state machine (runs from 2nd cycle as leader onwards)
@@ -406,30 +441,16 @@ begin
                             leader_state <= s_Send_Sync;
                             ptp_log_interval_o <= ptp_log_message_interval_i;
 
-                            -- Advance sync timer: next = wallclock + interval
-                            -- Use pipelined interval values (_r) to meet timing.
-                            ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
-                            if ns_sum >= ('0' & ONE_SECOND_NS) then
-                                sync_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
-                            else
-                                sync_next_ns  <= ns_sum(31 downto 0);
-                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4);
-                            end if;
+                            -- Advance sync timer using precomputed values
+                            sync_next_ns  <= sync_next_ns_pre;
+                            sync_next_sec <= sync_next_sec_pre;
                         elsif (announce_time_reached = '1') then
                             leader_state <= s_Send_Announce;
                             ptp_log_interval_o <= ptp_announce_log_message_interval_i;
 
-                            -- Advance announce timer: next = wallclock + interval
-                            -- Use pipelined interval values (_r) to meet timing.
-                            ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
-                            if ns_sum >= ('0' & ONE_SECOND_NS) then
-                                announce_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
-                            else
-                                announce_next_ns  <= ns_sum(31 downto 0);
-                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4);
-                            end if;
+                            -- Advance announce timer using precomputed values
+                            announce_next_ns  <= announce_next_ns_pre;
+                            announce_next_sec <= announce_next_sec_pre;
                         end if;
 
                     -- ========================================

@@ -73,6 +73,12 @@ architecture Behavioral of tx_router is
     type t_samples_per_packet_shadow is array (0 to 7) of std_logic_vector(7 downto 0);
     signal samples_per_packet_shadow : t_samples_per_packet_shadow := (others => (others => '0'));
     
+    -- Pre-computed threshold (samples_per_packet - 1) to reduce critical path
+    -- Computed in config_wr_clk domain and synchronized
+    type t_threshold_shadow is array (0 to 7) of unsigned(7 downto 0);
+    signal threshold_shadow : t_threshold_shadow := (others => (others => '0'));
+    signal threshold_sync   : t_threshold_shadow := (others => (others => '0'));
+    
     -- CDC synchronizer for shadow registers (config_wr_clk -> sys_clk)
     signal samples_per_packet_sync : t_samples_per_packet_shadow := (others => (others => '0'));
 
@@ -140,6 +146,9 @@ begin
                 offset := to_integer(unsigned(config_wr_addr_i(4 downto 0)));
                 if offset = 6 and stream_idx < 8 then
                     samples_per_packet_shadow(stream_idx) <= config_wr_data_i;
+                    -- Pre-compute threshold (spp - 1) to reduce critical path in sample counting
+                    -- This subtraction is done at config time, not every sample
+                    threshold_shadow(stream_idx) <= unsigned(config_wr_data_i) - 1;
                 end if;
             end if;
         end if;
@@ -164,8 +173,10 @@ begin
     begin
         if reset_n = '0' then
             samples_per_packet_sync <= (others => (others => '0'));
+            threshold_sync <= (others => (others => '0'));
         elsif rising_edge(sys_clk_i) then
             samples_per_packet_sync <= samples_per_packet_shadow;
+            threshold_sync <= threshold_shadow;
         end if;
     end process;
 
@@ -192,10 +203,11 @@ begin
                 num_streams := to_integer(unsigned(streams_configured_i));
                 for i in 0 to 7 loop
                     if i < num_streams then
-                        -- Use shadow register instead of RAM access
+                        -- Use pre-computed threshold (spp-1) to reduce critical path
+                        -- The subtraction was done at config time, not here
                         spp := unsigned(samples_per_packet_sync(i));
                         if spp /= 0 then
-                            if sample_count(i) >= spp - 1 then
+                            if sample_count(i) >= threshold_sync(i) then
                                 sample_count(i) <= (others => '0');
                                 -- Enqueue into parallel FIFOs with snapshot of current state
                                 fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);

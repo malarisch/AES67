@@ -102,6 +102,21 @@ set_clock_groups -asynchronous \
 set_false_path -from [get_registers {*ptpv2_sender*tx_en*}] -to [get_registers {*ptpv2_controller*tx_en_i_meta*}]
 set_false_path -to [get_registers {*ptpv2_parser*parse_ptp_packet_meta*}]
 
+# PTP is_leader and is_follower signals cross from fmc_clk_250m to sys_clk_125m domain
+# These are slow-changing configuration signals - false path to all PTP modules
+set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_leader_o}] -to [get_registers {ptpv2_controller:*|*}]
+set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_leader_o}] -to [get_registers {ptpv2_parser:*|*}]
+set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_follower_o}] -to [get_registers {ptpv2_controller:*|*}]
+set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_follower_o}] -to [get_registers {ptpv2_parser:*|*}]
+
+# tx_router shadow register CDC (config_wr_clk -> sys_clk)
+# These are slow-changing config values updated only during stream setup
+set_false_path -from [get_registers {tx_router:*|samples_per_packet_shadow[*][*]}] -to [get_registers {tx_router:*|samples_per_packet_sync[*][*]}]
+set_false_path -from [get_registers {tx_router:*|threshold_shadow[*][*]}] -to [get_registers {tx_router:*|threshold_sync[*][*]}]
+
+# tx_router tx_en CDC (tx_transmitter domain -> sys_clk)
+set_false_path -to [get_registers {tx_router:*|tx_en_meta}]
+
 
 #**************************************************************
 # Set Multicycle Path
