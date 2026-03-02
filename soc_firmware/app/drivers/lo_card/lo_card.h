@@ -76,8 +76,11 @@ extern "C" {
 #define LO_CLIP_MAX             24      /* Maximum clip level in dB */
 #define LO_BOARD_ID_EXPECTED    0x02    /* Expected board ID for LO card */
 
-/* Clip value conversion: maps dB to DAC register value */
-#define LO_CONVERT_CLIP(db)     (((LO_CLIP_MAX - LO_CLIP_MIN) - (db)) * 2)
+/* Clip value conversion: maps dB to DAC register value
+ * DAC expects 0 = max output (+24dB), 66 = min output (-9dB)
+ * Formula: (MAX - dB) * 2, where dB is in range [-9, +24]
+ */
+#define LO_CONVERT_CLIP(db)     ((LO_CLIP_MAX - (db)) * 2)
 
 /*******************************************************************************
  * Data Structures

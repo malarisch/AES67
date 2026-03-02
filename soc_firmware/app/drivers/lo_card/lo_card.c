@@ -1,8 +1,7 @@
 /*
  * Output Card Driver - 8-Channel DAC Line Output Board
  *
- * I2C control interface for the Line Output board. Protocol based on
- * reference firmware (LoCard.c).
+
  *
  */
 
@@ -45,11 +44,12 @@ static bool nrst_gpio_ready = false;
  ******************************************************************************/
 
 /**
- * @brief Write to LPC register (1-byte address)
+ * @brief Write to LPC register with retry and optional verify (1-byte address)
  */
 static int lpc_write(uint8_t reg, const uint8_t *data, size_t len)
 {
 	uint8_t buf[16];
+	int ret;
 
 	if (len > sizeof(buf) - 1) {
 		return -EINVAL;
@@ -58,39 +58,96 @@ static int lpc_write(uint8_t reg, const uint8_t *data, size_t len)
 	buf[0] = reg;
 	memcpy(&buf[1], data, len);
 
-	int ret = i2c_write(lo_data.i2c_dev, buf, len + 1, LO_LPC_ADDR);
-	if (ret < 0) {
-		LOG_ERR("LPC write failed: reg=0x%02x, err=%d", reg, ret);
+	for (int try = 0; try < CONFIG_LO_CARD_I2C_RETRIES; try++) {
+		ret = i2c_write(lo_data.i2c_dev, buf, len + 1, LO_LPC_ADDR);
+		if (ret < 0) {
+			LOG_WRN("LPC write retry %d: reg=0x%02x, err=%d", try, reg, ret);
+			k_sleep(K_MSEC(CONFIG_LO_CARD_I2C_RETRY_DELAY_MS));
+			continue;
+		}
+
+#if defined(CONFIG_LO_CARD_I2C_VERIFY_WRITES)
+		/* Verify by read-back */
+		uint8_t verify[16];
+		ret = i2c_write_read(lo_data.i2c_dev, LO_LPC_ADDR,
+				     &reg, 1, verify, len);
+		if (ret < 0 || memcmp(data, verify, len) != 0) {
+			LOG_WRN("LPC verify failed: reg=0x%02x, try=%d", reg, try);
+			k_sleep(K_MSEC(CONFIG_LO_CARD_I2C_RETRY_DELAY_MS));
+			continue;
+		}
+#endif
+		return 0; /* Success */
 	}
-	return ret;
+
+	LOG_ERR("LPC write failed after %d retries: reg=0x%02x",
+		CONFIG_LO_CARD_I2C_RETRIES, reg);
+	return ret < 0 ? ret : -EIO;
 }
 
 /**
- * @brief Read from LPC register (1-byte address)
+ * @brief Read from LPC register with retry (1-byte address)
  */
 static int lpc_read(uint8_t reg, uint8_t *data, size_t len)
 {
-	int ret = i2c_write_read(lo_data.i2c_dev, LO_LPC_ADDR,
-				 &reg, 1, data, len);
-	if (ret < 0) {
-		LOG_ERR("LPC read failed: reg=0x%02x, err=%d", reg, ret);
+	int ret;
+
+	for (int try = 0; try < CONFIG_LO_CARD_I2C_RETRIES; try++) {
+		ret = i2c_write_read(lo_data.i2c_dev, LO_LPC_ADDR,
+				     &reg, 1, data, len);
+		if (ret == 0) {
+			return 0;
+		}
+		LOG_WRN("LPC read retry %d: reg=0x%02x, err=%d", try, reg, ret);
+		k_sleep(K_MSEC(CONFIG_LO_CARD_I2C_RETRY_DELAY_MS));
 	}
+
+	LOG_ERR("LPC read failed after %d retries: reg=0x%02x",
+		CONFIG_LO_CARD_I2C_RETRIES, reg);
 	return ret;
 }
 
 /**
- * @brief Write to DAC register (1-byte address)
+ * @brief Write to DAC register with retry and optional verify (1-byte address)
+ *
+ * Note: MISC register (0x08) cannot be verified because it contains
+ * hardware status bits that differ from what was written.
  */
 static int dac_write(uint8_t dac_addr, uint8_t reg, uint8_t data)
 {
 	uint8_t buf[2] = { reg, data };
+	int ret;
+	bool can_verify = (reg != LO_DAC_MISC_REG); /* MISC has status bits */
 
-	int ret = i2c_write(lo_data.i2c_dev, buf, 2, dac_addr);
-	if (ret < 0) {
-		LOG_ERR("DAC write failed: dev=0x%02x reg=0x%02x, err=%d",
-			dac_addr, reg, ret);
+	for (int try = 0; try < CONFIG_LO_CARD_I2C_RETRIES; try++) {
+		ret = i2c_write(lo_data.i2c_dev, buf, 2, dac_addr);
+		if (ret < 0) {
+			LOG_WRN("DAC write retry %d: dev=0x%02x reg=0x%02x, err=%d",
+				try, dac_addr, reg, ret);
+			k_sleep(K_MSEC(CONFIG_LO_CARD_I2C_RETRY_DELAY_MS));
+			continue;
+		}
+
+#if defined(CONFIG_LO_CARD_I2C_VERIFY_WRITES)
+		/* Verify by read-back (skip registers with status bits) */
+		if (can_verify) {
+			uint8_t verify;
+			ret = i2c_write_read(lo_data.i2c_dev, dac_addr,
+					     &reg, 1, &verify, 1);
+			if (ret < 0 || verify != data) {
+				LOG_WRN("DAC verify failed: dev=0x%02x reg=0x%02x (wrote=0x%02x, read=0x%02x)",
+					dac_addr, reg, data, verify);
+				k_sleep(K_MSEC(CONFIG_LO_CARD_I2C_RETRY_DELAY_MS));
+				continue;
+			}
+		}
+#endif
+		return 0; /* Success */
 	}
-	return ret;
+
+	LOG_ERR("DAC write failed after %d retries: dev=0x%02x reg=0x%02x",
+		CONFIG_LO_CARD_I2C_RETRIES, dac_addr, reg);
+	return ret < 0 ? ret : -EIO;
 }
 
 /**
@@ -203,16 +260,40 @@ int lo_card_init(const struct device *i2c_dev)
 	LOG_INF("LO card detected: soft_id=0x%02x, board_id=0x%02x, rev=0x%02x",
 		info.soft_id, info.board_id, info.hard_rev);
 
-	/* Release from reset (NRST only, matching reference LoInit) */
+	/* ---- Reset sequence (matching MI card / enabling DSP) ----
+	 * The DSP (AD1941) requires a proper reset cycle to initialize.
+	 * 1. Assert reset (GlbReg = 0) — hold everything in reset
+	 * 2. Wait 500ms in reset state
+	 * 3. Release reset (GlbReg = NRST)
+	 * 4. Wait 500ms for boot
+	 *
+	 * The old LO firmware had this commented out, but MI card does it
+	 * and the DSP won't respond without a proper reset cycle.
+	 */
+
+	/* Step 1: Assert reset (hold DSP and DACs in reset) */
+	lo_data.glb_reg = 0;
+	ret = update_global_reg();
+	if (ret < 0) {
+		LOG_ERR("Failed to assert reset");
+		k_mutex_unlock(&lo_data.lock);
+		return ret;
+	}
+	LOG_DBG("Asserted reset (GlbReg=0x00)");
+
+	/* Step 2: Wait in reset state */
+	k_sleep(K_MSEC(500));
+
+	/* Step 3: Release from reset */
 	lo_data.glb_reg = LO_GLB_NRST;
 	ret = update_global_reg();
 	if (ret < 0) {
 		k_mutex_unlock(&lo_data.lock);
 		return ret;
 	}
+	LOG_DBG("Released reset (GlbReg=0x%02x)", lo_data.glb_reg);
 
-	/* Wait after reset release — reference uses OSTimeDly(50) which is
-	 * 50 RTOS ticks; at a typical 10ms tick rate that's 500ms. */
+	/* Step 4: Wait after reset release for DSP boot */
 	k_sleep(K_MSEC(500));
 
 	/* All channels unmuted (output_enable bits set) */
@@ -269,7 +350,13 @@ int lo_card_init(const struct device *i2c_dev)
 	LOG_INF("4x DAC devices initialized (0x4C-0x4F)");
 
 	/* ---- Initialize DSP (AD1941) ----
-	 * Reference firmware does fire-and-forget DSP writes (no error check).
+	 * The AD1941 DSP takes time to boot after reset. It needs MCLK to be
+	 * running and may take 200-500ms after power-up before responding to I2C.
+	 * Wait extra time here for the DSP to complete self-boot. */
+	LOG_INF("Waiting for DSP boot...");
+	k_sleep(K_MSEC(500));
+
+	/* Reference firmware does fire-and-forget DSP writes (no error check).
 	 * The DSP may not ACK on all boards — treat failures as non-fatal.
 	 * Use retries (reference uses 5 retries for DSP writes). */
 	uint8_t dsp_buf[2];

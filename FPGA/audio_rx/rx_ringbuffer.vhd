@@ -67,10 +67,10 @@ architecture Behavioral of rx_ringbuffer is
     signal sample_ram : t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram;
 
-    -- Synthesis attributes for Block RAM inference (Intel/Altera)
-    -- Use "M10K" (not "M9K") — "M9K" triggers a buggy dual-clock inference path in Quartus 13.1
+    -- Synthesis attributes for Block RAM inference (Intel/Altera, Cyclone 10 LP = M9K blocks)
     attribute ramstyle : string;
-    attribute ramstyle of stream_ram : signal is "M10K";
+    attribute ramstyle of sample_ram : signal is "no_rw_check";
+    attribute ramstyle of stream_ram : signal is "no_rw_check";
 
     -- Synchronous read port for stream_ram
     -- Two-stage pipeline: stream_rd_data (RAM output reg) -> stream_rd_data_r (user reg)
@@ -292,7 +292,7 @@ begin
                                             prepare_step <= 3;
                                         else
                                             comp_byte := comp_byte + 1;
-                                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + comp_byte + 1, 8);
+                                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + comp_byte, 8);
                                             prepare_step <= 1;
                                         end if;
                                     else
@@ -516,6 +516,8 @@ begin
     end process;
 
     -- Dedicated sample_ram process (simple dual-port: sync write + sync read)
+    -- no_rw_check attribute tells Quartus read-during-write result is don't-care,
+    -- allowing M9K inference without undefined output on address collision
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then
@@ -537,13 +539,20 @@ begin
     end process;
 
     -- Stream config RAM Read Process (Port B - sys_clk domain)
-    -- Two-stage registered read for M10K inference + timing closure
+    -- IMPORTANT: RAM read must be in its own process with ONLY the registered read.
+    -- Adding additional registers in the same process prevents M9K/M10K inference.
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then
-            -- Stage 1: RAM output register (required for M10K inference)
             stream_rd_data <= stream_ram(to_integer(stream_rd_addr));
-            -- Stage 2: Pipeline register (breaks timing path to comparison logic)
+        end if;
+    end process;
+
+    -- Pipeline register (separate process to not interfere with Block RAM inference)
+    -- Breaks timing path from RAM output to comparison logic
+    process(sys_clk)
+    begin
+        if rising_edge(sys_clk) then
             stream_rd_data_r <= stream_rd_data;
         end if;
     end process;

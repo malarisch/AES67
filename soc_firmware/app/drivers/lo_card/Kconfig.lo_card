@@ -51,4 +51,27 @@ config LO_CARD_NRST_RECOVERY_MS
 	  Time to wait after releasing reset before accessing I2C.
 	  The board needs time to initialize its internal PLLs/clocks.
 
+config LO_CARD_I2C_RETRIES
+	int "I2C retry count for failed transactions"
+	default 10
+	range 1 20
+	help
+	  Number of retry attempts for I2C operations that fail.
+	  The old firmware used 10 retries with verify-after-write.
+
+config LO_CARD_I2C_RETRY_DELAY_MS
+	int "Delay between I2C retries in milliseconds"
+	default 5
+	range 1 50
+	help
+	  Delay before retrying a failed I2C transaction.
+
+config LO_CARD_I2C_VERIFY_WRITES
+	bool "Verify I2C writes by reading back"
+	default y
+	help
+	  After each write, read back the data to verify it was
+	  written correctly. This matches the old firmware behavior
+	  (TwiSecureWrite) and improves reliability.
+
 endif # LO_CARD

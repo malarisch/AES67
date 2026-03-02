@@ -411,15 +411,16 @@ begin
 							first_packet_byte <= header_data;
 						end if;
 						
-						-- ===== ADDRESS PIPELINE PRE-FETCH (3 stages to account for pipeline latency) =====
-						-- Need 3 pre-fetch cycles: 1 for ch_id/base, 1 for address compute, 1 for RAM read
-						if (frame_write_index = PACKET_HEADER_LENGTH - 3) then
+						-- ===== ADDRESS PIPELINE PRE-FETCH (4 stages to account for pipeline latency) =====
+						-- Need 4 pre-fetch cycles: Stage 1 (ch_id/base), Stage 2 (addr compute),
+						-- Stage 3 (addr output to RAM port), Stage 4 (RAM registered read)
+						if (frame_write_index = PACKET_HEADER_LENGTH - 4) then
 							-- Pipeline Stage 1 setup: Initialize for first byte (MSB of ch0, sample 0)
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
 							sample_base_addr <= 0;  -- sample_index=0, so base=0
 							byte_offset_reg <= bytes_per_sample - 1;  -- MSB first
 						end if;
-						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
+						if (frame_write_index = PACKET_HEADER_LENGTH - 3) then
 							-- Pipeline Stage 2: Compute address for first byte
 							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
@@ -431,8 +432,8 @@ begin
 							sample_base_addr <= 0;
 							byte_offset_reg <= bytes_per_sample - 2;  -- middle byte
 						end if;
-						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
-							-- Output first address from Stage 2 result
+						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
+							-- Stage 3: Output first address to RAM
 							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
 							-- Pipeline Stage 2: Compute address for second byte
 							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
@@ -440,16 +441,25 @@ begin
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
 							raw_addr_reg <= raw_addr;
-							-- Setup Stage 1 for third byte (byte 2 = LSB = bytes_per_sample - 3, but we skip to next byte 0)
-							-- Actually, next is byte_counter=2 (which is the THIRD byte = LSB for 3-byte samples)
+							-- Setup Stage 1 for third byte
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
 							sample_base_addr <= 0;
 							byte_offset_reg <= 0;  -- LSB byte
-							-- Initialize counters 3 positions ahead (accounting for pipeline)
-                            byte_counter <= 0;  -- Will be at position 3 when data arrives
-                            channel_counter <= 1;  -- Next channel after ch0 byte2
-                            sample_index <= 0;
-                            -- Prepare look-ahead for next iteration
+						end if;
+						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
+							-- Stage 4: RAM is now reading first byte; output second address
+							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
+							-- Pipeline Stage 2: Compute address for third byte (ch0 LSB)
+							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
+							if raw_addr >= AUDIO_BUFFER_LENGTH then
+								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
+							end if;
+							raw_addr_reg <= raw_addr;
+							-- Setup Stage 1 for fourth byte (ch1 MSB)
+							ch_id_reg <= to_integer(unsigned(ch_ids_i(55 downto 48)));
+							sample_base_addr <= 0;
+							byte_offset_reg <= bytes_per_sample - 1;  -- MSB
+							-- next_* at HEADER-1 feeds Stage 1 at HEADER, result appears at PI=4 (ch1 MID)
                             next_byte_counter <= 1;
                             next_channel_counter <= 1;
                             next_sample_index <= 0;
