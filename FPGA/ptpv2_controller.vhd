@@ -89,11 +89,11 @@ entity ptpv2_controller is
     -- ============================================================
     -- Wallclock-based message timing
     -- ============================================================
-    -- Sync interval decoded from ptp_log_message_interval_i
+    -- Sync interval decoded from ptp_log_message_interval_i (registered)
     signal sync_interval_sec : unsigned(7 downto 0)  := to_unsigned(1, 8);
     signal sync_interval_ns  : unsigned(31 downto 0) := (others => '0');
 
-    -- Announce interval decoded from ptp_announce_log_message_interval_i
+    -- Announce interval decoded from ptp_announce_log_message_interval_i (registered)
     signal announce_interval_sec : unsigned(7 downto 0)  := to_unsigned(2, 8);
     signal announce_interval_ns  : unsigned(31 downto 0) := (others => '0');
 
@@ -124,6 +124,16 @@ entity ptpv2_controller is
     attribute PRESERVE of tx_en_i_sync : signal is true;
     attribute PRESERVE of is_leader : signal is true;
 
+    -- Registered input for interval decode (breaks combinatorial path from port to decode)
+    signal ptp_log_msg_int_r : std_logic_vector(7 downto 0) := (others => '0');
+    signal ptp_ann_log_msg_int_r : std_logic_vector(7 downto 0) := (others => '0');
+
+    -- Pipeline registers after interval decode (breaks ROM output -> timer calc critical path)
+    signal sync_interval_sec_r     : unsigned(7 downto 0)  := to_unsigned(1, 8);
+    signal sync_interval_ns_r      : unsigned(31 downto 0) := (others => '0');
+    signal announce_interval_sec_r : unsigned(7 downto 0)  := to_unsigned(2, 8);
+    signal announce_interval_ns_r  : unsigned(31 downto 0) := (others => '0');
+
 
     end entity;
 architecture Behavioral of ptpv2_controller is
@@ -132,83 +142,125 @@ begin
 
     -- ============================================================
     -- Decode ptp_log_message_interval_i to seconds + nanoseconds
-    -- logMessageInterval is signed: interval = 2^N seconds
-    -- Supports -7 (7.8125ms) through +4 (16s)
+    -- 2-stage pipeline: Stage 1 registers the input, Stage 2 decodes.
+    -- Uses if/elsif instead of case-on-to_integer to prevent Quartus
+    -- from inferring Block RAM (ROM) for the decode table.
     -- ============================================================
-    interval_decode: process(ptp_log_message_interval_i)
+    interval_input_reg: process(clk)
     begin
-        -- Default: 1 second
-        sync_interval_sec <= to_unsigned(1, 8);
-        sync_interval_ns  <= (others => '0');
+        if rising_edge(clk) then
+            ptp_log_msg_int_r <= ptp_log_message_interval_i;
+            ptp_ann_log_msg_int_r <= ptp_announce_log_message_interval_i;
+        end if;
+    end process interval_input_reg;
 
-        case to_integer(signed(ptp_log_message_interval_i)) is
-            when -7 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(7812500, 32);
-            when -6 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(15625000, 32);
-            when -5 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(31250000, 32);
-            when -4 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(62500000, 32);
-            when -3 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(125000000, 32);
-            when -2 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(250000000, 32);
-            when -1 =>     sync_interval_sec <= to_unsigned(0, 8);
-                           sync_interval_ns  <= to_unsigned(500000000, 32);
-            when  0 =>     sync_interval_sec <= to_unsigned(1, 8);
-                           sync_interval_ns  <= (others => '0');
-            when  1 =>     sync_interval_sec <= to_unsigned(2, 8);
-                           sync_interval_ns  <= (others => '0');
-            when  2 =>     sync_interval_sec <= to_unsigned(4, 8);
-                           sync_interval_ns  <= (others => '0');
-            when  3 =>     sync_interval_sec <= to_unsigned(8, 8);
-                           sync_interval_ns  <= (others => '0');
-            when  4 =>     sync_interval_sec <= to_unsigned(16, 8);
-                           sync_interval_ns  <= (others => '0');
-            when others => sync_interval_sec <= to_unsigned(1, 8);
-                           sync_interval_ns  <= (others => '0');
-        end case;
+    interval_decode: process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Default: 1 second
+            sync_interval_sec <= to_unsigned(1, 8);
+            sync_interval_ns  <= (others => '0');
+
+            if    ptp_log_msg_int_r = x"F9" then  -- -7
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(7812500, 32);
+            elsif ptp_log_msg_int_r = x"FA" then  -- -6
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(15625000, 32);
+            elsif ptp_log_msg_int_r = x"FB" then  -- -5
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(31250000, 32);
+            elsif ptp_log_msg_int_r = x"FC" then  -- -4
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(62500000, 32);
+            elsif ptp_log_msg_int_r = x"FD" then  -- -3
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(125000000, 32);
+            elsif ptp_log_msg_int_r = x"FE" then  -- -2
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(250000000, 32);
+            elsif ptp_log_msg_int_r = x"FF" then  -- -1
+                sync_interval_sec <= to_unsigned(0, 8);
+                sync_interval_ns  <= to_unsigned(500000000, 32);
+            elsif ptp_log_msg_int_r = x"00" then  --  0
+                sync_interval_sec <= to_unsigned(1, 8);
+                sync_interval_ns  <= (others => '0');
+            elsif ptp_log_msg_int_r = x"01" then  --  1
+                sync_interval_sec <= to_unsigned(2, 8);
+                sync_interval_ns  <= (others => '0');
+            elsif ptp_log_msg_int_r = x"02" then  --  2
+                sync_interval_sec <= to_unsigned(4, 8);
+                sync_interval_ns  <= (others => '0');
+            elsif ptp_log_msg_int_r = x"03" then  --  3
+                sync_interval_sec <= to_unsigned(8, 8);
+                sync_interval_ns  <= (others => '0');
+            elsif ptp_log_msg_int_r = x"04" then  --  4
+                sync_interval_sec <= to_unsigned(16, 8);
+                sync_interval_ns  <= (others => '0');
+            end if;
+        end if;
     end process interval_decode;
+
+    -- Pipeline stage: register interval values to break ROM->calc critical path
+    interval_pipeline: process(clk)
+    begin
+        if rising_edge(clk) then
+            sync_interval_sec_r <= sync_interval_sec;
+            sync_interval_ns_r  <= sync_interval_ns;
+            announce_interval_sec_r <= announce_interval_sec;
+            announce_interval_ns_r  <= announce_interval_ns;
+        end if;
+    end process interval_pipeline;
 
     -- ============================================================
     -- Decode ptp_announce_log_message_interval_i to seconds + nanoseconds
-    -- Same 2^N seconds encoding, supports -7 through +4
+    -- Same approach: if/elsif on registered input to prevent ROM inference.
     -- ============================================================
-    announce_interval_decode: process(ptp_announce_log_message_interval_i)
+    announce_interval_decode: process(clk)
     begin
-        -- Default: 2 seconds (logAnnounceInterval = 1)
-        announce_interval_sec <= to_unsigned(2, 8);
-        announce_interval_ns  <= (others => '0');
+        if rising_edge(clk) then
+            -- Default: 2 seconds (logAnnounceInterval = 1)
+            announce_interval_sec <= to_unsigned(2, 8);
+            announce_interval_ns  <= (others => '0');
 
-        case to_integer(signed(ptp_announce_log_message_interval_i)) is
-            when -7 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(7812500, 32);
-            when -6 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(15625000, 32);
-            when -5 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(31250000, 32);
-            when -4 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(62500000, 32);
-            when -3 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(125000000, 32);
-            when -2 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(250000000, 32);
-            when -1 =>     announce_interval_sec <= to_unsigned(0, 8);
-                           announce_interval_ns  <= to_unsigned(500000000, 32);
-            when  0 =>     announce_interval_sec <= to_unsigned(1, 8);
-                           announce_interval_ns  <= (others => '0');
-            when  1 =>     announce_interval_sec <= to_unsigned(2, 8);
-                           announce_interval_ns  <= (others => '0');
-            when  2 =>     announce_interval_sec <= to_unsigned(4, 8);
-                           announce_interval_ns  <= (others => '0');
-            when  3 =>     announce_interval_sec <= to_unsigned(8, 8);
-                           announce_interval_ns  <= (others => '0');
-            when  4 =>     announce_interval_sec <= to_unsigned(16, 8);
-                           announce_interval_ns  <= (others => '0');
-            when others => announce_interval_sec <= to_unsigned(2, 8);
-                           announce_interval_ns  <= (others => '0');
-        end case;
+            if    ptp_ann_log_msg_int_r = x"F9" then  -- -7
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(7812500, 32);
+            elsif ptp_ann_log_msg_int_r = x"FA" then  -- -6
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(15625000, 32);
+            elsif ptp_ann_log_msg_int_r = x"FB" then  -- -5
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(31250000, 32);
+            elsif ptp_ann_log_msg_int_r = x"FC" then  -- -4
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(62500000, 32);
+            elsif ptp_ann_log_msg_int_r = x"FD" then  -- -3
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(125000000, 32);
+            elsif ptp_ann_log_msg_int_r = x"FE" then  -- -2
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(250000000, 32);
+            elsif ptp_ann_log_msg_int_r = x"FF" then  -- -1
+                announce_interval_sec <= to_unsigned(0, 8);
+                announce_interval_ns  <= to_unsigned(500000000, 32);
+            elsif ptp_ann_log_msg_int_r = x"00" then  --  0
+                announce_interval_sec <= to_unsigned(1, 8);
+                announce_interval_ns  <= (others => '0');
+            elsif ptp_ann_log_msg_int_r = x"01" then  --  1
+                announce_interval_sec <= to_unsigned(2, 8);
+                announce_interval_ns  <= (others => '0');
+            elsif ptp_ann_log_msg_int_r = x"02" then  --  2
+                announce_interval_sec <= to_unsigned(4, 8);
+                announce_interval_ns  <= (others => '0');
+            elsif ptp_ann_log_msg_int_r = x"03" then  --  3
+                announce_interval_sec <= to_unsigned(8, 8);
+                announce_interval_ns  <= (others => '0');
+            elsif ptp_ann_log_msg_int_r = x"04" then  --  4
+                announce_interval_sec <= to_unsigned(16, 8);
+                announce_interval_ns  <= (others => '0');
+            end if;
+        end if;
     end process announce_interval_decode;
 
     -- ============================================================
@@ -324,21 +376,22 @@ begin
                     -- First cycle as leader: schedule first send from registered wallclock
                     -- Do NOT run the state machine this cycle (else branch)
                     -- to prevent it from clobbering these init values.
-                    ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns);
+                    -- Use pipelined interval values (_r suffixed) to meet timing.
+                    ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
                     if ns_sum >= ('0' & ONE_SECOND_NS) then
                         sync_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec, 4) + 1;
+                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
                     else
                         sync_next_ns  <= ns_sum(31 downto 0);
-                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec, 4);
+                        sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4);
                     end if;
-                    ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns);
+                    ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
                     if ns_sum >= ('0' & ONE_SECOND_NS) then
                         announce_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec, 4) + 1;
+                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
                     else
                         announce_next_ns  <= ns_sum(31 downto 0);
-                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec, 4);
+                        announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4);
                     end if;
                 else
 
@@ -351,29 +404,31 @@ begin
                             leader_state <= s_Send_Delay_Resp;
                         elsif (sync_time_reached = '1') then
                             leader_state <= s_Send_Sync;
-											 							ptp_log_interval_o <= ptp_log_message_interval_i;
+                            ptp_log_interval_o <= ptp_log_message_interval_i;
 
                             -- Advance sync timer: next = wallclock + interval
-                            ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns);
+                            -- Use pipelined interval values (_r) to meet timing.
+                            ns_sum := ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
                             if ns_sum >= ('0' & ONE_SECOND_NS) then
                                 sync_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec, 4) + 1;
+                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
                             else
                                 sync_next_ns  <= ns_sum(31 downto 0);
-                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec, 4);
+                                sync_next_sec <= wc_sec_r + resize(sync_interval_sec_r, 4);
                             end if;
                         elsif (announce_time_reached = '1') then
                             leader_state <= s_Send_Announce;
-											ptp_log_interval_o <= ptp_announce_log_message_interval_i;
+                            ptp_log_interval_o <= ptp_announce_log_message_interval_i;
 
                             -- Advance announce timer: next = wallclock + interval
-                            ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns);
+                            -- Use pipelined interval values (_r) to meet timing.
+                            ns_sum := ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
                             if ns_sum >= ('0' & ONE_SECOND_NS) then
                                 announce_next_ns  <= ns_sum(31 downto 0) - ONE_SECOND_NS;
-                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec, 4) + 1;
+                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
                             else
                                 announce_next_ns  <= ns_sum(31 downto 0);
-                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec, 4);
+                                announce_next_sec <= wc_sec_r + resize(announce_interval_sec_r, 4);
                             end if;
                         end if;
 
@@ -381,7 +436,7 @@ begin
                     -- SYNC MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Sync =>
-										ptp_log_interval_o <= ptp_log_message_interval_i;
+                        ptp_log_interval_o <= ptp_log_message_interval_i;
                         tx_message_type_o <= "0000";
                         sync_sequence_id <= sync_sequence_id + 1;
                         sequence_id_o <= sync_sequence_id + 1;

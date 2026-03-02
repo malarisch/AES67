@@ -328,7 +328,7 @@ static int send_raw_frame(struct net_if *iface, uint8_t seq)
  * to the same address.  Reads LSB first.
  *
  * @param fmc   The FMC device
- * @param reg   FPGA register address (0x52, 0x53, 0x54)
+ * @param reg   FPGA register address (0x52, 0x53, 0x54, 0x55)
  * @param val   Pointer to store the 32-bit result
  * @return 0 on success, negative errno on error
  */
@@ -428,6 +428,84 @@ static struct ui_fpga_metrics disp_metrics = {
 };
 
 /**
+ * @brief Calculate PPB from raw edge counter values.
+ *
+ * PPB formula:  ppb = (count_pll - count_wc) * 1e9 / count_wc
+ *   Positive -> PLL is running fast relative to wallclock.
+ *   Negative -> PLL is running slow relative to wallclock.
+ *
+ * @param count_wc   Wallclock edge count (22-bit, ~3.072M for 64·48kHz)
+ * @param count_pll  PLL edge count (22-bit)
+ * @return PPB difference, or 0 if count_wc is zero
+ */
+static int32_t calculate_ppb(uint32_t count_wc, uint32_t count_pll)
+{
+	if (count_wc == 0) {
+		return 0;
+	}
+
+	/* Calculate diff = count_pll - count_wc (signed) */
+	int32_t diff = (int32_t)count_pll - (int32_t)count_wc;
+
+	/* ppb = diff * 1e9 / count_wc
+	 * Use 64-bit arithmetic to avoid overflow (diff can be ~±4M, *1e9 overflows 32-bit)
+	 */
+	int64_t ppb = ((int64_t)diff * 1000000000LL) / (int64_t)count_wc;
+
+	/* Clamp to int32_t range (should never exceed in practice) */
+	if (ppb > INT32_MAX) {
+		return INT32_MAX;
+	}
+	if (ppb < INT32_MIN) {
+		return INT32_MIN;
+	}
+	return (int32_t)ppb;
+}
+
+/**
+ * @brief Read PPB meter values and calculate PPB.
+ *
+ * Reads the raw counter values from FPGA registers 0x54/0x55 and
+ * calculates the PPB difference.
+ *
+ * @param fmc         FMC device
+ * @param ppb_out     Output: calculated PPB value
+ * @param count_wc_out  Optional output: raw wallclock count (can be NULL)
+ * @param count_pll_out Optional output: raw PLL count (can be NULL)
+ * @return 0 on success, negative errno on error
+ */
+static int fpga_read_ppb(const struct device *fmc, int32_t *ppb_out,
+			 uint32_t *count_wc_out, uint32_t *count_pll_out)
+{
+	uint32_t count_wc, count_pll;
+	int ret;
+
+	ret = fpga_read_32(fmc, ETH_FMC_REG_COUNT_WC, (int32_t *)&count_wc);
+	if (ret < 0) {
+		return ret;
+	}
+	ret = fpga_read_32(fmc, ETH_FMC_REG_COUNT_PLL, (int32_t *)&count_pll);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Mask to 22 bits (upper byte is always 0, but be safe) */
+	count_wc &= 0x3FFFFF;
+	count_pll &= 0x3FFFFF;
+
+	*ppb_out = calculate_ppb(count_wc, count_pll);
+
+	if (count_wc_out) {
+		*count_wc_out = count_wc;
+	}
+	if (count_pll_out) {
+		*count_pll_out = count_pll;
+	}
+
+	return 0;
+}
+
+/**
  * @brief Background thread that continuously measures the PPB offset
  *        between the PLL and the PTP wallclock, and applies correction
  *        to the Si5351A clock generator.
@@ -435,7 +513,7 @@ static struct ui_fpga_metrics disp_metrics = {
  * Flow:
  *   1. Write bit[0] of register 0x50 to start measurement.
  *   2. Poll register 0x50 every 100 ms until PPB-valid flag appears.
- *   3. Read the 32-bit signed PPB value from register 0x54.
+ *   3. Read counter values from registers 0x54/0x55 and calculate PPB.
  *   4. Apply the negated PPB as a correction to the Si5351A PLL.
  *   5. Start the next measurement immediately and repeat.
  */
@@ -594,11 +672,10 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				disp_metrics.leader_offset_ns = leader_offset;
 			}
 
-			/* 0x54 - PPB offset (current reading) */
+			/* 0x54/0x55 - PPB offset (current reading, calculated from counters) */
 			int32_t ppb_current;
 
-			ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET,
-					   &ppb_current);
+			ret = fpga_read_ppb(fmc, &ppb_current, NULL, NULL);
 			if (ret == 0) {
 				//LOG_INF("PPB offset: %d  (total correction: %d)",
 				//	ppb_current, pi_state.output);
@@ -633,13 +710,18 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		eth_fmc_status_clear_bits(fmc, ETH_FMC_FLAG_PPB_START);
 
 		int32_t ppb_measured;
+		uint32_t count_wc, count_pll;
 
-		ret = fpga_read_32(fmc, ETH_FMC_REG_PPB_OFFSET, &ppb_measured);
+		ret = fpga_read_ppb(fmc, &ppb_measured, &count_wc, &count_pll);
 		if (ret < 0) {
 			LOG_WRN("PPB poll: failed to read PPB: %d", ret);
 			measurement_running = false;
 			continue;
 		}
+
+		/* Debug: log raw counter values */
+		LOG_INF("PPB raw: count_wc=%u count_pll=%u ppb=%d",
+			count_wc, count_pll, ppb_measured);
 
 		/* ---- Outlier rejection (after warm-up) ---- */
 		const struct aes67_device_config *cfg = aes67_config_get();
@@ -649,10 +731,10 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 							      : ppb_measured;
 			if (abs_meas > cfg->pi_outlier_ppb) {
 				pi_state.outliers++;
-				LOG_WRN("PPB outlier rejected: %d  "
+				LOG_WRN("PPB outlier rejected: %d (wc=%u pll=%u) "
 					"(outliers=%u cycle=%u)",
-					ppb_measured, pi_state.outliers,
-					pi_state.cycle);
+					ppb_measured, count_wc, count_pll,
+					pi_state.outliers, pi_state.cycle);
 				measurement_running = false;
 				continue;
 			}

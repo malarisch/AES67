@@ -65,10 +65,11 @@ entity fmc_ethernet_client is
     eth_link_up_i               : in  std_ulogic;
     eth_link_speed_i            : in  std_ulogic_vector(1 downto 0);
 
-    -- Read 0x52..0x54 (32-bit values)
+    -- Read 0x52..0x55 (32-bit values, 0x54/0x55 are 22-bit counter values)
     path_delay_i                : in  std_ulogic_vector(31 downto 0);
     leader_offset_i             : in  std_ulogic_vector(31 downto 0);
-    clock_ppb_meter_i           : in  std_ulogic_vector(31 downto 0);
+    clock_count_wc_i            : in  std_ulogic_vector(21 downto 0);  -- Wallclock edge count
+    
 
     ptp_is_leader_o               : out STD_ULOGIC;
     ptp_is_follower_o             : out STD_ULOGIC;
@@ -85,7 +86,8 @@ entity fmc_ethernet_client is
     rx_stream_config_wr_clk_o  : out std_ulogic;
     rx_stream_config_wr_en_o   : out std_ulogic;
     rx_stream_config_wr_addr_o : out std_ulogic_vector(7 downto 0);
-    rx_stream_config_wr_data_o : out std_ulogic_vector(7 downto 0)
+    rx_stream_config_wr_data_o : out std_ulogic_vector(7 downto 0);
+    clock_count_pll_i           : in  std_ulogic_vector(21 downto 0) -- PLL edge count
   );
 end entity;
 
@@ -170,7 +172,9 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_data_oe  : std_ulogic := '0';
   signal fmc_data_in  : std_ulogic_vector(7 downto 0);
   signal nwe_d        : std_ulogic := '1';
-  signal fmc_noe_n_sync_d : std_ulogic := '1';
+  signal fmc_noe_n_sync_d  : std_ulogic := '1';
+  signal fmc_noe_n_sync_dd  : std_ulogic := '1';
+  signal fmc_noe_n_sync_ddd : std_ulogic := '1';
   signal fmc_nwe_n_sync_d : std_ulogic := '1';
   signal fmc_ne_n_sync_d  : std_ulogic := '1';
   signal fmc_ne_n_meta  : std_ulogic := '1';
@@ -181,7 +185,8 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_nwe_n_sync : std_ulogic := '1';
   signal fmc_addr_meta  : std_ulogic_vector(6 downto 0) := (others => '0');
   signal fmc_addr_sync  : std_ulogic_vector(6 downto 0) := (others => '0');
-  signal fmc_addr_sync_d : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_addr_sync_d  : std_ulogic_vector(6 downto 0) := (others => '0');
+  signal fmc_addr_sync_dd : std_ulogic_vector(6 downto 0) := (others => '0');
   signal fmc_din_meta   : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_din_sync   : std_ulogic_vector(7 downto 0) := (others => '0');
   signal fmc_din_sync_d : std_ulogic_vector(7 downto 0) := (others => '0');
@@ -191,6 +196,14 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_read_latched : std_ulogic := '0';
   signal fmc_read_addr_lat : unsigned(6 downto 0) := (others => '0');
   signal fmc_read_data_lat : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal fmc_read_data_pre : std_ulogic_vector(7 downto 0) := (others => '0');
+  -- Stage-1 group outputs (registered each cycle, one per address group)
+  signal rd_grp_low    : std_ulogic_vector(7 downto 0) := (others => '0'); -- 0x00..0x0F
+  signal rd_grp_rx     : std_ulogic_vector(7 downto 0) := (others => '0'); -- 0x20..0x2F
+  signal rd_grp_fifo   : std_ulogic_vector(7 downto 0) := (others => '0'); -- 0x30..0x3F
+  signal rd_grp_status : std_ulogic_vector(7 downto 0) := (others => '0'); -- 0x50..0x5F
+  signal rd_grp_cfg    : std_ulogic_vector(7 downto 0) := (others => '0'); -- 0x60..0x7F
+  signal rd_grp_sel    : std_ulogic_vector(2 downto 0) := (others => '0'); -- addr[6:4] latched
   signal fmc_ne_qual_low : std_ulogic := '0';
 
   -- NWE-edge write capture (CDC from NWE domain → clk_sys domain)
@@ -219,7 +232,9 @@ architecture rtl of fmc_ethernet_client is
   -- CDC for 32-bit status inputs
   signal path_delay_meta, path_delay_sync             : std_ulogic_vector(31 downto 0) := (others => '0');
   signal leader_offset_meta, leader_offset_sync       : std_ulogic_vector(31 downto 0) := (others => '0');
-  signal ppb_meter_meta, ppb_meter_sync               : std_ulogic_vector(31 downto 0) := (others => '0');
+  -- CDC for 22-bit clock counter values (PPB meter raw outputs)
+  signal count_wc_meta, count_wc_sync                 : std_ulogic_vector(21 downto 0) := (others => '0');
+  signal count_pll_meta, count_pll_sync               : std_ulogic_vector(21 downto 0) := (others => '0');
 
   -- PPB measurement start handshake
   signal ppb_start_reg : std_ulogic := '0';
@@ -257,8 +272,8 @@ begin
 
 
   -- Config RAM read address: combinational so data is ready when latched
-  system_config_rd_addr <= resize(unsigned(fmc_addr_meta) - to_unsigned(16#60#, 7), 11)
-                           when unsigned(fmc_addr_meta) >= 16#60#
+  system_config_rd_addr <= resize(unsigned(fmc_addr_sync) - to_unsigned(16#60#, 7), 11)
+                           when unsigned(fmc_addr_sync) >= 16#60#
                            else (others => '0');
 
   -- Qualify NE low using both raw and synchronized versions to tolerate phase differences
@@ -372,6 +387,8 @@ begin
       fmc_noe_n_meta <= '1';
       fmc_noe_n_sync <= '1';
       fmc_noe_n_sync_d <= '1';
+      fmc_noe_n_sync_dd <= '1';
+      fmc_noe_n_sync_ddd <= '1';
       fmc_nwe_n_meta <= '1';
       fmc_nwe_n_sync <= '1';
       fmc_nwe_n_sync_d <= '1';
@@ -379,6 +396,7 @@ begin
       fmc_addr_meta <= (others => '0');
       fmc_addr_sync <= (others => '0');
       fmc_addr_sync_d <= (others => '0');
+      fmc_addr_sync_dd <= (others => '0');
       fmc_din_meta  <= (others => '0');
       fmc_din_sync  <= (others => '0');
       fmc_din_sync_d <= (others => '0');
@@ -397,6 +415,8 @@ begin
       fmc_noe_n_meta <= fmc_noe_n_i;
       fmc_noe_n_sync <= fmc_noe_n_meta;
       fmc_noe_n_sync_d <= fmc_noe_n_sync;
+      fmc_noe_n_sync_dd <= fmc_noe_n_sync_d;
+      fmc_noe_n_sync_ddd <= fmc_noe_n_sync_dd;
 
       fmc_nwe_n_meta <= fmc_nwe_n_i;
       fmc_nwe_n_sync <= fmc_nwe_n_meta;
@@ -406,6 +426,7 @@ begin
       fmc_addr_meta <= fmc_addr_i;
       fmc_addr_sync <= fmc_addr_meta;
       fmc_addr_sync_d <= fmc_addr_sync;
+      fmc_addr_sync_dd <= fmc_addr_sync_d;
 
       fmc_din_meta  <= fmc_data_in;
       fmc_din_sync  <= fmc_din_meta;
@@ -434,7 +455,8 @@ begin
       eth_speed_meta       <= (others => '0'); eth_speed_sync       <= (others => '0');
       path_delay_meta      <= (others => '0'); path_delay_sync      <= (others => '0');
       leader_offset_meta   <= (others => '0'); leader_offset_sync   <= (others => '0');
-      ppb_meter_meta       <= (others => '0'); ppb_meter_sync       <= (others => '0');
+      count_wc_meta        <= (others => '0'); count_wc_sync        <= (others => '0');
+      count_pll_meta       <= (others => '0'); count_pll_sync       <= (others => '0');
     elsif rising_edge(clk_sys_i) then
       -- 1-bit flags
       ppb_valid_meta       <= pll_ppb_measurement_valid_i;
@@ -456,8 +478,11 @@ begin
       path_delay_sync      <= path_delay_meta;
       leader_offset_meta   <= leader_offset_i;
       leader_offset_sync   <= leader_offset_meta;
-      ppb_meter_meta       <= clock_ppb_meter_i;
-      ppb_meter_sync       <= ppb_meter_meta;
+      -- 22-bit clock counter values (PPB meter raw outputs)
+      count_wc_meta        <= clock_count_wc_i;
+      count_wc_sync        <= count_wc_meta;
+      count_pll_meta       <= clock_count_pll_i;
+      count_pll_sync       <= count_pll_meta;
     end if;
   end process p_status_cdc;
 
@@ -482,6 +507,125 @@ begin
       end if;
     end if;
   end process;
+
+  --------------------------------------------------------------------
+  -- Read pipeline stage 1: compute per-group data (small muxes).
+  -- Each group mux only decodes the lower address bits within its
+  -- group, keeping fan-in small.  All outputs are registered.
+  --------------------------------------------------------------------
+  p_read_stage1 : process(clk_sys_i, rst_sys_i)
+    variable v_pre_byte : unsigned(1 downto 0);
+  begin
+    if rst_sys_i = '1' then
+      rd_grp_low    <= (others => '0');
+      rd_grp_rx     <= (others => '0');
+      rd_grp_fifo   <= (others => '0');
+      rd_grp_status <= (others => '0');
+      rd_grp_cfg    <= (others => '0');
+      rd_grp_sel    <= (others => '0');
+    elsif rising_edge(clk_sys_i) then
+      -- Determine byte position for multi-byte sequential registers
+      if fmc_addr_sync /= read_reg_addr_prev then
+        v_pre_byte := "00";
+      else
+        v_pre_byte := read_byte_count;
+      end if;
+
+      -- Latch group selector (upper 3 bits of address)
+      rd_grp_sel <= fmc_addr_sync(6 downto 4);
+
+      -- Group 0x00..0x0F: only 0x02 (TX status)
+      rd_grp_low <= (others => '0');
+      if fmc_addr_sync(3 downto 0) = "0010" then -- 0x02
+        rd_grp_low(0) <= tx_busy_sys;
+      end if;
+
+      -- Group 0x20..0x2F: RX registers
+      rd_grp_rx <= (others => '0');
+      case fmc_addr_sync(3 downto 0) is
+        when "0000" => rd_grp_rx <= std_ulogic_vector(reg_rx_len_sys(7 downto 0));  -- 0x20
+        when "0001" => rd_grp_rx <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
+        when "0010" => -- 0x22
+          rd_grp_rx(0) <= reg_rx_ready_sys;
+          rd_grp_rx(1) <= reg_rx_overflow_sys;
+        when others => null;
+      end case;
+
+      -- Group 0x30..0x3F: RX FIFO data (directly from FIFO output)
+      rd_grp_fifo <= rxfifo_rd_data;
+
+      -- Group 0x50..0x5F: Status registers (0x50..0x54)
+      rd_grp_status <= (others => '0');
+      case fmc_addr_sync(3 downto 0) is
+        when "0000" => -- 0x50 Clocking flags
+          rd_grp_status(0) <= ppb_valid_sync;
+          rd_grp_status(1) <= wc_locked_sync;
+          rd_grp_status(2) <= wc_phasejump_sync;
+          rd_grp_status(3) <= wc_configured_sync;
+          rd_grp_status(4) <= ptp_leader_lost_sync;
+        when "0001" => -- 0x51 Ethernet flags
+          rd_grp_status(0) <= eth_link_up_sync;
+          rd_grp_status(1) <= eth_speed_sync(0);
+          rd_grp_status(2) <= eth_speed_sync(1);
+        when "0010" => -- 0x52 Path Delay
+          case v_pre_byte is
+            when "00"   => rd_grp_status <= path_delay_sync(7 downto 0);
+            when "01"   => rd_grp_status <= path_delay_sync(15 downto 8);
+            when "10"   => rd_grp_status <= path_delay_sync(23 downto 16);
+            when others => rd_grp_status <= path_delay_sync(31 downto 24);
+          end case;
+        when "0011" => -- 0x53 Leader Offset
+          case v_pre_byte is
+            when "00"   => rd_grp_status <= leader_offset_sync(7 downto 0);
+            when "01"   => rd_grp_status <= leader_offset_sync(15 downto 8);
+            when "10"   => rd_grp_status <= leader_offset_sync(23 downto 16);
+            when others => rd_grp_status <= leader_offset_sync(31 downto 24);
+          end case;
+        when "0100" => -- 0x54 Wallclock edge count (22-bit, 4-byte read)
+          if ppb_valid_sync = '1' then
+            case v_pre_byte is
+              when "00"   => rd_grp_status <= count_wc_sync(7 downto 0);
+              when "01"   => rd_grp_status <= count_wc_sync(15 downto 8);
+              when "10"   => rd_grp_status <= "00" & count_wc_sync(21 downto 16);
+              when others => rd_grp_status <= (others => '0');  -- upper byte always 0
+            end case;
+          end if;
+        when "0101" => -- 0x55 PLL edge count (22-bit, 4-byte read)
+          if ppb_valid_sync = '1' then
+            case v_pre_byte is
+              when "00"   => rd_grp_status <= count_pll_sync(7 downto 0);
+              when "01"   => rd_grp_status <= count_pll_sync(15 downto 8);
+              when "10"   => rd_grp_status <= "00" & count_pll_sync(21 downto 16);
+              when others => rd_grp_status <= (others => '0');  -- upper byte always 0
+            end case;
+          end if;
+        when others => null;
+      end case;
+
+      -- Group 0x60..0x7F: Config RAM (address computed combinationally)
+      rd_grp_cfg <= system_config_rd_data;
+    end if;
+  end process p_read_stage1;
+
+  --------------------------------------------------------------------
+  -- Read pipeline stage 2: select among group outputs using the
+  -- registered group selector.  This is a small 5:1 mux.
+  --------------------------------------------------------------------
+  p_read_stage2 : process(clk_sys_i, rst_sys_i)
+  begin
+    if rst_sys_i = '1' then
+      fmc_read_data_pre <= (others => '0');
+    elsif rising_edge(clk_sys_i) then
+      case rd_grp_sel is
+        when "000"  => fmc_read_data_pre <= rd_grp_low;    -- 0x00..0x0F
+        when "010"  => fmc_read_data_pre <= rd_grp_rx;     -- 0x20..0x2F
+        when "011"  => fmc_read_data_pre <= rd_grp_fifo;   -- 0x30..0x3F
+        when "101"  => fmc_read_data_pre <= rd_grp_status; -- 0x50..0x5F
+        when "110" | "111" => fmc_read_data_pre <= rd_grp_cfg; -- 0x60..0x7F
+        when others => fmc_read_data_pre <= (others => '0');
+      end case;
+    end if;
+  end process p_read_stage2;
 
   --------------------------------------------------------------------
   -- FMC bus handling (byte accesses, lower byte used)
@@ -686,88 +830,37 @@ begin
         end case;
       end if;
 
-      -- Latch address and prepare read data when NOE is low and not yet latched.
-      -- We still use the synchronized NOE level, but do not require a clean falling edge,
-      -- so a simultaneous NE/NOE assertion will still produce data in the next clk_sys_i.
-      if (fmc_ne_qual_low = '1')and (fmc_noe_n_sync = '1') and (fmc_noe_n_meta = '0') then
-        -- Use the most recent address (1-stage synced) to handle NE/NOE asserting together.
-        --addr_v := unsigned(fmc_addr_meta);
-        --fmc_read_addr_lat <= addr_v;
-        fmc_read_data_lat <= (others => '0');
+      -- Latch pre-computed read data when NOE falling edge is detected.
+      -- Uses fmc_noe_n_sync_ddd / fmc_noe_n_sync_dd to align with the
+      -- 2-stage read pipeline (stage1 + stage2 = 2 extra clock cycles).
+      if (fmc_ne_qual_low = '1') and (fmc_noe_n_sync_ddd = '1') and (fmc_noe_n_sync_dd = '0') then
+        -- Latch the pre-computed mux result (already registered)
+        fmc_read_data_lat <= fmc_read_data_pre;
 
+        -- Side-effects that must only happen once per read cycle:
         -- Determine byte position for multi-byte sequential registers
-        if fmc_addr_meta /= read_reg_addr_prev then
+        if fmc_addr_sync_dd /= read_reg_addr_prev then
           v_rd_byte := "00";
         else
           v_rd_byte := read_byte_count;
         end if;
 
-        case fmc_addr_meta is
-          when "0000010" => -- 0x02 Read: TX status
-            fmc_read_data_lat(0) <= tx_busy_sys;
-
-          when "0100000" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(7 downto 0)); -- 0x20
-          when "0100001" => fmc_read_data_lat <= std_ulogic_vector(reg_rx_len_sys(15 downto 8)); -- 0x21
-          when "0100010" => -- 0x22
-            fmc_read_data_lat(0) <= reg_rx_ready_sys;
-            fmc_read_data_lat(1) <= reg_rx_overflow_sys;
-
-          when "1010000" => -- 0x50 Read: Clocking flags
-            fmc_read_data_lat(0) <= ppb_valid_sync;
-            fmc_read_data_lat(1) <= wc_locked_sync;
-            fmc_read_data_lat(2) <= wc_phasejump_sync;
-            fmc_read_data_lat(3) <= wc_configured_sync;
-            fmc_read_data_lat(4) <= ptp_leader_lost_sync;
-
-          when "1010001" => -- 0x51 Read: Ethernet flags
-            fmc_read_data_lat(0) <= eth_link_up_sync;
-            fmc_read_data_lat(1) <= eth_speed_sync(0);
-            fmc_read_data_lat(2) <= eth_speed_sync(1);
-
-          when "1010010" => -- 0x52 Read: Path Delay (4-byte sequential)
-            case v_rd_byte is
-              when "00"   => fmc_read_data_lat <= path_delay_sync(7 downto 0);
-              when "01"   => fmc_read_data_lat <= path_delay_sync(15 downto 8);
-              when "10"   => fmc_read_data_lat <= path_delay_sync(23 downto 16);
-              when others => fmc_read_data_lat <= path_delay_sync(31 downto 24);
-            end case;
+        case fmc_addr_sync_dd is
+          when "1010010" | "1010011" | "1010100" | "1010101" => -- 0x52..0x55
             read_byte_count <= v_rd_byte + 1;
-
-          when "1010011" => -- 0x53 Read: Leader Offset (4-byte sequential)
-            case v_rd_byte is
-              when "00"   => fmc_read_data_lat <= leader_offset_sync(7 downto 0);
-              when "01"   => fmc_read_data_lat <= leader_offset_sync(15 downto 8);
-              when "10"   => fmc_read_data_lat <= leader_offset_sync(23 downto 16);
-              when others => fmc_read_data_lat <= leader_offset_sync(31 downto 24);
-            end case;
-            read_byte_count <= v_rd_byte + 1;
-
-          when "1010100" => -- 0x54 Read: PLL PPB meter (4-byte, zeros if not valid)
-            if ppb_valid_sync = '1' then
-              case v_rd_byte is
-                when "00"   => fmc_read_data_lat <= ppb_meter_sync(7 downto 0);
-                when "01"   => fmc_read_data_lat <= ppb_meter_sync(15 downto 8);
-                when "10"   => fmc_read_data_lat <= ppb_meter_sync(23 downto 16);
-                when others => fmc_read_data_lat <= ppb_meter_sync(31 downto 24);
-              end case;
-            end if;
-            -- fmc_read_data_lat stays zeros when ppb_valid_sync = '0'
-            read_byte_count <= v_rd_byte + 1;
-
           when others =>
-            if unsigned(fmc_addr_meta) >= 16#30# and unsigned(fmc_addr_meta) < 16#40# then
-              if rxfifo_rd_empty = '0' then
-                fmc_read_data_lat <= rxfifo_rd_data;
-                rxfifo_rd_en <= '1';
-                fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
-              end if;
-            elsif unsigned(fmc_addr_meta) >= 16#60# then
-              -- 0x60..0x7F: Direct config RAM read (address - 0x60)
-              fmc_read_data_lat <= system_config_rd_data;
-            end if;
+            null;
         end case;
 
-        read_reg_addr_prev <= fmc_addr_meta;
+        -- RX FIFO read for address range 0x30..0x3F
+        if unsigned(fmc_addr_sync_dd) >= 16#30# and unsigned(fmc_addr_sync_dd) < 16#40# then
+          if rxfifo_rd_empty = '0' then
+            rxfifo_rd_en <= '1';
+            fmc_rx_bytes_sent <= fmc_rx_bytes_sent + 1;
+          end if;
+        end if;
+
+        read_reg_addr_prev <= fmc_addr_sync_dd;
         fmc_read_latched <= '1';
       end if;
 

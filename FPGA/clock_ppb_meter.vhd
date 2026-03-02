@@ -1,21 +1,19 @@
 -- ============================================================================
 -- clock_ppb_meter.vhd
 --
--- Measures the PPB (parts-per-billion) frequency difference between two
--- clocks (wallclock_64fs vs. pll_64fs) over a one-second measurement window
--- defined by wallclock_second_pulse_i.
+-- Measures edge counts of two clocks (wallclock_64fs vs. pll_64fs) over a 
+-- one-second measurement window defined by wallclock_second_pulse_i.
+-- The raw counter values are output for MCU to calculate PPB.
 --
 -- Operation:
 --   1. Assert start_i -> module waits for the next second pulse.
 --   2. On first second pulse: valid_o goes low, edge counters start.
---   3. On next second pulse:  counting stops, PPB is calculated.
---   4. Result appears on ppb_o, valid_o goes high.
+--   3. On next second pulse:  counting stops, counters latched.
+--   4. Results appear on count_wc_o / count_pll_o, valid_o goes high.
 --
--- PPB formula:  ppb = (count_pll - count_wc) * 1e9 / count_wc
+-- MCU calculates PPB:  ppb = (count_pll - count_wc) * 1e9 / count_wc
 --   Positive -> PLL is running fast relative to wallclock.
 --   Negative -> PLL is running slow relative to wallclock.
---
--- Division is performed by a restoring binary long divider (52 cycles).
 -- ============================================================================
 
 library ieee;
@@ -32,33 +30,23 @@ entity clock_ppb_meter is
         -- Control (active in sys_clk domain)
         wallclock_second_pulse_i : in  std_logic;   -- 1-PPS from wallclock
         start_i                  : in  std_logic;   -- Start a measurement
-        -- Result
-        ppb_o                    : out signed(31 downto 0);  -- PPB difference
-        valid_o                  : out std_logic             -- High when ppb_o is valid
+        -- Results: raw counter values for MCU to compute PPB
+        count_wc_o               : out unsigned(21 downto 0);  -- Wallclock edge count
+        count_pll_o              : out unsigned(21 downto 0);  -- PLL edge count
+        valid_o                  : out std_logic               -- High when counts are valid
     );
 end entity clock_ppb_meter;
 
 architecture rtl of clock_ppb_meter is
 
     -- ======================================================================
-    -- Constants
-    -- ======================================================================
-    constant ONE_BILLION : unsigned(29 downto 0) := to_unsigned(1_000_000_000, 30);
-    constant DIV_BITS    : integer := 52;  -- dividend width (22 + 30)
-
-    -- ======================================================================
-    -- FSM
+    -- FSM (simplified - no calculation needed)
     -- ======================================================================
     type state_t is (
         S_IDLE,        -- Waiting for start_i
         S_WAIT_PULSE,  -- Waiting for first second-pulse (alignment)
         S_COUNTING,    -- Counting edges between two second-pulses
-        S_CALC_DIFF,   -- Pipeline stage 1: compute |diff|, determine sign
-        S_CALC_MULT1,  -- Pipeline stage 2a: register multiply inputs
-        S_CALC_MULT2,  -- Pipeline stage 2b: capture multiply result
-        S_CALC_SETUP,  -- Pipeline stage 3: setup divider registers
-        S_DIVIDING,    -- Restoring binary long division (52 cycles)
-        S_DONE         -- Apply sign, output result
+        S_DONE         -- Counting complete, output valid
     );
     signal state : state_t := S_IDLE;
 
@@ -86,32 +74,17 @@ architecture rtl of clock_ppb_meter is
     signal count_pll : unsigned(21 downto 0) := (others => '0');
 
     -- ======================================================================
-    -- Divider datapath
-    -- ======================================================================
-    signal dividend   : unsigned(DIV_BITS-1 downto 0) := (others => '0');
-    signal divisor    : unsigned(21 downto 0)          := (others => '0');
-    signal quotient   : unsigned(31 downto 0)          := (others => '0');
-    signal rem_reg    : unsigned(22 downto 0)          := (others => '0');
-    signal div_step   : integer range 0 to DIV_BITS-1  := 0;
-    signal result_neg : std_logic                      := '0';
-    
-    -- ======================================================================
-    -- Pipeline registers for CALC stages (split long combinatorial paths)
-    -- ======================================================================
-    signal diff_reg   : unsigned(21 downto 0)          := (others => '0');  -- |count_pll - count_wc|
-    signal mult_in_reg: unsigned(21 downto 0)          := (others => '0');  -- DSP input pipeline
-    signal product_reg: unsigned(51 downto 0)          := (others => '0');  -- diff * 1e9
-
-    -- ======================================================================
     -- Output registers
     -- ======================================================================
-    signal ppb_reg   : signed(31 downto 0) := (others => '0');
-    signal valid_reg : std_logic           := '0';
+    signal count_wc_reg  : unsigned(21 downto 0) := (others => '0');
+    signal count_pll_reg : unsigned(21 downto 0) := (others => '0');
+    signal valid_reg     : std_logic             := '0';
 
 begin
 
-    ppb_o   <= ppb_reg;
-    valid_o <= valid_reg;
+    count_wc_o  <= count_wc_reg;
+    count_pll_o <= count_pll_reg;
+    valid_o     <= valid_reg;
 
     -- ==================================================================
     -- CDC: Synchronise the two asynchronous 64-fs clocks into sys_clk
@@ -143,26 +116,17 @@ begin
     start_rise <= start_i                  and not start_d;
 
     -- ==================================================================
-    -- Main state machine
+    -- Main state machine (simplified - just count, no calculation)
     -- ==================================================================
     p_fsm : process(sys_clk, reset_n)
-        variable v_rem     : unsigned(22 downto 0);
     begin
         if reset_n = '0' then
-            state       <= S_IDLE;
-            valid_reg   <= '0';
-            ppb_reg     <= (others => '0');
-            count_wc    <= (others => '0');
-            count_pll   <= (others => '0');
-            dividend    <= (others => '0');
-            divisor     <= (others => '0');
-            quotient    <= (others => '0');
-            rem_reg     <= (others => '0');
-            result_neg  <= '0';
-            div_step    <= 0;
-            diff_reg    <= (others => '0');
-            mult_in_reg <= (others => '0');
-            product_reg <= (others => '0');
+            state        <= S_IDLE;
+            valid_reg    <= '0';
+            count_wc     <= (others => '0');
+            count_pll    <= (others => '0');
+            count_wc_reg <= (others => '0');
+            count_pll_reg<= (others => '0');
 
         elsif rising_edge(sys_clk) then
             case state is
@@ -175,6 +139,7 @@ begin
                         valid_reg <= '0';
                         state     <= S_WAIT_PULSE;
                     end if;
+
                 -- =====================================================
                 -- WAIT_PULSE – align to the next second boundary
                 -- =====================================================
@@ -197,103 +162,16 @@ begin
                     end if;
 
                     if sec_rise = '1' then
-                        state <= S_CALC_DIFF;
+                        -- Latch final counts to output registers
+                        count_wc_reg  <= count_wc;
+                        count_pll_reg <= count_pll;
+                        state         <= S_DONE;
                     end if;
 
                 -- =====================================================
-                -- CALC_DIFF – Pipeline stage 1: compute |diff|, sign
-                -- Critical path: 22-bit comparison + 22-bit subtraction
-                -- =====================================================
-                when S_CALC_DIFF =>
-                    -- Determine sign and absolute difference
-                    if count_pll >= count_wc then
-                        diff_reg   <= count_pll - count_wc;
-                        result_neg <= '0';
-                    else
-                        diff_reg   <= count_wc - count_pll;
-                        result_neg <= '1';
-                    end if;
-                    
-                    -- Latch divisor now (count_wc won't change)
-                    divisor <= count_wc;
-                    
-                    -- Check for division by zero early
-                    if count_wc = 0 then
-                        ppb_reg   <= (others => '0');
-                        valid_reg <= '1';
-                        state     <= S_IDLE;
-                    else
-                        state <= S_CALC_MULT1;
-                    end if;
-
-                -- =====================================================
-                -- CALC_MULT1 – Pipeline stage 2a: register multiply inputs
-                -- Places diff_reg value adjacent to DSP block input
-                -- =====================================================
-                when S_CALC_MULT1 =>
-                    mult_in_reg <= diff_reg;
-                    state       <= S_CALC_MULT2;
-
-                -- =====================================================
-                -- CALC_MULT2 – Pipeline stage 2b: multiply and capture
-                -- Critical path: 22×30 = 52-bit multiplication (uses DSP)
-                -- Input is now from local mult_in_reg for better placement
-                -- =====================================================
-                when S_CALC_MULT2 =>
-                    product_reg <= mult_in_reg * ONE_BILLION;
-                    state       <= S_CALC_SETUP;
-
-                -- =====================================================
-                -- CALC_SETUP – Pipeline stage 3: setup divider registers
-                -- Critical path: register assignments only
-                -- =====================================================
-                when S_CALC_SETUP =>
-                    -- Load dividend MSB-first for shift-based division
-                    dividend <= resize(product_reg, DIV_BITS);
-                    quotient <= (others => '0');
-                    rem_reg  <= (others => '0');
-                    div_step <= DIV_BITS - 1;
-                    state    <= S_DIVIDING;
-
-                -- =====================================================
-                -- DIVIDING – restoring binary long division (1 bit/clk)
-                --   OPTIMIZATION: Uses shift register instead of MUX.
-                --   dividend shifts left each cycle, MSB feeds into rem.
-                --   Iterates DIV_BITS (52) cycles.
-                -- =====================================================
-                when S_DIVIDING =>
-                    -- Shift remainder left and bring in MSB of dividend
-                    v_rem := rem_reg(21 downto 0) & dividend(DIV_BITS-1);
-                    
-                    -- Shift dividend left for next iteration
-                    dividend <= dividend(DIV_BITS-2 downto 0) & '0';
-
-                    if v_rem >= resize(divisor, 23) then
-                        v_rem := v_rem - resize(divisor, 23);
-                        -- Shift quotient left with 1
-                        quotient <= quotient(30 downto 0) & '1';
-                    else
-                        -- Shift quotient left with 0
-                        quotient <= quotient(30 downto 0) & '0';
-                    end if;
-
-                    rem_reg <= v_rem;
-
-                    if div_step = 0 then
-                        state <= S_DONE;
-                    else
-                        div_step <= div_step - 1;
-                    end if;
-
-                -- =====================================================
-                -- DONE – apply sign and present result
+                -- DONE – output is valid, wait for next measurement
                 -- =====================================================
                 when S_DONE =>
-                    if result_neg = '1' then
-                        ppb_reg <= -signed(quotient);
-                    else
-                        ppb_reg <= signed(quotient);
-                    end if;
                     valid_reg <= '1';
                     state     <= S_IDLE;
 

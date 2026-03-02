@@ -87,12 +87,17 @@ architecture Behavioral of ptpv2_parser is
     signal s2m_fill_count   : integer range 0 to MIN_FILTER_DEPTH := 0;
     signal s2m_min_value    : signed(31 downto 0) := MAX_SIGNED_32;
     
-    -- Min search state machine
-    type min_search_state_t is (MS_IDLE, MS_M2S_SEARCH, MS_S2M_CALC, MS_S2M_SEARCH, MS_OUTPUT);
+    -- Min search state machine (2-stage pipeline: FETCH+ABS, then COMPARE)
+    type min_search_state_t is (MS_IDLE, MS_M2S_ABS, MS_M2S_CMP, MS_S2M_CALC, MS_S2M_ABS, MS_S2M_CMP, MS_OUTPUT);
     signal min_search_state : min_search_state_t := MS_IDLE;
     signal search_idx       : integer range 0 to MIN_FILTER_DEPTH-1 := 0;
     signal temp_min_m2s     : signed(31 downto 0) := MAX_SIGNED_32;
     signal temp_min_s2m     : signed(31 downto 0) := MAX_SIGNED_32;
+
+    -- Pipeline registers for abs() computation
+    signal fetched_val      : signed(31 downto 0) := (others => '0');
+    signal fetched_abs      : unsigned(31 downto 0) := (others => '0');
+    signal current_min_abs  : unsigned(31 downto 0) := (others => '0');
     
     -- State machine
     type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Done);
@@ -291,6 +296,9 @@ begin
             search_idx <= 0;
             temp_min_m2s <= MAX_SIGNED_32;
             temp_min_s2m <= MAX_SIGNED_32;
+            fetched_val <= (others => '0');
+            fetched_abs <= (others => '0');
+            current_min_abs <= (others => '0');
             
         elsif rising_edge(clk) then
             send_delay_resp_o <= '0';
@@ -517,80 +525,97 @@ begin
                     when MS_IDLE =>
                         -- Store new m2s sample in buffer and start search
                         m2s_buffer(m2s_write_idx) <= delta_m2s_reg;
-                        
+
                         -- Update write index (circular)
                         if m2s_write_idx = MIN_FILTER_DEPTH - 1 then
                             m2s_write_idx <= 0;
                         else
                             m2s_write_idx <= m2s_write_idx + 1;
                         end if;
-                        
+
                         -- Update fill count
                         if m2s_fill_count < MIN_FILTER_DEPTH then
                             m2s_fill_count <= m2s_fill_count + 1;
                         end if;
-                        
+
                         -- Initialize min search for m2s
                         search_idx <= 0;
                         temp_min_m2s <= delta_m2s_reg;  -- Start with current sample
-                        min_search_state <= MS_M2S_SEARCH;
-                        
-                    when MS_M2S_SEARCH =>
-                        -- Sequentially search through m2s buffer
-                        -- Compare one element per clock cycle (closest to zero)
+                        current_min_abs <= unsigned(abs(delta_m2s_reg));
+                        min_search_state <= MS_M2S_ABS;
+
+                    when MS_M2S_ABS =>
+                        -- Pipeline stage 1: Fetch buffer element and compute abs()
                         if search_idx < m2s_fill_count then
-                            if abs(m2s_buffer(search_idx)) < abs(temp_min_m2s) then
-                                temp_min_m2s <= m2s_buffer(search_idx);
-                            end if;
-                            
-                            if search_idx = MIN_FILTER_DEPTH - 1 then
-                                -- Done searching m2s (full buffer), move to s2m
-                                min_search_state <= MS_S2M_CALC;
-                            else
-                                search_idx <= search_idx + 1;
-                            end if;
+                            fetched_val <= m2s_buffer(search_idx);
+                            fetched_abs <= unsigned(abs(m2s_buffer(search_idx)));
+                            min_search_state <= MS_M2S_CMP;
                         else
                             -- Buffer not full yet, done with m2s search
                             min_search_state <= MS_S2M_CALC;
                         end if;
-                        
+
+                    when MS_M2S_CMP =>
+                        -- Pipeline stage 2: Compare registered abs values
+                        if fetched_abs < current_min_abs then
+                            temp_min_m2s <= fetched_val;
+                            current_min_abs <= fetched_abs;
+                        end if;
+
+                        if search_idx = MIN_FILTER_DEPTH - 1 then
+                            -- Done searching m2s (full buffer), move to s2m
+                            min_search_state <= MS_S2M_CALC;
+                        else
+                            search_idx <= search_idx + 1;
+                            min_search_state <= MS_M2S_ABS;
+                        end if;
+
                     when MS_S2M_CALC =>
                         -- Store new s2m sample in buffer
                         s2m_buffer(s2m_write_idx) <= delta_s2m_reg;
-                        
+
                         -- Update write index (circular)
                         if s2m_write_idx = MIN_FILTER_DEPTH - 1 then
                             s2m_write_idx <= 0;
                         else
                             s2m_write_idx <= s2m_write_idx + 1;
                         end if;
-                        
+
                         -- Update fill count
                         if s2m_fill_count < MIN_FILTER_DEPTH then
                             s2m_fill_count <= s2m_fill_count + 1;
                         end if;
-                        
+
                         -- Initialize min search for s2m
                         search_idx <= 0;
                         temp_min_s2m <= delta_s2m_reg;  -- Start with current sample
-                        min_search_state <= MS_S2M_SEARCH;
-                        
-                    when MS_S2M_SEARCH =>
-                        -- Sequentially search through s2m buffer (closest to zero)
+                        current_min_abs <= unsigned(abs(delta_s2m_reg));
+                        min_search_state <= MS_S2M_ABS;
+
+                    when MS_S2M_ABS =>
+                        -- Pipeline stage 1: Fetch buffer element and compute abs()
                         if search_idx < s2m_fill_count then
-                            if abs(s2m_buffer(search_idx)) < abs(temp_min_s2m) then
-                                temp_min_s2m <= s2m_buffer(search_idx);
-                            end if;
-                            
-                            if search_idx = MIN_FILTER_DEPTH - 1 then
-                                -- Done searching s2m (full buffer)
-                                min_search_state <= MS_OUTPUT;
-                            else
-                                search_idx <= search_idx + 1;
-                            end if;
+                            fetched_val <= s2m_buffer(search_idx);
+                            fetched_abs <= unsigned(abs(s2m_buffer(search_idx)));
+                            min_search_state <= MS_S2M_CMP;
                         else
                             -- Buffer not full yet, done with s2m search
                             min_search_state <= MS_OUTPUT;
+                        end if;
+
+                    when MS_S2M_CMP =>
+                        -- Pipeline stage 2: Compare registered abs values
+                        if fetched_abs < current_min_abs then
+                            temp_min_s2m <= fetched_val;
+                            current_min_abs <= fetched_abs;
+                        end if;
+
+                        if search_idx = MIN_FILTER_DEPTH - 1 then
+                            -- Done searching s2m (full buffer)
+                            min_search_state <= MS_OUTPUT;
+                        else
+                            search_idx <= search_idx + 1;
+                            min_search_state <= MS_S2M_ABS;
                         end if;
                         
                     when MS_OUTPUT =>

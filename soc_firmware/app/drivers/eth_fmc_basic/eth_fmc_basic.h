@@ -88,8 +88,10 @@ extern "C" {
 #define ETH_FMC_REG_PATH_DELAY     0x52
 /* Read register 0x53 - leader offset, 4-byte sequential read (LSB first) */
 #define ETH_FMC_REG_LEADER_OFFSET  0x53
-/* Read register 0x54 - PLL PPB offset, 4-byte sequential read (LSB first) */
-#define ETH_FMC_REG_PPB_OFFSET     0x54
+/* Read register 0x54 - wallclock edge count, 4-byte sequential read (22-bit value, LSB first) */
+#define ETH_FMC_REG_COUNT_WC       0x54
+/* Read register 0x55 - PLL edge count, 4-byte sequential read (22-bit value, LSB first) */
+#define ETH_FMC_REG_COUNT_PLL      0x55
 
 /* Read register 0x60..0x7F - direct config RAM access (addr - 0x60) */
 #define ETH_FMC_REG_CONFIG_RAM     0x60

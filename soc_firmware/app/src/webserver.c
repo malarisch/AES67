@@ -209,12 +209,29 @@ static int read_fpga_status(struct ui_fpga_metrics *m)
 					((uint32_t)buf[3] << 24));
 	}
 
-	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_PPB_OFFSET, buf, 4);
+	/* Read raw counters and calculate PPB (0x54 = count_wc, 0x55 = count_pll) */
+	uint32_t count_wc = 0, count_pll = 0;
+
+	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_COUNT_WC, buf, 4);
 	if (ret == 0) {
-		m->ppb_offset = (int32_t)((uint32_t)buf[0] |
-				((uint32_t)buf[1] << 8) |
-				((uint32_t)buf[2] << 16) |
-				((uint32_t)buf[3] << 24));
+		count_wc = ((uint32_t)buf[0] |
+			    ((uint32_t)buf[1] << 8) |
+			    ((uint32_t)buf[2] << 16)) & 0x3FFFFF;
+	}
+	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_COUNT_PLL, buf, 4);
+	if (ret == 0) {
+		count_pll = ((uint32_t)buf[0] |
+			     ((uint32_t)buf[1] << 8) |
+			     ((uint32_t)buf[2] << 16)) & 0x3FFFFF;
+	}
+
+	/* Calculate PPB: (count_pll - count_wc) * 1e9 / count_wc */
+	if (count_wc > 0) {
+		int32_t diff = (int32_t)count_pll - (int32_t)count_wc;
+		m->ppb_offset = (int32_t)(((int64_t)diff * 1000000000LL) /
+					  (int64_t)count_wc);
+	} else {
+		m->ppb_offset = 0;
 	}
 
 	return 0;

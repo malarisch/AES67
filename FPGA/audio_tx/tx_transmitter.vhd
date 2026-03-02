@@ -319,7 +319,17 @@ begin
 
 
 						packet_counter <= packet_counter + 1;
-						ip_checksum_acc <= (others => '0');
+
+						-- Pre-compute IP header checksum to avoid critical timing path
+						-- IP header words: 0x4500, total_length, pkt_counter+1, 0x0000, 0x8011, 0x0000, src_ip, dst_ip
+						ip_checksum_acc <= resize(to_unsigned(16#4500#, 16), 32) +
+							resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32) +
+							resize(packet_counter + 1, 32) +  -- pkt_counter will be incremented
+							resize(to_unsigned(16#8011#, 16), 32) +  -- TTL=0x80, proto=0x11
+							resize(unsigned(src_ip_address(31 downto 16)), 32) +
+							resize(unsigned(src_ip_address(15 downto 0)), 32) +
+							resize(unsigned(dst_ip_address(31 downto 16)), 32) +
+							resize(unsigned(dst_ip_address(15 downto 0)), 32);
 						ip_checksum_upper_byte <= (others => '0');
 						ip_checksum_byte_phase <= '0';
 						udp_checksum_upper_byte <= (others => '0');
@@ -351,9 +361,7 @@ begin
 						if (frame_write_index = 0) then
 							first_packet_byte <= header_data;
 						end if;
-						if ((frame_write_index >= MAC_HEADER_LENGTH) and (frame_write_index < MAC_HEADER_LENGTH + IP_HEADER_LENGTH)) then
-							feed_checksum(ip_checksum_upper_byte, ip_checksum_byte_phase, ip_checksum_acc, header_data);
-						end if;
+						-- IP checksum is pre-computed in s_A_CalcValues, no byte-by-byte feed needed
 						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
 							-- Pre-fetch 1: set address for FIRST audio byte (MSB of ch0, sample 0)
 							raw_addr := read_base
