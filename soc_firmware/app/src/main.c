@@ -16,6 +16,9 @@
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
+#ifdef CONFIG_LO_CARD
+#include "../drivers/lo_card/lo_card.h"
+#endif
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
@@ -759,6 +762,30 @@ int main(void)
             /* Example: Set channel 0 to 20 dB gain, enable HPF */
             /* mi_card_set_gain(0, 20); */
             /* mi_card_set_hpf(true); */
+        }
+    }
+#endif
+
+#ifdef CONFIG_LO_CARD
+    /* ---- LO Card 8-Channel DAC Line Output Setup ---- */
+#ifdef CONFIG_LO_CARD_NRST_GPIO
+    /* Initialize nRST GPIO first */
+    if (lo_card_nrst_gpio_init() < 0) {
+        LOG_WRN("LO card nRST GPIO init failed (hw reset unavailable)");
+    }
+#endif
+    const struct device *lo_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+    if (!device_is_ready(lo_i2c)) {
+        LOG_ERR("LO card I2C bus (i2c2) not ready");
+    } else {
+        int lo_ret = lo_card_init(lo_i2c);
+        if (lo_ret < 0) {
+            LOG_WRN("LO card init failed: %d (board may not be connected)", lo_ret);
+        } else {
+            LOG_INF("LO card initialized successfully");
+            /* Example: Set channel 0 clip to 0 dB, enable outputs */
+            /* lo_card_set_clip(0, 0); */
+            /* lo_card_enable_outputs(true); */
         }
     }
 #endif

@@ -116,6 +116,7 @@
 };
 
 /* ---- MI Card nRST GPIO (PA8 active-low) ---- */
+/* Disabled for LO card testing
 / {
 	mi_card_gpios {
 		compatible = "gpio-leds";
@@ -127,6 +128,22 @@
 
 	aliases {
 		mi-nrst = &mi_nrst;
+	};
+};
+*/
+
+/* ---- LO Card nRST GPIO (PA8 active-low, same pinout as MI) ---- */
+/ {
+	lo_card_gpios {
+		compatible = "gpio-leds";
+		lo_nrst: lo_nrst {
+			gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;
+			label = "LO Card nRST";
+		};
+	};
+
+	aliases {
+		lo-nrst = &lo_nrst;
 	};
 };
 

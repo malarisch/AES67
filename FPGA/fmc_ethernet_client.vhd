@@ -83,6 +83,7 @@ entity fmc_ethernet_client is
 
     -- RX stream config (written via 0x59, 16 bytes per stream -> rx_ringbuffer stream_ram)
     rx_stream_config_wr_clk_o  : out std_ulogic;
+    rx_stream_config_wr_en_o   : out std_ulogic;
     rx_stream_config_wr_addr_o : out std_ulogic_vector(7 downto 0);
     rx_stream_config_wr_data_o : out std_ulogic_vector(7 downto 0)
   );
@@ -251,8 +252,8 @@ begin
   -- Concurrent output assignments for status/control ports
   pll_ppb_measurement_start_o <= ppb_start_reg;
 
-  -- RX stream config clock: gate clk_sys_i with wr_en so rx_ringbuffer sees a rising edge per write
-  rx_stream_config_wr_clk_o <= clk_sys_i and rx_stream_cfg_wr_en;
+  rx_stream_config_wr_clk_o <= clk_sys_i;
+  rx_stream_config_wr_en_o <= rx_stream_cfg_wr_en;
 
 
   -- Config RAM read address: combinational so data is ready when latched

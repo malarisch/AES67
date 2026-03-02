@@ -30,6 +30,9 @@
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
+#ifdef CONFIG_LO_CARD
+#include "../drivers/lo_card/lo_card.h"
+#endif
 
 /* local_memmem is a GNU extension not available in picolibc / Zephyr */
 static void *local_memmem(const void *haystack, size_t haystacklen,
@@ -1046,6 +1049,97 @@ static int apply_mi_global_json(const char *json, size_t len)
 }
 #endif /* CONFIG_MI_CARD */
 
+#ifdef CONFIG_LO_CARD
+/* ================================================================
+ * LO Card (8-channel line output) status/control
+ * ================================================================ */
+
+static int build_lo_status(char *buf, size_t sz)
+{
+	int p = json_start_object(buf, sz);
+
+	/* Global settings */
+	int f96 = lo_card_get_96khz();
+	int oe = lo_card_get_output_enable();
+
+	p = json_add_bool(buf, sz, p, "f96khz", (f96 > 0));
+	p = json_add_bool(buf, sz, p, "output_enable", (oe > 0));
+
+	/* Per-channel settings */
+	p = json_add_key(buf, sz, p, "channels");
+	p = json_start_array(buf, sz, p);
+
+	for (int ch = 0; ch < LO_NUM_CHANNELS; ch++) {
+		p += snprintf(buf + p, sz - p, "{");
+		p = json_add_uint(buf, sz, p, "id", ch);
+
+		int clip = lo_card_get_clip(ch);
+		int muted = lo_card_get_mute(ch);
+
+		p = json_add_int(buf, sz, p, "clip", clip);
+		p = json_add_bool(buf, sz, p, "muted", (muted > 0));
+
+		if (p > 1 && buf[p - 1] == ',') {
+			p--;
+		}
+		p += snprintf(buf + p, sz - p, "},");
+	}
+
+	p = json_end_array(buf, sz, p);
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+static int apply_lo_channel_json(int channel, const char *json, size_t len)
+{
+	int32_t val;
+	bool bval;
+	int ret = 0;
+
+	if (channel < 0 || channel >= LO_NUM_CHANNELS) {
+		return -EINVAL;
+	}
+
+	if (json_find_int(json, len, "clip", &val)) {
+		ret = lo_card_set_clip((uint8_t)channel, (int8_t)val);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (json_find_bool(json, len, "muted", &bval)) {
+		ret = lo_card_set_mute((uint8_t)channel, bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int apply_lo_global_json(const char *json, size_t len)
+{
+	bool bval;
+	int ret = 0;
+
+	if (json_find_bool(json, len, "f96khz", &bval)) {
+		ret = lo_card_set_96khz(bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	if (json_find_bool(json, len, "output_enable", &bval)) {
+		ret = lo_card_enable_outputs(bval);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	return 0;
+}
+#endif /* CONFIG_LO_CARD */
+
 /* ================================================================
  * POST body accumulator
  * ================================================================ */
@@ -1139,6 +1233,22 @@ static int api_handler(struct http_client_ctx *client,
 				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
 			}
 #endif
+#ifdef CONFIG_LO_CARD
+		} else if (strcmp(url, "/api/lo") == 0) {
+			json_len = build_lo_status(json_buf, JSON_BUF_SIZE);
+		} else if (strcmp(url, "/api/lo/reset") == 0) {
+			/* GET /api/lo/reset returns board info */
+			struct lo_board_info info;
+			if (lo_card_detect(&info)) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"soft_id\":%d,\"board_id\":%d,\"rev\":%d}",
+					info.soft_id, info.board_id, info.hard_rev);
+			} else {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"error\":\"board not detected\"}");
+				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
+			}
+#endif
 		} else {
 			/* 404 */
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
@@ -1202,6 +1312,35 @@ static int api_handler(struct http_client_ctx *client,
 			ret = mi_card_hw_reset();
 #else
 			ret = mi_card_reset();
+#endif
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":\"Board reset complete\"}");
+			}
+#endif
+#ifdef CONFIG_LO_CARD
+		} else if (strcmp(url, "/api/lo") == 0) {
+			/* Global LO settings (96kHz, output enable) */
+			ret = apply_lo_global_json(post_body, post_body_len);
+			if (ret == 0) {
+				json_len = build_lo_status(json_buf,
+							   JSON_BUF_SIZE);
+			}
+		} else if (strncmp(url, "/api/lo/channel/", 16) == 0) {
+			/* Per-channel settings: /api/lo/channel/0 */
+			int ch = atoi(url + 16);
+			ret = apply_lo_channel_json(ch, post_body,
+						    post_body_len);
+			if (ret == 0) {
+				json_len = build_lo_status(json_buf,
+							   JSON_BUF_SIZE);
+			}
+		} else if (strcmp(url, "/api/lo/reset") == 0) {
+			/* POST /api/lo/reset triggers reset */
+#ifdef CONFIG_LO_CARD_NRST_GPIO
+			ret = lo_card_hw_reset();
+#else
+			ret = lo_card_reset();
 #endif
 			if (ret == 0) {
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,

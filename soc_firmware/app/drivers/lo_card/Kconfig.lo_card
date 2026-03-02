@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config LO_CARD
+	bool "LO Card 8-channel DAC line output board driver"
+	depends on I2C
+	help
+	  Enable driver for the LO 8-channel DAC line output board.
+	  This board has an LPC microcontroller (at I2C address 0x40)
+	  controlling output enable and muting, plus a DSP chip
+	  (at I2C address 0x14) and 4x DAC devices (0x4C-0x4F).
+
+if LO_CARD
+
+config LO_CARD_LOG_LEVEL
+	int "LO card driver log level"
+	default 3
+	range 0 4
+	help
+	  Log level for LO card driver.
+	  0 = OFF, 1 = ERR, 2 = WRN, 3 = INF, 4 = DBG
+
+config LO_CARD_INIT_PRIORITY
+	int "LO card driver initialization priority"
+	default 80
+	help
+	  Device driver initialization priority for LO card.
+	  Must be initialized after I2C bus.
+
+config LO_CARD_NRST_GPIO
+	bool "Enable hardware reset via nRST GPIO"
+	default y
+	depends on GPIO
+	help
+	  Enable hardware reset functionality via a dedicated GPIO pin.
+	  The GPIO is active-low (asserted low to reset the board).
+
+config LO_CARD_NRST_PULSE_MS
+	int "nRST pulse duration in milliseconds"
+	default 100
+	range 1 100
+	depends on LO_CARD_NRST_GPIO
+	help
+	  Duration of the reset pulse in milliseconds.
+
+config LO_CARD_NRST_RECOVERY_MS
+	int "Post-reset recovery time in milliseconds"
+	default 1000
+	range 10 1000
+	depends on LO_CARD_NRST_GPIO
+	help
+	  Time to wait after releasing reset before accessing I2C.
+	  The board needs time to initialize its internal PLLs/clocks.
+
+endif # LO_CARD

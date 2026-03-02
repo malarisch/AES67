@@ -41,7 +41,7 @@ entity rx_ringbuffer is
 
         stream_config_wr_clk_i: in std_logic;
         stream_config_wr_en_i: in std_logic;
-        stream_config_addr_i: in std_logic_vector(7 downto 0);
+        stream_config_addr_i: in unsigned(7 downto 0);
         stream_config_data_i: in std_logic_vector(7 downto 0)
 
 	);
@@ -68,9 +68,8 @@ architecture Behavioral of rx_ringbuffer is
     signal stream_ram : t_stream_ram;
 
     -- Synthesis attributes for Block RAM inference (Intel/Altera)
-    -- Use "M10K" (not "M9K") — "M9K" triggers a buggy dual-clock inference path in Quartus 13.1
     attribute ramstyle : string;
-    attribute ramstyle of stream_ram : signal is "M10K";
+    attribute ramstyle of stream_ram : signal is "M9K";
 
     -- Synchronous read port for stream_ram (registered address -> data available next cycle)
     signal stream_rd_addr : unsigned(7 downto 0) := (others => '0');
@@ -500,7 +499,7 @@ begin
     begin
         if rising_edge(stream_config_wr_clk_i) then
             if stream_config_wr_en_i = '1' then
-                stream_ram(to_integer(unsigned(stream_config_addr_i))) <= stream_config_data_i;
+                stream_ram(to_integer(stream_config_addr_i)) <= stream_config_data_i;
             end if;
         end if;
     end process;
