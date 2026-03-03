@@ -26,6 +26,15 @@ create_clock -name {rmii_refclk} -period 20.000 -waveform { 0.000 10.000 } [get_
 # Audio master clock from external PLL (48kHz * 512 = 24.576 MHz)
 create_clock -name {audio_mclk} -period 40.690 -waveform { 0.000 20.345 } [get_ports {gpio34}]
 
+create_clock -period 8.000  -name {enet_clk_125m} [get_ports {enet_clk_125m}]
+set_clock_groups -asynchronous -group [get_clocks {enet_clk_125m}]
+
+set_output_delay  -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdc}]
+set_input_delay   -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdio}]
+set_output_delay  -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdio}]
+
+set_false_path -from [get_ports enet_intn] -to *
+set_false_path -from * -to [get_ports enet_resetn]
 
 #**************************************************************
 # Create Generated Clock
@@ -64,8 +73,6 @@ create_generated_clock -name {mac_clk_25m} \
 #**************************************************************
 
 # Let Quartus derive clock uncertainties based on PLL characteristics
-derive_clock_uncertainty
-
 
 #**************************************************************
 # Set Input Delay
@@ -139,3 +146,15 @@ set_false_path -to [get_registers {*inst13|inst37|tx_en_meta}]
 #**************************************************************
 # Set Input Transition
 #**************************************************************
+
+derive_pll_clocks
+derive_clock_uncertainty
+
+
+source ./rgmii_phy_if.sdc
+source ./rgmii_io.sdc
+
+# RGMII interface
+constrain_rgmii_input_pins "enet" "enet_rx_clk" "enet_rx_dv enet_rx_d*"
+constrain_rgmii_output_pins "enet" "inst9|altpll_component|auto_generated|pll1|clk[0]" "enet_tx_clk" "enet_tx_en enet_tx_d*"
+

@@ -15,7 +15,7 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Tue Mar  3 16:00:45 2026"
+-- CREATED		"Tue Mar  3 20:48:08 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
@@ -27,11 +27,13 @@ ENTITY FPGA IS
 	(
 		c10_resetn :  IN  STD_LOGIC;
 		c10_clk50m :  IN  STD_LOGIC;
+		enet_clk_125m :  IN  STD_LOGIC;
+		enet_rx_clk :  IN  STD_LOGIC;
+		enet_rx_dv :  IN  STD_LOGIC;
+		enet_resetn :  IN  STD_LOGIC;
+		enet_mdio :  INOUT  STD_LOGIC;
+		enet_rx_d :  IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
 		gpio31 :  IN  STD_LOGIC;
-		gpio23 :  IN  STD_LOGIC;
-		gpio24 :  IN  STD_LOGIC;
-		gpio22 :  IN  STD_LOGIC;
-		gpio21 :  IN  STD_LOGIC;
 		gpio0 :  IN  STD_LOGIC;
 		gpio1 :  IN  STD_LOGIC;
 		gpio2 :  IN  STD_LOGIC;
@@ -43,7 +45,6 @@ ENTITY FPGA IS
 		gpio4 :  IN  STD_LOGIC;
 		gpio3 :  IN  STD_LOGIC;
 		gpio34 :  IN  STD_LOGIC;
-		gpio28 :  INOUT  STD_LOGIC;
 		gpio17 :  INOUT  STD_LOGIC;
 		gpio16 :  INOUT  STD_LOGIC;
 		gpio15 :  INOUT  STD_LOGIC;
@@ -54,11 +55,11 @@ ENTITY FPGA IS
 		gpio10 :  INOUT  STD_LOGIC;
 		arduino_io4 :  OUT  STD_LOGIC;
 		arduino_io5 :  OUT  STD_LOGIC;
+		enet_tx_clk :  OUT  STD_LOGIC;
+		enet_tx_en :  OUT  STD_LOGIC;
+		enet_mdc :  OUT  STD_LOGIC;
 		arduino_io :  OUT  STD_LOGIC_VECTOR(0 TO 0);
-		gpio27 :  OUT  STD_LOGIC;
-		gpio20 :  OUT  STD_LOGIC;
-		gpio19 :  OUT  STD_LOGIC;
-		gpio18 :  OUT  STD_LOGIC;
+		enet_tx_d :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
 		gpio33 :  OUT  STD_LOGIC;
 		gpio32 :  OUT  STD_LOGIC;
 		gpio30 :  OUT  STD_LOGIC;
@@ -344,6 +345,36 @@ COMPONENT ptp_module
 	);
 END COMPONENT;
 
+COMPONENT rgmii_phy_if
+GENERIC (CLOCK_INPUT_STYLE : STRING;
+			IODDR_STYLE : STRING;
+			TARGET : STRING;
+			USE_CLK90 : STRING
+			);
+	PORT(clk : IN STD_LOGIC;
+		 clk90 : IN STD_LOGIC;
+		 rst : IN STD_LOGIC;
+		 mac_gmii_tx_en : IN STD_LOGIC;
+		 mac_gmii_tx_er : IN STD_LOGIC;
+		 phy_rgmii_rx_clk : IN STD_LOGIC;
+		 phy_rgmii_rx_ctl : IN STD_LOGIC;
+		 mac_gmii_txd : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 phy_rgmii_rxd : IN STD_LOGIC_VECTOR(3 DOWNTO 0);
+		 speed : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
+		 mac_gmii_rx_clk : OUT STD_LOGIC;
+		 mac_gmii_rx_rst : OUT STD_LOGIC;
+		 mac_gmii_rx_dv : OUT STD_LOGIC;
+		 mac_gmii_rx_er : OUT STD_LOGIC;
+		 mac_gmii_tx_clk : OUT STD_LOGIC;
+		 mac_gmii_tx_rst : OUT STD_LOGIC;
+		 mac_gmii_tx_clk_en : OUT STD_LOGIC;
+		 phy_rgmii_tx_clk : OUT STD_LOGIC;
+		 phy_rgmii_tx_ctl : OUT STD_LOGIC;
+		 mac_gmii_rxd : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 phy_rgmii_txd : OUT STD_LOGIC_VECTOR(3 DOWNTO 0)
+	);
+END COMPONENT;
+
 COMPONENT clock_ppb_meter
 	PORT(sys_clk : IN STD_LOGIC;
 		 reset_n : IN STD_LOGIC;
@@ -413,28 +444,6 @@ GENERIC (MIIM_CLOCK_DIVIDER : INTEGER;
 		 mii_txd_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 speed_o : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT miirmii
-	PORT(ena_10 : IN STD_LOGIC;
-		 RefClk : IN STD_LOGIC;
-		 m_tx_en : IN STD_LOGIC;
-		 m_tx_err : IN STD_LOGIC;
-		 Rstn : IN STD_LOGIC;
-		 rmii_crs_dv : IN STD_LOGIC;
-		 rmii_rx_err : IN STD_LOGIC;
-		 m_tx_d : IN STD_LOGIC_VECTOR(3 DOWNTO 0);
-		 rmii_rx_d : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
-		 m_rx_en : OUT STD_LOGIC;
-		 m_rx_err : OUT STD_LOGIC;
-		 m_rx_crs : OUT STD_LOGIC;
-		 m_rx_col : OUT STD_LOGIC;
-		 rx_clk : OUT STD_LOGIC;
-		 tx_clk : OUT STD_LOGIC;
-		 rmii_tx_en : OUT STD_LOGIC;
-		 m_rx_d : OUT STD_LOGIC_VECTOR(3 DOWNTO 0);
-		 rmii_tx_d : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -525,6 +534,14 @@ GENERIC (RX_ADDR_WIDTH : INTEGER;
 	);
 END COMPONENT;
 
+COMPONENT ethernet_clks
+	PORT(inclk0 : IN STD_LOGIC;
+		 c0 : OUT STD_LOGIC;
+		 c1 : OUT STD_LOGIC;
+		 locked : OUT STD_LOGIC
+	);
+END COMPONENT;
+
 COMPONENT i2s_in
 GENERIC (fifo_addrbits : INTEGER;
 			width : INTEGER
@@ -568,6 +585,8 @@ SIGNAL	clk_1MHz :  STD_LOGIC;
 SIGNAL	clk_250MHz :  STD_LOGIC;
 SIGNAL	const_eth_speed :  STD_LOGIC_VECTOR(1 DOWNTO 0);
 SIGNAL	dst_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	enet_clk :  STD_LOGIC;
+SIGNAL	enet_clk_90 :  STD_LOGIC;
 SIGNAL	eth_byte_cnt :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	eth_frame_o :  STD_LOGIC;
 SIGNAL	eth_frame_rdy :  STD_LOGIC;
@@ -581,6 +600,17 @@ SIGNAL	fmc_ne :  STD_LOGIC;
 SIGNAL	fmc_noe :  STD_LOGIC;
 SIGNAL	fmc_nwe :  STD_LOGIC;
 SIGNAL	fs :  STD_LOGIC;
+SIGNAL	gmii_rx_clk :  STD_LOGIC;
+SIGNAL	gmii_rx_dv :  STD_LOGIC;
+SIGNAL	gmii_rx_err :  STD_LOGIC;
+SIGNAL	gmii_rx_rst :  STD_LOGIC;
+SIGNAL	gmii_rxd :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	gmii_tx_clk :  STD_LOGIC;
+SIGNAL	gmii_tx_clk_en :  STD_LOGIC;
+SIGNAL	gmii_tx_en :  STD_LOGIC;
+SIGNAL	gmii_tx_err :  STD_LOGIC;
+SIGNAL	gmii_tx_rst :  STD_LOGIC;
+SIGNAL	gmii_txd :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	i2s_i1 :  STD_LOGIC;
 SIGNAL	i2s_o1 :  STD_LOGIC;
 SIGNAL	icmp_dst_ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -612,15 +642,9 @@ SIGNAL	mcu_allow_req :  STD_LOGIC;
 SIGNAL	mcu_tx_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	mcu_tx_enable :  STD_LOGIC;
 SIGNAL	media_clock :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	MII_RX_CLK :  STD_LOGIC;
-SIGNAL	MII_RX_DV :  STD_LOGIC;
-SIGNAL	MII_RX_ERR :  STD_LOGIC;
-SIGNAL	MII_TX_CLK :  STD_LOGIC;
 SIGNAL	parse_ptp_packet :  STD_LOGIC;
 SIGNAL	parse_rtp_packet :  STD_LOGIC;
 SIGNAL	phy_reset :  STD_LOGIC;
-SIGNAL	PHY_RX_D :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	PHY_TX_D :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	pll_counter :  STD_LOGIC_VECTOR(21 DOWNTO 0);
 SIGNAL	pll_fs128 :  STD_LOGIC;
 SIGNAL	pll_fs256 :  STD_LOGIC;
@@ -628,6 +652,7 @@ SIGNAL	pll_fs512 :  STD_LOGIC;
 SIGNAL	pll_fs64 :  STD_LOGIC;
 SIGNAL	pll_meas_valid :  STD_LOGIC;
 SIGNAL	powerGood :  STD_LOGIC;
+SIGNAL	ppb_meter_start :  STD_LOGIC;
 SIGNAL	ptp_allow :  STD_LOGIC;
 SIGNAL	ptp_allow_req :  STD_LOGIC;
 SIGNAL	ptp_announce_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -641,7 +666,6 @@ SIGNAL	ptp_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	ptp_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	ptp_sync_lost :  STD_LOGIC;
 SIGNAL	ptp_time_source :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	rmii_crs :  STD_LOGIC;
 SIGNAL	rtp_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	rtp_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	rx_conf_wr_addr :  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -681,29 +705,17 @@ SIGNAL	SYNTHESIZED_WIRE_10 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_11 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_12 :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_13 :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_14 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_15 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_16 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_17 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_18 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_19 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_20 :  STD_LOGIC_VECTOR(1 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_14 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_15 :  STD_LOGIC;
 
-SIGNAL	GDFX_TEMP_SIGNAL_0 :  STD_LOGIC_VECTOR(1 DOWNTO 0);
 
 BEGIN 
-gpio20 <= SYNTHESIZED_WIRE_20(1);
-gpio19 <= SYNTHESIZED_WIRE_20(0);
-SYNTHESIZED_WIRE_18 <= '0';
-
-GDFX_TEMP_SIGNAL_0 <= (gpio22 & gpio21);
 
 
 
 b2v_inst1 : ethernet_reset
 PORT MAP(clk => clk_1kHz,
 		 power_good => powerGood,
-		 phy_rstn => phy_reset,
 		 mac_rst => mac_reset);
 
 
@@ -754,7 +766,7 @@ PORT MAP(clk => mac_rx_clock,
 
 b2v_inst12 : reverse_mac
 PORT MAP(mac_address_i => mac_address,
-		 mac_address_o => SYNTHESIZED_WIRE_15);
+		 mac_address_o => SYNTHESIZED_WIRE_14);
 
 
 b2v_inst13 : audio_tx_module
@@ -829,7 +841,7 @@ PORT MAP(tx_en3_i => mcu_tx_enable,
 		 data_o => mac_tx_data);
 
 
-SYNTHESIZED_WIRE_19 <= NOT(powerGood);
+SYNTHESIZED_WIRE_15 <= NOT(powerGood);
 
 
 
@@ -944,13 +956,38 @@ PORT MAP(clk_in => pll_fs64,
 		 clk_out => fs);
 
 
+b2v_inst3 : rgmii_phy_if
+GENERIC MAP(CLOCK_INPUT_STYLE => "BUFG",
+			IODDR_STYLE => "IODDR2",
+			TARGET => "ALTERA",
+			USE_CLK90 => TRUE
+			)
+PORT MAP(clk => enet_clk,
+		 clk90 => enet_clk_90,
+		 rst => enet_resetn,
+		 mac_gmii_tx_en => gmii_tx_en,
+		 mac_gmii_tx_er => gmii_tx_err,
+		 phy_rgmii_rx_clk => enet_rx_clk,
+		 phy_rgmii_rx_ctl => enet_rx_dv,
+		 mac_gmii_txd => gmii_txd,
+		 phy_rgmii_rxd => enet_rx_d,
+		 speed => const_eth_speed,
+		 mac_gmii_rx_clk => gmii_rx_clk,
+		 mac_gmii_rx_er => gmii_rx_err,
+		 mac_gmii_tx_clk => gmii_tx_clk,
+		 phy_rgmii_tx_clk => enet_tx_clk,
+		 phy_rgmii_tx_ctl => enet_tx_en,
+		 mac_gmii_rxd => gmii_rxd,
+		 phy_rgmii_txd => enet_tx_d);
+
+
 b2v_inst31 : clock_ppb_meter
 PORT MAP(sys_clk => clk_125MHz,
 		 reset_n => powerGood,
 		 wallclock_64fs_in => wc_64fs,
 		 pll_64fs_in => pll_fs64,
 		 wallclock_second_pulse_i => second_pulse_sys,
-		 start_i => SYNTHESIZED_WIRE_14,
+		 start_i => ppb_meter_start,
 		 valid_o => pll_meas_valid,
 		 count_pll_o => pll_counter,
 		 count_wc_o => wc_counter);
@@ -983,22 +1020,22 @@ GENERIC MAP(MIIM_CLOCK_DIVIDER => 50,
 			MIIM_POLL_WAIT_TICKS => 10000000,
 			MIIM_RESET_WAIT_TICKS => 0
 			)
-PORT MAP(clock_125_i => clk_125MHz,
+PORT MAP(clock_125_i => enet_clk,
 		 reset_i => mac_reset,
-		 mii_tx_clk_i => MII_TX_CLK,
-		 mii_rx_clk_i => MII_RX_CLK,
-		 mii_rx_er_i => MII_RX_ERR,
-		 mii_rx_dv_i => MII_RX_DV,
+		 mii_tx_clk_i => gmii_tx_clk,
+		 mii_rx_clk_i => gmii_rx_clk,
+		 mii_rx_er_i => gmii_rx_err,
+		 mii_rx_dv_i => gmii_rx_err,
 		 miim_clock_i => clk_125MHz,
 		 tx_enable_i => mac_tx_enable,
-		 mdio_io => gpio28,
-		 mac_address_i => SYNTHESIZED_WIRE_15,
-		 mii_rxd_i => PHY_RX_D,
+		 mdio_io => enet_mdio,
+		 mac_address_i => SYNTHESIZED_WIRE_14,
+		 mii_rxd_i => gmii_rxd,
 		 speed_override_i => const_eth_speed,
 		 tx_data_i => mac_tx_data,
-		 mii_tx_er_o => SYNTHESIZED_WIRE_17,
-		 mii_tx_en_o => SYNTHESIZED_WIRE_16,
-		 mdc_o => gpio27,
+		 mii_tx_er_o => gmii_tx_err,
+		 mii_tx_en_o => gmii_tx_en,
+		 mdc_o => enet_mdc,
 		 link_up_o => mac_linkup,
 		 tx_clock_o => mac_tx_clock,
 		 tx_reset_o => mac_tx_reset,
@@ -1010,27 +1047,9 @@ PORT MAP(clock_125_i => clk_125MHz,
 		 rx_byte_received_o => mac_rx_byte_received,
 		 rx_error_o => mac_rx_error,
 		 frame_o => eth_frame_o,
-		 mii_txd_o => PHY_TX_D,
+		 mii_txd_o => gmii_txd,
 		 rx_data_o => mac_rx_data,
 		 speed_o => mac_speed);
-
-
-b2v_inst43 : miirmii
-PORT MAP(RefClk => gpio23,
-		 m_tx_en => SYNTHESIZED_WIRE_16,
-		 m_tx_err => SYNTHESIZED_WIRE_17,
-		 Rstn => phy_reset,
-		 rmii_crs_dv => rmii_crs,
-		 rmii_rx_err => SYNTHESIZED_WIRE_18,
-		 m_tx_d => PHY_TX_D(3 DOWNTO 0),
-		 rmii_rx_d => GDFX_TEMP_SIGNAL_0,
-		 m_rx_en => MII_RX_DV,
-		 m_rx_err => MII_RX_ERR,
-		 rx_clk => MII_RX_CLK,
-		 tx_clk => MII_TX_CLK,
-		 rmii_tx_en => gpio18,
-		 m_rx_d => PHY_RX_D(3 DOWNTO 0),
-		 rmii_tx_d => SYNTHESIZED_WIRE_20);
 
 
 b2v_inst5 : clk_by_x
@@ -1068,7 +1087,7 @@ GENERIC MAP(RX_ADDR_WIDTH => 11,
 			TX_ADDR_WIDTH => 11
 			)
 PORT MAP(clk_sys_i => clk_250MHz,
-		 rst_sys_i => SYNTHESIZED_WIRE_19,
+		 rst_sys_i => SYNTHESIZED_WIRE_15,
 		 fmc_ne_n_i => fmc_ne,
 		 fmc_noe_n_i => fmc_noe,
 		 fmc_nwe_n_i => fmc_nwe,
@@ -1101,7 +1120,7 @@ PORT MAP(clk_sys_i => clk_250MHz,
 		 mac_tx_enable_o => mcu_tx_enable,
 		 system_config_wr_en => sys_conf_wr_en,
 		 system_config_done_o => sys_conf_wr_done,
-		 pll_ppb_measurement_start_o => SYNTHESIZED_WIRE_14,
+		 pll_ppb_measurement_start_o => ppb_meter_start,
 		 ptp_is_leader_o => ptp_is_leader,
 		 ptp_is_follower_o => ptp_is_follower,
 		 tx_stream_config_wr_en_o => tx_wr_en,
@@ -1118,6 +1137,12 @@ PORT MAP(clk_sys_i => clk_250MHz,
 		 tx_stream_config_wr_data_o => tx_wr_data);
 
 
+b2v_inst9 : ethernet_clks
+PORT MAP(inclk0 => enet_clk_125m,
+		 c0 => enet_clk,
+		 c1 => enet_clk_90);
+
+
 b2v_inst_i2s_in_1 : i2s_in
 GENERIC MAP(fifo_addrbits => 3,
 			width => 24
@@ -1132,10 +1157,8 @@ PORT MAP(LR_CLK => fs,
 
 pll_fs512 <= gpio34;
 arduino_io5 <= pll_fs512;
-arduino_io(0) <= i2s_o1;
 powerGood <= c10_resetn;
 clk50m <= c10_clk50m;
-rmii_crs <= gpio24;
 fmc_ne <= gpio0;
 fmc_noe <= gpio1;
 fmc_nwe <= gpio2;
@@ -1148,6 +1171,7 @@ gpio13 <= fmc_data(3);
 gpio12 <= fmc_data(2);
 gpio11 <= fmc_data(1);
 gpio10 <= fmc_data(0);
+arduino_io(0) <= i2s_o1;
 gpio33 <= pll_fs64;
 gpio32 <= fs;
 gpio30 <= fmc_int_o;

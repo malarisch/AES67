@@ -4,3 +4,6 @@
 [submodule "FPGA/mii_rmii"]
 	path = FPGA/mii_rmii
 	url = https://github.com/WangXuan95/FPGA-RMII-SMII.git
+[submodule "verilog-ethernet-mod"]
+	path = verilog-ethernet-mod
+	url = https://github.com/malarisch/verilog-ethernet

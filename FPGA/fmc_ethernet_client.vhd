@@ -146,21 +146,18 @@ architecture rtl of fmc_ethernet_client is
   signal fmc_rx_bytes_sent   : unsigned(15 downto 0) := (others => '0');
 
   -- MAC TX
-  signal mac_tx_active   : std_ulogic := '0';
   signal tx_start_sync_1 : std_ulogic := '0';
   signal tx_start_sync_2 : std_ulogic := '0';
   signal tx_start_pulse  : std_ulogic := '0';
-  signal tx_prefetch_valid : std_ulogic := '0';
-  signal tx_byte_sent_count : unsigned(15 downto 0) := (others => '0');
+  signal tx_bytes_remaining : unsigned(15 downto 0) := (others => '0');
   signal tx_clear_toggle_mac : std_ulogic := '0';
   signal tx_clear_sync_sys_1 : std_ulogic := '0';
   signal tx_clear_sync_sys_2 : std_ulogic := '0';
   signal tx_clear_sys_pulse  : std_ulogic := '0';
   signal tx_clear_mac_d      : std_ulogic := '0';
   signal tx_clear_mac_pulse  : std_ulogic := '0';
-  signal mac_tx_preamble_bytes_sent : unsigned(3 downto 0) := (others => '0');
 
-  type t_tx_SM is (s_Idle, s_waitForAllow, s_PrimeTx, s_Transmit, s_End);
+  type t_tx_SM is (s_Idle, s_waitForAllow, s_PrimeTx, s_PrimeTx2, s_Transmit, s_End);
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
 
   -- RX bookkeeping
@@ -899,83 +896,59 @@ begin
   begin
     if mac_tx_reset_i = '1' then
       tx_clear_toggle_mac <= '0';
-      mac_tx_active   <= '0';
       mac_tx_enable_o <= '0';
       mac_tx_data_o   <= (others => '0');
       txfifo_rd_en    <= '0';
-      tx_prefetch_valid <= '0';
-      mac_tx_preamble_bytes_sent <= (others => '0');
-      tx_byte_sent_count <= (others => '0');
+      tx_bytes_remaining <= (others => '0');
     elsif rising_edge(mac_tx_clock_i) then
       txfifo_rd_en <= '0';
       case sm_tx_ethernet is
         when s_Idle =>
           mac_tx_data_o   <= (others => '0');
           mac_tx_enable_o <= '0';
-          tx_allow_req_o <= '0';
-          if (tx_start_pulse = '1') and (mac_tx_active = '0') then
-            if txfifo_rd_empty = '0' then
-              sm_tx_ethernet <= s_waitForAllow;
-              tx_allow_req_o <= '1';
-            end if;
+          tx_allow_req_o  <= '0';
+          if tx_start_pulse = '1' then
+            sm_tx_ethernet <= s_waitForAllow;
+            tx_allow_req_o <= '1';
           end if;
+
         when s_waitForAllow =>
           if tx_allow_i = '1' then
-            if txfifo_rd_empty = '0' then
-              sm_tx_ethernet <= s_PrimeTx;
-              mac_tx_data_o <= txfifo_rd_data;
-              mac_tx_enable_o <= '1';
-              tx_prefetch_valid <= '1';
-            else
-              -- FIFO empty (e.g. after reset glitch) — abort back to idle
-              sm_tx_ethernet <= s_Idle;
-              tx_allow_req_o <= '0';
-            end if;
-          end if;
-        when s_PrimeTx =>
-          
-          mac_tx_preamble_bytes_sent <= mac_tx_preamble_bytes_sent + 1;
-          mac_tx_active <= '1';
-          tx_prefetch_valid <= '1';
-          if (mac_tx_preamble_bytes_sent = 12) then
+            sm_tx_ethernet <= s_PrimeTx;
             txfifo_rd_en <= '1';
           end if;
-          if mac_tx_preamble_bytes_sent = 14 then
-            if txfifo_rd_en = '0' then
-              sm_tx_ethernet <= s_Transmit;
-              txfifo_rd_en <= '1';
-              mac_tx_preamble_bytes_sent <= (others => '0');
-            end if;
-          end if;
+        when s_PrimeTx =>
+            txfifo_rd_en <= '1';
+            sm_tx_ethernet <= s_PrimeTx2;
+        when s_PrimeTx2 =>
+          -- FIFO shows Byte 0 on rd_data already (registered show-ahead).
+          -- Latch it, pulse rd_en to advance to Byte 1, then go.
+          -- Preamble gives us plenty of time before first byte_sent.
           mac_tx_data_o <= txfifo_rd_data;
-          
+          txfifo_rd_en <= '1';
+
+          tx_bytes_remaining <= reg_tx_len - 1;
+          sm_tx_ethernet <= s_Transmit;
+        
         when s_Transmit =>
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
-            if tx_prefetch_valid = '1' then
-              mac_tx_data_o <= txfifo_rd_data;
-              tx_byte_sent_count <= tx_byte_sent_count + 1;
-            end if;
-            if txfifo_rd_empty = '0' then
-              txfifo_rd_en <= '1';
-              tx_prefetch_valid <= '0';
+            if tx_bytes_remaining = 0 then
+              sm_tx_ethernet <= s_End;
             else
-              if (tx_byte_sent_count + 1) >= reg_tx_len then
-                sm_tx_ethernet <= s_End;
+              mac_tx_data_o <= txfifo_rd_data;
+              tx_bytes_remaining <= tx_bytes_remaining - 1;
+              if tx_bytes_remaining > 1 then
+                txfifo_rd_en <= '1';
               end if;
             end if;
-          end if;
-          if txfifo_rd_en = '1' then
-            tx_prefetch_valid <= '1';
           end if;
 
         when s_End =>
           mac_tx_enable_o <= '0';
           mac_tx_data_o   <= (others => '0');
-          mac_tx_active   <= '0';
+          tx_allow_req_o  <= '0';
           sm_tx_ethernet  <= s_Idle;
-          tx_prefetch_valid <= '0';
-          tx_byte_sent_count <= (others => '0');
           tx_clear_toggle_mac <= not tx_clear_toggle_mac;
       end case;
     end if;
