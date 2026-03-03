@@ -94,7 +94,6 @@ end entity;
 architecture rtl of fmc_ethernet_client is
 
   signal reg_tx_len      : unsigned(15 downto 0) := (others => '0');
-  signal reg_tx_start    : std_ulogic := '0';
   signal reg_tx_start_toggle : std_ulogic := '0'; -- Toggle for CDC
 
   signal reg_rx_len      : unsigned(15 downto 0) := (others => '0');
@@ -125,16 +124,18 @@ architecture rtl of fmc_ethernet_client is
 
   signal reg_tx_len_reset : std_ulogic := '0';
 
-  -- TX busy flag: set when tx_start_toggle is issued, cleared by tx_clear_sys_pulse
+  -- TX busy flag: set when tx_start_toggle is issued, cleared by tx_done_sys_pulse
   signal tx_busy_sys : std_ulogic := '0';
 
-  -- TX FIFO
-  signal txfifo_wr_en    : std_ulogic := '0';
-  signal txfifo_wr_data  : std_ulogic_vector(7 downto 0) := (others => '0');
-  signal txfifo_wr_full  : std_ulogic;
-  signal txfifo_rd_en    : std_ulogic := '0';
-  signal txfifo_rd_data  : std_ulogic_vector(7 downto 0);
-  signal txfifo_rd_empty : std_ulogic;
+  -- TX packet RAM (dual-port: clk_sys writes, mac_tx_clock reads)
+  type t_tx_packet_ram is array (0 to 2**TX_ADDR_WIDTH - 1) of std_ulogic_vector(7 downto 0);
+  signal tx_packet_ram : t_tx_packet_ram := (others => (others => '0'));
+  attribute ram_style : string;
+  attribute ram_style of tx_packet_ram : signal is "block";
+
+  signal tx_wr_addr   : unsigned(TX_ADDR_WIDTH-1 downto 0) := (others => '0');
+  signal tx_rd_addr   : integer range 0 to 2**TX_ADDR_WIDTH - 1 := 0;
+  signal tx_rd_data   : std_ulogic_vector(7 downto 0) := (others => '0');
 
   -- RX FIFO
   signal rxfifo_wr_en    : std_ulogic := '0';
@@ -150,14 +151,14 @@ architecture rtl of fmc_ethernet_client is
   signal tx_start_sync_2 : std_ulogic := '0';
   signal tx_start_pulse  : std_ulogic := '0';
   signal tx_bytes_remaining : unsigned(15 downto 0) := (others => '0');
-  signal tx_clear_toggle_mac : std_ulogic := '0';
-  signal tx_clear_sync_sys_1 : std_ulogic := '0';
-  signal tx_clear_sync_sys_2 : std_ulogic := '0';
-  signal tx_clear_sys_pulse  : std_ulogic := '0';
-  signal tx_clear_mac_d      : std_ulogic := '0';
-  signal tx_clear_mac_pulse  : std_ulogic := '0';
 
-  type t_tx_SM is (s_Idle, s_waitForAllow, s_PrimeTx, s_PrimeTx2, s_Transmit, s_End);
+  -- TX done toggle CDC (mac_tx → clk_sys)
+  signal tx_done_toggle_mac  : std_ulogic := '0';
+  signal tx_done_sync_sys_1  : std_ulogic := '0';
+  signal tx_done_sync_sys_2  : std_ulogic := '0';
+  signal tx_done_sys_pulse   : std_ulogic := '0';
+
+  type t_tx_SM is (s_Idle, s_waitForAllow, s_PrimeTx, s_Transmit, s_End);
   signal sm_tx_ethernet : t_tx_SM := s_Idle;
 
   -- RX bookkeeping
@@ -277,26 +278,14 @@ begin
   fmc_ne_qual_low <= '1' when (fmc_ne_n_i = '0') or (fmc_ne_n_sync = '0') or (fmc_ne_n_sync_d = '0') else '0';
 
   --------------------------------------------------------------------
-  -- TX-FIFO
+  -- TX packet RAM Port B: MAC TX clock reads
   --------------------------------------------------------------------
-  tx_fifo_inst : entity work.async_fifo
-    generic map (
-      DATA_WIDTH => 8,
-      ADDR_WIDTH => TX_ADDR_WIDTH
-    )
-    port map (
-      wr_clk_i   => clk_sys_i,
-      wr_rst_i   => rst_sys_i or tx_clear_sys_pulse,
-      wr_en_i    => txfifo_wr_en,
-      wr_data_i  => txfifo_wr_data,
-      wr_full_o  => txfifo_wr_full,
-
-      rd_clk_i   => mac_tx_clock_i,
-      rd_rst_i   => mac_tx_reset_i or tx_clear_mac_pulse,
-      rd_en_i    => txfifo_rd_en,
-      rd_data_o  => txfifo_rd_data,
-      rd_empty_o => txfifo_rd_empty
-    );
+  tx_ram_rd : process(mac_tx_clock_i)
+  begin
+    if falling_edge(mac_tx_clock_i) then
+      tx_rd_data <= tx_packet_ram(tx_rd_addr);
+    end if;
+  end process tx_ram_rd;
 
   --------------------------------------------------------------------
   -- RX-FIFO
@@ -365,9 +354,9 @@ begin
         end if;
       end if;
 
-      tx_clear_sync_sys_1 <= tx_clear_toggle_mac;
-      tx_clear_sync_sys_2 <= tx_clear_sync_sys_1;
-      tx_clear_sys_pulse  <= tx_clear_sync_sys_1 xor tx_clear_sync_sys_2;
+      tx_done_sync_sys_1 <= tx_done_toggle_mac;
+      tx_done_sync_sys_2 <= tx_done_sync_sys_1;
+      tx_done_sys_pulse  <= tx_done_sync_sys_1 xor tx_done_sync_sys_2;
     end if;
   end process;
 
@@ -632,13 +621,12 @@ begin
     variable v_rd_byte : unsigned(1 downto 0);
   begin
     if rst_sys_i = '1' then
-      txfifo_wr_en    <= '0';
       rxfifo_rd_en    <= '0';
       reg_tx_len      <= (others => '0');
-      reg_tx_start    <= '0';
       reg_tx_start_toggle <= '0';
       reg_tx_len_reset <= '0';
       tx_busy_sys     <= '0';
+      tx_wr_addr      <= (others => '0');
       rx_clear_req_sys   <= '0';
       fmc_rx_bytes_sent <= (others => '0');
       fmc_data_out    <= (others => '0');
@@ -667,14 +655,13 @@ begin
       system_config_wr_en <= '0';
       tx_stream_config_wr_en_o <= '0';
       rx_stream_cfg_wr_en <= '0';
-      txfifo_wr_en <= '0';
       rxfifo_rd_en <= '0';
       fmc_data_out <= fmc_read_data_lat;
       fmc_data_oe  <= '0';
 
 
       -- TX busy: cleared when MAC side signals completion via toggle CDC
-      if tx_clear_sys_pulse = '1' then
+      if tx_done_sys_pulse = '1' then
         tx_busy_sys <= '0';
       end if;
 
@@ -701,20 +688,17 @@ begin
           when "0000000" =>  -- 0x00 TX_LEN low
             reg_tx_len(7 downto 0) <= unsigned(wr_cap_data);
             reg_tx_len_reset <= '1';
-
+            tx_wr_addr <= (others => '0');  -- reset write pointer on new frame
             register_byte_count <= (others => '0');
           when "0000001" =>  -- 0x01 TX_LEN high
             reg_tx_len(15 downto 8) <= unsigned(wr_cap_data);
             reg_tx_len_reset <= '1';
-
             register_byte_count <= (others => '0');
           when "0000010" =>  -- 0x02 TX_CTRL
-            if wr_cap_data(0) = '1' and reg_tx_start = '0' then
+            if wr_cap_data(0) = '1' then
               reg_tx_start_toggle <= not reg_tx_start_toggle;
               tx_busy_sys <= '1';
             end if;
-            reg_tx_start <= wr_cap_data(0);
-
             register_byte_count <= (others => '0');
           when "0100010" =>  -- 0x22 RX_STATUS clear
             if wr_cap_data(0) = '1' then
@@ -818,11 +802,10 @@ begin
                 rx_stream_cfg_byte_count <= rx_stream_cfg_byte_count + 1;
               end if;
           when others =>
+            -- TX packet data write (0x10..0x1F)
             if wr_cap_addr >= 16#10# and wr_cap_addr < 16#20# then
-              if txfifo_wr_full = '0' then
-                txfifo_wr_data <= wr_cap_data;
-                txfifo_wr_en   <= '1';
-              end if;
+              tx_packet_ram(to_integer(tx_wr_addr)) <= wr_cap_data;
+              tx_wr_addr <= tx_wr_addr + 1;
             end if;
         end case;
       end if;
@@ -890,18 +873,18 @@ begin
   end process;
 
   --------------------------------------------------------------------
-  -- TX MAC state machine (derived from spi_ethernet_client)
+  -- TX MAC state machine (uses packet_ram instead of FIFO)
   --------------------------------------------------------------------
   process(mac_tx_clock_i, mac_tx_reset_i)
   begin
     if mac_tx_reset_i = '1' then
-      tx_clear_toggle_mac <= '0';
-      mac_tx_enable_o <= '0';
-      mac_tx_data_o   <= (others => '0');
-      txfifo_rd_en    <= '0';
+      tx_done_toggle_mac <= '0';
+      mac_tx_enable_o    <= '0';
+      mac_tx_data_o      <= (others => '0');
       tx_bytes_remaining <= (others => '0');
+      tx_rd_addr         <= 0;
+      sm_tx_ethernet     <= s_Idle;
     elsif rising_edge(mac_tx_clock_i) then
-      txfifo_rd_en <= '0';
       case sm_tx_ethernet is
         when s_Idle =>
           mac_tx_data_o   <= (others => '0');
@@ -914,57 +897,38 @@ begin
 
         when s_waitForAllow =>
           if tx_allow_i = '1' then
-            sm_tx_ethernet <= s_PrimeTx;
-            txfifo_rd_en <= '1';
+            -- Setup read of first byte: address 0, wait one cycle for RAM latency
+            tx_rd_addr         <= 0;
+            tx_bytes_remaining <= reg_tx_len;
+            sm_tx_ethernet     <= s_PrimeTx;
           end if;
-        when s_PrimeTx =>
-            txfifo_rd_en <= '1';
-            sm_tx_ethernet <= s_PrimeTx2;
-        when s_PrimeTx2 =>
-          -- FIFO shows Byte 0 on rd_data already (registered show-ahead).
-          -- Latch it, pulse rd_en to advance to Byte 1, then go.
-          -- Preamble gives us plenty of time before first byte_sent.
-          mac_tx_data_o <= txfifo_rd_data;
-          txfifo_rd_en <= '1';
 
-          tx_bytes_remaining <= reg_tx_len - 1;
+        when s_PrimeTx =>
+          -- 1-cycle wait for RAM read latency, then latch first byte
+          mac_tx_data_o  <= tx_rd_data;
+          tx_rd_addr     <= 1;  -- prepare next byte
           sm_tx_ethernet <= s_Transmit;
-        
+
         when s_Transmit =>
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
-            if tx_bytes_remaining = 0 then
+            tx_bytes_remaining <= tx_bytes_remaining - 1;
+            if tx_bytes_remaining = 1 then
               sm_tx_ethernet <= s_End;
             else
-              mac_tx_data_o <= txfifo_rd_data;
-              tx_bytes_remaining <= tx_bytes_remaining - 1;
-              if tx_bytes_remaining > 1 then
-                txfifo_rd_en <= '1';
-              end if;
+              -- Load next byte from RAM (already available due to previous cycle's addr)
+              mac_tx_data_o <= tx_rd_data;
+              tx_rd_addr    <= tx_rd_addr + 1;
             end if;
           end if;
 
         when s_End =>
-          mac_tx_enable_o <= '0';
-          mac_tx_data_o   <= (others => '0');
-          tx_allow_req_o  <= '0';
-          sm_tx_ethernet  <= s_Idle;
-          tx_clear_toggle_mac <= not tx_clear_toggle_mac;
+          mac_tx_enable_o    <= '0';
+          mac_tx_data_o      <= (others => '0');
+          tx_allow_req_o     <= '0';
+          sm_tx_ethernet     <= s_Idle;
+          tx_done_toggle_mac <= not tx_done_toggle_mac;
       end case;
-    end if;
-  end process;
-
-  --------------------------------------------------------------------
-  -- TX FIFO clear sync
-  --------------------------------------------------------------------
-  process(mac_tx_clock_i, mac_tx_reset_i)
-  begin
-    if mac_tx_reset_i = '1' then
-      tx_clear_mac_d     <= '0';
-      tx_clear_mac_pulse <= '0';
-    elsif rising_edge(mac_tx_clock_i) then
-      tx_clear_mac_pulse <= tx_clear_toggle_mac xor tx_clear_mac_d;
-      tx_clear_mac_d     <= tx_clear_toggle_mac;
     end if;
   end process;
 
