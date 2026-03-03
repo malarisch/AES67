@@ -15,7 +15,7 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Tue Mar  3 20:48:08 2026"
+-- CREATED		"Tue Mar  3 23:38:31 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
@@ -973,6 +973,7 @@ PORT MAP(clk => enet_clk,
 		 phy_rgmii_rxd => enet_rx_d,
 		 speed => const_eth_speed,
 		 mac_gmii_rx_clk => gmii_rx_clk,
+		 mac_gmii_rx_dv => gmii_rx_dv,
 		 mac_gmii_rx_er => gmii_rx_err,
 		 mac_gmii_tx_clk => gmii_tx_clk,
 		 phy_rgmii_tx_clk => enet_tx_clk,
@@ -1025,8 +1026,8 @@ PORT MAP(clock_125_i => enet_clk,
 		 mii_tx_clk_i => gmii_tx_clk,
 		 mii_rx_clk_i => gmii_rx_clk,
 		 mii_rx_er_i => gmii_rx_err,
-		 mii_rx_dv_i => gmii_rx_err,
-		 miim_clock_i => clk_125MHz,
+		 mii_rx_dv_i => gmii_rx_dv,
+		 miim_clock_i => enet_clk,
 		 tx_enable_i => mac_tx_enable,
 		 mdio_io => enet_mdio,
 		 mac_address_i => SYNTHESIZED_WIRE_14,

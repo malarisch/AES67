@@ -29,9 +29,12 @@ create_clock -name {audio_mclk} -period 40.690 -waveform { 0.000 20.345 } [get_p
 create_clock -period 8.000  -name {enet_clk_125m} [get_ports {enet_clk_125m}]
 set_clock_groups -asynchronous -group [get_clocks {enet_clk_125m}]
 
-set_output_delay  -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdc}]
-set_input_delay   -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdio}]
-set_output_delay  -clock [get_clocks c10_clk50m] 2   [get_ports {enet_mdio}]
+# MIIM (MDC/MDIO) is a slow async management interface (~2.5 MHz max).
+# The MIIM logic runs internally with clock dividers. False path these
+# as they are not timing critical and have no synchronous relationship.
+set_false_path -from * -to [get_ports {enet_mdc}]
+set_false_path -from * -to [get_ports {enet_mdio}]
+set_false_path -from [get_ports {enet_mdio}] -to *
 
 set_false_path -from [get_ports enet_intn] -to *
 set_false_path -from * -to [get_ports enet_resetn]

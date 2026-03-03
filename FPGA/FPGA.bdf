@@ -4011,11 +4011,6 @@ on the Quartus Prime software download page.
 	(pt 3448 616)
 )
 (connector
-	(text "clk_125MHz" (rect 3018 488 3081 499)(font "Arial" ))
-	(pt 3096 504)
-	(pt 3176 504)
-)
-(connector
 	(pt 2904 368)
 	(pt 2904 376)
 )
@@ -5442,6 +5437,11 @@ on the Quartus Prime software download page.
 	(text "gmii_rx_dv" (rect 3087 440 3140 453)(font "Intel Clear" ))
 	(pt 3024 456)
 	(pt 3176 456)
+)
+(connector
+	(text "enet_clk" (rect 3018 488 3064 499)(font "Arial" ))
+	(pt 3096 504)
+	(pt 3176 504)
 )
 (junction (pt 4288 504))
 (junction (pt 3776 568))
