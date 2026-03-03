@@ -359,6 +359,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio33
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio[33]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[35]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[34]
+set_global_assignment -name VERILOG_FILE mii_rmii/RTL/rmii_phy_if.v
 set_global_assignment -name VHDL_FILE ptp/ptpv2_parser_no_min_filter.vhd
 set_global_assignment -name VHDL_FILE ptp/ptpv2_sender.vhd
 set_global_assignment -name VHDL_FILE ptp/ptpv2_parser.vhd
@@ -384,7 +385,6 @@ set_global_assignment -name VHDL_FILE ethernet_packet_aggregator.vhd
 set_global_assignment -name BSF_FILE pll_systemclocks.bsf
 set_global_assignment -name BSF_FILE i2s_in.bsf
 set_global_assignment -name VHDL_FILE I2S_IN.vhd
-set_global_assignment -name BSF_FILE miirmii/miirmii.bsf
 set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/eth_ram.vhd
 set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_brom.vhd
 set_global_assignment -name VHDL_FILE FPGA_Ethernet/FPGA/ddfs_amplitude.vhd

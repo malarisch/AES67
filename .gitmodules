@@ -1,3 +1,6 @@
 [submodule "FPGA/FPGA_Ethernet"]
 	path = FPGA/FPGA_Ethernet
 	url = https://github.com/malarisch/FPGA_Ethernet
+[submodule "FPGA/mii_rmii"]
+	path = FPGA/mii_rmii
+	url = https://github.com/WangXuan95/FPGA-RMII-SMII.git
