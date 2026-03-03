@@ -7,7 +7,8 @@ entity tx_router is
     (
         samples_per_channel_depth : integer := 48; -- number of samples per channel to buffer
         global_channel_count : integer := 16; -- number of channels to buffer
-        bytes_per_sample : integer := 3 -- number of bytes per sample (e.g., 3 for 24-bit audio)
+        bytes_per_sample : integer := 3; -- number of bytes per sample (e.g., 3 for 24-bit audio)
+		  max_streams : integer := 8
     );
     port
     (
@@ -33,7 +34,7 @@ entity tx_router is
         config_wr_data_i                : in std_logic_vector(7 downto 0);
         config_wr_en_i                  : in std_logic;
 
-        streams_configured_i            : in std_logic_vector(7 downto 0); -- number of configured streams (unsigned)
+
 
         sample_ready_i                  : in std_logic; -- comes from sys clk domain
 
@@ -200,9 +201,8 @@ begin
 
             -- Rising edge of sample_ready
             if sample_ready_i = '1' and sample_ready_sync = '0' then
-                num_streams := to_integer(unsigned(streams_configured_i));
                 for i in 0 to 7 loop
-                    if i < num_streams then
+                    if i < max_streams then
                         -- Use pre-computed threshold (spp-1) to reduce critical path
                         -- The subtraction was done at config time, not here
                         spp := unsigned(samples_per_packet_sync(i));

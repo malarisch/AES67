@@ -25,7 +25,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity ptpv2_servo is
+entity ptpv2_servo_with_median is
     generic(
         -- PI controller gains (normalized to 1 Hz sync rate)
         -- Actual gains are scaled by 2^log_msg_interval for faster rates
@@ -76,7 +76,7 @@ entity ptpv2_servo is
     );
 end entity;
 
-architecture Behavioral of ptpv2_servo is
+architecture Behavioral of ptpv2_servo_with_median is
 
     -- Filtered offset - 25 bits handles offsets up to PHASE_JUMP_THRESHOLD (10M < 16M)
     signal filtered_offset : signed(24 downto 0) := (others => '0');

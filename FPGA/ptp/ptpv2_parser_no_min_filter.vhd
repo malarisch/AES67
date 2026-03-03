@@ -1,7 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
-entity ptpv2_parser is
+entity ptpv2_parser_no_min is
     port(
         clk                 : in std_logic;
         ram_data            : in std_logic_vector(7 downto 0);
@@ -47,7 +47,7 @@ entity ptpv2_parser is
     );
 end entity;
 
-architecture Behavioral of ptpv2_parser is
+architecture Behavioral of ptpv2_parser_no_min is
 
     -- EUI-64 Clock Identity from MAC address (IEEE 1588)
     -- Format: MAC[47:24] with bit 1 flipped (U/L bit) | 0xFFFE | MAC[23:0] | PortNumber(0x0001)

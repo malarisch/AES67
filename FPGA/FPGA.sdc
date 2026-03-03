@@ -98,24 +98,24 @@ set_clock_groups -asynchronous \
 # Set False Path
 #**************************************************************
 
-# CDC synchronizers in PTP logic
-set_false_path -from [get_registers {*ptpv2_sender*tx_en*}] -to [get_registers {*ptpv2_controller*tx_en_i_meta*}]
-set_false_path -to [get_registers {*ptpv2_parser*parse_ptp_packet_meta*}]
+# CDC synchronizers in PTP logic (inside ptp_module inst24)
+set_false_path -from [get_registers {*inst24|inst35|tx_enable}] -to [get_registers {*inst24|inst34|tx_en_i_meta}]
+set_false_path -to [get_registers {*inst24|inst14|parse_ptp_packet_meta}]
 
 # PTP is_leader and is_follower signals cross from fmc_clk_250m to sys_clk_125m domain
 # These are slow-changing configuration signals - false path to all PTP modules
-set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_leader_o}] -to [get_registers {ptpv2_controller:*|*}]
-set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_leader_o}] -to [get_registers {ptpv2_parser:*|*}]
-set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_follower_o}] -to [get_registers {ptpv2_controller:*|*}]
-set_false_path -from [get_registers {fmc_ethernet_client:*|ptp_is_follower_o}] -to [get_registers {ptpv2_parser:*|*}]
+set_false_path -from [get_registers {*fmc_ethernet_client*|ptp_is_leader_o}] -to [get_registers {*inst24|inst34|*}]
+set_false_path -from [get_registers {*fmc_ethernet_client*|ptp_is_leader_o}] -to [get_registers {*inst24|inst14|*}]
+set_false_path -from [get_registers {*fmc_ethernet_client*|ptp_is_follower_o}] -to [get_registers {*inst24|inst34|*}]
+set_false_path -from [get_registers {*fmc_ethernet_client*|ptp_is_follower_o}] -to [get_registers {*inst24|inst14|*}]
 
-# tx_router shadow register CDC (config_wr_clk -> sys_clk)
+# tx_router shadow register CDC (config_wr_clk -> sys_clk) - inside audio_tx_module inst13
 # These are slow-changing config values updated only during stream setup
-set_false_path -from [get_registers {tx_router:*|samples_per_packet_shadow[*][*]}] -to [get_registers {tx_router:*|samples_per_packet_sync[*][*]}]
-set_false_path -from [get_registers {tx_router:*|threshold_shadow[*][*]}] -to [get_registers {tx_router:*|threshold_sync[*][*]}]
+set_false_path -from [get_registers {*inst13|inst37|samples_per_packet_shadow[*][*]}] -to [get_registers {*inst13|inst37|samples_per_packet_sync[*][*]}]
+set_false_path -from [get_registers {*inst13|inst37|threshold_shadow[*][*]}] -to [get_registers {*inst13|inst37|threshold_sync[*][*]}]
 
 # tx_router tx_en CDC (tx_transmitter domain -> sys_clk)
-set_false_path -to [get_registers {tx_router:*|tx_en_meta}]
+set_false_path -to [get_registers {*inst13|inst37|tx_en_meta}]
 
 
 #**************************************************************
