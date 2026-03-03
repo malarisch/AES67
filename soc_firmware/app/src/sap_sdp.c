@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "sap_sdp.h"
+#include "ieee1588_utils.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 
 LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_INF);
@@ -67,22 +68,6 @@ static struct sap_foreign_stream foreign_streams[SAP_MAX_FOREIGN_STREAMS];
 
 /* ---- SAP message ID (hash of originating source) ---- */
 static uint16_t sap_msg_id_hash;
-
-/* ================================================================
- * Helper: Build EUI-64 clock identity from 48-bit MAC address
- * (same logic as ptp_bmc.c)
- * ================================================================ */
-static void mac_to_clock_identity(const uint8_t mac[6], uint8_t clock_id[8])
-{
-	clock_id[0] = mac[0] ^ 0x02;
-	clock_id[1] = mac[1];
-	clock_id[2] = mac[2];
-	clock_id[3] = 0xFF;
-	clock_id[4] = 0xFE;
-	clock_id[5] = mac[3];
-	clock_id[6] = mac[4];
-	clock_id[7] = mac[5];
-}
 
 /* ================================================================
  * Helper: Format clock identity as PTP=IEEE1588-2008 string

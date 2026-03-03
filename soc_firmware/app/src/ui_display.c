@@ -1,4 +1,5 @@
 #include "ui_display.h"
+#include "ieee1588_utils.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -57,20 +58,6 @@ static struct k_thread ui_display_thread_data;
 static void ui_display_request_refresh(void)
 {
 	k_sem_give(&ui_display_refresh_sem);
-}
-
-static const char *eth_speed_to_text(uint8_t speed_code)
-{
-	switch (speed_code) {
-	case 0:
-		return "10M";
-	case 1:
-		return "100M";
-	case 2:
-		return "1G";
-	default:
-		return "?";
-	}
 }
 
 static const uint8_t *ui_tiny_glyph(char c)

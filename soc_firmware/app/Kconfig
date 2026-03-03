@@ -1,6 +1,18 @@
 
 rsource "drivers/Kconfig"
 
+menu "SD Card Configuration Storage"
+
+config SD_CONFIG
+	bool "Enable SD card configuration storage"
+	default y
+	depends on FILE_SYSTEM && FAT_FILESYSTEM_ELM && DISK_ACCESS
+	help
+	  Store device configuration and stream settings on SD card as JSON.
+	  The config file is loaded at boot and saved when changes are made.
+
+endmenu
+
 menu "Zephyr"
 source "Kconfig.zephyr"
 endmenu

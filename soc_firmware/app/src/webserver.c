@@ -23,9 +23,14 @@
 
 #include "webserver.h"
 #include "aes67_config.h"
+#include "ieee1588_utils.h"
 #include "ptp_bmc.h"
 #include "sap_sdp.h"
 #include "ui_display.h"
+#ifdef CONFIG_SD_CONFIG
+#include "sd_config.h"
+#endif
+#include <zephyr/sys/reboot.h>
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
@@ -284,11 +289,7 @@ static int build_status_network(char *buf, size_t sz)
 	struct ui_fpga_metrics m = {0};
 
 	if (read_fpga_status(&m) == 0) {
-		const char *speed =
-			(m.speed_code == 0) ? "10M" :
-			(m.speed_code == 1) ? "100M" :
-			(m.speed_code == 2) ? "1G" : "unknown";
-		p = json_add_str(buf, sz, p, "phy_speed", speed);
+		p = json_add_str(buf, sz, p, "phy_speed", eth_speed_to_text(m.speed_code));
 		p = json_add_bool(buf, sz, p, "phy_link_up", m.link_up);
 	}
 
@@ -386,11 +387,7 @@ static int build_status_fpga(char *buf, size_t sz)
 				  m.leader_offset_ns);
 		p = json_add_int(buf, sz, p, "ppb_offset", m.ppb_offset);
 
-		const char *speed =
-			(m.speed_code == 0) ? "10M" :
-			(m.speed_code == 1) ? "100M" :
-			(m.speed_code == 2) ? "1G" : "unknown";
-		p = json_add_str(buf, sz, p, "phy_speed", speed);
+		p = json_add_str(buf, sz, p, "phy_speed", eth_speed_to_text(m.speed_code));
 	} else {
 		p = json_add_str(buf, sz, p, "error",
 				  "FPGA not available");
@@ -1266,6 +1263,21 @@ static int api_handler(struct http_client_ctx *client,
 				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
 			}
 #endif
+		} else if (strcmp(url, "/api/system") == 0) {
+			/* GET /api/system - returns system status including SD */
+			int p = json_start_object(json_buf, JSON_BUF_SIZE);
+#ifdef CONFIG_SD_CONFIG
+			p = json_add_bool(json_buf, JSON_BUF_SIZE, p, "sd_mounted",
+					   sd_config_is_ready());
+			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "sd_config_status",
+					  sd_config_status_str(sd_config_get_load_status()));
+#else
+			p = json_add_bool(json_buf, JSON_BUF_SIZE, p, "sd_mounted", false);
+			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "sd_config_status", "disabled");
+#endif
+			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "version", "1.0.0");
+			p = json_end_object(json_buf, JSON_BUF_SIZE, p);
+			json_len = p;
 		} else {
 			/* 404 */
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
@@ -1293,18 +1305,27 @@ static int api_handler(struct http_client_ctx *client,
 			if (ret == 0) {
 				json_len = build_config_json(json_buf,
 							    JSON_BUF_SIZE);
+#ifdef CONFIG_SD_CONFIG
+				sd_config_save();
+#endif
 			}
 		} else if (strcmp(url, "/api/streams/tx") == 0) {
 			ret = apply_tx_stream_json(post_body, post_body_len);
 			if (ret == 0) {
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,
 						    "{\"ok\":true}");
+#ifdef CONFIG_SD_CONFIG
+				sd_config_save();
+#endif
 			}
 		} else if (strcmp(url, "/api/streams/rx") == 0) {
 			ret = apply_rx_stream_json(post_body, post_body_len);
 			if (ret == 0) {
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,
 						    "{\"ok\":true}");
+#ifdef CONFIG_SD_CONFIG
+				sd_config_save();
+#endif
 			}
 #ifdef CONFIG_MI_CARD
 		} else if (strcmp(url, "/api/mi") == 0) {
@@ -1364,6 +1385,31 @@ static int api_handler(struct http_client_ctx *client,
 					"{\"ok\":true,\"message\":\"Board reset complete\"}");
 			}
 #endif
+		} else if (strcmp(url, "/api/system/reboot") == 0) {
+			/* POST /api/system/reboot - reboot MCU */
+			LOG_WRN("Reboot requested via REST API");
+			json_len = snprintf(json_buf, JSON_BUF_SIZE,
+				"{\"ok\":true,\"message\":\"Rebooting...\"}");
+			/* Send response before rebooting */
+			response_ctx->status = HTTP_200_OK;
+			response_ctx->body = (const uint8_t *)json_buf;
+			response_ctx->body_len = json_len;
+			response_ctx->final_chunk = true;
+			response_ctx->headers = json_hdrs;
+			response_ctx->header_count = ARRAY_SIZE(json_hdrs);
+			/* Schedule reboot after short delay to allow response */
+			k_msleep(100);
+			sys_reboot(SYS_REBOOT_COLD);
+			return 0;
+#ifdef CONFIG_SD_CONFIG
+		} else if (strcmp(url, "/api/sd/format") == 0) {
+			/* POST /api/sd/format - format SD card */
+			ret = sd_config_format();
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":\"SD card formatted\"}");
+			}
+#endif
 		} else {
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
 					    "{\"error\":\"not found\"}");
@@ -1399,10 +1445,20 @@ static int api_handler(struct http_client_ctx *client,
 			int sid = atoi(url + 16);
 
 			ret = delete_tx_stream(sid);
+#ifdef CONFIG_SD_CONFIG
+			if (ret == 0) {
+				sd_config_save();
+			}
+#endif
 		} else if (strncmp(url, "/api/streams/rx/", 16) == 0) {
 			int sid = atoi(url + 16);
 
 			ret = delete_rx_stream(sid);
+#ifdef CONFIG_SD_CONFIG
+			if (ret == 0) {
+				sd_config_save();
+			}
+#endif
 		}
 
 		post_body_len = 0;

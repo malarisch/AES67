@@ -22,6 +22,7 @@
 #include <zephyr/sys/byteorder.h>
 
 #include "ptp_bmc.h"
+#include "ieee1588_utils.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 
 LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_INF);
@@ -60,22 +61,21 @@ static int bmc_sock = -1;  /* Socket for multicast rejoin */
 static struct k_sem ip_ready_sem;
 
 /* ================================================================
- * Helper: Build EUI-64 clock identity from 48-bit MAC address
- *
- * IEEE 1588 Section 7.5.2.2.2:
- *   Clock ID = MAC[0] (with U/L bit toggled) | MAC[1] | MAC[2]
- *              | 0xFF | 0xFE | MAC[3] | MAC[4] | MAC[5]
+ * Helper: Copy announce dataset fields into foreign master entry
  * ================================================================ */
-static void mac_to_clock_identity(const uint8_t mac[6], uint8_t clock_id[8])
+static void fm_copy_announce(struct ptp_announce_dataset *fm,
+			     const struct ptp_announce_dataset *src)
 {
-	clock_id[0] = mac[0] ^ 0x02;  /* Toggle U/L bit */
-	clock_id[1] = mac[1];
-	clock_id[2] = mac[2];
-	clock_id[3] = 0xFF;
-	clock_id[4] = 0xFE;
-	clock_id[5] = mac[3];
-	clock_id[6] = mac[4];
-	clock_id[7] = mac[5];
+	fm->gm_priority1 = src->gm_priority1;
+	fm->gm_clock_class = src->gm_clock_class;
+	fm->gm_clock_accuracy = src->gm_clock_accuracy;
+	fm->gm_offset_scaled_log_variance = src->gm_offset_scaled_log_variance;
+	fm->gm_priority2 = src->gm_priority2;
+	memcpy(fm->gm_identity, src->gm_identity, 8);
+	fm->steps_removed = src->steps_removed;
+	fm->time_source = src->time_source;
+	memcpy(fm->sender_clock_id, src->sender_clock_id, 8);
+	fm->sender_port_number = src->sender_port_number;
 }
 
 /* ================================================================
@@ -494,17 +494,7 @@ static void bmc_grace_period(int sock, uint8_t *rx_buf, size_t rx_buf_len)
 		struct ptp_announce_dataset *fm =
 			fm_find_or_create(incoming.sender_clock_id);
 		if (fm) {
-			fm->gm_priority1 = incoming.gm_priority1;
-			fm->gm_clock_class = incoming.gm_clock_class;
-			fm->gm_clock_accuracy = incoming.gm_clock_accuracy;
-			fm->gm_offset_scaled_log_variance =
-				incoming.gm_offset_scaled_log_variance;
-			fm->gm_priority2 = incoming.gm_priority2;
-			memcpy(fm->gm_identity, incoming.gm_identity, 8);
-			fm->steps_removed = incoming.steps_removed;
-			fm->time_source = incoming.time_source;
-			memcpy(fm->sender_clock_id, incoming.sender_clock_id, 8);
-			fm->sender_port_number = incoming.sender_port_number;
+			fm_copy_announce(fm, &incoming);
 			fm->last_received_uptime_ms = k_uptime_get();
 			fm->announce_count++;
 		}
@@ -687,18 +677,7 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 			fm_find_or_create(incoming.sender_clock_id);
 
 		if (fm) {
-			/* Copy the dataset fields */
-			fm->gm_priority1 = incoming.gm_priority1;
-			fm->gm_clock_class = incoming.gm_clock_class;
-			fm->gm_clock_accuracy = incoming.gm_clock_accuracy;
-			fm->gm_offset_scaled_log_variance =
-				incoming.gm_offset_scaled_log_variance;
-			fm->gm_priority2 = incoming.gm_priority2;
-			memcpy(fm->gm_identity, incoming.gm_identity, 8);
-			fm->steps_removed = incoming.steps_removed;
-			fm->time_source = incoming.time_source;
-			memcpy(fm->sender_clock_id, incoming.sender_clock_id, 8);
-			fm->sender_port_number = incoming.sender_port_number;
+			fm_copy_announce(fm, &incoming);
 			fm->last_received_uptime_ms = k_uptime_get();
 			fm->announce_count++;
 		}

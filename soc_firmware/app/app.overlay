@@ -1,6 +1,15 @@
 #include <zephyr/dt-bindings/dma/stm32_dma.h>
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/* Custom SPI1 pinctrl with pull-up on MISO for SD card */
+&pinctrl {
+	spi1_sd_miso_pa6: spi1_sd_miso_pa6 {
+		pinmux = <STM32_PINMUX('A', 6, AF5)>;
+		bias-pull-up;
+	};
+};
 
 /* Ensure SYSCLK/HCLK are configured for a fast AHB3 (FMC) clock. */
 &clk_hse {
@@ -52,33 +61,35 @@
 	status = "okay";
 };
 
-/*
-&spi1 {
-    status = "okay";
-    pinctrl-names = "default";
-    // Nucleo-H753ZI SPI1 pinout
-    pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pb5>;
-    
-    dmas = <&dmamux1 0 38 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
-           <&dmamux1 1 37 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH)>;
-    dma-names = "tx", "rx";
-    
-    eth0: spi-ethernet@0 {
-        compatible = "vendor,spi-ethernet";
-        reg = <0>;
-        // Max SPI clock in Hz (25 MHz)
-        spi-max-frequency = <25000000>;
-        // Dedicated GPIO CS on D14/PB9 for this device
-        cs-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;
-        // IRQ on a valid GPIO0 bank pin (0..21 on ESP32-S3)
-        // Button Test: PC13 is User Button. Active High (Pressed=1). Needs Pull-Down to be 0 when idle.
-        int-gpios = <&gpiob 1 (GPIO_ACTIVE_LOW)>;
-        full-duplex;
-        
-        
-    };
+/* Enable HSI for SPI1 clock (64MHz allows 250kHz min for SD init) */
+&clk_hsi {
+	status = "okay";
+	hsi-div = <1>;  /* 64 MHz */
 };
-*/
+
+/* ---- SD Card on SPI1 (PA5=SCK, PA6=MISO, PB5=MOSI, PA4=CS) ---- */
+&spi1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi1_sck_pa5 &spi1_sd_miso_pa6 &spi1_mosi_pb5>;
+	cs-gpios = <&gpioa 4 GPIO_ACTIVE_LOW>;
+	/* Use HSI (64MHz) as clock source - allows 250kHz min for SD card init */
+	clocks = <&rcc STM32_CLOCK(APB2, 12U)>,
+	         <&rcc STM32_SRC_HSI_KER SPI123_SEL(0)>;
+
+	sdhc0: sdhc@0 {
+		compatible = "zephyr,sdhc-spi-slot";
+		reg = <0>;
+		status = "okay";
+		spi-max-frequency = <1000000>;
+		power-delay-ms = <1000>;
+		mmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};
 
 /* ---- Si5351A clock generator on I2C1 (PB8=SCL, PB9=SDA) ---- */
 &i2c1 {

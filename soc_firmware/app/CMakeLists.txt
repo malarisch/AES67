@@ -43,11 +43,17 @@ add_custom_target(web_assets DEPENDS ${WEB_INC})
 
 target_sources(app PRIVATE
   src/main.c
+  src/fpga_regs.c
+  src/pll_ctrl.c
+  src/fpga_poll.c
   src/ui_display.c
   src/ptp_bmc.c
   src/sap_sdp.c
   src/aes67_config.c
   src/webserver.c
 )
+
+# SD card configuration storage (optional)
+target_sources_ifdef(CONFIG_SD_CONFIG app PRIVATE src/sd_config.c)
 
 add_dependencies(app web_assets)

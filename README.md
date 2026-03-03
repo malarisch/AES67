@@ -13,25 +13,26 @@ On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified 
 - Ethernet RX + TX on the FPGA
 - Ethernet RX + TX on the MCU via FPGA/FMC
 - Configuring Networking via MCU (Mac addr, IP addr via DHCP)
-- PTPv2 Leader and Follower Mode
+- PTPv2 Leader and Follower Mode; BMC
 - Derive Media Clocks from PTP
 - Si5351A Driver
 - Sending RTP Audio Packets
 - Single I2S Audio in
 - Webserver for device config
 - I2S in 48k/24bit
-- Audio TX for 48k/24bit; max packet time 1ms (just increase the audio buffer size)
-  
+- Audio TX for 48k/24bit
+- Audio RX for 48k/24bit
+- Internal Audio Routing Matrix
+- Webinterface for configuration
+- FPGA and MCU reset recovery
+
 ## Todo list
 
-- Audio Routing Matrix (TX Path Done)
-- Receive Audio Packets
+
 - Audio Buffer (TX Path Done)
 - RTCP, SDP, SAP (mDNS?) on the MCU (DONE)
 - Tune PI Controller on the FPGA further (currently, it reaches a solid lock but jitters at +-30ns difference)
-- PTP outlier rejection (DONE)
-- PTP reject other leaders that are not "my leader" (lol) (DONE)
-- Priority-Based arbiter for Ethernet TX on the FPGA (PTP first, Audio second, everything else third), as well as filtering out packets that are not relevant to the MCU in the RX Path
+
 - FPGA optimizations - current design uses quite a lot of ressources
   - PTP implementation - use RAM for Packet generation instead of Registers
   - PTP implementation - Servo synthesizes to 1600 LUTs eventhough it is not _that_ big 
@@ -39,21 +40,5 @@ On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified 
 - RGMII Support on the Ethernet MAC (my entire testing and development is done via an LAN8720 via RMII)
 - Custom RMII -> MII Converter (I'm using the Altera IP for now but want the project to be as vendor independent as possible)
 - FPGA bitstream upload
-- IGMP (DONE)
-- Proper bootup sequence:
-  - MCU boots
-  - Bitstream upload & wait for FPGA ready signal (that means we have ethernet)
-  - Write basic config to control registers
-  - Start DHCP Client on MCU
-  - Write IP Config to MCU
-  - Write PTP Config to MCU
-  - Listen for PTP Announce Messages
-  - Run BMC
-  - Set PTP Online flag to MCU - start PTP
-  - Wait for PTP Lock
-  - Wait for Media Clock lock
-  - Configure & Start Audio Engine
 
-## Todo Nice to have
 
-- Some User Interface on the MCU (Touchscreen/LVGL? Webserver?)

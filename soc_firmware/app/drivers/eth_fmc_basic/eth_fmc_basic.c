@@ -604,7 +604,17 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 
 			if (!from_isr && !(status & RX_STATUS_READY)) {
 				if (status & RX_STATUS_OVF) {
-					LOG_WRN("RX overflow detected (poll)");
+					static int64_t last_ovf_log;
+					static uint32_t ovf_count;
+					int64_t now = k_uptime_get();
+
+					ovf_count++;
+					if ((now - last_ovf_log) >= 1000) {
+						LOG_WRN("RX overflow (poll): %u in last %lld ms",
+							ovf_count, now - last_ovf_log);
+						ovf_count = 0;
+						last_ovf_log = now;
+					}
 					fmc_write8(cfg->base, REG_RX_STATUS, RX_STATUS_READY);
 					/* Give the FPGA a few µs for the CDC
 					 * clear to propagate before re-reading */
@@ -616,7 +626,13 @@ static void eth_fmc_basic_rx_thread(void *p1, void *p2, void *p3)
 				break;
 			}
 			if (status & RX_STATUS_OVF) {
-				LOG_WRN("RX overflow (frame also ready)");
+				static int64_t last_ovf_rdy_log;
+				int64_t now = k_uptime_get();
+
+				if ((now - last_ovf_rdy_log) >= 1000) {
+					LOG_WRN("RX overflow (frame also ready)");
+					last_ovf_rdy_log = now;
+				}
 			}
 			
 			if (pkt_len < 14 || pkt_len > ETH_FMC_MAX_PKT_SIZE + 4) {
