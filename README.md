@@ -171,8 +171,6 @@ Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G
 - Further tune PI controller (currently ±30ns jitter when locked)
 - FPGA resource optimization (PTP servo uses ~1600 LUTs)
 - Phase jump handling
-- RGMII support (currently RMII via LAN8720)
-- Replace Altera RMII→MII converter with custom logic
 - FPGA bitstream upload from MCU
 
 ## Technical Details
