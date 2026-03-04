@@ -1,44 +1,205 @@
 # AES67
 
-This project is an attempt for a full AES67 Hardware/Embedded implementation. A FPGA and MCU is used, currently for the dev setup a Cyclone 10LP and STM32H753ZI. The STM32 uses Zephyr. Some code was LLM generated, but human-checked and debugged. 
+A full AES67 Audio-over-IP implementation using FPGA and MCU. Currently targeting Cyclone 10LP (FPGA) and STM32H753ZI (MCU with Zephyr RTOS). Some code was LLM generated, but human-checked and debugged. 
 
-For transparency, this is primarely a learning project for me. I have never worked with FPGAs before and the only embedded experiences I've had before were not more than attaching a temperature sensor to an ESP32.
+For transparency, this is primarily a learning project. I had no FPGA experience before and only basic embedded experience (ESP32 + temperature sensor level).
 
-## How it works
+## System Architecture
 
-Media Processing is offloaded onto the FPGA. The FPGA has the Ethernet PHY attached to it and uses a fork of the fork (https://github.com/xn--nding-jua/FPGA_Ethernet) of the YOL Ethernet MAC (https://github.com/yol/ethernet_mac). For communication with the MCU, the FMC peripheral of the STM32H7 is used for DMA. A Zephyr driver and the FPGA counterpart was implemented for Ethernet on the MCU via FMC and Control Signals. TODO: Only specific packet types shall be forwarded to the MCU to not overload it. (My implementation of) FMC is quite slow, so a lot of network traffic can easily overload it
-On the FPGA Side I implemented PTPv2 in Leader and Follower Mode. I've modified the Eth MAC to output signals at SOF Delimiter, at which a timestamp is taken and latched (48bit Seconds, 32bit ns). From the PTP a local running wallclock (48b/32b) is disciplined. From the Wallclock the media sample counter for RTP Packets is calculated, as well as the media clocks for the audio interface. As the media clocks are quiet jittery due to the nature of integer arithmetic and my incompetence, a ppb correction signal for an external PLL is calculated. For that I use a Si5351A, that is controlled by the MCU via I2C. A custom zephyr driver for the chip was implemented (one-shot vibe coded by Claude Opus 4.6 and then manually verified by me - I'm honestly impressed).
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FPGA (Cyclone 10LP)                            │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐  │
+│  │ Ethernet    │   │   PTPv2     │   │  Wallclock  │   │   Audio TX/RX   │  │
+│  │ MAC (YOL)   │◄──┤ Controller  │──►│  48b:32b    │──►│   RTP Packets   │  │
+│  │ + Timestamp │   │ + Servo PI  │   │ + Media Clk │   │   + I2S I/O     │  │
+│  └──────┬──────┘   └─────────────┘   └──────┬──────┘   └─────────────────┘  │
+│         │                                   │                               │
+│         │         ┌─────────────────────────┴───────────────┐               │
+│         │         │            FMC Bridge                   │               │
+│         │         │  (fmc_ethernet_client.vhd)              │               │
+│         │         │  - Register-mapped config               │               │
+│         │         │  - ETH TX/RX packet buffers             │               │
+│         └─────────┴─────────────────────────────────────────┘               │
+│                                    ▲                                        │
+│                                    │ FMC Bus @ 0x60000000                   │
+└────────────────────────────────────┼────────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────┼────────────────────────────────────────┐
+│                                    ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │            FMC Ethernet Driver (eth_fmc_basic)                  │        │
+│  │  - Zephyr network interface (eth0)                              │        │
+│  │  - FPGA state detection & recovery                              │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │   PTP BMC    │  │   SAP/SDP    │  │   Webserver  │  │   Si5351A    │    │
+│  │   Algorithm  │  │  Announce    │  │   Config UI  │  │   PLL Ctrl   │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
+│                                                                             │
+│                            MCU (STM32H753ZI + Zephyr)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-## What is working
-- Ethernet RX + TX on the FPGA
-- Ethernet RX + TX on the MCU via FPGA/FMC
-- Configuring Networking via MCU (Mac addr, IP addr via DHCP)
-- PTPv2 Leader and Follower Mode; BMC
-- Derive Media Clocks from PTP
-- Si5351A Driver
-- Sending RTP Audio Packets
-- Single I2S Audio in
-- Webserver for device config
-- I2S in 48k/24bit
-- Audio TX for 48k/24bit
-- Audio RX for 48k/24bit
-- Internal Audio Routing Matrix
-- Webinterface for configuration
-- FPGA and MCU reset recovery
+## FPGA Architecture (Data Plane)
 
-## Todo list
+The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
 
+### Ethernet
+| Module | File | Description |
+|--------|------|-------------|
+| Ethernet MAC | `FPGA_Ethernet/` | Fork of YOL MAC with SOF timestamp output |
+| Timestamp | `ethernet_timestamp.vhd` | Latches 48b:32b wallclock at SOF delimiter |
+| FMC Bridge | `fmc_ethernet_client.vhd` | Register-mapped interface to MCU |
 
-- Audio Buffer (TX Path Done)
-- RTCP, SDP, SAP (mDNS?) on the MCU (DONE)
-- Tune PI Controller on the FPGA further (currently, it reaches a solid lock but jitters at +-30ns difference)
+### PTP (IEEE 1588)
+| Module | File | Description |
+|--------|------|-------------|
+| Controller | `ptp/ptpv2_controller.vhd` | State machine for Sync, Follow_Up, Announce, Delay_Resp |
+| Parser | `ptp/ptpv2_parser.vhd` | Extracts timestamps & computes offset/path delay |
+| Servo | `ptp/ptpv2_servo.vhd` | PI controller for clock discipline (PPB correction) |
+| Sender | `ptp/ptpv2_sender.vhd` | Constructs PTP packets |
 
-- FPGA optimizations - current design uses quite a lot of ressources
-  - PTP implementation - use RAM for Packet generation instead of Registers
-  - PTP implementation - Servo synthesizes to 1600 LUTs eventhough it is not _that_ big 
+### Clock & Timing
+| Module | File | Description |
+|--------|------|-------------|
+| Wallclock | `wallclock.vhd` | PTP-disciplined 48b seconds + 32b nanoseconds |
+| NCO | `wallclock.vhd` | Direct audio clock synthesis (BCLK, LRCK) |
+| Media Clock | `wallclock.vhd` | RTP timestamp counter derived from wallclock |
+| PPB Meter | `clock_ppb_meter.vhd` | Measures PPB offset for external PLL correction |
+
+### Audio
+| Module | File | Description |
+|--------|------|-------------|
+| TX Router | `audio_tx/tx_router.vhd` | Multi-stream config RAM, sample aggregation |
+| TX Transmitter | `audio_tx/tx_transmitter.vhd` | RTP packet construction with SSRC |
+| TX Sample Buffer | `audio_tx/tx_sample_buffer.vhd` | Ring buffer for outgoing samples |
+| RX Ringbuffer | `audio_rx/rx_ringbuffer.vhd` | Stream demux, playout buffer |
+| I2S Input | `I2S_IN.vhd` | 48kHz/24bit I2S deserializer |
+| I2S Output | `audio_rx/i2s_out.vhd` | I2S serializer to DAC |
+
+### Data Flow
+```
+           ┌───────────────────────────────────────────────────────────┐
+  I2S IN   │    TX Path                                                │
+    ──────►│  I2S_IN → tx_sample_buffer → tx_router → tx_transmitter   │───► RTP out
+           │                                    ↑                      │
+           │                              config from MCU              │
+           └───────────────────────────────────────────────────────────┘
+           
+           ┌───────────────────────────────────────────────────────────┐
+  RTP IN   │    RX Path                                                │
+    ──────►│  UDP parser → rx_ringbuffer (stream demux) → i2s_out      │───► I2S OUT
+           │                      ↑                                    │
+           │                 stream_ram config                         │
+           └───────────────────────────────────────────────────────────┘
+```
+
+## Firmware Architecture (Control Plane)
+
+The STM32H753ZI runs Zephyr RTOS and handles all non-realtime tasks. Source in `soc_firmware/app/`:
+
+### Core Modules
+| Module | File | Description |
+|--------|------|-------------|
+| Main | `src/main.c` | Init, DHCP, FPGA recovery callback |
+| PTP BMC | `src/ptp_bmc.c` | IEEE 1588 Best Master Clock algorithm on 224.0.1.129:320 |
+| SAP/SDP | `src/sap_sdp.c` | Session announcement (239.255.255.255:9875), stream config |
+| Webserver | `src/webserver.c` | HTTP config UI |
+| FPGA Regs | `src/fpga_regs.c` | High-level register write helpers |
+| FPGA Poll | `src/fpga_poll.c` | Status polling (PTP lock, link state) |
+| PLL Control | `src/pll_ctrl.c` | Si5351A PPB correction from FPGA measurements |
+
+### Drivers
+| Driver | Path | Description |
+|--------|------|-------------|
+| FMC Ethernet | `drivers/eth_fmc_basic/` | Zephyr network interface via FMC bus |
+| Si5351A | `drivers/si5351a/` | I2C clock generator with PPB correction |
+| Display | `drivers/display_ctrl/` | SSD1306 OLED status display |
+| MI Card | `drivers/mi_card/` | 8-channel ADC preamp control |
+
+### FMC Register Map (MCU ↔ FPGA)
+
+| Address | R/W | Description |
+|---------|-----|-------------|
+| `0x00-0x02` | W | ETH TX length + control |
+| `0x10-0x20` | W | ETH TX frame data |
+| `0x20-0x22` | R | ETH RX length + status |
+| `0x30-0x40` | R | ETH RX frame data |
+| `0x40` | W | MAC address (6 bytes) |
+| `0x41` | W | IP address (4 bytes) |
+| `0x50` | R/W | Flags: PLL, reset, PTP mode |
+| `0x51` | R | Ethernet link status |
+| `0x52-0x54` | R | PTP metrics (path delay, offset, PPB) |
+| `0x55` | W | PTP config (leader identity, intervals) |
+| `0x57` | W | Audio destination IP:port |
+| `0x58` | W | TX stream config (20 bytes/stream) |
+| `0x59` | W | RX stream config (18 bytes/stream) |
+
+Full register map: see [config_ram_address_map.md](config_ram_address_map.md)
+
+## Build Instructions
+
+### Firmware (Zephyr)
+```bash
+cd soc_firmware/app
+source ../.venv/bin/activate  # Activate Python venv for west
+west build -b nucleo_h753zi -p  # Clean build
+west flash                       # Flash to board
+```
+
+### FPGA
+Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G.
+
+## Current Status
+
+### Working
+- Ethernet RX + TX on FPGA and MCU (via FMC bridge)
+- Network config via MCU (MAC, DHCP IP)
+- PTPv2 Leader and Follower mode with BMC
+- Wallclock discipline and media clock derivation
+- Si5351A driver with PPB correction
+- Audio TX/RX paths (48kHz/24bit I2S)
+- RTP packet generation and parsing
+- SAP/SDP announcements
+- Webserver configuration UI
+- FPGA/MCU reset recovery
+- Internal audio routing matrix
+
+### Todo
+- Further tune PI controller (currently ±30ns jitter when locked)
+- FPGA resource optimization (PTP servo uses ~1600 LUTs)
 - Phase jump handling
-- RGMII Support on the Ethernet MAC (my entire testing and development is done via an LAN8720 via RMII)
-- Custom RMII -> MII Converter (I'm using the Altera IP for now but want the project to be as vendor independent as possible)
-- FPGA bitstream upload
+- RGMII support (currently RMII via LAN8720)
+- Replace Altera RMII→MII converter with custom logic
+- FPGA bitstream upload from MCU
+
+## Technical Details
+
+### PTP Clock Discipline
+The FPGA implements a PI controller in `ptpv2_servo.vhd`:
+- Filters offset measurements
+- Outputs frequency correction in PPB
+- Lock detection with hysteresis (500ns lock / 5µs unlock threshold)
+- Message interval awareness (scales gains for different sync rates)
+
+### Media Clock Generation
+`wallclock.vhd` generates reference clocks using an NCO for PLL discipline:
+- NCO outputs (BCLK, LRCK) are used to measure phase error against external PLL
+- `clock_ppb_meter.vhd` compares NCO edges vs Si5351A edges → PPB correction
+- Si5351A (external I2C PLL) provides the actual low-jitter audio clocks
+- Media clock counter: (seconds × 48000 + sample_in_second) for RTP timestamps
+
+The NCO has ±8ns jitter (1 sys_clk period), which is fine for measurement but not for direct I2S use.
+
+### FMC Bridge Considerations
+The FMC bridge requires special handling:
+1. **MPU Region**: FMC memory must be marked `ATTR_MPU_IO` to prevent Cortex-M7 speculative reads
+2. **Stack Size**: RX thread needs 4096 bytes due to on-stack frame buffer
+3. **FPGA Ready**: GPIO PC13 gates FMC access until FPGA is configured
+
+## License
+See [LICENSE.md](LICENSE.md)
 
 
