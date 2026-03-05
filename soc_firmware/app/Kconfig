@@ -1,6 +1,86 @@
 
 rsource "drivers/Kconfig"
 
+menu "RAVENNA RTSP Server/Client"
+
+config RTSP
+	bool "Enable RTSP server and client for stream control"
+	default y
+	depends on NETWORKING && NET_TCP && NET_SOCKETS
+	help
+	  Enable RAVENNA-compliant RTSP (RFC 2326) server and client.
+	  The server exposes TX streams for remote subscription via
+	  DESCRIBE/SETUP/PLAY commands. The client can subscribe to
+	  remote streams for RX configuration.
+
+config RTSP_AUTO_START
+	bool "Auto-start RTSP server at boot"
+	default y
+	depends on RTSP
+	help
+	  Automatically start the RTSP server when the network is ready.
+	  If disabled, use the 'rtsp start' shell command to start manually.
+
+config RTSP_PORT
+	int "RTSP server port"
+	default 554
+	depends on RTSP
+	help
+	  TCP port for the RTSP server. Standard RTSP port is 554.
+
+config RTSP_MAX_SESSIONS
+	int "Maximum concurrent RTSP sessions"
+	default 8
+	depends on RTSP
+	help
+	  Maximum number of concurrent streaming sessions the server
+	  can maintain.
+
+config RTSP_MAX_CLIENTS
+	int "Maximum RTSP client connections"
+	default 4
+	depends on RTSP
+	help
+	  Maximum number of outgoing client connections for
+	  subscribing to remote streams.
+
+endmenu
+
+menu "RAVENNA mDNS/DNS-SD Discovery"
+
+config MDNS_SD
+	bool "Enable mDNS/DNS-SD service advertisement"
+	default y
+	depends on NETWORKING && MDNS_RESPONDER && DNS_SD
+	help
+	  Advertise HTTP and RTSP services via mDNS/DNS-SD per
+	  RAVENNA Operating Principles §3.5.1.  Registers both
+	  vendor node ID and user-defined device name services.
+
+config MDNS_SD_VENDOR_ID
+	string "Vendor identifier"
+	default "AES67"
+	depends on MDNS_SD
+	help
+	  Vendor name for the RAVENNA vendor node ID.
+
+config MDNS_SD_PRODUCT_ID
+	string "Product identifier"
+	default "AudioNode"
+	depends on MDNS_SD
+	help
+	  Product name for the RAVENNA vendor node ID.
+
+config MDNS_SD_SERIAL
+	string "Device serial number"
+	default "0001"
+	depends on MDNS_SD
+	help
+	  Serial number for the RAVENNA vendor node ID.
+	  Must be unique per device.
+
+endmenu
+
 menu "SD Card Configuration Storage"
 
 config SD_CONFIG

@@ -27,6 +27,9 @@
 #include <stdio.h>
 
 #include "sap_sdp.h"
+#include "aes67_sdp_utils.h"
+#include "aes67_config.h"
+#include "sd_config.h"
 #include "ieee1588_utils.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
 
@@ -70,68 +73,31 @@ static struct sap_foreign_stream foreign_streams[SAP_MAX_FOREIGN_STREAMS];
 static uint16_t sap_msg_id_hash;
 
 /* ================================================================
- * Helper: Format clock identity as PTP=IEEE1588-2008 string
- * Output: "XX-XX-XX-FF-FE-XX-XX-XX"
- * ================================================================ */
-static int format_ptp_clock_id(char *buf, size_t len, const uint8_t id[8])
-{
-	return snprintf(buf, len,
-			"%02X-%02X-%02X-%02X-%02X-%02X-%02X-%02X",
-			id[0], id[1], id[2], id[3],
-			id[4], id[5], id[6], id[7]);
-}
-
-/* ================================================================
- * Build SDP body for our AES67 stream
+ * Build SDP body for our AES67 stream (legacy single-stream config)
  *
  * Returns the number of bytes written to buf (not including NUL),
  * or negative errno if the buffer is too small.
  * ================================================================ */
 static int build_sdp(char *buf, size_t buf_size)
 {
-	char ip_str[INET_ADDRSTRLEN];
-	char mcast_str[INET_ADDRSTRLEN];
-	char clock_id_str[32];
-
-	zsock_inet_ntop(AF_INET, &my_ip_addr, ip_str, sizeof(ip_str));
-	zsock_inet_ntop(AF_INET, &local_config.mcast_addr,
-			mcast_str, sizeof(mcast_str));
-	format_ptp_clock_id(clock_id_str, sizeof(clock_id_str), my_clock_id);
-
-	/* Compute ptime in microseconds, then format as fractional ms.
-	 * 16 samples at 48000 Hz = 333.333 µs = 0.333 ms */
-	uint32_t ptime_us = (uint32_t)local_config.samples_per_packet *
-			    1000000U / local_config.sample_rate;
-
-	/* Session ID: use the IP address as a simple unique-ish number */
-	uint32_t session_id = sys_be32_to_cpu(my_ip_addr.s_addr);
-
-	int n = snprintf(buf, buf_size,
-		"v=0\r\n"
-		"o=- %u 1 IN IP4 %s\r\n"
-		"s=Der geile Hecht\r\n"
-		"i=%uch %ubit %uHz\r\n"
-		"c=IN IP4 %s/32\r\n"
-		"t=0 0\r\n"
-		"m=audio %u RTP/AVP %u\r\n"
-		"a=rtpmap:%u L%u/%u/%u\r\n"
-		"a=ptime:%u.%03u\r\n"
-		"a=ts-refclk:ptp=IEEE1588-2008:%s\r\n"
-		"a=mediaclk:direct=0\r\n",
-		session_id, ip_str,
-		local_config.channels, local_config.bit_depth,
-		local_config.sample_rate,
-		mcast_str,
-		local_config.port, local_config.payload_type,
-		local_config.payload_type, local_config.bit_depth,
-		local_config.sample_rate, local_config.channels,
-		ptime_us / 1000, ptime_us % 1000,
-		clock_id_str);
-
-	if (n < 0 || (size_t)n >= buf_size) {
-		return -ENOMEM;
-	}
-	return n;
+	struct aes67_device_config *cfg = aes67_config_get();
+	struct aes67_sdp_params params = {
+		.origin_addr = my_ip_addr,
+		.connection_addr = local_config.mcast_addr,
+		.stream_id = 0,
+		.channel_count = local_config.channels,
+		.bit_depth = local_config.bit_depth,
+		.sample_rate = local_config.sample_rate,
+		.samples_per_packet = local_config.samples_per_packet,
+		.port = local_config.port,
+		.payload_type = local_config.payload_type,
+		.ssrc = 0,
+		.clock_id = my_clock_id,
+		.stream_name = "Der geile Hecht",
+		.ptp_domain = cfg->ptp_domain,
+		.sync_time = 0,  /* epoch-aligned RTP timestamp */
+	};
+	return aes67_sdp_build(buf, buf_size, &params);
 }
 
 /* ================================================================
@@ -140,50 +106,24 @@ static int build_sdp(char *buf, size_t buf_size)
 static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
 				   const struct aes67_tx_stream *stream)
 {
-	char ip_str[INET_ADDRSTRLEN];
-	char mcast_str[INET_ADDRSTRLEN];
-	char clock_id_str[32];
-
-	zsock_inet_ntop(AF_INET, &my_ip_addr, ip_str, sizeof(ip_str));
-	zsock_inet_ntop(AF_INET, &stream->dst_ip, mcast_str, sizeof(mcast_str));
-	format_ptp_clock_id(clock_id_str, sizeof(clock_id_str), my_clock_id);
-
-	uint32_t ptime_us = (uint32_t)stream->samples_per_packet *
-			    1000000U / AES67_DEFAULT_SAMPLE_RATE;
-
-	/* Use stream_id to create distinct session IDs */
-	uint32_t session_id = sys_be32_to_cpu(my_ip_addr.s_addr) +
-			      stream->stream_id;
-
-	int n = snprintf(buf, buf_size,
-		"v=0\r\n"
-		"o=- %u %u IN IP4 %s\r\n"
-		"s=AES67 Stream %u\r\n"
-		"i=%uch %ubit %uHz\r\n"
-		"c=IN IP4 %s/32\r\n"
-		"t=0 0\r\n"
-		"m=audio %u RTP/AVP %u\r\n"
-		"a=rtpmap:%u L%u/%u/%u\r\n"
-		"a=ptime:%u.%03u\r\n"
-		"a=ts-refclk:ptp=IEEE1588-2008:%s\r\n"
-		"a=mediaclk:direct=0\r\n"
-		"a=ssrc:%u cname:aes67@%s\r\n",
-		session_id, stream->stream_id, ip_str,
-		stream->stream_id,
-		stream->channel_count, AES67_DEFAULT_BIT_DEPTH,
-		AES67_DEFAULT_SAMPLE_RATE,
-		mcast_str,
-		AES67_DEFAULT_PORT, AES67_DEFAULT_PAYLOAD_TYPE,
-		AES67_DEFAULT_PAYLOAD_TYPE, AES67_DEFAULT_BIT_DEPTH,
-		AES67_DEFAULT_SAMPLE_RATE, stream->channel_count,
-		ptime_us / 1000, ptime_us % 1000,
-		clock_id_str,
-		stream->ssrc, ip_str);
-
-	if (n < 0 || (size_t)n >= buf_size) {
-		return -ENOMEM;
-	}
-	return n;
+	struct aes67_device_config *cfg = aes67_config_get();
+	struct aes67_sdp_params params = {
+		.origin_addr = my_ip_addr,
+		.connection_addr = stream->dst_ip,
+		.stream_id = stream->stream_id,
+		.channel_count = stream->channel_count,
+		.bit_depth = AES67_DEFAULT_BIT_DEPTH,
+		.sample_rate = AES67_DEFAULT_SAMPLE_RATE,
+		.samples_per_packet = stream->samples_per_packet,
+		.port = AES67_DEFAULT_PORT,
+		.payload_type = AES67_DEFAULT_PAYLOAD_TYPE,
+		.ssrc = stream->ssrc,
+		.clock_id = my_clock_id,
+		.stream_name = stream->name,
+		.ptp_domain = cfg->ptp_domain,
+		.sync_time = 0,  /* epoch-aligned RTP timestamp */
+	};
+	return aes67_sdp_build(buf, buf_size, &params);
 }
 
 /* ================================================================
@@ -295,6 +235,8 @@ static int send_sap_announce(int sock, const struct sockaddr_in *dst)
 
 /* ================================================================
  * Parse a received SAP packet and extract SDP fields
+ *
+ * Uses the shared aes67_sdp_parse for the SDP body parsing.
  * ================================================================ */
 static int parse_sap_sdp(const uint8_t *buf, size_t len,
 			  struct sap_foreign_stream *out)
@@ -343,181 +285,28 @@ static int parse_sap_sdp(const uint8_t *buf, size_t len,
 	sdp_start++; /* Skip past NUL */
 	remaining -= (sdp_start - payload);
 
-	/* Parse SDP fields line by line */
-	memset(out->name, 0, sizeof(out->name));
+	/* Parse SDP body using shared helper */
+	struct aes67_sdp_parsed parsed;
+	int ret = aes67_sdp_parse(sdp_start, remaining, &parsed);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Copy parsed fields to sap_foreign_stream */
 	out->valid = true;
-	out->port = 0;
-	out->channels = 0;
-	out->bit_depth = 0;
-	out->sample_rate = 0;
-	out->ssrc = 0;
-	out->samples_per_packet = 0;
-	out->mcast_addr.s_addr = 0;
-
-	const char *line = sdp_start;
-	const char *end = sdp_start + remaining;
-
-	while (line < end) {
-		const char *eol = memchr(line, '\n', end - line);
-		size_t line_len = eol ? (size_t)(eol - line) : (size_t)(end - line);
-
-		/* Strip \r */
-		size_t clean_len = line_len;
-
-		if (clean_len > 0 && line[clean_len - 1] == '\r') {
-			clean_len--;
-		}
-
-		if (clean_len > 2 && line[0] == 's' && line[1] == '=') {
-			/* Session name */
-			size_t copy_len = clean_len - 2;
-
-			if (copy_len >= SAP_SDP_NAME_MAX) {
-				copy_len = SAP_SDP_NAME_MAX - 1;
-			}
-			memcpy(out->name, line + 2, copy_len);
-			out->name[copy_len] = '\0';
-		} else if (clean_len > 2 && line[0] == 'c' && line[1] == '=') {
-			/* Connection: c=IN IP4 <addr>/TTL */
-			const char *ip_start = NULL;
-			const char *p = line + 2;
-			const char *p_end = line + clean_len;
-
-			/* Find the IP address after "IN IP4 " */
-			const char *marker = "IN IP4 ";
-			size_t marker_len = 7;
-
-			for (; p + marker_len <= p_end; p++) {
-				if (memcmp(p, marker, marker_len) == 0) {
-					ip_start = p + marker_len;
-					break;
-				}
-			}
-			if (ip_start) {
-				char addr_buf[INET_ADDRSTRLEN];
-				const char *slash = memchr(ip_start, '/',
-							   p_end - ip_start);
-				size_t addr_len = slash ?
-					(size_t)(slash - ip_start) :
-					(size_t)(p_end - ip_start);
-
-				if (addr_len < sizeof(addr_buf)) {
-					memcpy(addr_buf, ip_start, addr_len);
-					addr_buf[addr_len] = '\0';
-					zsock_inet_pton(AF_INET, addr_buf,
-							&out->mcast_addr);
-				}
-			}
-		} else if (clean_len > 2 && line[0] == 'm' && line[1] == '=') {
-			/* Media: m=audio <port> RTP/AVP <pt> */
-			unsigned int port_val = 0;
-
-			/* Find port number after "audio " */
-			const char *p = line + 2;
-
-			if (clean_len > 8 && memcmp(p, "audio ", 6) == 0) {
-				p += 6;
-				while (p < line + clean_len && *p >= '0' &&
-				       *p <= '9') {
-					port_val = port_val * 10 +
-						   (*p - '0');
-					p++;
-				}
-				out->port = (uint16_t)port_val;
-			}
-		} else if (clean_len > 10 && memcmp(line, "a=rtpmap:", 9) == 0) {
-			/* a=rtpmap:<pt> L<depth>/<rate>/<ch> */
-			const char *p = line + 9;
-			const char *p_end = line + clean_len;
-
-			/* Skip payload type number */
-			while (p < p_end && *p >= '0' && *p <= '9') {
-				p++;
-			}
-			if (p < p_end && *p == ' ') {
-				p++;
-			}
-			/* Expect L<depth>/<rate>/<ch> */
-			if (p < p_end && *p == 'L') {
-				p++;
-				unsigned int depth = 0, rate = 0, ch = 0;
-
-				while (p < p_end && *p >= '0' && *p <= '9') {
-					depth = depth * 10 + (*p - '0');
-					p++;
-				}
-				if (p < p_end && *p == '/') {
-					p++;
-					while (p < p_end && *p >= '0' &&
-					       *p <= '9') {
-						rate = rate * 10 + (*p - '0');
-						p++;
-					}
-				}
-				if (p < p_end && *p == '/') {
-					p++;
-					while (p < p_end && *p >= '0' &&
-					       *p <= '9') {
-						ch = ch * 10 + (*p - '0');
-						p++;
-					}
-				}
-				out->bit_depth = (uint8_t)depth;
-				out->sample_rate = rate;
-				out->channels = (uint8_t)ch;
-			}
-		} else if (clean_len > 7 && memcmp(line, "a=ssrc:", 7) == 0) {
-			/* a=ssrc:<ssrc> cname:... -- extract 32-bit SSRC */
-			const char *p = line + 7;
-			const char *p_end = line + clean_len;
-			uint32_t ssrc_val = 0;
-
-			while (p < p_end && *p >= '0' && *p <= '9') {
-				ssrc_val = ssrc_val * 10 + (uint32_t)(*p - '0');
-				p++;
-			}
-			out->ssrc = ssrc_val;
-		} else if (clean_len > 8 && memcmp(line, "a=ptime:", 8) == 0) {
-			/* a=ptime:<ms>[.<frac>] -- store raw us, resolve after loop */
-			const char *p = line + 8;
-			const char *p_end = line + clean_len;
-			uint32_t ptime_ms = 0;
-			uint32_t ptime_frac_us = 0;
-
-			while (p < p_end && *p >= '0' && *p <= '9') {
-				ptime_ms = ptime_ms * 10 + (uint32_t)(*p - '0');
-				p++;
-			}
-			if (p < p_end && *p == '.') {
-				p++;
-				uint32_t scale = 100000U;
-
-				while (p < p_end && *p >= '0' &&
-				       *p <= '9' && scale > 0) {
-					ptime_frac_us += (*p - '0') * scale;
-					scale /= 10;
-					p++;
-				}
-			}
-			/* Store raw us as placeholder; resolved to samples below */
-			out->samples_per_packet = (uint16_t)(
-				ptime_ms * 1000U + ptime_frac_us);
-		}
-
-		if (!eol) {
-			break;
-		}
-		line = eol + 1;
-	}
-
-	/* Resolve samples_per_packet: stored above as raw ptime us,
-	 * compute samples = ptime_us * sample_rate / 1000000 */
-	if (out->samples_per_packet > 0 && out->sample_rate > 0) {
-		uint32_t ptime_us = out->samples_per_packet;
-
-		out->samples_per_packet = (uint16_t)(
-			ptime_us * out->sample_rate / 1000000U);
-	}
+	memcpy(out->name, parsed.name, sizeof(out->name));
+	out->mcast_addr = parsed.connection_addr;
+	out->port = parsed.port;
+	out->channels = parsed.channels;
+	out->bit_depth = parsed.bit_depth;
+	out->sample_rate = parsed.sample_rate;
+	out->ssrc = parsed.ssrc;
+	out->samples_per_packet = parsed.samples_per_packet;
+	/* RAVENNA extensions */
+	out->ptp_domain = parsed.ptp_domain;
+	out->has_clock_domain = parsed.has_clock_domain;
+	out->sync_time = parsed.sync_time;
+	out->has_sync_time = parsed.has_sync_time;
 
 	return 0;
 }
@@ -757,14 +546,25 @@ static int cmd_aes67_status(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
+	struct aes67_device_config *cfg = aes67_config_get();
+	char node_id[AES67_NODE_ID_MAX];
 	char mcast_str[INET_ADDRSTRLEN];
 	char ip_str[INET_ADDRSTRLEN];
+
+	aes67_config_build_node_id(node_id, sizeof(node_id));
 
 	zsock_inet_ntop(AF_INET, &local_config.mcast_addr,
 			mcast_str, sizeof(mcast_str));
 	zsock_inet_ntop(AF_INET, &my_ip_addr, ip_str, sizeof(ip_str));
 
-	shell_print(sh, "=== AES67 Stream Configuration ===");
+	shell_print(sh, "=== Device Identity ===");
+	shell_print(sh, "Vendor:       %s", cfg->vendor);
+	shell_print(sh, "Product:      %s", cfg->product);
+	shell_print(sh, "Serial:       %s", cfg->serial);
+	shell_print(sh, "Node ID:      %s", node_id);
+	shell_print(sh, "Device Name:  %s", cfg->device_name);
+
+	shell_print(sh, "\n=== AES67 Stream Configuration ===");
 	shell_print(sh, "Source IP:    %s", ip_ready ? ip_str : "(no IP)");
 	shell_print(sh, "Multicast:    %s:%u", mcast_str, local_config.port);
 	shell_print(sh, "Audio:        %uch %ubit %uHz",
@@ -966,7 +766,7 @@ static int cmd_aes67_txstream(const struct shell *sh, size_t argc, char **argv)
 					      (uint8_t)ch_count,
 					      (uint8_t)spp,
 					      ch_ids, (uint8_t)ch_count,
-					      0); /* SSRC: auto-generate */
+					      0, NULL); /* SSRC: auto-generate, name: auto */
 	if (ret < 0) {
 		shell_error(sh, "Failed to configure stream: %d", ret);
 		return ret;
@@ -986,9 +786,113 @@ static int cmd_aes67_txstream(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* ---- Device identity shell commands ---- */
+
+static int cmd_aes67_vendor(const struct shell *sh, size_t argc, char **argv)
+{
+	struct aes67_device_config *cfg = aes67_config_get();
+
+	if (argc < 2) {
+		shell_print(sh, "Vendor: %s", cfg->vendor);
+		return 0;
+	}
+
+	aes67_config_lock();
+	strncpy(cfg->vendor, argv[1], AES67_VENDOR_MAX - 1);
+	cfg->vendor[AES67_VENDOR_MAX - 1] = '\0';
+	aes67_config_unlock();
+
+	sd_config_save();
+	shell_print(sh, "Vendor set to: %s", cfg->vendor);
+	return 0;
+}
+
+static int cmd_aes67_product(const struct shell *sh, size_t argc, char **argv)
+{
+	struct aes67_device_config *cfg = aes67_config_get();
+
+	if (argc < 2) {
+		shell_print(sh, "Product: %s", cfg->product);
+		return 0;
+	}
+
+	aes67_config_lock();
+	strncpy(cfg->product, argv[1], AES67_PRODUCT_MAX - 1);
+	cfg->product[AES67_PRODUCT_MAX - 1] = '\0';
+	aes67_config_unlock();
+
+	sd_config_save();
+	shell_print(sh, "Product set to: %s", cfg->product);
+	return 0;
+}
+
+static int cmd_aes67_serial(const struct shell *sh, size_t argc, char **argv)
+{
+	struct aes67_device_config *cfg = aes67_config_get();
+
+	if (argc < 2) {
+		shell_print(sh, "Serial: %s", cfg->serial);
+		return 0;
+	}
+
+	aes67_config_lock();
+	strncpy(cfg->serial, argv[1], AES67_SERIAL_MAX - 1);
+	cfg->serial[AES67_SERIAL_MAX - 1] = '\0';
+	aes67_config_unlock();
+
+	sd_config_save();
+	shell_print(sh, "Serial set to: %s", cfg->serial);
+	return 0;
+}
+
+static int cmd_aes67_name(const struct shell *sh, size_t argc, char **argv)
+{
+	struct aes67_device_config *cfg = aes67_config_get();
+
+	if (argc < 2) {
+		shell_print(sh, "Device name: %s", cfg->device_name);
+		return 0;
+	}
+
+	aes67_config_lock();
+	strncpy(cfg->device_name, argv[1], AES67_DEVICE_NAME_MAX - 1);
+	cfg->device_name[AES67_DEVICE_NAME_MAX - 1] = '\0';
+	aes67_config_unlock();
+
+	sd_config_save();
+	shell_print(sh, "Device name set to: %s", cfg->device_name);
+	return 0;
+}
+
+static int cmd_aes67_nodeid(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	char node_id[AES67_NODE_ID_MAX];
+	char hostname[AES67_NODE_ID_MAX];
+
+	aes67_config_build_node_id(node_id, sizeof(node_id));
+	aes67_config_build_hostname(hostname, sizeof(hostname));
+
+	shell_print(sh, "Node ID:  %s", node_id);
+	shell_print(sh, "Hostname: %s", hostname);
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 	SHELL_CMD(status, NULL, "Show AES67 stream config and discovered streams",
 		  cmd_aes67_status),
+	SHELL_CMD(vendor, NULL, "Get/set vendor: aes67 vendor [name]",
+		  cmd_aes67_vendor),
+	SHELL_CMD(product, NULL, "Get/set product: aes67 product [name]",
+		  cmd_aes67_product),
+	SHELL_CMD(serial, NULL, "Get/set serial: aes67 serial [number]",
+		  cmd_aes67_serial),
+	SHELL_CMD(name, NULL, "Get/set device name: aes67 name [friendly_name]",
+		  cmd_aes67_name),
+	SHELL_CMD(nodeid, NULL, "Show RAVENNA node ID and hostname",
+		  cmd_aes67_nodeid),
 	SHELL_CMD(mcast, NULL, "Set audio multicast address: aes67 mcast <ip> [port]",
 		  cmd_aes67_mcast),
 	SHELL_CMD(announce, NULL, "Enable/disable SAP: aes67 announce [on|off]",
@@ -1040,8 +944,8 @@ int sap_sdp_start(struct net_if *iface)
 	k_sem_init(&sap_ip_sem, 0, 1);
 	k_mutex_init(&sap_mutex);
 	memset(foreign_streams, 0, sizeof(foreign_streams));
-	memset(tx_streams, 0, sizeof(tx_streams));
-	memset(rx_streams, 0, sizeof(rx_streams));
+	/* Note: tx_streams and rx_streams are not cleared here to preserve
+	 * streams configured by sd_config_load() before sap_sdp_start() */
 	force_announce = false;
 	ip_ready = false;
 
@@ -1121,7 +1025,8 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 				uint8_t samples_per_pkt,
 				const uint8_t *ch_ids,
 				uint8_t num_ch_ids,
-				uint32_t ssrc)
+				uint32_t ssrc,
+				const char *name)
 {
 	if (stream_id >= AES67_MAX_TX_STREAMS || !dst_ip) {
 		return -EINVAL;
@@ -1167,6 +1072,16 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 		tx_streams[stream_id].ch_ids[i] = ch_ids[i];
 	}
 	tx_streams[stream_id].ssrc = effective_ssrc;
+
+	/* Set stream name (auto-generate if NULL) */
+	if (name && name[0] != '\0') {
+		strncpy(tx_streams[stream_id].name, name,
+			AES67_STREAM_NAME_MAX - 1);
+		tx_streams[stream_id].name[AES67_STREAM_NAME_MAX - 1] = '\0';
+	} else {
+		snprintf(tx_streams[stream_id].name, AES67_STREAM_NAME_MAX,
+			 "TX Stream %u", stream_id);
+	}
 	k_mutex_unlock(&sap_mutex);
 
 	/* Force immediate SAP announcement */

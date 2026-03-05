@@ -5,7 +5,9 @@
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/net_event.h>
 #include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/hostname.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include "../drivers/si5351a/si5351a.h"
 #include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
@@ -26,8 +28,14 @@
 #include "sap_sdp.h"
 #include "webserver.h"
 #include "aes67_config.h"
+#ifdef CONFIG_RTSP
+#include "rtsp.h"
+#endif
 #ifdef CONFIG_SD_CONFIG
 #include "sd_config.h"
+#endif
+#ifdef CONFIG_MDNS_SD
+#include "mdns_sd.h"
 #endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -98,6 +106,10 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 #endif
 
 	sap_sdp_notify_ip_ready(&dhcpv4->requested_ip);
+
+#ifdef CONFIG_RTSP
+	rtsp_notify_ip_ready(&dhcpv4->requested_ip);
+#endif
 }
 
 /* ---- FPGA Recovery Callback ---- */
@@ -274,6 +286,12 @@ int main(void)
 			LOG_INF("Configuration loaded from SD card");
 		}
 	}
+
+	/* Apply configured hostname to network stack */
+	char hostname_buf[AES67_NODE_ID_MAX];
+	aes67_config_build_hostname(hostname_buf, sizeof(hostname_buf));
+	net_hostname_set(hostname_buf, strlen(hostname_buf));
+	LOG_INF("Hostname set to: %s", hostname_buf);
 #endif
 
 	/* ---- Network Initialization (after FPGA ready) ---- */
@@ -331,6 +349,26 @@ int main(void)
 	if (web_ret < 0) {
 		LOG_ERR("Failed to start HTTP server: %d", web_ret);
 	}
+
+#ifdef CONFIG_RTSP
+	/* ---- Start RAVENNA RTSP server ---- */
+#ifdef CONFIG_RTSP_AUTO_START
+	int rtsp_ret = rtsp_server_start();
+	if (rtsp_ret < 0) {
+		LOG_ERR("Failed to start RTSP server: %d", rtsp_ret);
+	}
+#else
+	LOG_INF("RTSP auto-start disabled, use 'rtsp start' to enable");
+#endif
+#endif
+
+#ifdef CONFIG_MDNS_SD
+	/* ---- Start RAVENNA mDNS/DNS-SD service advertisement ---- */
+	int mdns_ret = mdns_sd_start();
+	if (mdns_ret < 0) {
+		LOG_ERR("Failed to start mDNS/DNS-SD: %d", mdns_ret);
+	}
+#endif
 
 	/* ---- Start PPB measurement / PLL correction thread ---- */
 	fpga_poll_start(dhcp_restart);

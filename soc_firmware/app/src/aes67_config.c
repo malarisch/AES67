@@ -7,6 +7,8 @@
 
 #include "aes67_config.h"
 #include <string.h>
+#include <stdio.h>
+#include <ctype.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(aes67_config, LOG_LEVEL_INF);
@@ -24,7 +26,10 @@ void aes67_config_reset_defaults(void)
 {
 	memset(&g_config, 0, sizeof(g_config));
 
-	/* Device */
+	/* Device identification (RAVENNA format) */
+	strncpy(g_config.vendor, "AES67", AES67_VENDOR_MAX - 1);
+	strncpy(g_config.product, "AudioNode", AES67_PRODUCT_MAX - 1);
+	strncpy(g_config.serial, "0001", AES67_SERIAL_MAX - 1);
 	strncpy(g_config.device_name, "AES67 Node",
 		AES67_DEVICE_NAME_MAX - 1);
 
@@ -84,4 +89,48 @@ void aes67_config_lock(void)
 void aes67_config_unlock(void)
 {
 	k_mutex_unlock(&cfg_mutex);
+}
+
+char *aes67_config_build_node_id(char *buf, size_t buflen)
+{
+	if (!buf || buflen == 0) {
+		return buf;
+	}
+
+	snprintf(buf, buflen, "%s %s %s",
+		 g_config.vendor, g_config.product, g_config.serial);
+	return buf;
+}
+
+char *aes67_config_build_hostname(char *buf, size_t buflen)
+{
+	if (!buf || buflen == 0) {
+		return buf;
+	}
+
+	if (g_config.device_name[0] != '\0') {
+		/* Use friendly name with spaces removed */
+		char *dst = buf;
+		const char *src = g_config.device_name;
+		size_t remaining = buflen - 1;
+
+		while (*src && remaining > 0) {
+			if (*src != ' ') {
+				*dst++ = tolower((unsigned char)*src);
+				remaining--;
+			}
+			src++;
+		}
+		*dst = '\0';
+	} else {
+		/* No friendly name: use "vendor_product_serial" */
+		snprintf(buf, buflen, "%s_%s_%s",
+			 g_config.vendor, g_config.product, g_config.serial);
+
+		/* Sanitize for DNS: lowercase */
+		for (char *p = buf; *p; p++) {
+			*p = tolower((unsigned char)*p);
+		}
+	}
+	return buf;
 }

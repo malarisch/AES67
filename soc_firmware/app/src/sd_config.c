@@ -156,6 +156,10 @@ static int serialize_device_config(char *buf, size_t sz, int pos)
 
 	aes67_config_lock();
 
+	/* Device identification (RAVENNA format) */
+	pos = json_str(buf, sz, pos, "vendor", cfg->vendor, 1);
+	pos = json_str(buf, sz, pos, "product", cfg->product, 1);
+	pos = json_str(buf, sz, pos, "serial", cfg->serial, 1);
 	pos = json_str(buf, sz, pos, "device_name", cfg->device_name, 1);
 	pos = json_str(buf, sz, pos, "default_mcast_addr",
 		       cfg->default_mcast_addr, 1);
@@ -212,6 +216,7 @@ static int serialize_tx_streams(char *buf, size_t sz, int pos)
 		pos = json_obj_start(buf, sz, pos, 2);
 		pos = json_uint(buf, sz, pos, "stream_id",
 				streams[i].stream_id, 3);
+		pos = json_str(buf, sz, pos, "name", streams[i].name, 3);
 
 		zsock_inet_ntop(AF_INET, &streams[i].dst_ip,
 				ip_str, sizeof(ip_str));
@@ -439,6 +444,25 @@ static int parse_device_config(const char *json)
 
 	aes67_config_lock();
 
+	/* Device identification (RAVENNA format) */
+	if ((v = json_find_key(json, "vendor")) != NULL) {
+		s = json_parse_str(v);
+		if (s) {
+			strncpy(cfg->vendor, s, AES67_VENDOR_MAX - 1);
+		}
+	}
+	if ((v = json_find_key(json, "product")) != NULL) {
+		s = json_parse_str(v);
+		if (s) {
+			strncpy(cfg->product, s, AES67_PRODUCT_MAX - 1);
+		}
+	}
+	if ((v = json_find_key(json, "serial")) != NULL) {
+		s = json_parse_str(v);
+		if (s) {
+			strncpy(cfg->serial, s, AES67_SERIAL_MAX - 1);
+		}
+	}
 	if ((v = json_find_key(json, "device_name")) != NULL) {
 		s = json_parse_str(v);
 		if (s) {
@@ -576,11 +600,18 @@ static int parse_tx_streams(const char *json)
 		uint8_t samples_per_packet = 48;
 		uint32_t ssrc = 0;
 		uint8_t ch_ids[AES67_MAX_CH_PER_STREAM] = {0};
+		char stream_name[AES67_STREAM_NAME_MAX] = {0};
 
 		const char *v;
 
 		if ((v = json_find_key(obj, "stream_id")) != NULL) {
 			stream_id = (uint8_t)json_parse_uint(v);
+		}
+		if ((v = json_find_key(obj, "name")) != NULL) {
+			char *name_str = json_parse_str(v);
+			if (name_str) {
+				strncpy(stream_name, name_str, AES67_STREAM_NAME_MAX - 1);
+			}
 		}
 		if ((v = json_find_key(obj, "dst_ip")) != NULL) {
 			char *ip_str = json_parse_str(v);
@@ -612,7 +643,8 @@ static int parse_tx_streams(const char *json)
 		int ret = sap_sdp_configure_tx_stream(stream_id, &dst_ip,
 						      channel_count,
 						      samples_per_packet,
-						      ch_ids, num_ch, ssrc);
+						      ch_ids, num_ch, ssrc,
+						      stream_name[0] ? stream_name : NULL);
 		if (ret == 0) {
 			LOG_INF("TX stream %u configured from SD card", stream_id);
 			count++;

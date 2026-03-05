@@ -50,8 +50,15 @@ target_sources(app PRIVATE
   src/ptp_bmc.c
   src/sap_sdp.c
   src/aes67_config.c
+  src/aes67_sdp_utils.c
   src/webserver.c
 )
+
+# RTSP server/client (RAVENNA stream control)
+target_sources_ifdef(CONFIG_RTSP app PRIVATE src/rtsp.c)
+
+# RAVENNA mDNS/DNS-SD service advertisement
+target_sources_ifdef(CONFIG_MDNS_SD app PRIVATE src/mdns_sd.c)
 
 # SD card configuration storage (optional)
 target_sources_ifdef(CONFIG_SD_CONFIG app PRIVATE src/sd_config.c)

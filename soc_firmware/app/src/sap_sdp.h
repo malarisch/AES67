@@ -57,10 +57,12 @@ struct aes67_stream_config {
 #define AES67_MAX_TX_STREAMS     8
 #define AES67_MAX_RX_STREAMS     8
 #define AES67_MAX_CH_PER_STREAM  8
+#define AES67_STREAM_NAME_MAX    32
 
 struct aes67_tx_stream {
 	bool     active;
 	uint8_t  stream_id;
+	char     name[AES67_STREAM_NAME_MAX];  /* User-defined stream name */
 	struct in_addr dst_ip;
 	uint8_t  channel_count;
 	uint8_t  samples_per_packet;
@@ -99,6 +101,11 @@ struct sap_foreign_stream {
 	uint16_t samples_per_packet; /* derived from a=ptime: line, 0 if unknown */
 	char     name[SAP_SDP_NAME_MAX];
 	int64_t  last_seen_ms;
+	/* RAVENNA extensions */
+	uint8_t  ptp_domain;         /* from a=clock-domain:PTPv2 <domain> */
+	bool     has_clock_domain;   /* true if a=clock-domain was present */
+	uint32_t sync_time;          /* from a=sync-time:<timestamp> */
+	bool     has_sync_time;      /* true if a=sync-time was present */
 };
 
 /* ---- Public API ---- */
@@ -163,6 +170,7 @@ void sap_sdp_set_announce(bool enable);
  * @param ch_ids           Array of channel IDs
  * @param num_ch_ids       Number of entries in ch_ids
  * @param ssrc             SSRC for RTP (0 = auto-generate from IP+stream_id)
+ * @param name             Stream name (NULL = auto-generate)
  * @return 0 on success, negative errno on error
  */
 int sap_sdp_configure_tx_stream(uint8_t stream_id,
@@ -171,7 +179,8 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 				uint8_t samples_per_pkt,
 				const uint8_t *ch_ids,
 				uint8_t num_ch_ids,
-				uint32_t ssrc);
+				uint32_t ssrc,
+				const char *name);
 
 /**
  * @brief Get the TX stream table.

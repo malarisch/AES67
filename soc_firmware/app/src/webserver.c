@@ -414,6 +414,7 @@ static int build_status_streams(char *buf, size_t sz)
 		}
 		p += snprintf(buf + p, sz - p, "{");
 		p = json_add_uint(buf, sz, p, "stream_id", txs[i].stream_id);
+		p = json_add_str(buf, sz, p, "name", txs[i].name);
 		format_ip(tmp, sizeof(tmp), &txs[i].dst_ip);
 		p = json_add_str(buf, sz, p, "dst_ip", tmp);
 		p = json_add_uint(buf, sz, p, "channel_count",
@@ -770,6 +771,7 @@ static int apply_tx_stream_json(const char *json, size_t len)
 	int32_t channel_count = 0;
 	int32_t samples_per_pkt = 48;
 	char dst_ip_str[INET_ADDRSTRLEN] = {0};
+	char stream_name[AES67_STREAM_NAME_MAX] = {0};
 
 	if (!json_find_int(json, len, "stream_id", &stream_id) ||
 	    stream_id < 0 || stream_id > 7) {
@@ -780,6 +782,9 @@ static int apply_tx_stream_json(const char *json, size_t len)
 			  sizeof(dst_ip_str)) <= 0) {
 		return -EINVAL;
 	}
+
+	/* Parse optional stream name */
+	json_find_str(json, len, "name", stream_name, sizeof(stream_name));
 
 	struct in_addr dst;
 
@@ -821,7 +826,7 @@ static int apply_tx_stream_json(const char *json, size_t len)
 					   (uint8_t)channel_count,
 					   (uint8_t)samples_per_pkt,
 					   ch_ids, (uint8_t)channel_count,
-					   0); /* SSRC: auto-generate */
+					   0, stream_name[0] ? stream_name : NULL);
 }
 
 /* ================================================================
@@ -913,7 +918,7 @@ static int delete_tx_stream(int stream_id)
 	uint8_t zero_ch[8] = {0};
 
 	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &zero_ip,
-					   0, 0, zero_ch, 0, 0);
+					   0, 0, zero_ch, 0, 0, NULL);
 }
 
 /* ================================================================

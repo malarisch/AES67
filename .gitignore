@@ -52,3 +52,4 @@ external/
 **/node_modules/
 *.stp
 datasheets/AD1940_1941.pdf
+datasheets/RAVENNA_Operating_Principles_-_Draft_1.0_final.pdf

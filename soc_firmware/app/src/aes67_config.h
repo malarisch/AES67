@@ -23,13 +23,20 @@ extern "C" {
 
 /* ---- Device identification ---- */
 
-#define AES67_DEVICE_NAME_MAX  32
+#define AES67_DEVICE_NAME_MAX   32
+#define AES67_VENDOR_MAX        16
+#define AES67_PRODUCT_MAX       24
+#define AES67_SERIAL_MAX        16
+#define AES67_NODE_ID_MAX       64  /* "vendor product serial" */
 
 /* ---- Configuration structure ---- */
 
 struct aes67_device_config {
-	/* -- Device -- */
-	char device_name[AES67_DEVICE_NAME_MAX];
+	/* -- Device identification (RAVENNA format) -- */
+	char vendor[AES67_VENDOR_MAX];     /* Vendor name */
+	char product[AES67_PRODUCT_MAX];   /* Product name */
+	char serial[AES67_SERIAL_MAX];     /* Serial number (unique) */
+	char device_name[AES67_DEVICE_NAME_MAX];  /* User-defined friendly name */
 
 	/* -- AES67 audio defaults -- */
 	char     default_mcast_addr[16];   /* e.g. "239.69.0.1" */
@@ -84,6 +91,30 @@ void aes67_config_unlock(void);
  * @brief Reset all configuration values to compiled-in defaults.
  */
 void aes67_config_reset_defaults(void);
+
+/**
+ * @brief Build the RAVENNA-format node ID string.
+ *
+ * Generates "<vendor> <product> <serial>" from the current config.
+ * Caller must provide a buffer of at least AES67_NODE_ID_MAX bytes.
+ *
+ * @param buf    Output buffer
+ * @param buflen Buffer size
+ * @return Pointer to buf (for chaining)
+ */
+char *aes67_config_build_node_id(char *buf, size_t buflen);
+
+/**
+ * @brief Get the hostname (vendor-product-serial, sanitized for DNS).
+ *
+ * Replaces spaces with dashes and lowercases for DNS compatibility.
+ * Caller must provide a buffer of at least AES67_NODE_ID_MAX bytes.
+ *
+ * @param buf    Output buffer
+ * @param buflen Buffer size
+ * @return Pointer to buf (for chaining)
+ */
+char *aes67_config_build_hostname(char *buf, size_t buflen);
 
 #ifdef __cplusplus
 }
