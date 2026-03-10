@@ -115,14 +115,14 @@ class AES67SoC(SoCCore):
     }
     mem_map.update(SoCCore.mem_map)
 
-    def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", **kwargs):
+    def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_rom_size=24*1024, integrated_sram_size=4*1024, **kwargs):
 
         # SoCCore - must be initialized before CRG
         SoCCore.__init__(self, platform, sys_clk_freq,
             cpu_type             = "vexriscv",
             cpu_variant          = "minimal",
-            integrated_rom_size  = 32 * 1024,  # 32 KB boot ROM
-            integrated_sram_size = 8 * 1024,   # 8 KB SRAM
+            integrated_rom_size  = integrated_rom_size,
+            integrated_sram_size = integrated_sram_size,
             integrated_main_ram_size = 0,
             ident                = "AES67-LiteX-SoC",
             ident_version        = True,
@@ -154,10 +154,13 @@ class AES67SoC(SoCCore):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
-    parser.add_argument("--sys-clk-freq",       default=50e6,  type=float, help="System clock frequency (Hz)")
+    parser.add_argument("--sys-clk-freq",       default=80e6,  type=float, help="System clock frequency (Hz)")
     parser.add_argument("--with-hyperram",      action="store_true",       help="Enable HyperRAM support")
     parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (2:1 = 2x faster)")
-    parser.add_argument("--output-dir",          default=None,              help="Output directory")
+    parser.add_argument("--rom-size",           default=24,    type=int,   help="ROM size in KB (default: 32)")
+    parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 8)")
+    parser.add_argument("--bios-console",       default="lite", choices=["full", "lite", "disable"], help="BIOS console mode (lite saves ~8KB)")
+    parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 
     output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "build")
@@ -165,9 +168,11 @@ def main():
     platform = StubPlatform()
     soc = AES67SoC(
         platform,
-        sys_clk_freq       = int(args.sys_clk_freq),
-        with_hyperram      = args.with_hyperram,
-        hyperram_clk_ratio = args.hyperram_clk_ratio,
+        sys_clk_freq         = int(args.sys_clk_freq),
+        with_hyperram        = args.with_hyperram,
+        hyperram_clk_ratio   = args.hyperram_clk_ratio,
+        integrated_rom_size  = args.rom_size * 1024,
+        integrated_sram_size = args.sram_size * 1024,
     )
 
     builder = Builder(soc,
@@ -176,6 +181,7 @@ def main():
         compile_gateware = False,
         csr_json         = os.path.join(output_dir, "csr.json"),
         csr_csv          = os.path.join(output_dir, "csr.csv"),
+        bios_console     = args.bios_console,
     )
     builder.build(build_name="top", run=False)
 
