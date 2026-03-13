@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
 
-#include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
@@ -48,16 +48,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	const struct device *fmc = device_get_binding("eth_fmc0");
 	bool measurement_running = false;
-	uint8_t status;
-	int ret;
 	uint32_t poll_count = 0;
-
-	if (!fmc) {
-		LOG_ERR("PPB poll: FMC device not found");
-		return;
-	}
 
 	LOG_INF("PPB poll thread started");
 
@@ -65,69 +57,54 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		k_msleep(FPGA_POLL_INTERVAL_MS);
 		poll_count++;
 
-		/* Read clocking status flags (register 0x50 read) */
-		ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_CLK, &status);
-		if (ret < 0) {
-			LOG_WRN("PPB poll: failed to read status: %d", ret);
-			continue;
-		}
+		/* Read combined status word */
+		uint32_t status = fpga_hal_read_status();
 
 		/* ---- Update display metrics every 1 second ---- */
 		if (poll_count >= 10) {
 			poll_count = 0;
 
-			disp_metrics.ppb_valid = !!(status & ETH_FMC_CLK_PPB_VALID);
-			disp_metrics.wc_locked = !!(status & ETH_FMC_CLK_WC_LOCKED);
-			disp_metrics.wc_phasejump = !!(status & ETH_FMC_CLK_WC_PHASEJUMP);
-			disp_metrics.wc_configured = !!(status & ETH_FMC_CLK_WC_CONFIGURED);
-			disp_metrics.ptp_leader_lost = !!(status & ETH_FMC_CLK_PTP_LEADER_LOST);
+			disp_metrics.ppb_valid = !!(status & FPGA_HAL_CLK_PPB_VALID);
+			disp_metrics.wc_locked = !!(status & FPGA_HAL_CLK_WC_LOCKED);
+			disp_metrics.wc_phasejump = !!(status & FPGA_HAL_CLK_WC_PHASEJUMP);
+			disp_metrics.wc_configured = !!(status & FPGA_HAL_CLK_WC_CONFIGURED);
+			disp_metrics.ptp_leader_lost = !!(status & FPGA_HAL_CLK_PTP_LEADER_LOST);
 
-			/* Ethernet flags (register 0x51) */
-			uint8_t eth_status;
+			disp_metrics.link_up = !!(status & FPGA_HAL_ETH_LINK_UP);
+			disp_metrics.speed_code = (status & FPGA_HAL_ETH_SPEED_MASK) >>
+						  FPGA_HAL_ETH_SPEED_SHIFT;
 
-			ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_ETH,
-					       &eth_status);
-			if (ret == 0) {
-				unsigned speed_code = (eth_status &
-						       ETH_FMC_ETH_SPEED_MASK) >>
-						      ETH_FMC_ETH_SPEED_SHIFT;
+			/* ---- Link state tracking with DHCP restart ---- */
+			static bool link_prev_up;
+			static int64_t link_down_since;
+			static bool link_down_handled;
 
-				disp_metrics.link_up =
-					!!(eth_status & ETH_FMC_ETH_LINK_UP);
-				disp_metrics.speed_code = speed_code;
+			if (disp_metrics.link_up && !link_prev_up) {
+				LOG_INF("Ethernet link up");
 
-				/* ---- Link state tracking with DHCP restart ---- */
-				static bool link_prev_up;
-				static int64_t link_down_since;
-				static bool link_down_handled;
-
-				if (disp_metrics.link_up && !link_prev_up) {
-					LOG_INF("Ethernet link up");
-
-					if (link_down_handled) {
-						k_msleep(500);
-						if (g_dhcp_restart_cb) {
-							g_dhcp_restart_cb();
-						}
-						link_down_handled = false;
-					} else if (g_ip_valid) {
-						LOG_INF("Short link flap — rejoining multicast groups");
-						ptp_bmc_notify_link_up();
-						sap_sdp_notify_link_up();
+				if (link_down_handled) {
+					k_msleep(500);
+					if (g_dhcp_restart_cb) {
+						g_dhcp_restart_cb();
 					}
-				} else if (!disp_metrics.link_up && link_prev_up) {
-					link_down_since = k_uptime_get();
 					link_down_handled = false;
-					LOG_INF("Ethernet link down");
-				} else if (!disp_metrics.link_up && !link_prev_up
-					   && !link_down_handled) {
-					if ((k_uptime_get() - link_down_since) > 1000) {
-						LOG_INF("Link down > 1s — will restart DHCP on link-up");
-						link_down_handled = true;
-					}
+				} else if (g_ip_valid) {
+					LOG_INF("Short link flap — rejoining multicast groups");
+					ptp_bmc_notify_link_up();
+					sap_sdp_notify_link_up();
 				}
-				link_prev_up = disp_metrics.link_up;
+			} else if (!disp_metrics.link_up && link_prev_up) {
+				link_down_since = k_uptime_get();
+				link_down_handled = false;
+				LOG_INF("Ethernet link down");
+			} else if (!disp_metrics.link_up && !link_prev_up
+				   && !link_down_handled) {
+				if ((k_uptime_get() - link_down_since) > 1000) {
+					LOG_INF("Link down > 1s — will restart DHCP on link-up");
+					link_down_handled = true;
+				}
 			}
+			link_prev_up = disp_metrics.link_up;
 
 #ifdef CONFIG_DISPLAY_CTRL
 			/* Update status LEDs based on FPGA status */
@@ -149,29 +126,16 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			}
 #endif
 
-			/* Path delay (register 0x52) */
-			int32_t path_delay;
+			/* Path delay */
+			disp_metrics.path_delay_ns = fpga_hal_read_path_delay();
 
-			ret = fpga_read_32(fmc, ETH_FMC_REG_PATH_DELAY,
-					   &path_delay);
-			if (ret == 0) {
-				disp_metrics.path_delay_ns = path_delay;
-			}
+			/* Leader offset */
+			disp_metrics.leader_offset_ns = fpga_hal_read_ptp_offset();
 
-			/* Leader offset (register 0x53) */
-			int32_t leader_offset;
-
-			ret = fpga_read_32(fmc, ETH_FMC_REG_LEADER_OFFSET,
-					   &leader_offset);
-			if (ret == 0) {
-				disp_metrics.leader_offset_ns = leader_offset;
-			}
-
-			/* PPB offset (registers 0x54/0x55) */
+			/* PPB offset */
 			int32_t ppb_current;
 
-			ret = fpga_read_ppb(fmc, &ppb_current, NULL, NULL);
-			if (ret == 0) {
+			if (fpga_read_ppb(&ppb_current, NULL, NULL) == 0) {
 				disp_metrics.ppb_offset = ppb_current;
 			}
 
@@ -185,9 +149,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 
 		/* If no measurement is running, start one */
 		if (!measurement_running) {
-			ret = eth_fmc_status_set_bits(fmc, ETH_FMC_FLAG_PPB_START);
-			if (ret < 0) {
-				LOG_WRN("PPB poll: failed to start measurement: %d", ret);
+			if (fpga_hal_ctrl_set_bits(FPGA_HAL_CTRL_PPB_START) < 0) {
+				LOG_WRN("PPB poll: failed to start measurement");
 				continue;
 			}
 			measurement_running = true;
@@ -196,19 +159,18 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		}
 
 		/* Check if measurement is complete */
-		if (!(status & ETH_FMC_CLK_PPB_VALID)) {
+		if (!(status & FPGA_HAL_CLK_PPB_VALID)) {
 			continue;
 		}
 
 		/* Measurement complete — clear the start bit and read the PPB value */
-		eth_fmc_status_clear_bits(fmc, ETH_FMC_FLAG_PPB_START);
+		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PPB_START);
 
 		int32_t ppb_measured;
 		uint32_t count_wc, count_pll;
 
-		ret = fpga_read_ppb(fmc, &ppb_measured, &count_wc, &count_pll);
-		if (ret < 0) {
-			LOG_WRN("PPB poll: failed to read PPB: %d", ret);
+		if (fpga_read_ppb(&ppb_measured, &count_wc, &count_pll) < 0) {
+			LOG_WRN("PPB poll: failed to read PPB");
 			measurement_running = false;
 			continue;
 		}

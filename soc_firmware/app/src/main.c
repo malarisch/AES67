@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "../drivers/si5351a/si5351a.h"
-#include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
@@ -41,7 +41,7 @@
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* Forward declarations */
-static void fpga_reconfigure(const struct device *dev, void *user_data);
+static void fpga_reconfigure(void *user_data);
 
 static struct net_if *g_iface;
 static struct in_addr g_my_ip;
@@ -114,9 +114,8 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 /* ---- FPGA Recovery Callback ---- */
 
-static void fpga_reconfigure(const struct device *dev, void *user_data)
+static void fpga_reconfigure(void *user_data)
 {
-	ARG_UNUSED(dev);
 	ARG_UNUSED(user_data);
 
 	LOG_INF("FPGA recovery: re-writing configuration registers");
@@ -267,7 +266,7 @@ int main(void)
 #endif
 
 	/* ---- Wait for FPGA to be ready before network operations ---- */
-	if (eth_fmc_wait_for_fpga_ready(30000) < 0) {
+	if (fpga_hal_wait_ready(30000) < 0) {
 		LOG_ERR("FPGA not ready after 30s - network services will not start");
 		return -1;
 	}
@@ -303,7 +302,7 @@ int main(void)
 
 	g_iface = iface;
 
-	eth_fmc_register_fpga_recover_cb(fpga_reconfigure, NULL);
+	fpga_hal_register_recover_cb(fpga_reconfigure, NULL);
 
 	fpga_write_mac_address(iface);
 

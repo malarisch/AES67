@@ -1,0 +1,109 @@
+&cpu0 {
+    clock-frequency = <80000000>;
+};
+&ctrl0 {
+    reg = <0xf0000800 0x4>,
+        <0xf0000804 0x4>,
+        <0xf0000808 0x4>;
+    reg-names = "reset",
+        "scratch",
+        "bus_errors";
+    };
+&uart0 {
+    reg = <0xf0004800 0x4>,
+        <0xf0004804 0x4>,
+        <0xf0004808 0x4>,
+        <0xf000480c 0x4>,
+        <0xf0004810 0x4>,
+        <0xf0004814 0x4>,
+        <0xf0004818 0x4>,
+        <0xf000481c 0x4>,
+        <0xf0005000 0x4>,
+        <0xf0005004 0x4>,
+        <0xf0005008 0x4>,
+        <0xf000500c 0x4>,
+        <0xf0005010 0x4>,
+        <0xf0005014 0x4>,
+        <0xf0005018 0x4>,
+        <0xf000501c 0x4>;
+    reg-names = "rxtx",
+        "txfull",
+        "rxempty",
+        "ev_status",
+        "ev_pending",
+        "ev_enable",
+        "txempty",
+        "rxfull",
+        "_rxtx",
+        "_txfull",
+        "_rxempty",
+        "_ev_status",
+        "_ev_pending",
+        "_ev_enable",
+        "_txempty",
+        "_rxfull";
+    interrupts = <0 1>;
+};
+&timer0 {
+    reg = <0xf0004000 0x4>,
+        <0xf0004004 0x4>,
+        <0xf0004008 0x4>,
+        <0xf000400c 0x4>,
+        <0xf0004010 0x4>,
+        <0xf0004014 0x4>,
+        <0xf0004018 0x4>,
+        <0xf000401c 0x4>;
+    reg-names = "load",
+        "reload",
+        "en",
+        "update_value",
+        "value",
+        "ev_status",
+        "ev_pending",
+        "ev_enable";
+    interrupts = <1 1>;
+};
+&eth0 {
+    status = "disabled";
+};
+&mdio0 {
+    status = "disabled";
+};
+&spi0 {
+    status = "disabled";
+};
+&spi1 {
+    status = "disabled";
+};
+&sdhc0 {
+    status = "disabled";
+};
+&i2c0 {
+    reg = <0xf0002000 0x4>,
+        <0xf0002004 0x4>,
+        <0xf0002008 0x4>;
+    reg-names = "ev_status",
+        "ev_pending",
+        "ev_enable";
+};
+&i2s_rx {
+    status = "disabled";
+};
+&i2s_tx {
+    status = "disabled";
+};
+&wdt0 {
+    status = "disabled";
+};
+&clock0 {
+    status = "disabled";
+};
+&ram0 {
+    status = "disabled";
+};
+&dna0 {
+    status = "disabled";
+};
+&prbs0 {
+    status = "disabled";
+};

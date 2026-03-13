@@ -31,7 +31,7 @@
 #include "sd_config.h"
 #endif
 #include <zephyr/sys/reboot.h>
-#include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
@@ -169,68 +169,26 @@ static void format_ip(char *out, size_t sz, const struct in_addr *addr)
  * To avoid coupling we just read FPGA regs directly here. */
 static int read_fpga_status(struct ui_fpga_metrics *m)
 {
-	const struct device *fmc = device_get_binding("eth_fmc0");
-	uint8_t status, eth_status;
-	int ret;
+	uint32_t status = fpga_hal_read_status();
 
-	if (!fmc) {
-		return -ENODEV;
-	}
+	m->ppb_valid        = !!(status & FPGA_HAL_CLK_PPB_VALID);
+	m->wc_locked        = !!(status & FPGA_HAL_CLK_WC_LOCKED);
+	m->wc_phasejump     = !!(status & FPGA_HAL_CLK_WC_PHASEJUMP);
+	m->wc_configured    = !!(status & FPGA_HAL_CLK_WC_CONFIGURED);
+	m->ptp_leader_lost  = !!(status & FPGA_HAL_CLK_PTP_LEADER_LOST);
 
-	ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_CLK, &status);
-	if (ret < 0) {
-		return ret;
-	}
+	m->link_up    = !!(status & FPGA_HAL_ETH_LINK_UP);
+	m->speed_code = (status & FPGA_HAL_ETH_SPEED_MASK) >>
+			FPGA_HAL_ETH_SPEED_SHIFT;
 
-	m->ppb_valid        = !!(status & ETH_FMC_CLK_PPB_VALID);
-	m->wc_locked        = !!(status & ETH_FMC_CLK_WC_LOCKED);
-	m->wc_phasejump     = !!(status & ETH_FMC_CLK_WC_PHASEJUMP);
-	m->wc_configured    = !!(status & ETH_FMC_CLK_WC_CONFIGURED);
-	m->ptp_leader_lost  = !!(status & ETH_FMC_CLK_PTP_LEADER_LOST);
+	m->path_delay_ns = fpga_hal_read_path_delay();
+	m->leader_offset_ns = fpga_hal_read_ptp_offset();
 
-	ret = eth_fmc_reg_read(fmc, ETH_FMC_REG_STATUS_ETH, &eth_status);
-	if (ret == 0) {
-		m->link_up    = !!(eth_status & ETH_FMC_ETH_LINK_UP);
-		m->speed_code = (eth_status & ETH_FMC_ETH_SPEED_MASK) >>
-				ETH_FMC_ETH_SPEED_SHIFT;
-	}
-
-	/* 32-bit reads */
-	uint8_t buf[4];
-
-	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_PATH_DELAY, buf, 4);
-	if (ret == 0) {
-		m->path_delay_ns = (int32_t)((uint32_t)buf[0] |
-				   ((uint32_t)buf[1] << 8) |
-				   ((uint32_t)buf[2] << 16) |
-				   ((uint32_t)buf[3] << 24));
-	}
-
-	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_LEADER_OFFSET, buf, 4);
-	if (ret == 0) {
-		m->leader_offset_ns = (int32_t)((uint32_t)buf[0] |
-					((uint32_t)buf[1] << 8) |
-					((uint32_t)buf[2] << 16) |
-					((uint32_t)buf[3] << 24));
-	}
-
-	/* Read raw counters and calculate PPB (0x54 = count_wc, 0x55 = count_pll) */
+	/* Read raw counters and calculate PPB */
 	uint32_t count_wc = 0, count_pll = 0;
 
-	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_COUNT_WC, buf, 4);
-	if (ret == 0) {
-		count_wc = ((uint32_t)buf[0] |
-			    ((uint32_t)buf[1] << 8) |
-			    ((uint32_t)buf[2] << 16)) & 0x3FFFFF;
-	}
-	ret = eth_fmc_reg_read_block(fmc, ETH_FMC_REG_COUNT_PLL, buf, 4);
-	if (ret == 0) {
-		count_pll = ((uint32_t)buf[0] |
-			     ((uint32_t)buf[1] << 8) |
-			     ((uint32_t)buf[2] << 16)) & 0x3FFFFF;
-	}
+	fpga_hal_read_ppb_counts(&count_wc, &count_pll);
 
-	/* Calculate PPB: (count_pll - count_wc) * 1e9 / count_wc */
 	if (count_wc > 0) {
 		int32_t diff = (int32_t)count_pll - (int32_t)count_wc;
 		m->ppb_offset = (int32_t)(((int64_t)diff * 1000000000LL) /

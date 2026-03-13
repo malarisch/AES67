@@ -31,7 +31,7 @@
 #include "aes67_config.h"
 #include "sd_config.h"
 #include "ieee1588_utils.h"
-#include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "../drivers/fpga_hal/fpga_hal.h"
 
 LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_INF);
 
@@ -1041,18 +1041,11 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	}
 
 	/* Write to FPGA */
-	const struct device *fmc = device_get_binding("eth_fmc0");
-
-	if (!fmc) {
-		LOG_ERR("SAP: FMC device not found");
-		return -ENODEV;
-	}
-
-	int ret = eth_fmc_write_tx_stream_config(fmc, stream_id, dst_ip,
-						 channel_count,
-						 samples_per_pkt,
-						 ch_ids, num_ch_ids,
-						 effective_ssrc);
+	int ret = fpga_hal_write_tx_stream_config(stream_id, dst_ip,
+						  channel_count,
+						  samples_per_pkt,
+						  ch_ids, num_ch_ids,
+						  effective_ssrc);
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write stream %u to FPGA: %d",
 			stream_id, ret);
@@ -1114,17 +1107,10 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 		return -EINVAL;
 	}
 
-	const struct device *fmc = device_get_binding("eth_fmc0");
-
-	if (!fmc) {
-		LOG_ERR("SAP: FMC device not found");
-		return -ENODEV;
-	}
-
-	int ret = eth_fmc_write_rx_stream_config(fmc, stream_id, dst_ip,
-						 dst_port, ch_map,
-						 channel_count, output_delay,
-						 samples_per_channel);
+	int ret = fpga_hal_write_rx_stream_config(stream_id, dst_ip,
+						  dst_port, ch_map,
+						  channel_count, output_delay,
+						  samples_per_channel);
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write RX stream %u to FPGA: %d",
 			stream_id, ret);

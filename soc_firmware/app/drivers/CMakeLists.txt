@@ -1,5 +1,7 @@
 add_subdirectory_ifdef(CONFIG_ETH_SPI_BASIC eth_spi_basic)
 add_subdirectory_ifdef(CONFIG_ETH_FMC_BASIC eth_fmc_basic)
+add_subdirectory_ifdef(CONFIG_ETH_LITEX eth_litex)
+add_subdirectory_ifdef(CONFIG_FPGA_HAL fpga_hal)
 add_subdirectory_ifdef(CONFIG_SI5351A si5351a)
 add_subdirectory_ifdef(CONFIG_MI_CARD mi_card)
 add_subdirectory_ifdef(CONFIG_LO_CARD lo_card)

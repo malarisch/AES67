@@ -10,8 +10,10 @@ endif()
 
 
 #set(BOARD "esp32s3_devkitc/esp32s3/procpu")
-set(BOARD "nucleo_h753zi")
-set(CONFIG_BOOTLOADER_MCUBOOT y)
+#set(BOARD "nucleo_h753zi")
+set(BOARD "litex_vexriscv")
+set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/litex_vexriscv.overlay")
+#set(CONFIG_BOOTLOADER_MCUBOOT y)
 #set(DOPENOCD /home/wolff/openocd-esp32/openocd-esp32/bin/openocd)
 #set(DOPENOCD_DEFAULT_PATH /home/wolff/openocd-esp32/openocd-esp32/share/openocd/scripts)
 

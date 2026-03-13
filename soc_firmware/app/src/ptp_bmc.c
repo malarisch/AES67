@@ -23,7 +23,7 @@
 
 #include "ptp_bmc.h"
 #include "ieee1588_utils.h"
-#include "../drivers/eth_fmc_basic/eth_fmc_basic.h"
+#include "../drivers/fpga_hal/fpga_hal.h"
 
 LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_INF);
 
@@ -297,33 +297,26 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 				    int8_t log_msg_interval,
 				    int8_t log_announce_interval)
 {
-	const struct device *fmc = device_get_binding("eth_fmc0");
-
-	if (!fmc) {
-		LOG_ERR("BMC: FMC device not found for write-back");
-		return;
-	}
-
 	int ret;
 
-	/* Write PTP configuration register 0x55 */
-	ret = eth_fmc_write_ptp_config(fmc, leader_id, time_source,
-				       log_msg_interval,
-				       log_announce_interval);
+	/* Write PTP configuration */
+	ret = fpga_hal_write_ptp_config(leader_id, time_source,
+					log_msg_interval,
+					log_announce_interval);
 	if (ret < 0) {
 		LOG_ERR("BMC: Failed to write PTP config: %d", ret);
 		return;
 	}
 
-	/* Write status flags register 0x50.
+	/* Write control flags.
 	 * Use set/clear to modify only the PTP_IS_LEADER / PTP_IS_FOLLOWER
 	 * bits, leaving other bits (PPB start, resets) untouched. */
 	if (role == PTP_ROLE_LEADER) {
-		eth_fmc_status_clear_bits(fmc, ETH_FMC_FLAG_PTP_IS_FOLLOWER);
-		ret = eth_fmc_status_set_bits(fmc, ETH_FMC_FLAG_PTP_IS_LEADER);
+		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
+		ret = fpga_hal_ctrl_set_bits(FPGA_HAL_CTRL_PTP_IS_LEADER);
 	} else {
-		eth_fmc_status_clear_bits(fmc, ETH_FMC_FLAG_PTP_IS_LEADER);
-		ret = eth_fmc_status_set_bits(fmc, ETH_FMC_FLAG_PTP_IS_FOLLOWER);
+		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_LEADER);
+		ret = fpga_hal_ctrl_set_bits(FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
 	}
 
 	if (ret < 0) {

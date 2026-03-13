@@ -1,0 +1,25 @@
+menuconfig ETH_LITEX
+	bool "LiteX SoC Ethernet interface"
+	select NET_L2_ETHERNET
+	help
+	  Ethernet driver for the LiteX-generated AES67 SoC.
+	  Uses CSR registers for control/status and a Wishbone-mapped
+	  dual-port packet buffer (1500 bytes RX + 1500 bytes TX).
+
+if ETH_LITEX
+
+config ETH_LITEX_POLL_INTERVAL_MS
+	int "RX poll interval (ms)"
+	default 100
+	help
+	  Fallback polling interval when no IRQ fires. The driver
+	  uses k_sem_take with this timeout, so actual RX latency
+	  is typically much lower when the IRQ is working.
+
+config ETH_LITEX_RX_STACK_SIZE
+	int "RX/TX thread stack size"
+	default 2048
+	help
+	  Stack size for RX and TX worker threads.
+
+endif # ETH_LITEX

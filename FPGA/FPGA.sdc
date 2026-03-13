@@ -64,6 +64,14 @@ create_generated_clock -name {mac_clk_25m} \
     -master_clock {rmii_refclk} \
     [get_registers {miirmii:inst43|intel_fpga_mii2rmii:fpga_mii2rmii_0|clkdiv2:u0_clkdiv|clkby2}]
 
+# LiteX SoC PLL output: 70 MHz sys_clk (50 * 7 / 5)
+# Note: Quartus auto-derives this from ALTPLL, but we define it explicitly for clarity
+create_generated_clock -name {litex_sys_clk} \
+    -source [get_pins {inst|ALTPLL|auto_generated|pll1|inclk[0]}] \
+    -multiply_by 7 -divide_by 5 \
+    -master_clock {c10_clk50m} \
+    [get_pins {inst|ALTPLL|auto_generated|pll1|clk[0]}]
+
 
 #**************************************************************
 # Set Clock Latency
@@ -93,15 +101,17 @@ create_generated_clock -name {mac_clk_25m} \
 # Set Clock Groups
 #**************************************************************
 
-# Three asynchronous clock domains:
+# Clock domains:
 # 1. System domain: c10_clk50m -> PLL -> sys_clk_125m, fmc_clk_250m
 # 2. MAC domain: rmii_refclk -> mac_clk_25m
 # 3. Audio domain: audio_mclk
+# 4. LiteX SoC domain: c10_clk50m -> litex_sys_clk
 
 set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m fmc_clk_250m}] \
     -group [get_clocks {rmii_refclk mac_clk_25m}] \
-    -group [get_clocks {audio_mclk}]
+    -group [get_clocks {audio_mclk}] \
+    -group [get_clocks {litex_sys_clk}]
 
 
 #**************************************************************
@@ -126,6 +136,11 @@ set_false_path -from [get_registers {*inst13|inst37|threshold_shadow[*][*]}] -to
 
 # tx_router tx_en CDC (tx_transmitter domain -> sys_clk)
 set_false_path -to [get_registers {*inst13|inst37|tx_en_meta}]
+
+# LiteX SoC reset signals - static during normal operation
+set_false_path -from [get_registers {*aes67soc_reset_storage*}] -to *
+set_false_path -from [get_registers {*aes67soc_reset_re*}] -to *
+set_false_path -from [get_registers {*crg_rst*}] -to *
 
 
 #**************************************************************

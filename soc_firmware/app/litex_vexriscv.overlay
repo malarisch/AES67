@@ -1,0 +1,270 @@
+/*
+ * DTS overlay for the AES67 LiteX VexRiscv SoC.
+ *
+ * Applies on top of the upstream litex_vexriscv board DTS
+ * (riscv32-litex-vexriscv.dtsi).  All addresses are derived from
+ * litex_soc/build/software/include/generated/{csr,mem,soc}.h.
+ *
+ * Regenerate the SoC:  python litex_soc/generate.py
+ * Then update this overlay if addresses change.
+ */
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/* ---- CPU clock ---------------------------------------------------------- */
+&cpu0 {
+	clock-frequency = <80000000>;
+};
+
+/* ---- Memory ------------------------------------------------------------- */
+
+/*
+ * Main RAM = HyperRAM at 0x20000000, 16 MB.
+ * The board DTS defines ram0 at 0x40000000 — override its reg.
+ */
+&ram0 {
+	reg = <0x20000000 0x01000000>;
+};
+
+/ {
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,sram = &ram0;
+	};
+};
+
+/* ---- SoC controller (ctrl) ---------------------------------------------- */
+&ctrl0 {
+	reg = <0xf0000800 0x4>,
+	      <0xf0000804 0x4>,
+	      <0xf0000808 0x4>;
+	reg-names = "reset",
+		    "scratch",
+		    "bus_errors";
+	status = "okay";
+};
+
+/* ---- UART 0 (console, 115200) ------------------------------------------- */
+&uart0 {
+	reg = <0xf0004800 0x4>,
+	      <0xf0004804 0x4>,
+	      <0xf0004808 0x4>,
+	      <0xf000480c 0x4>,
+	      <0xf0004810 0x4>,
+	      <0xf0004814 0x4>,
+	      <0xf0004818 0x4>,
+	      <0xf000481c 0x4>;
+	reg-names = "rxtx",
+		    "txfull",
+		    "rxempty",
+		    "ev_status",
+		    "ev_pending",
+		    "ev_enable",
+		    "txempty",
+		    "rxfull";
+	interrupts = <0 1>;
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/* ---- Timer 0 ------------------------------------------------------------ */
+&timer0 {
+	reg = <0xf0004000 0x4>,
+	      <0xf0004004 0x4>,
+	      <0xf0004008 0x4>,
+	      <0xf000400c 0x4>,
+	      <0xf0004010 0x4>,
+	      <0xf0004014 0x4>,
+	      <0xf0004018 0x4>,
+	      <0xf000401c 0x4>,
+	      <0xf0004020 0x4>,
+	      <0xf0004024 0x8>;
+	reg-names = "load",
+		    "reload",
+		    "en",
+		    "update_value",
+		    "value",
+		    "ev_status",
+		    "ev_pending",
+		    "ev_enable",
+		    "uptime_latch",
+		    "uptime_cycles";
+	interrupts = <1 1>;
+	status = "okay";
+};
+
+/* ---- I2C 0: Display (SSD1306) + PLL (Si5351A) -------------------------- */
+&i2c0 {
+	reg = <0xf0002000 0x4>,
+	      <0xf0002004 0x4>;
+	reg-names = "write",
+		    "read";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	status = "okay";
+
+	si5351a: si5351a@60 {
+		compatible = "silabs,si5351a";
+		reg = <0x60>;
+		clock-frequency = <25000000>;
+		silabs,xtal-load-pf = <10>;
+	};
+
+	ssd1306: ssd1306@3c {
+		compatible = "solomon,ssd1306fb";
+		reg = <0x3c>;
+		width = <128>;
+		height = <64>;
+		segment-offset = <0>;
+		page-offset = <0>;
+		display-offset = <0>;
+		multiplex-ratio = <63>;
+		segment-remap;
+		com-invdir;
+		prechargep = <0x22>;
+	};
+};
+
+/* ---- I2C 1: AD/DA Card Controller -------------------------------------- */
+/* Disable the DTSI-defined i2c1 (litex,litei2c at 0xe000d800) */
+&i2c1 {
+	status = "disabled";
+};
+
+/* Define new I2C1 node at our SoC address */
+/ {
+	soc {
+		i2c_card: i2c2: i2c@f0002800 {
+			compatible = "litex,i2c";
+			reg = <0xf0002800 0x4>,
+			      <0xf0002804 0x4>;
+			reg-names = "write",
+				    "read";
+			clock-frequency = <I2C_BITRATE_STANDARD>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+		};
+	};
+};
+
+/* ---- SPI 0: SD Card ----------------------------------------------------- */
+&spi0 {
+	reg = <0xf0003800 0x4>,
+	      <0xf0003804 0x4>,
+	      <0xf0003808 0x4>,
+	      <0xf000380c 0x4>,
+	      <0xf0003810 0x4>,
+	      <0xf0003814 0x4>;
+	reg-names = "control",
+		    "status",
+		    "mosi",
+		    "miso",
+		    "cs",
+		    "loopback";
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	sdhc0: sdhc@0 {
+		compatible = "zephyr,sdhc-spi-slot";
+		reg = <0>;
+		status = "okay";
+		spi-max-frequency = <1000000>;
+		power-delay-ms = <1000>;
+		mmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};
+
+/* ---- Disable peripherals not present in our SoC ------------------------- */
+&eth0 {
+	status = "disabled";
+};
+
+&mdio0 {
+	status = "disabled";
+};
+
+&dna0 {
+	status = "disabled";
+};
+
+&prbs0 {
+	status = "disabled";
+};
+
+&wdt0 {
+	status = "disabled";
+};
+
+&clock0 {
+	status = "disabled";
+};
+
+&gpio_out {
+	status = "disabled";
+};
+
+&gpio_in {
+	status = "disabled";
+};
+
+&i2s_rx {
+	status = "disabled";
+};
+
+&i2s_tx {
+	status = "disabled";
+};
+
+&spi1 {
+	status = "disabled";
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+/* ---- Chosen display ----------------------------------------------------- */
+/ {
+	chosen {
+		zephyr,display = &ssd1306;
+	};
+};
+
+/* ---- UART 1: AD/DA Card LEDs (115200) ----------------------------------- */
+/ {
+	soc {
+		uart1: serial@f0005000 {
+			compatible = "litex,uart";
+			interrupt-parent = <&intc0>;
+			interrupts = <2 1>;
+			reg = <0xf0005000 0x4>,
+			      <0xf0005004 0x4>,
+			      <0xf0005008 0x4>,
+			      <0xf000500c 0x4>,
+			      <0xf0005010 0x4>,
+			      <0xf0005014 0x4>,
+			      <0xf0005018 0x4>,
+			      <0xf000501c 0x4>;
+			reg-names = "rxtx",
+				    "txfull",
+				    "rxempty",
+				    "ev_status",
+				    "ev_pending",
+				    "ev_enable",
+				    "txempty",
+				    "rxfull";
+			current-speed = <115200>;
+			status = "okay";
+		};
+	};
+
+	aliases {
+		display-ctrl-uart = &uart1;
+	};
+};
