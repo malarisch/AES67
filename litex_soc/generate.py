@@ -43,6 +43,9 @@ _io = [
     ("clk_mac_rx", 0, Pins(1)),
     ("clk_mac_tx", 0, Pins(1)),
 
+    # SoC sys_clk output (80 MHz PLL output, directly active to FPGA for config RAM write clocks)
+    ("sys_clk_out", 0, Pins(1)),
+
     # Serial / UART
     ("serial", 0,
         Subsignal("tx", Pins(1)),
@@ -111,6 +114,20 @@ _io = [
         Subsignal("ptp_log_msg_interval", Pins(8)),
         Subsignal("ptp_announce_msg_interval", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
+    ),
+
+    # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)
+    ("tx_stream_cfg", 0,
+        Subsignal("wr_en",   Pins(1)),   # output: write enable
+        Subsignal("wr_addr", Pins(8)),   # output: write address (0..255)
+        Subsignal("wr_data", Pins(8)),   # output: write data
+    ),
+
+    # RX stream config RAM (SoC writes, rx_ringbuffer reads via FPGA-side port)
+    ("rx_stream_cfg", 0,
+        Subsignal("wr_en",   Pins(1)),   # output: write enable
+        Subsignal("wr_addr", Pins(8)),   # output: write address (0..255)
+        Subsignal("wr_data", Pins(8)),   # output: write data
     ),
 
     # Ethernet packet buffer I/O (directly active to/from external FPGA logic)
@@ -420,20 +437,8 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
             tx_wr_port.we.eq(wb.cyc & wb.stb & is_tx & wb.we),
         ]
 
-        # CPU can also read back TX buffer (separate sys-domain read port)
-        tx_rd_cpu = tx_mem.get_port(has_re=True, clock_domain="sys")
-        self.specials += tx_rd_cpu
-        self.comb += [
-            tx_rd_cpu.adr.eq(cpu_addr),
-            tx_rd_cpu.re.eq(wb.cyc & wb.stb & is_tx & ~wb.we),
-        ]
-
-        # Wishbone read data mux
-        self.comb += If(is_tx,
-            wb.dat_r.eq(tx_rd_cpu.dat_r),
-        ).Else(
-            wb.dat_r.eq(rx_rd_port.dat_r),
-        )
+        # Wishbone read data: only RX buffer is readable, TX is write-only
+        self.comb += wb.dat_r.eq(rx_rd_port.dat_r)
 
         # Ack: 1-cycle latency for memory read
         wb_ack = Signal()
@@ -462,13 +467,65 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         self.comb += self.ev.rx_ready.trigger.eq(~self.i_rx_valid)
 
 
+# -- Stream Configuration RAM (256 bytes, CPU writes, FPGA reads) ------------
+
+class StreamConfigRAM(LiteXModule, AutoCSR):
+    """
+    256-byte configuration RAM for audio stream parameters.
+
+    CPU writes via Wishbone (sys clock domain).  The FPGA side gets a
+    registered copy of every write as wr_en/wr_addr/wr_data output signals,
+    which feed directly into the tx_router or rx_ringbuffer config RAM.
+
+    The FPGA-side config RAMs (tx_router, rx_ringbuffer) are the actual
+    storage — this module just forwards CPU writes to them.  No read-back
+    from the FPGA side is needed (write-only from SoC perspective).
+
+    Wishbone address map: 256 byte addresses (1 byte per 32-bit word).
+    """
+    def __init__(self):
+        # -- FPGA-side output signals (directly connected to config RAM write port) --
+        self.o_wr_en   = Signal()
+        self.o_wr_addr = Signal(8)
+        self.o_wr_data = Signal(8)
+
+        # -- Wishbone slave (write-only, 256 addresses) --
+        self.bus = wishbone.Interface(data_width=32, adr_width=10)
+        wb = self.bus
+
+        # Register the write and generate FPGA-side signals
+        self.sync += [
+            self.o_wr_en.eq(0),
+            If(wb.cyc & wb.stb & wb.we,
+                self.o_wr_en.eq(1),
+                self.o_wr_addr.eq(wb.adr[:8]),
+                self.o_wr_data.eq(wb.dat_w[:8]),
+            ),
+        ]
+
+        # Always ack in 1 cycle
+        wb_ack = Signal()
+        self.sync += [
+            wb_ack.eq(0),
+            If(wb.cyc & wb.stb & ~wb_ack,
+                wb_ack.eq(1),
+            ),
+        ]
+        self.comb += [
+            wb.ack.eq(wb_ack),
+            wb.dat_r.eq(0),  # write-only, reads return 0
+        ]
+
+
 # -- SoC definition ----------------------------------------------------------
 
 class AES67SoC(SoCCore):
     mem_map = dict(SoCCore.mem_map)
     mem_map.update({
-        "main_ram": 0x20000000,  # HyperRAM serves as main RAM
-        "eth_buf":  0x30000000,
+        "main_ram":       0x20000000,  # HyperRAM serves as main RAM
+        "eth_buf":        0x30000000,
+        "tx_stream_cfg":  0x30001000,
+        "rx_stream_cfg":  0x30002000,
     })
 
     def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_rom_size=24*1024, integrated_sram_size=4*1024, **kwargs):
@@ -524,6 +581,9 @@ class AES67SoC(SoCCore):
         self.uart1_phy = RS232PHY(platform.request("serial", 1), clk_freq=sys_clk_freq, baudrate=1e6)
         self.uart1 = UART(self.uart1_phy, tx_fifo_depth=16, rx_fifo_depth=16)
         self.irq.add("uart1")
+
+        # -- sys_clk output (for FPGA-side config RAM write clocks) -------------
+        self.comb += platform.request("sys_clk_out").eq(ClockSignal("sys"))
 
         # -- Application CSRs --------------------------------------------------
         self.aes67_csr = AES67CSRs()
@@ -584,6 +644,30 @@ class AES67SoC(SoCCore):
         # Add IRQ for RX packet received
         self.irq.add("eth_buf")
 
+        # -- TX Stream Config RAM (256 bytes, write-only from SoC) -------------
+        self.tx_stream_cfg = StreamConfigRAM()
+        self.bus.add_slave("tx_stream_cfg", slave=self.tx_stream_cfg.bus,
+            region=SoCRegion(origin=0x30001000, size=1024))
+
+        tx_cfg_pads = platform.request("tx_stream_cfg")
+        self.comb += [
+            tx_cfg_pads.wr_en.eq(self.tx_stream_cfg.o_wr_en),
+            tx_cfg_pads.wr_addr.eq(self.tx_stream_cfg.o_wr_addr),
+            tx_cfg_pads.wr_data.eq(self.tx_stream_cfg.o_wr_data),
+        ]
+
+        # -- RX Stream Config RAM (256 bytes, write-only from SoC) -------------
+        self.rx_stream_cfg = StreamConfigRAM()
+        self.bus.add_slave("rx_stream_cfg", slave=self.rx_stream_cfg.bus,
+            region=SoCRegion(origin=0x30002000, size=1024))
+
+        rx_cfg_pads = platform.request("rx_stream_cfg")
+        self.comb += [
+            rx_cfg_pads.wr_en.eq(self.rx_stream_cfg.o_wr_en),
+            rx_cfg_pads.wr_addr.eq(self.rx_stream_cfg.o_wr_addr),
+            rx_cfg_pads.wr_data.eq(self.rx_stream_cfg.o_wr_data),
+        ]
+
 
 # -- Main ---------------------------------------------------------------------
 
@@ -592,9 +676,9 @@ def main():
     parser.add_argument("--sys-clk-freq",       default=80e6,  type=float, help="System clock frequency (Hz)")
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support")
     parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (2:1 = 2x faster)")
-    parser.add_argument("--rom-size",           default=28,    type=int,   help="ROM size in KB (default: 28)")
+    parser.add_argument("--rom-size",           default=24,    type=int,   help="ROM size in KB (default: 24)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 8)")
-    parser.add_argument("--bios-console",       default="lite", choices=["full", "lite", "disable"], help="BIOS console mode (lite saves ~8KB)")
+    parser.add_argument("--bios-console",       default="disable", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 
