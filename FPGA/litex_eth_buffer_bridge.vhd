@@ -36,7 +36,7 @@ entity litex_eth_buffer_bridge is
     buf_rx_ack_i    : in  std_ulogic;
 
     -- TX buffer: this module reads packet data
-    buf_tx_data_i   : in  std_ulogic_vector(7 downto 0);
+
     buf_tx_addr_o   : out unsigned(10 downto 0);
     buf_tx_len_i    : in  unsigned(10 downto 0);
 
@@ -54,7 +54,7 @@ entity litex_eth_buffer_bridge is
     mac_tx_clock_i     : in  std_ulogic;
     mac_tx_reset_i     : in  std_ulogic;
     mac_tx_enable_o    : out std_ulogic;
-    mac_tx_data_o      : out t_ethernet_data;
+
     mac_tx_byte_sent_i : in  std_ulogic;
     mac_tx_busy_i      : in  std_ulogic;
 
@@ -76,7 +76,7 @@ end entity;
 
 architecture rtl of litex_eth_buffer_bridge is
 
-  constant MAX_FRAME_LEN : natural := 1500;
+  constant MAX_FRAME_LEN : natural := 1518;
 
   -- ================================================================
   -- TX signals (mac_tx_clock domain)
@@ -92,6 +92,7 @@ architecture rtl of litex_eth_buffer_bridge is
 
   type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_TRANSMIT, TX_END);
   signal sm_tx : t_tx_sm := TX_IDLE;
+
 
   -- ================================================================
   -- RX signals (mac_rx_clock domain)
@@ -125,6 +126,7 @@ begin
   -- SoC, so this is a same-clock-domain access.
   -- ================================================================
   p_tx : process(mac_tx_clock_i, mac_tx_reset_i)
+  variable tx_preamble_bytes : UNSIGNED(4 downto 0);
   begin
     if mac_tx_reset_i = '1' then
       tx_req_meta       <= '0';
@@ -134,9 +136,9 @@ begin
       tx_bytes_remaining <= (others => '0');
       buf_tx_addr_o     <= (others => '0');
       mac_tx_enable_o   <= '0';
-      mac_tx_data_o     <= (others => '0');
       tx_allow_req_o    <= '0';
       sm_tx             <= TX_IDLE;
+      tx_preamble_bytes := (others => '0');
     elsif rising_edge(mac_tx_clock_i) then
       -- CDC: sync eth_tx_request into mac_tx domain
       tx_req_meta   <= eth_tx_request_i;
@@ -146,27 +148,35 @@ begin
       case sm_tx is
         when TX_IDLE =>
           mac_tx_enable_o <= '0';
-          mac_tx_data_o   <= (others => '0');
           tx_allow_req_o  <= '0';
           -- Detect rising edge of tx_request
           if tx_req_sync = '1' and tx_req_sync_d = '0' then
             tx_done_reg    <= '0';
             tx_allow_req_o <= '1';
             sm_tx          <= TX_WAIT_ALLOW;
+            buf_tx_addr_o      <= (others => '0');
           end if;
 
         when TX_WAIT_ALLOW =>
           if tx_allow_i = '1' then
-            buf_tx_addr_o      <= (others => '0');
+            
             tx_bytes_remaining <= buf_tx_len_i;
             sm_tx              <= TX_PRIME;
-          end if;
 
-        -- 1-cycle wait for RAM read latency
+            --buf_tx_addr_o <= buf_tx_addr_o + 1;
+          end if;
         when TX_PRIME =>
-          mac_tx_data_o <= buf_tx_data_i;
-          buf_tx_addr_o <= to_unsigned(1, 11);
-          sm_tx         <= TX_TRANSMIT;
+              mac_tx_enable_o <= '1';
+              if (mac_tx_busy_i = '1') then
+                tx_preamble_bytes := tx_preamble_bytes + 1;
+                if (tx_preamble_bytes = 7) then
+                  buf_tx_addr_o <= buf_tx_addr_o + 1;
+                  sm_tx              <= TX_TRANSMIT;
+                  tx_preamble_bytes := (others => '0');
+                end if;
+              end if;
+              
+              
 
         when TX_TRANSMIT =>
           mac_tx_enable_o <= '1';
@@ -175,14 +185,13 @@ begin
             if tx_bytes_remaining = 1 then
               sm_tx <= TX_END;
             else
-              mac_tx_data_o <= buf_tx_data_i;
+              
               buf_tx_addr_o <= buf_tx_addr_o + 1;
             end if;
           end if;
 
         when TX_END =>
           mac_tx_enable_o <= '0';
-          mac_tx_data_o   <= (others => '0');
           tx_allow_req_o  <= '0';
           tx_done_reg     <= '1';
           sm_tx           <= TX_IDLE;
@@ -228,7 +237,7 @@ begin
 
       rx_frame_d <= mac_rx_frame_i;
 
-      -- Frame start: reset write address
+      -- Frame start: reset state
       if mac_rx_frame_i = '1' and rx_frame_d = '0' then
         rx_wr_addr    <= (others => '0');
         rx_error_flag <= '0';
@@ -239,12 +248,23 @@ begin
       end if;
 
       -- Receive bytes: write directly into buffer
+      -- NOTE: when mac_rx_byte_rcv_i is asserted on the same cycle as
+      -- frame start (rx_frame_d='0'), we must use address 0 explicitly
+      -- because the frame-start reset above would be overridden by the
+      -- increment (VHDL "last assignment wins").
       if mac_rx_frame_i = '1' and mac_rx_byte_rcv_i = '1' then
         if rx_wr_addr < MAX_FRAME_LEN and rx_valid_reg = '0' then
           buf_rx_data_o <= mac_rx_data_i;
-          buf_rx_addr_o <= rx_wr_addr;
-          buf_rx_we_o   <= '1';
-          rx_wr_addr    <= rx_wr_addr + 1;
+          if rx_frame_d = '0' then
+            -- First byte of new frame: write to address 0
+            buf_rx_addr_o <= (others => '0');
+            buf_rx_we_o   <= '1';
+            rx_wr_addr    <= to_unsigned(1, rx_wr_addr'length);
+          else
+            buf_rx_addr_o <= rx_wr_addr;
+            buf_rx_we_o   <= '1';
+            rx_wr_addr    <= rx_wr_addr + 1;
+          end if;
         else
           rx_error_flag <= '1';
         end if;

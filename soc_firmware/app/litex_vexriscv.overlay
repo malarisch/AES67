@@ -180,6 +180,25 @@
 	};
 };
 
+/* ---- EthPacketBuffer EventManager (IRQ dispatch node) -------------------- */
+/*
+ * The custom eth_buf peripheral is instantiated in C via ETH_NET_DEVICE_INIT
+ * (not DT-bound), but the VexRiscv LiteX interrupt controller dispatches ISRs
+ * only for DT nodes found by DT_FOREACH_STATUS_OKAY_NODE.  Without this node,
+ * IRQ 3 would never be dispatched and would cause an infinite IRQ storm.
+ */
+/ {
+	soc {
+		eth_buf: eth_buf@f0001000 {
+			compatible = "litex,eth-buf-event";
+			reg = <0xf0001000 0x20>;
+			interrupt-parent = <&intc0>;
+			interrupts = <3 1>;
+			status = "okay";
+		};
+	};
+};
+
 /* ---- Disable peripherals not present in our SoC ------------------------- */
 &eth0 {
 	status = "disabled";

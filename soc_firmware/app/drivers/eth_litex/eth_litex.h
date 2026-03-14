@@ -59,8 +59,8 @@ extern "C" {
 /* ---- EventManager bit fields ---- */
 #define ETH_BUF_EV_RX_READY        BIT(CSR_ETH_BUF_EV_PENDING_RX_READY_OFFSET)
 
-/* Maximum Ethernet frame size (without FCS) */
-#define ETH_LITEX_MAX_PKT_SIZE 1500
+/* Maximum Ethernet frame size (without FCS): 6 dst + 6 src + 4 VLAN + 2 EtherType + 1500 payload */
+#define ETH_LITEX_MAX_PKT_SIZE 1518
 
 /* ========================================================================
  * CSR access primitives

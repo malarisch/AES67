@@ -337,32 +337,32 @@ class AES67CSRs(LiteXModule, AutoCSR):
         ]
 
 
-# -- Ethernet Packet Buffers (memory-mapped, 1500 bytes each) -----------------
+# -- Ethernet Packet Buffers (memory-mapped, 1518 bytes each) -----------------
 
 class EthPacketBuffer(LiteXModule, AutoCSR):
     """
-    RX and TX packet buffers (1500 bytes each) with CSR-accessible length/control
+    RX and TX packet buffers (1518 bytes each) with CSR-accessible length/control
     and an IRQ for RX packet received.
 
     The FPGA side writes the RX buffer and reads the TX buffer via dedicated signals.
     The CPU side reads the RX buffer and writes the TX buffer via a Wishbone slave.
 
     Wishbone address map (byte-addressed, 1 byte per 32-bit word):
-      - 0x000..0x5DB: RX buffer (1500 bytes, read-only from CPU)
-      - 0x800..0xDDB: TX buffer (1500 bytes, read/write from CPU)
+      - 0x000..0x5ED: RX buffer (1518 bytes, read-only from CPU)
+      - 0x800..0xDED: TX buffer (1518 bytes, read/write from CPU)
     """
     def __init__(self):
         # -- External FPGA-side signals --
         # RX: FPGA writes into buffer, asserts rx_valid when packet is complete
         self.i_rx_data   = Signal(8)    # data byte from FPGA
-        self.i_rx_addr   = Signal(11)   # write address from FPGA (0..1499)
+        self.i_rx_addr   = Signal(11)   # write address from FPGA (0..1517)
         self.i_rx_we     = Signal()     # write enable from FPGA
         self.i_rx_len    = Signal(11)   # received packet length
         self.i_rx_valid  = Signal()     # packet ready to read (level)
         self.o_rx_ack    = Signal()     # SoC done reading (active high)
         # TX: SoC writes buffer, FPGA reads via signals
         self.o_tx_data   = Signal(8)    # data byte to FPGA
-        self.i_tx_addr   = Signal(11)   # read address from FPGA (0..1499)
+        self.i_tx_addr   = Signal(11)   # read address from FPGA (0..1517)
         self.o_tx_len    = Signal(11)   # packet length for FPGA
 
         # -- IRQ (EventManager required by LiteX irq.add()) --
@@ -386,7 +386,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         # Cyclone 10LP block RAMs natively support dual-clock operation.
 
         # RX buffer: MAC writes (port A, mac_rx domain), CPU reads (port B, sys domain)
-        rx_mem = Memory(8, 1500, name="eth_rx_buf")
+        rx_mem = Memory(8, 1518, name="eth_rx_buf")
         self.specials += rx_mem
         rx_wr_port = rx_mem.get_port(write_capable=True, clock_domain="mac_rx")
         self.specials += rx_wr_port
@@ -394,7 +394,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         self.specials += rx_rd_port
 
         # TX buffer: CPU writes (port A, sys domain), MAC reads (port B, mac_tx domain)
-        tx_mem = Memory(8, 1500, name="eth_tx_buf")
+        tx_mem = Memory(8, 1518, name="eth_tx_buf")
         self.specials += tx_mem
         tx_wr_port = tx_mem.get_port(write_capable=True, clock_domain="sys")
         self.specials += tx_wr_port
@@ -431,8 +431,12 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         ]
 
         # CPU writes TX buffer (sys domain port)
+        # cpu_addr includes the TX region offset (bit 9 = 0x200) which must be
+        # stripped so that TX byte 0 maps to tx_mem[0], not tx_mem[512].
+        tx_mem_addr = Signal(11)
+        self.comb += tx_mem_addr.eq(cpu_addr - 0x200)
         self.comb += [
-            tx_wr_port.adr.eq(cpu_addr),
+            tx_wr_port.adr.eq(tx_mem_addr),
             tx_wr_port.dat_w.eq(wb.dat_w[:8]),
             tx_wr_port.we.eq(wb.cyc & wb.stb & is_tx & wb.we),
         ]
@@ -450,13 +454,31 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         ]
         self.comb += wb.ack.eq(wb_ack)
 
-        # -- RX status, ACK, TX length --
-        rx_valid_r = Signal()
-        self.sync += rx_valid_r.eq(self.i_rx_valid)
+        # -- CDC: synchronise mac_rx domain signals into sys domain --
+        # i_rx_valid is a level signal from mac_rx_clock; needs 2-FF sync
+        # to avoid metastability on the IRQ trigger and status reads.
+        rx_valid_meta = Signal(reset=0)
+        rx_valid_sync = Signal(reset=0)
+        self.sync += [
+            rx_valid_meta.eq(self.i_rx_valid),
+            rx_valid_sync.eq(rx_valid_meta),
+        ]
 
+        # i_rx_len is multi-bit but only valid while rx_valid is stable-high,
+        # so we latch it on the rising edge of the synchronised rx_valid.
+        rx_valid_sync_d = Signal()
+        rx_len_latched  = Signal(11)
+        self.sync += [
+            rx_valid_sync_d.eq(rx_valid_sync),
+            If(rx_valid_sync & ~rx_valid_sync_d,
+                rx_len_latched.eq(self.i_rx_len),
+            ),
+        ]
+
+        # -- RX status, ACK, TX length --
         self.comb += [
-            self.rx_len.status.eq(self.i_rx_len),
-            self.rx_ready.status.eq(self.i_rx_valid),
+            self.rx_len.status.eq(rx_len_latched),
+            self.rx_ready.status.eq(rx_valid_sync),
             self.o_rx_ack.eq(self.rx_ack.storage),
             self.o_tx_len.eq(self.tx_len.storage[:11]),
         ]
@@ -464,7 +486,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         # IRQ: EventSourceProcess triggers on low->high of its trigger input
         # (it is active-low internally, so we invert: trigger=~rx_valid means
         #  IRQ fires when rx_valid goes high)
-        self.comb += self.ev.rx_ready.trigger.eq(~self.i_rx_valid)
+        self.comb += self.ev.rx_ready.trigger.eq(~rx_valid_sync)
 
 
 # -- Stream Configuration RAM (256 bytes, CPU writes, FPGA reads) ------------
@@ -541,7 +563,7 @@ class AES67SoC(SoCCore):
             ident_version        = True,
             with_uart            = True,
             uart_name            = "serial",
-            uart_baudrate        = 115200,
+            uart_baudrate        = 921600,
             with_timer           = True,
             timer_uptime         = True,
             **kwargs,

@@ -45,7 +45,7 @@ int pll_ctrl_update(int32_t ppb_measured, uint32_t count_wc, uint32_t count_pll)
 		return -ENODEV;
 	}
 
-	LOG_INF("PPB raw: count_wc=%u count_pll=%u ppb=%d",
+	LOG_DBG("PPB raw: count_wc=%u count_pll=%u ppb=%d",
 		count_wc, count_pll, ppb_measured);
 
 	/* Outlier rejection (after warm-up) */
