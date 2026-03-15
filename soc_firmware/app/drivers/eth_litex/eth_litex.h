@@ -31,9 +31,11 @@ extern "C" {
  * Derived addresses from LiteX-generated headers
  * ======================================================================== */
 
-/* Packet buffer memory regions (from generated/mem.h: ETH_BUF_BASE) */
-#define ETH_BUF_RX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x000UL) /* RX: byte 0..1499 */
-#define ETH_BUF_TX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x800UL) /* TX: byte 0..1499 */
+/* Packet buffer memory regions (from generated/mem.h: ETH_BUF_BASE)
+ * Each byte occupies one 32-bit word, so byte N is at word address N.
+ * TX region starts at word address 0x800 (bit 11), i.e. byte address 0x2000. */
+#define ETH_BUF_RX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x0000UL) /* RX: byte 0..1517 */
+#define ETH_BUF_TX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x2000UL) /* TX: byte 0..1517 */
 
 /* ---- Status register bit fields (CSR_AES67_CSR_STATUS) ---- */
 #define AES67_STATUS_WC_LOCKED      BIT(CSR_AES67_CSR_STATUS_WALLCLOCK_LOCKED_OFFSET)

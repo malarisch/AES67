@@ -347,9 +347,10 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
     The FPGA side writes the RX buffer and reads the TX buffer via dedicated signals.
     The CPU side reads the RX buffer and writes the TX buffer via a Wishbone slave.
 
-    Wishbone address map (byte-addressed, 1 byte per 32-bit word):
+    Wishbone address map (word-addressed, 1 byte per 32-bit word):
       - 0x000..0x5ED: RX buffer (1518 bytes, read-only from CPU)
-      - 0x800..0xDED: TX buffer (1518 bytes, read/write from CPU)
+      - 0x800..0xDED: TX buffer (1518 bytes, write-only from CPU)
+    Byte addresses (CPU view): RX at +0x0000, TX at +0x2000.
     """
     def __init__(self):
         # -- External FPGA-side signals --
@@ -416,11 +417,12 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         ]
 
         # -- Wishbone slave interface (CPU side, sys clock domain) --
+        # Need 12-bit address to cover 0x000..0x5ED (RX) and 0x800..0xDED (TX)
         self.bus = wishbone.Interface(data_width=32, adr_width=12)
         wb = self.bus
 
-        # bit 9 of word address selects TX (0x800+) vs RX (0x000+)
-        is_tx = wb.adr[9]
+        # bit 11 of word address selects TX (0x800+) vs RX (0x000+)
+        is_tx = wb.adr[11]
         cpu_addr = Signal(11)
         self.comb += cpu_addr.eq(wb.adr[:11])
 
@@ -431,12 +433,10 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         ]
 
         # CPU writes TX buffer (sys domain port)
-        # cpu_addr includes the TX region offset (bit 9 = 0x200) which must be
-        # stripped so that TX byte 0 maps to tx_mem[0], not tx_mem[512].
-        tx_mem_addr = Signal(11)
-        self.comb += tx_mem_addr.eq(cpu_addr - 0x200)
+        # cpu_addr is bits [10:0] of wb.adr — already the offset within the TX
+        # region (bit 11 selects TX vs RX), so no subtraction needed.
         self.comb += [
-            tx_wr_port.adr.eq(tx_mem_addr),
+            tx_wr_port.adr.eq(cpu_addr),
             tx_wr_port.dat_w.eq(wb.dat_w[:8]),
             tx_wr_port.we.eq(wb.cyc & wb.stb & is_tx & wb.we),
         ]
@@ -545,9 +545,12 @@ class AES67SoC(SoCCore):
     mem_map = dict(SoCCore.mem_map)
     mem_map.update({
         "main_ram":       0x20000000,  # HyperRAM serves as main RAM
-        "eth_buf":        0x30000000,
-        "tx_stream_cfg":  0x30001000,
-        "rx_stream_cfg":  0x30002000,
+        # Place packet buffers and stream config in IO region (>= 0x80000000)
+        # so VexRiscV data cache treats them as uncacheable.
+        # Bit 31 of the physical address controls isIoAccess in VexRiscv.v.
+        "eth_buf":        0x90000000,
+        "tx_stream_cfg":  0x90004000,
+        "rx_stream_cfg":  0x90005000,
     })
 
     def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_rom_size=24*1024, integrated_sram_size=4*1024, **kwargs):
@@ -556,6 +559,7 @@ class AES67SoC(SoCCore):
         SoCCore.__init__(self, platform, sys_clk_freq,
             cpu_type             = "vexriscv",
             cpu_variant          = "standard",
+            bus_interconnect     = "crossbar",
             integrated_rom_size  = integrated_rom_size,
             integrated_sram_size = integrated_sram_size,
             integrated_main_ram_size = 0,
@@ -645,7 +649,7 @@ class AES67SoC(SoCCore):
 
         # Register packet buffer memory on the Wishbone bus
         self.bus.add_slave("eth_buf", slave=self.eth_buf.bus,
-            region=SoCRegion(origin=0x30000000, size=4096))
+            region=SoCRegion(origin=0x90000000, size=0x4000, cached=False))
 
         # Wire buffer signals to top-level pads
         eth_buf_pads = platform.request("eth_buf")
@@ -669,7 +673,7 @@ class AES67SoC(SoCCore):
         # -- TX Stream Config RAM (256 bytes, write-only from SoC) -------------
         self.tx_stream_cfg = StreamConfigRAM()
         self.bus.add_slave("tx_stream_cfg", slave=self.tx_stream_cfg.bus,
-            region=SoCRegion(origin=0x30001000, size=1024))
+            region=SoCRegion(origin=0x90004000, size=1024, cached=False))
 
         tx_cfg_pads = platform.request("tx_stream_cfg")
         self.comb += [
@@ -681,7 +685,7 @@ class AES67SoC(SoCCore):
         # -- RX Stream Config RAM (256 bytes, write-only from SoC) -------------
         self.rx_stream_cfg = StreamConfigRAM()
         self.bus.add_slave("rx_stream_cfg", slave=self.rx_stream_cfg.bus,
-            region=SoCRegion(origin=0x30002000, size=1024))
+            region=SoCRegion(origin=0x90005000, size=1024, cached=False))
 
         rx_cfg_pads = platform.request("rx_stream_cfg")
         self.comb += [

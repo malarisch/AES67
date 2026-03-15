@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "/home/wolff/AES67/soc_firmware/app"
+    "cmake.sourceDirectory": "/home/wolff/AES67/soc_firmware/app",
+    "claudeCode.allowDangerouslySkipPermissions": true
 }

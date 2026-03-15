@@ -1,11 +1,13 @@
--- PTPv2 Sync Delay_Resp UDP Packet Sender
+-- PTPv2 Sync/Delay_Resp/Announce UDP Packet Sender
+-- Refactored: Dual-Port RAM architecture
+-- Packet assembly in sys_clk domain, TX in tx_clk domain
+--
 -- based on udp_packet.vhd:
 -- UDP Packet Sender
 -- (c) 2025 Dr.-Ing. Christian Noeding
 -- christian@noeding-online.de
 -- Released under GNU General Public License v3
 -- Source: https://www.github.com/xn--nding-jua/AES50_Transmitter
---
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -14,6 +16,7 @@ use IEEE.NUMERIC_STD.ALL;
 entity ptpv2_sender is
 	port
 	(
+		sys_clk					: in std_logic;
 		src_mac_address		: in std_logic_vector(47 downto 0);
 		src_ip_address			: in std_logic_vector(31 downto 0);
 		frame_start				: in std_logic;
@@ -27,11 +30,10 @@ entity ptpv2_sender is
 
 		request_port_identity : in std_logic_vector(79 downto 0);
 
-		tx_enable				: out std_logic := '0';  -- TX valid
-		tx_data					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
+		tx_enable				: out std_logic := '0';
+		tx_data					: out std_logic_vector(7 downto 0) := (others => '0');
 
-
-        message_type_i : in std_logic_vector(3 downto 0) := "0000";
+		message_type_i : in std_logic_vector(3 downto 0) := "0000";
 		tx_ready_o			: out std_logic := '0';
 		ptp_time_source_i : in std_logic_vector(7 downto 0);
 		ptp_log_interval_i : in std_logic_vector(7 downto 0);
@@ -43,444 +45,783 @@ end entity;
 
 architecture Behavioral of ptpv2_sender is
 	-- Constants
-    constant PTP_EVENT_PORT            : integer := 320;
 	constant MAC_HEADER_LENGTH			: integer := 14;
-	constant IP_HEADER_LENGTH			: integer := 5 * (32 / 8); -- Header length always 20 bytes (5 * 32 bit words)
-	constant UDP_PSEUDO_HEADER_LENGTH: integer := 8;
+	constant IP_HEADER_LENGTH			: integer := 20;
 	constant UDP_HEADER_LENGTH			: integer := 8;
-	constant MAX_UDP_PAYLOAD_LENGTH		: integer := 64;
-	constant MAX_PACKET_LENGTH				: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + MAX_UDP_PAYLOAD_LENGTH;
+	constant MAX_UDP_PAYLOAD_LENGTH	: integer := 64;
+	constant MAX_PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + MAX_UDP_PAYLOAD_LENGTH;
+	-- RAM depth must be power-of-2 for M9K block RAM inference (106 bytes too small otherwise)
+	constant RAM_DEPTH					: integer := 128;
 
-    signal real_udp_payload_length		: integer := 64;
-    signal real_packet_length			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length;
-    type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up);
-    
-    function get_message_type(message_type : std_logic_vector(3 downto 0)) return t_packet_type is
-    begin
-        case message_type is
-            when x"0" =>
-                return t_Sync;
-            when x"1" =>
-                return t_Delay_Req;
-            when x"2" =>
-                return t_Pdelay_Req;
-            when x"3" =>
-                return t_Pdelay_Resp;
-            when x"8" =>
-                return t_Follow_Up;
-            when x"9" =>
-                return t_Delay_Resp;
-            when x"A" =>
-                return t_Pdelay_Follow_Up;
-            when x"B" =>
-                return t_Announce;
-                
-            when others =>
-                return t_Sync; -- default
-        end case;
-    end function;
+	-- Message type enumeration
+	type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up);
 
-    signal current_message_type : t_packet_type;
-    signal tx_port_319_i : std_logic := '0';
-    
-	-- Checksum calculation
-	signal checksum						: unsigned(15 downto 0) := (others => '0');
-	signal checksum_tmp					: unsigned(31 downto 0) := (others => '0');
-	signal checksum_byte_count			: integer range 0 to IP_HEADER_LENGTH + 2;
-	signal calculating_checksum		: std_logic := '0';
-	signal calc_new_checksum			: std_logic := '0';
-        
+	function get_message_type(message_type : std_logic_vector(3 downto 0)) return t_packet_type is
+	begin
+		case message_type is
+			when x"0" => return t_Sync;
+			when x"1" => return t_Delay_Req;
+			when x"2" => return t_Pdelay_Req;
+			when x"3" => return t_Pdelay_Resp;
+			when x"8" => return t_Follow_Up;
+			when x"9" => return t_Delay_Resp;
+			when x"A" => return t_Pdelay_Follow_Up;
+			when x"B" => return t_Announce;
+			when others => return t_Sync;
+		end case;
+	end function;
 
-	signal udp_checksum					: unsigned(15 downto 0) := (others => '0');
-	signal udp_checksum_tmp				: unsigned(31 downto 0) := (others => '0');
-	signal udp_checksum_byte_count	: integer range 0 to UDP_PSEUDO_HEADER_LENGTH + UDP_HEADER_LENGTH + MAX_UDP_PAYLOAD_LENGTH + 2;
-	signal udp_calculating_checksum	: std_logic := '0';
-	signal udp_calc_new_checksum		: std_logic := '0';
+	function get_udp_payload_length(msg_type : t_packet_type) return integer is
+	begin
+		case msg_type is
+			when t_Sync           => return 44;
+			when t_Delay_Req      => return 44;
+			when t_Follow_Up      => return 44;
+			when t_Delay_Resp     => return 54;
+			when t_Announce        => return 64;
+			when t_Pdelay_Req     => return 54;
+			when t_Pdelay_Resp    => return 54;
+			when t_Pdelay_Follow_Up => return 54;
+			when others           => return 44;
+		end case;
+	end function;
 
-	-- Other signals used in this file
-	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_CalcChecksum, s_WaitChecksum, s_Start, s_Wait, s_Transmit, s_End);
-	signal s_SM_Ethernet					: t_SM_Ethernet := s_Idle;
-	signal byte_counter					: integer range 0 to 1600 := 0; -- one ethernet-frame cannot take more than 1500 bytes + header
-	signal packet_counter				: integer range 0 to 65535 := 0;
+	function is_event_message(msg_type : t_packet_type) return boolean is
+	begin
+		case msg_type is
+			when t_Sync | t_Delay_Req | t_Pdelay_Req | t_Pdelay_Resp => return true;
+			when others => return false;
+		end case;
+	end function;
 
-	type t_ethernet_frame is array (0 to MAX_PACKET_LENGTH - 1) of std_logic_vector(7 downto 0);
-	signal udp_frame		: t_ethernet_frame;
+	function is_pdelay_message(msg_type : t_packet_type) return boolean is
+	begin
+		case msg_type is
+			when t_Pdelay_Req | t_Pdelay_Resp | t_Pdelay_Follow_Up => return true;
+			when others => return false;
+		end case;
+	end function;
 
-	signal zframe_start	: std_logic;
+	function get_control_field(msg_type : t_packet_type) return std_logic_vector is
+	begin
+		case msg_type is
+			when t_Sync       => return x"00";
+			when t_Delay_Req  => return x"01";
+			when t_Follow_Up  => return x"02";
+			when t_Delay_Resp => return x"03";
+			when others       => return x"05";
+		end case;
+	end function;
+
+	-- Header byte generator function (replaces the huge mux)
+	function get_header_byte(
+		idx            : integer;
+		src_mac        : std_logic_vector(47 downto 0);
+		src_ip         : std_logic_vector(31 downto 0);
+		msg_type       : t_packet_type;
+		msg_type_raw   : std_logic_vector(3 downto 0);
+		pkt_cnt        : unsigned(15 downto 0);
+		seq_id         : unsigned(15 downto 0);
+		ts_sec         : unsigned(47 downto 0);
+		ts_nsec        : unsigned(31 downto 0);
+		req_port_id    : std_logic_vector(79 downto 0);
+		udp_payload_len : integer;
+		log_interval   : std_logic_vector(7 downto 0);
+		time_source    : std_logic_vector(7 downto 0)
+	) return std_logic_vector is
+		variable total_length : std_logic_vector(15 downto 0);
+		variable udp_length   : std_logic_vector(15 downto 0);
+		variable port_byte    : std_logic_vector(7 downto 0);
+		variable dst_last     : std_logic_vector(7 downto 0);
+		variable clock_id     : std_logic_vector(63 downto 0);
+	begin
+		total_length := std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + udp_payload_len, 16));
+		udp_length := std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + udp_payload_len, 16));
+
+		-- Port byte: 0x3f for event (319), 0x40 for general (320)
+		if is_event_message(msg_type) then
+			port_byte := x"3f";
+		else
+			port_byte := x"40";
+		end if;
+
+		-- Destination MAC/IP last byte: 0x6b for pdelay, 0x81 for PTP
+		if is_pdelay_message(msg_type) then
+			dst_last := x"6b";
+		else
+			dst_last := x"81";
+		end if;
+
+		-- EUI-64 clock identity from MAC
+		clock_id := (src_mac(47 downto 40) xor x"02") & src_mac(39 downto 32) & src_mac(31 downto 24)
+		            & x"FF" & x"FE"
+		            & src_mac(23 downto 16) & src_mac(15 downto 8) & src_mac(7 downto 0);
+
+		case idx is
+			-- MAC header (14 bytes)
+			when 0  => return x"01";
+			when 1  => return x"00";
+			when 2  => return x"5e";
+			when 3  => return x"00";
+			when 4  => return x"01";
+			when 5  => return dst_last;
+			when 6  => return src_mac(47 downto 40);
+			when 7  => return src_mac(39 downto 32);
+			when 8  => return src_mac(31 downto 24);
+			when 9  => return src_mac(23 downto 16);
+			when 10 => return src_mac(15 downto 8);
+			when 11 => return src_mac(7 downto 0);
+			when 12 => return x"08";
+			when 13 => return x"00";
+
+			-- IP header (20 bytes)
+			when 14 => return x"45";
+			when 15 => return b"10111000"; -- DSCP=0x2e (Expedited Forwarding)
+			when 16 => return total_length(15 downto 8);
+			when 17 => return total_length(7 downto 0);
+			when 18 => return std_logic_vector(pkt_cnt(15 downto 8));
+			when 19 => return std_logic_vector(pkt_cnt(7 downto 0));
+			when 20 => return x"00";
+			when 21 => return x"00";
+			when 22 => return x"80"; -- TTL=128
+			when 23 => return x"11"; -- UDP
+			when 24 => return x"00"; -- IP checksum placeholder
+			when 25 => return x"00";
+			when 26 => return src_ip(31 downto 24);
+			when 27 => return src_ip(23 downto 16);
+			when 28 => return src_ip(15 downto 8);
+			when 29 => return src_ip(7 downto 0);
+			when 30 => return x"E0"; -- 224
+			when 31 => return x"00"; -- 0
+			when 32 => return x"01"; -- 1
+			when 33 => return dst_last;
+
+			-- UDP header (8 bytes)
+			when 34 => return x"01";
+			when 35 => return port_byte;
+			when 36 => return x"01";
+			when 37 => return port_byte;
+			when 38 => return udp_length(15 downto 8);
+			when 39 => return udp_length(7 downto 0);
+			when 40 => return x"00"; -- UDP checksum placeholder
+			when 41 => return x"00";
+
+			-- PTP header (34 bytes, offsets 42..75)
+			when 42 => return x"0" & msg_type_raw; -- majorSdoId + messageType
+			when 43 => return x"02"; -- PTP version 2
+			when 44 => return std_logic_vector(to_unsigned(udp_payload_len, 16)(15 downto 8));
+			when 45 => return std_logic_vector(to_unsigned(udp_payload_len, 16)(7 downto 0));
+			when 46 => return x"00"; -- domainNumber
+			when 47 => return x"00"; -- minorSdoId
+			when 48 => return x"02"; -- Flags1: TwoStep
+			when 49 => return x"00"; -- Flags2
+			when 50 => return x"00"; -- correctionField (8 bytes)
+			when 51 => return x"00";
+			when 52 => return x"00";
+			when 53 => return x"00";
+			when 54 => return x"00";
+			when 55 => return x"00";
+			when 56 => return x"00";
+			when 57 => return x"00";
+			when 58 => return x"00"; -- messageTypeSpecific (4 bytes)
+			when 59 => return x"00";
+			when 60 => return x"00";
+			when 61 => return x"00";
+			when 62 => return clock_id(63 downto 56); -- clockIdentity (8 bytes)
+			when 63 => return clock_id(55 downto 48);
+			when 64 => return clock_id(47 downto 40);
+			when 65 => return clock_id(39 downto 32);
+			when 66 => return clock_id(31 downto 24);
+			when 67 => return clock_id(23 downto 16);
+			when 68 => return clock_id(15 downto 8);
+			when 69 => return clock_id(7 downto 0);
+			when 70 => return x"00"; -- sourcePortId
+			when 71 => return x"01";
+			when 72 => return std_logic_vector(seq_id(15 downto 8));
+			when 73 => return std_logic_vector(seq_id(7 downto 0));
+			when 74 => return get_control_field(msg_type);
+			when 75 => return log_interval;
+
+			-- Timestamp (10 bytes, offsets 76..85)
+			when 76 => return std_logic_vector(ts_sec(47 downto 40));
+			when 77 => return std_logic_vector(ts_sec(39 downto 32));
+			when 78 => return std_logic_vector(ts_sec(31 downto 24));
+			when 79 => return std_logic_vector(ts_sec(23 downto 16));
+			when 80 => return std_logic_vector(ts_sec(15 downto 8));
+			when 81 => return std_logic_vector(ts_sec(7 downto 0));
+			when 82 => return std_logic_vector(ts_nsec(31 downto 24));
+			when 83 => return std_logic_vector(ts_nsec(23 downto 16));
+			when 84 => return std_logic_vector(ts_nsec(15 downto 8));
+			when 85 => return std_logic_vector(ts_nsec(7 downto 0));
+
+			-- Message-type-specific suffix (offsets 86+)
+			when 86 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(79 downto 72);
+				elsif (msg_type = t_Announce) then
+					return x"00"; -- currentUtcOffset MSB
+				else
+					return x"00";
+				end if;
+			when 87 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(71 downto 64);
+				elsif (msg_type = t_Announce) then
+					return x"25"; -- currentUtcOffset LSB
+				else
+					return x"00";
+				end if;
+			when 88 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(63 downto 56);
+				elsif (msg_type = t_Announce) then
+					return x"00"; -- reserved
+				else
+					return x"00";
+				end if;
+			when 89 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(55 downto 48);
+				elsif (msg_type = t_Announce) then
+					return x"80"; -- grandmasterPriority1
+				else
+					return x"00";
+				end if;
+			when 90 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(47 downto 40);
+				elsif (msg_type = t_Announce) then
+					return x"F8"; -- clockQuality.clockClass
+				else
+					return x"00";
+				end if;
+			when 91 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(39 downto 32);
+				elsif (msg_type = t_Announce) then
+					return x"FE"; -- clockQuality.clockAccuracy
+				else
+					return x"00";
+				end if;
+			when 92 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(31 downto 24);
+				elsif (msg_type = t_Announce) then
+					return x"FF"; -- offsetScaledLogVariance MSB
+				else
+					return x"00";
+				end if;
+			when 93 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(23 downto 16);
+				elsif (msg_type = t_Announce) then
+					return x"FF"; -- offsetScaledLogVariance LSB
+				else
+					return x"00";
+				end if;
+			when 94 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(15 downto 8);
+				elsif (msg_type = t_Announce) then
+					return x"80"; -- grandmasterPriority2
+				else
+					return x"00";
+				end if;
+			when 95 =>
+				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
+					return req_port_id(7 downto 0);
+				elsif (msg_type = t_Announce) then
+					return clock_id(63 downto 56); -- grandmasterIdentity
+				else
+					return x"00";
+				end if;
+			-- Announce-only fields (offsets 96..105)
+			when 96 =>
+				if (msg_type = t_Announce) then return clock_id(55 downto 48);
+				else return x"00"; end if;
+			when 97 =>
+				if (msg_type = t_Announce) then return clock_id(47 downto 40);
+				else return x"00"; end if;
+			when 98 =>
+				if (msg_type = t_Announce) then return clock_id(39 downto 32);
+				else return x"00"; end if;
+			when 99 =>
+				if (msg_type = t_Announce) then return clock_id(31 downto 24);
+				else return x"00"; end if;
+			when 100 =>
+				if (msg_type = t_Announce) then return clock_id(23 downto 16);
+				else return x"00"; end if;
+			when 101 =>
+				if (msg_type = t_Announce) then return clock_id(15 downto 8);
+				else return x"00"; end if;
+			when 102 =>
+				if (msg_type = t_Announce) then return clock_id(7 downto 0);
+				else return x"00"; end if;
+			when 103 =>
+				if (msg_type = t_Announce) then return x"00"; -- stepsRemoved MSB
+				else return x"00"; end if;
+			when 104 =>
+				if (msg_type = t_Announce) then return x"00"; -- stepsRemoved LSB
+				else return x"00"; end if;
+			when 105 =>
+				if (msg_type = t_Announce) then return time_source;
+				else return x"00"; end if;
+
+			when others => return x"00";
+		end case;
+	end function;
+
+	-- Checksum helper procedures/functions (from tx_transmitter pattern)
+	procedure feed_checksum(
+		signal upper_byte  : inout std_logic_vector(7 downto 0);
+		signal byte_phase  : inout std_logic;
+		signal accumulator : inout unsigned(31 downto 0);
+		constant data_byte : std_logic_vector(7 downto 0)
+	) is
+		variable word16 : unsigned(15 downto 0);
+	begin
+		if (byte_phase = '0') then
+			upper_byte <= data_byte;
+			byte_phase <= '1';
+		else
+			word16 := shift_left(resize(unsigned(upper_byte), 16), 8) + resize(unsigned(data_byte), 16);
+			accumulator <= accumulator + resize(word16, accumulator'length);
+			byte_phase <= '0';
+		end if;
+	end procedure;
+
+	function finalize_checksum(sum_in : unsigned(31 downto 0)) return std_logic_vector is
+		variable tmp : unsigned(31 downto 0) := sum_in;
+	begin
+		tmp := resize(tmp(15 downto 0), 32) + resize(tmp(31 downto 16), 32);
+		tmp := resize(tmp(15 downto 0), 32) + resize(tmp(31 downto 16), 32);
+		return std_logic_vector(not tmp(15 downto 0));
+	end function;
 
 	-- ============================================================
-	-- CDC (Clock Domain Crossing) Synchronizers
-	-- All input signals from 250MHz domain need 2-stage sync
+	-- Dual-Port Packet RAM
 	-- ============================================================
-	
-	-- Frame start CDC (single bit - 2-stage synchronizer)
-	signal frame_start_meta    : std_logic := '0';
-	signal frame_start_sync    : std_logic := '0';
-	
-	-- Message type CDC (4-bit bus - synchronized with frame_start)
-	signal message_type_meta   : std_logic_vector(3 downto 0) := (others => '0');
-	signal message_type_sync   : std_logic_vector(3 downto 0) := (others => '0');
-	
-	-- Sequence ID CDC (16-bit bus - synchronized with frame_start)
-	signal sequence_id_meta    : unsigned(15 downto 0) := (others => '0');
-	signal sequence_id_sync    : unsigned(15 downto 0) := (others => '0');
-	
-	-- Timestamp seconds CDC (32-bit bus - synchronized with frame_start)
-	signal timestamp_sec_meta  : unsigned(47 downto 0) := (others => '0');
-	signal timestamp_sec_sync  : unsigned(47 downto 0) := (others => '0');
-	
-	-- Timestamp nanoseconds CDC (32-bit bus - synchronized with frame_start)
-	signal timestamp_nsec_meta : unsigned(31 downto 0) := (others => '0');
-	signal timestamp_nsec_sync : unsigned(31 downto 0) := (others => '0');
-	
-	-- Request port identity CDC (80-bit bus - synchronized with frame_start)
-	signal req_port_id_meta    : std_logic_vector(79 downto 0) := (others => '0');
-	signal req_port_id_sync    : std_logic_vector(79 downto 0) := (others => '0');
+	type t_packet_ram is array (0 to RAM_DEPTH - 1) of std_logic_vector(7 downto 0);
+	signal packet_ram : t_packet_ram := (others => (others => '0'));
 
-	-- Prevent register optimization/merging for metastability registers
+	attribute ram_style : string;
+	attribute ram_style of packet_ram : signal is "block";
+
+	-- Port A (sys_clk): write + checksum read
+	signal packet_wr_en   : std_logic := '0';
+	signal packet_wr_addr : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal packet_wr_data : std_logic_vector(7 downto 0) := (others => '0');
+	signal asm_rd_addr    : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal asm_rd_data    : std_logic_vector(7 downto 0) := (others => '0');
+	signal asm_rd_data_r  : std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register
+
+	-- Port B (tx_clk): TX read
+	signal tx_rd_addr : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal tx_rd_data : std_logic_vector(7 downto 0) := (others => '0');
+
+	-- First byte cache (avoids RAM read latency for byte 0)
+	signal first_packet_byte : std_logic_vector(7 downto 0) := (others => '0');
+
+	-- ============================================================
+	-- Assembly state machine (sys_clk domain)
+	-- ============================================================
+	type t_SM_Assemble is (s_A_Idle, s_A_CalcIpChkPartial, s_A_CalcIpChkFinal, s_A_PrepFrame,
+	                       s_A_CalcUdpChecksum, s_A_FinalizeChecksum, s_A_WriteChecksum,
+	                       s_A_RequestTx, s_A_WaitAckDone);
+	signal SM_Assemble : t_SM_Assemble := s_A_Idle;
+
+	signal frame_write_index    : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal checksum_write_index : integer range 0 to 4 := 0;
+	signal packet_counter       : unsigned(15 downto 0) := (others => '0');
+
+	-- Captured input signals (sampled on frame_start rising edge in sys_clk)
+	signal cap_message_type     : t_packet_type := t_Sync;
+	signal cap_message_type_raw : std_logic_vector(3 downto 0) := (others => '0');
+	signal cap_sequence_id      : unsigned(15 downto 0) := (others => '0');
+	signal cap_timestamp_sec    : unsigned(47 downto 0) := (others => '0');
+	signal cap_timestamp_nsec   : unsigned(31 downto 0) := (others => '0');
+	signal cap_req_port_id      : std_logic_vector(79 downto 0) := (others => '0');
+	signal cap_log_interval     : std_logic_vector(7 downto 0) := (others => '0');
+	signal cap_time_source      : std_logic_vector(7 downto 0) := (others => '0');
+	signal cap_udp_payload_len  : integer := 44;
+	signal cap_packet_length    : integer := 0;
+
+	-- IP checksum pipeline
+	signal ip_checksum_partial1 : unsigned(31 downto 0) := (others => '0');
+	signal ip_checksum_partial2 : unsigned(31 downto 0) := (others => '0');
+	signal ip_checksum_acc      : unsigned(31 downto 0) := (others => '0');
+	signal ip_checksum_value    : std_logic_vector(15 downto 0) := (others => '0');
+
+	-- UDP checksum
+	signal udp_checksum_acc            : unsigned(31 downto 0) := (others => '0');
+	signal udp_checksum_upper_byte     : std_logic_vector(7 downto 0) := (others => '0');
+	signal udp_checksum_byte_phase     : std_logic := '0';
+	signal udp_checksum_value          : std_logic_vector(15 downto 0) := (others => '0');
+	signal udp_pseudo_header_sum       : unsigned(31 downto 0) := (others => '0');
+	signal udp_checksum_bytes_remaining : integer range 0 to 256 := 0;
+	signal udp_checksum_request_count  : integer range 0 to 256 := 0;
+	signal udp_checksum_data_valid     : std_logic := '0';
+	signal udp_checksum_data_valid_d   : std_logic := '0';
+
+	-- CDC handshake signals
+	signal tx_frame_start       : std_logic := '0';
+	signal tx_frame_start_sync1 : std_logic := '0';
+	signal tx_frame_start_sync2 : std_logic := '0';
+	signal tx_ack               : std_logic := '0';
+	signal tx_ack_sync1         : std_logic := '0';
+	signal tx_ack_sync2         : std_logic := '0';
+
+	-- frame_start edge detection in sys_clk
+	signal frame_start_sync1 : std_logic := '0';
+	signal frame_start_sync2 : std_logic := '0';
+	signal frame_start_prev  : std_logic := '0';
+
+	-- ============================================================
+	-- TX state machine (tx_clk domain)
+	-- ============================================================
+	type t_SM_Tx is (s_Idle, s_WaitForAllow, s_LatchCDC, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
+	signal SM_Tx : t_SM_Tx := s_Idle;
+
+	signal tx_bytes_remaining : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal tx_read_pointer    : integer range 0 to RAM_DEPTH - 1 := 0;
+	signal prime_wait         : integer range 0 to 1 := 0;
+
+	-- Prevent register optimization for CDC registers
 	attribute PRESERVE : boolean;
-	attribute PRESERVE of frame_start_meta : signal is true;
-	attribute PRESERVE of frame_start_sync : signal is true;
-	attribute PRESERVE of message_type_meta : signal is true;
-	attribute PRESERVE of sequence_id_meta : signal is true;
-	attribute PRESERVE of timestamp_sec_meta : signal is true;
-	attribute PRESERVE of timestamp_nsec_meta : signal is true;
-	attribute PRESERVE of req_port_id_meta : signal is true;
+	attribute PRESERVE of frame_start_sync1 : signal is true;
+	attribute PRESERVE of frame_start_sync2 : signal is true;
+	attribute PRESERVE of tx_frame_start_sync1 : signal is true;
+	attribute PRESERVE of tx_frame_start_sync2 : signal is true;
+	attribute PRESERVE of tx_ack_sync1 : signal is true;
+	attribute PRESERVE of tx_ack_sync2 : signal is true;
 
 begin
+
 	-- ============================================================
-	-- CDC Synchronization Process
-	-- Multi-bit signals are safe because they are qualified by frame_start
-	-- (held stable when frame_start is asserted in source domain)
+	-- Packet RAM Port B (tx_clk domain): TX read only
+	-- Separate process for true dual-port inference (different clock)
 	-- ============================================================
-	cdc_sync_proc: process(tx_clk)
+	packet_ram_port_b : process(tx_clk)
+	begin
+		if falling_edge(tx_clk) then
+			tx_rd_data <= packet_ram(tx_rd_addr);
+		end if;
+	end process packet_ram_port_b;
+
+	-- ============================================================
+	-- Packet Assembly Process (sys_clk domain)
+	-- Includes RAM Port A (write + read) for proper block RAM inference.
+	-- Only ONE ram access (read or write) per clock cycle on this port.
+	-- ============================================================
+	sys_clock_process : process(sys_clk)
+		variable header_data       : std_logic_vector(7 downto 0);
+		variable pseudo_header_sum : unsigned(31 downto 0);
+		variable udp_pl_len        : integer;
+		variable pkt_len           : integer;
+	begin
+		if rising_edge(sys_clk) then
+			-- ---- RAM Port A: one write OR one read per cycle ----
+			if (packet_wr_en = '1') then
+				packet_ram(packet_wr_addr) <= packet_wr_data;
+			else
+				-- Read path (used during UDP checksum calculation)
+				-- Stage 1: RAM output register (required for M9K inference)
+				asm_rd_data <= packet_ram(asm_rd_addr);
+			end if;
+			-- Stage 2: Pipeline register (breaks timing to checksum logic)
+			asm_rd_data_r <= asm_rd_data;
+
+			packet_wr_en <= '0'; -- default: no write next cycle
+
+			-- CDC: sync frame_start from external domain to sys_clk
+			frame_start_sync1 <= frame_start;
+			frame_start_sync2 <= frame_start_sync1;
+			frame_start_prev  <= frame_start_sync2;
+
+			-- CDC: sync tx_ack from tx_clk to sys_clk
+			tx_ack_sync1 <= tx_ack;
+			tx_ack_sync2 <= tx_ack_sync1;
+
+			case SM_Assemble is
+				when s_A_Idle =>
+					-- Detect rising edge of frame_start
+					if (frame_start_sync2 = '1') and (frame_start_prev = '0') then
+						-- Capture all input signals (stable because controller holds them while frame_start=1)
+						cap_message_type     <= get_message_type(message_type_i);
+						cap_message_type_raw <= message_type_i;
+						cap_sequence_id      <= sequence_id;
+						cap_timestamp_sec    <= timestamp_seconds_i;
+						cap_timestamp_nsec   <= timestamp_nanoseconds_i;
+						cap_req_port_id      <= request_port_identity;
+						cap_log_interval     <= ptp_log_interval_i;
+						cap_time_source      <= ptp_time_source_i;
+
+						-- Compute lengths
+						udp_pl_len := get_udp_payload_length(get_message_type(message_type_i));
+						cap_udp_payload_len <= udp_pl_len;
+						cap_packet_length   <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + udp_pl_len;
+
+						packet_counter <= packet_counter + 1;
+
+						-- IP checksum pipeline stage 1: partial sums
+						ip_checksum_partial1 <= resize(to_unsigned(16#8011#, 16), 32) +
+							resize(unsigned(src_ip_address(31 downto 16)), 32) +
+							resize(unsigned(src_ip_address(15 downto 0)), 32);
+
+						-- Destination IP depends on message type
+						if is_pdelay_message(get_message_type(message_type_i)) then
+							-- 224.0.0.107 = 0xE000006B
+							ip_checksum_partial2 <=
+								resize(to_unsigned(16#E000#, 16), 32) +
+								resize(to_unsigned(16#006B#, 16), 32);
+						else
+							-- 224.0.1.129 = 0xE0000181
+							ip_checksum_partial2 <=
+								resize(to_unsigned(16#E000#, 16), 32) +
+								resize(to_unsigned(16#0181#, 16), 32);
+						end if;
+
+						-- UDP checksum pseudo-header seed
+						if is_pdelay_message(get_message_type(message_type_i)) then
+							pseudo_header_sum := resize(unsigned(src_ip_address(31 downto 16)), 32)
+								+ resize(unsigned(src_ip_address(15 downto 0)), 32)
+								+ resize(to_unsigned(16#E000#, 16), 32)
+								+ resize(to_unsigned(16#006B#, 16), 32)
+								+ resize(to_unsigned(16#0011#, 16), 32)
+								+ resize(to_unsigned(UDP_HEADER_LENGTH + udp_pl_len, 16), 32);
+						else
+							pseudo_header_sum := resize(unsigned(src_ip_address(31 downto 16)), 32)
+								+ resize(unsigned(src_ip_address(15 downto 0)), 32)
+								+ resize(to_unsigned(16#E000#, 16), 32)
+								+ resize(to_unsigned(16#0181#, 16), 32)
+								+ resize(to_unsigned(16#0011#, 16), 32)
+								+ resize(to_unsigned(UDP_HEADER_LENGTH + udp_pl_len, 16), 32);
+						end if;
+						udp_checksum_acc <= pseudo_header_sum;
+						udp_pseudo_header_sum <= pseudo_header_sum;
+
+						-- Reset state
+						udp_checksum_upper_byte <= (others => '0');
+						udp_checksum_byte_phase <= '0';
+						checksum_write_index <= 0;
+
+						SM_Assemble <= s_A_CalcIpChkPartial;
+					end if;
+
+				-- IP checksum pipeline stage 2
+				when s_A_CalcIpChkPartial =>
+					ip_checksum_acc <= ip_checksum_partial1 + ip_checksum_partial2 +
+						resize(to_unsigned(16#4500# + 16#B800#, 32), 32) +
+						resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + cap_udp_payload_len, 16), 32) +
+						resize(packet_counter, 32);
+
+					frame_write_index <= 0;
+					SM_Assemble <= s_A_CalcIpChkFinal;
+
+				-- One more cycle to let ip_checksum_acc settle, then start writing
+				when s_A_CalcIpChkFinal =>
+					ip_checksum_value <= finalize_checksum(ip_checksum_acc);
+					SM_Assemble <= s_A_PrepFrame;
+
+				-- Write packet bytes into RAM one per cycle
+				when s_A_PrepFrame =>
+					packet_wr_en <= '1';
+					packet_wr_addr <= frame_write_index;
+
+					header_data := get_header_byte(
+						frame_write_index, src_mac_address, src_ip_address,
+						cap_message_type, cap_message_type_raw, packet_counter,
+						cap_sequence_id, cap_timestamp_sec, cap_timestamp_nsec,
+						cap_req_port_id, cap_udp_payload_len,
+						cap_log_interval, cap_time_source
+					);
+
+					-- Patch in computed IP checksum at offsets 24-25
+					if (frame_write_index = MAC_HEADER_LENGTH + 10) then
+						header_data := ip_checksum_value(15 downto 8);
+					elsif (frame_write_index = MAC_HEADER_LENGTH + 11) then
+						header_data := ip_checksum_value(7 downto 0);
+					end if;
+
+					packet_wr_data <= header_data;
+
+					-- Cache first byte for TX process
+					if (frame_write_index = 0) then
+						first_packet_byte <= header_data;
+					end if;
+
+					if (frame_write_index = cap_packet_length - 1) then
+						-- Packet fully written to RAM, start UDP checksum
+						udp_checksum_acc <= udp_pseudo_header_sum;
+						udp_checksum_upper_byte <= (others => '0');
+						udp_checksum_byte_phase <= '0';
+						udp_checksum_bytes_remaining <= UDP_HEADER_LENGTH + cap_udp_payload_len;
+						if (UDP_HEADER_LENGTH + cap_udp_payload_len > 0) then
+							udp_checksum_request_count <= 1;
+						else
+							udp_checksum_request_count <= 0;
+						end if;
+						udp_checksum_data_valid <= '0';
+						udp_checksum_data_valid_d <= '0';
+						asm_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
+						SM_Assemble <= s_A_CalcUdpChecksum;
+					else
+						frame_write_index <= frame_write_index + 1;
+					end if;
+
+				-- Read back UDP portion from RAM and compute checksum
+				when s_A_CalcUdpChecksum =>
+					-- Pipeline delay to match asm_rd_data_r latency (2 cycles)
+					udp_checksum_data_valid_d <= udp_checksum_data_valid;
+
+					if (udp_checksum_data_valid_d = '1') then
+						feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, asm_rd_data_r);
+						if (udp_checksum_bytes_remaining > 0) then
+							udp_checksum_bytes_remaining <= udp_checksum_bytes_remaining - 1;
+						end if;
+					end if;
+
+					if ((udp_checksum_data_valid_d = '1') and (udp_checksum_bytes_remaining = 1)) then
+						udp_checksum_data_valid <= '0';
+						SM_Assemble <= s_A_FinalizeChecksum;
+					elsif ((udp_checksum_data_valid = '0') and (udp_checksum_bytes_remaining = 0)) then
+						SM_Assemble <= s_A_FinalizeChecksum;
+					else
+						if (udp_checksum_data_valid = '0') then
+							if (udp_checksum_bytes_remaining > 0) then
+								udp_checksum_data_valid <= '1';
+							end if;
+						end if;
+						if (udp_checksum_request_count < (UDP_HEADER_LENGTH + cap_udp_payload_len)) then
+							asm_rd_addr <= asm_rd_addr + 1;
+							udp_checksum_request_count <= udp_checksum_request_count + 1;
+						end if;
+					end if;
+
+				when s_A_FinalizeChecksum =>
+					udp_checksum_value <= finalize_checksum(udp_checksum_acc);
+					SM_Assemble <= s_A_WriteChecksum;
+
+				-- Write UDP checksum back into RAM
+				when s_A_WriteChecksum =>
+					case checksum_write_index is
+						when 0 =>
+							packet_wr_en <= '1';
+							packet_wr_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 6;
+							packet_wr_data <= udp_checksum_value(15 downto 8);
+							checksum_write_index <= 1;
+						when 1 =>
+							packet_wr_en <= '1';
+							packet_wr_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 7;
+							packet_wr_data <= udp_checksum_value(7 downto 0);
+							checksum_write_index <= 2;
+						when others =>
+							-- Packet ready, signal TX process
+							tx_frame_start <= '1';
+							SM_Assemble <= s_A_RequestTx;
+					end case;
+
+				-- Wait for TX process to acknowledge
+				when s_A_RequestTx =>
+					if (tx_ack_sync2 = '1') then
+						tx_frame_start <= '0';
+						SM_Assemble <= s_A_WaitAckDone;
+					end if;
+
+				-- Wait for TX to complete (ack deasserted)
+				when s_A_WaitAckDone =>
+					if (tx_ack_sync2 = '0') then
+						SM_Assemble <= s_A_Idle;
+					end if;
+			end case;
+		end if;
+	end process sys_clock_process;
+
+	-- ============================================================
+	-- TX Process (tx_clk domain)
+	-- Reads packet bytes from RAM and sends them to MAC
+	-- ============================================================
+	tx_process : process(tx_clk)
 	begin
 		if rising_edge(tx_clk) then
-			-- Stage 1 (metastable)
-			frame_start_meta    <= frame_start;
-			message_type_meta   <= message_type_i;
-			sequence_id_meta    <= sequence_id;
-			timestamp_sec_meta  <= timestamp_seconds_i;
-			timestamp_nsec_meta <= timestamp_nanoseconds_i;
-			req_port_id_meta    <= request_port_identity;
-			
-			-- Stage 2 (stable)
-			frame_start_sync    <= frame_start_meta;
-			message_type_sync   <= message_type_meta;
-			sequence_id_sync    <= sequence_id_meta;
-			timestamp_sec_sync  <= timestamp_sec_meta;
-			timestamp_nsec_sync <= timestamp_nsec_meta;
-			req_port_id_sync    <= req_port_id_meta;
-		end if;
-	end process cdc_sync_proc;
-	-- Combinatorial logic for message type decoding (must be immediate, not clocked)
-	-- Uses synchronized signal for CDC safety
-	current_message_type <= get_message_type(message_type_sync);
-	
-	with current_message_type select real_udp_payload_length <=
-		44 when t_Sync,
-		44 when t_Delay_Req,
-		54 when t_Pdelay_Req,
-		54 when t_Pdelay_Resp,
-		44 when t_Follow_Up,
-		54 when t_Delay_Resp,
-		64 when t_Announce,
-		54 when t_Pdelay_Follow_Up,
-		44 when others;
-	
-	with current_message_type select tx_port_319_i <=
-		'1' when t_Sync,
-		'1' when t_Delay_Req,
-		'1' when t_Pdelay_Req,
-		'1' when t_Pdelay_Resp,
-		'0' when others;  -- Follow_Up, Delay_Resp, Announce, Pdelay_Follow_Up use port 320
-	
-	real_packet_length <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length;
+			-- CDC: sync tx_frame_start from sys_clk
+			tx_frame_start_sync1 <= tx_frame_start;
+			tx_frame_start_sync2 <= tx_frame_start_sync1;
 
-	process (tx_clk)
-		variable Word: std_logic_vector(15 downto 0);
-		variable udpWord: std_logic_vector(15 downto 0);
-	begin
-		if (falling_edge(tx_clk)) then
-			zframe_start <= frame_start_sync;
 			tx_ready_o <= '0';
-			if (s_SM_Ethernet = s_Idle) then
-				tx_allow_req_o <= '0'; -- default: do not request to send
-			end if;
-			if ((frame_start_sync = '1') and (zframe_start = '0') and (s_SM_Ethernet = s_Idle)) then
-				-- prepare begin of packet
-				packet_counter <= packet_counter + 1; -- increment packet counter
-				tx_enable <= '0';
-				byte_counter <= 0;
 
-				-- 7 preamble bytes + SFD will be added by Ethernet-MAC
-				
-				-- MAC HEADER (14 bytes)
-				-- fill MAC-Header with desired values
-				udp_frame(0) <= x"01"; -- MSB contains typical left side of MAC
-				udp_frame(1) <= x"00";
-				udp_frame(2) <= x"5e";
-				udp_frame(3) <= x"00";
-				udp_frame(4) <= x"01";
-				if (current_message_type = t_Pdelay_Req) or (current_message_type = t_Pdelay_Resp) or (current_message_type = t_Pdelay_Follow_Up) then
-				    udp_frame(5) <= x"6b"; -- standard Pdelay MAC-address LSB for 224.0.0.107
-				else
-					udp_frame(5) <= x"81"; -- standard PTP-multicast MAC-address LSB for 224.0.1.129
-				end if;
-
-				udp_frame(6) <= src_mac_address(47 downto 40); -- MSB contains typical left side of MAC
-				udp_frame(7) <= src_mac_address(39 downto 32);
-				udp_frame(8) <= src_mac_address(31 downto 24);
-				udp_frame(9) <= src_mac_address(23 downto 16);
-				udp_frame(10) <= src_mac_address(15 downto 8);
-				udp_frame(11) <= src_mac_address(7 downto 0);
-
-				-- IP Protocol
-				udp_frame(12) <= x"08"; -- type [0x0800 = IP Protocol]
-				udp_frame(13) <= x"00";
-
-				-- IP HEADER (20 bytes)
-				udp_frame(14) <= x"45"; -- b14 = version (4-bit) | internet header length (4-bit) [Version 4 and header length of 0x05 = 20 bytes]
-				udp_frame(15) <= b"10111000"; -- differentiated services (6-bits) | explicit congestion notification (2-bits) -> DSCP=0x2e (Expedited Forwarding)
-				udp_frame(16) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length, 16)(15 downto 8)); -- total length without MAC-header: entire packet size in bytes, including IP-header and payload-data. The minimum size is 46 bytes of user data (= 0x2e, header without data) and the maximum is 65,535 bytes
-				udp_frame(17) <= std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length, 16)(7 downto 0)); -- 20 bytes IP-header + 8 bytes UDP-header + 18 bytes UDP-payload = 46 bytes = 0x002e
-				udp_frame(18) <= std_logic_vector(to_unsigned(packet_counter, 16)(15 downto 8));
-				udp_frame(19) <= std_logic_vector(to_unsigned(packet_counter, 16)(7 downto 0));
-				udp_frame(20) <= x"00"; -- flags (3-bits) | fragment offsets (13-bits)
-				udp_frame(21) <= x"00";
-				udp_frame(22) <= x"80"; -- time to live (0x80 = 128)
-				udp_frame(23) <= x"11"; -- b23 = protocol (0x01 = ICMP, 0x06 = TCP, 0x11 = UDP)
-				udp_frame(24) <= x"00"; -- header checksum (16-bit ones' complement of the ones' complement sum of all 16-bit words in the header)
-				udp_frame(25) <= x"00";
-
-				udp_frame(26) <= src_ip_address(31 downto 24); -- MSB contains typical "192"
-				udp_frame(27) <= src_ip_address(23 downto 16);
-				udp_frame(28) <= src_ip_address(15 downto 8);
-				udp_frame(29) <= src_ip_address(7 downto 0);
-	
-				udp_frame(30) <= x"E0"; -- 224
-				udp_frame(31) <= x"00"; -- 0
-				udp_frame(32) <= x"01"; -- 1
-				if (current_message_type = t_Pdelay_Req) or (current_message_type = t_Pdelay_Resp) or (current_message_type = t_Pdelay_Follow_Up) then
-					udp_frame(33) <= x"6b"; -- 107
-				else				
-					udp_frame(33) <= x"81"; -- 129
-				end if;
-
-				-- UDP HEADER (8 bytes)
-				udp_frame(34) <= x"01";
-                udp_frame(36) <= x"01";
-
-                if (tx_port_319_i = '1') then
-                    udp_frame(35) <= x"3f"; -- source port 319 (PTP event messages)
-                    udp_frame(37) <= x"3f"; -- source port 319 (PTP event messages)
-                    
-                else
-                    udp_frame(35) <= x"40"; -- source port 320 (PTP general messages)
-                    udp_frame(37) <= x"40"; -- source port 320 (PTP general messages)
-                    
-                end if;
-				
-				udp_frame(38) <= std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + real_udp_payload_length, 16)(15 downto 8)); -- length (length of this UDP packet including header and data. Minimum 8 bytes)
-				udp_frame(39) <= std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + real_udp_payload_length, 16)(7 downto 0));
-				udp_frame(40) <= x"00"; -- checksum (0 is a valid CRC-value to ignore it)
-				udp_frame(41) <= x"00";
-
-				-- UDP PAYLOAD (44 bytes)
-				udp_frame(42) <= x"0" & message_type_sync; -- 0 majorSdoId + MessageType (Mapping is as in protocol specification!!!)
-				udp_frame(43) <= x"02"; -- 1 majorVersionPTP = 0000 0010b = version 2
-				udp_frame(44) <= std_logic_vector(to_unsigned(real_udp_payload_length, 16)(15 downto 8)); -- 2 messageLength MSB
-				udp_frame(45) <= std_logic_vector(to_unsigned(real_udp_payload_length, 16)(7 downto 0)); -- 3 messageLength continued (44 bytes = 0x002c)
-				udp_frame(46) <= x"00"; -- 4 domainNumber
-				udp_frame(47) <= x"00"; -- 5 minorSdoId (reserved for future use)
-				udp_frame(48) <= x"02"; -- 6 Flags1 0x0200 = TwoStep
-				udp_frame(49) <= x"00"; -- 7 Flags2
-				udp_frame(50) <= x"00"; -- 8 0 CorrectionField NS
-				udp_frame(51) <= x"00"; -- 9 1 CorrectionField NS
-				udp_frame(52) <= x"00"; -- 10 2 CorrectionField NS
-                udp_frame(53) <= x"00"; -- 11 3 CorrectionField NS
-				udp_frame(54) <= x"00"; -- 12 4 CorrectionField NS
-				udp_frame(55) <= x"00"; -- 13 5 CorrectionField NS
-				udp_frame(56) <= x"00"; -- 14 6 CorrectionField SubNS
-				udp_frame(57) <= x"00"; -- 15 7 CorrectionField SubNS
-				udp_frame(58) <= x"00"; -- 16 MessageType specific
-                udp_frame(59) <= x"00"; -- 17 MessageType specific
-                udp_frame(60) <= x"00"; -- 18 MessageType specific
-                udp_frame(61) <= x"00"; -- 19 MessageType specific
-                udp_frame(62) <= src_mac_address(47 downto 40) xor x"02"; -- 20 0 ClockIdentity
-                udp_frame(63) <= src_mac_address(39 downto 32); -- 21 1 ClockIdentity
-                udp_frame(64) <= src_mac_address(31 downto 24); -- 22 2 ClockIdentity
-                udp_frame(65) <= x"FF"; -- 23 3 ClockIdentity
-                udp_frame(66) <= x"FE"; -- 24 4 ClockIdentity
-                udp_frame(67) <= src_mac_address(23 downto 16); -- 25 5 ClockIdentity
-                udp_frame(68) <= src_mac_address(15 downto 8); -- 26 6 ClockIdentity
-                udp_frame(69) <= src_mac_address(7 downto 0); -- 27 7 ClockIdentity
-                udp_frame(70) <= x"00"; -- 28 sourcePortId
-                udp_frame(71) <= x"01"; -- 29 sourcePortId
-				udp_frame(72) <= std_logic_vector(sequence_id_sync(15 downto 8)); -- 30 sequenceId
-				udp_frame(73) <= std_logic_vector(sequence_id_sync(7 downto 0)); -- 31 sequenceId
-                case current_message_type is
-                    when t_Sync =>
-                        udp_frame(74) <= x"00"; -- 32 controlField
-                    when t_Delay_Req =>
-                        udp_frame(74) <= x"01"; -- 32 controlField
-                    when t_Follow_Up =>
-                            udp_frame(74) <= x"02"; -- 32 controlField
-                            
-                    when t_Delay_Resp =>
-                        udp_frame(74) <= x"03";
-					when t_Pdelay_Req =>
-						udp_frame(74) <= x"05"; -- 32 controlField
-					when t_Pdelay_Follow_Up =>
-						udp_frame(74) <= x"05"; -- 32 controlField
-					when t_Pdelay_Resp =>
-						udp_frame(74) <= x"05"; -- 32 
-					when t_Announce =>
-						udp_frame(74) <= x"05"; -- 32 controlField --
-                    when others =>
-                        udp_frame(74) <= x"02"; -- 32 controlField -- 0x02 for Delay_Req, Sync, Follow_Up, Announce
-
-                        -- TODO: Later add 0x04 for management messagess
-                end case;
-                udp_frame(75) <= ptp_log_interval_i; -- 33 logMessageInterval
-                udp_frame(76) <= std_logic_vector(timestamp_sec_sync(47 downto 40)); -- 34 0 originTimestamp seconds
-                udp_frame(77) <= std_logic_vector(timestamp_sec_sync(39 downto 32)); -- 35 1 originTimestamp seconds
-				udp_frame(78) <= std_logic_vector(timestamp_sec_sync(31 downto 24)); -- 36 2 originTimestamp seconds 
-				udp_frame(79) <= std_logic_vector(timestamp_sec_sync(23 downto 16)); -- 37 3 originTimestamp seconds
-				udp_frame(80) <= std_logic_vector(timestamp_sec_sync(15 downto 8)); -- 38 4 originTimestamp seconds
-				udp_frame(81) <= std_logic_vector(timestamp_sec_sync(7 downto 0)); -- 39 5 originTimestamp seconds
-				udp_frame(82) <= std_logic_vector(timestamp_nsec_sync(31 downto 24)); -- 40 0 originTimestamp nanoseconds
-				udp_frame(83) <= std_logic_vector(timestamp_nsec_sync(23 downto 16)); -- 41 1 originTimestamp nanoseconds
-				udp_frame(84) <= std_logic_vector(timestamp_nsec_sync(15 downto 8)); -- 42 2 originTimestamp nanoseconds
-				udp_frame(85) <= std_logic_vector(timestamp_nsec_sync(7 downto 0)); -- 43 3 originTimestamp nanoseconds
-                if (current_message_type = t_Delay_Resp or current_message_type = t_Pdelay_Resp) then
-                    udp_frame(86) <= std_logic_vector(req_port_id_sync(79 downto 72)); -- 44 0 requestingPortIdentity
-                    udp_frame(87) <= std_logic_vector(req_port_id_sync(71 downto 64)); -- 45 1 requestingPortIdentity
-                    udp_frame(88) <= std_logic_vector(req_port_id_sync(63 downto 56)); -- 46 2 requestingPortIdentity
-                    udp_frame(89) <= std_logic_vector(req_port_id_sync(55 downto 48)); -- 47 3 requestingPortIdentity
-                    udp_frame(90) <= std_logic_vector(req_port_id_sync(47 downto 40)); -- 48 4 requestingPortIdentity
-                    udp_frame(91) <= std_logic_vector(req_port_id_sync(39 downto 32)); -- 49 5 requestingPortIdentity
-                    udp_frame(92) <= std_logic_vector(req_port_id_sync(31 downto 24)); -- 50 6 requestingPortIdentity
-                    udp_frame(93) <= std_logic_vector(req_port_id_sync(23 downto 16)); -- 51 7 requestingPortIdentity
-                    udp_frame(94) <= std_logic_vector(req_port_id_sync(15 downto 8)); -- 52 8 requestingPortNumber
-                    udp_frame(95) <= std_logic_vector(req_port_id_sync(7 downto 0)); -- 53 9 requestingPortNumber
-                elsif (current_message_type = t_Announce) then
-					-- Announce message has no timestamp, so pad with zeros
-					udp_frame(86) <= x"00"; --current UTC Offset
-					udp_frame(87) <= x"25"; --current UTC Offset
-					udp_frame(88) <= x"00"; -- reserved
-					udp_frame(89) <= x"80"; -- grandmasterPriority1
-					udp_frame(90) <= x"F8"; --- clockQuality.clockClass
-					udp_frame(91) <= x"FE"; -- clockQuality.clockAccuracy
-					udp_frame(92) <= x"FF"; -- clockQuality.offsetScaledLogVariance MSB
-					udp_frame(93) <= x"FF"; -- clockQuality.offsetScaledLogVariance LSB
-					udp_frame(94) <= x"80"; -- grandmasterPriority2
-
-                	udp_frame(95) <= src_mac_address(47 downto 40) xor x"02"; -- 20 0 ClockIdentity
-                	udp_frame(96) <= src_mac_address(39 downto 32); -- 21 1 ClockIdentity
-                	udp_frame(97) <= src_mac_address(31 downto 24); -- 22 2 ClockIdentity
-                	udp_frame(98) <= x"FF"; -- 23 3 ClockIdentity
-                	udp_frame(99) <= x"FE"; -- 24 4 ClockIdentity
-                	udp_frame(100) <= src_mac_address(23 downto 16); -- 25 5 ClockIdentity
-                	udp_frame(101) <= src_mac_address(15 downto 8); -- 26 6 ClockIdentity
-                	udp_frame(102) <= src_mac_address(7 downto 0); -- 27 7 ClockIdentity
-                	
-					udp_frame(103) <= x"00"; -- stepsRemoved MSB
-					udp_frame(104) <= x"00"; -- stepsRemoved LSB
-
-					udp_frame(105) <= ptp_time_source_i; -- timeSource
-				end if;
-				
-                
-
-				checksum_tmp                <= (others => '0');
-				checksum_byte_count         <= 0;
-				calculating_checksum        <= '1';
-				
-				udp_checksum_tmp            <= to_unsigned(17 + UDP_HEADER_LENGTH + real_udp_payload_length, 32); -- 0x11 (protocol) + UDP-LENGTH (header+payload)
-				udp_checksum_byte_count     <= 0;
-				udp_calculating_checksum    <= '1';
-				
-				s_SM_Ethernet <= s_CalcChecksum;
-				
-			elsif (s_SM_Ethernet = s_CalcChecksum) then
-				-- calculate checksum for IP-Header
-				if (checksum_byte_count < IP_HEADER_LENGTH) then
-					Word                    := udp_frame(MAC_HEADER_LENGTH + checksum_byte_count) & udp_frame(MAC_HEADER_LENGTH + checksum_byte_count + 1);
-					checksum_tmp            <= checksum_tmp + resize(unsigned(Word), 32);
-					checksum_byte_count     <= checksum_byte_count + 2; -- we are reading two bytes at once
-				else
-					-- checksum is calculated -> make sure that we have only 2-byte checksum and add carryover above 16th bit to 16-bit checksum
-					if (checksum_tmp(31 downto 16) > 0) then
-						checksum_tmp <= resize(checksum_tmp(15 downto 0), 32) + resize(checksum_tmp(31 downto 16), 32);
-					else
-						checksum                <= x"ffff" - checksum_tmp(15 downto 0);
-						calculating_checksum    <= '0';
+			case SM_Tx is
+				when s_Idle =>
+					tx_enable <= '0';
+					tx_ack <= '0';
+					tx_allow_req_o <= '0';
+					if (tx_frame_start_sync2 = '1') then
+						tx_ack <= '1';
+						tx_allow_req_o <= '1';
+						SM_Tx <= s_WaitForAllow;
 					end if;
-				end if;
 
-				-- calculate checksum for UDP-Payload
-				if (udp_checksum_byte_count < (UDP_PSEUDO_HEADER_LENGTH + UDP_HEADER_LENGTH + real_udp_payload_length)) then
-					udpWord                     := udp_frame(MAC_HEADER_LENGTH + IP_HEADER_LENGTH - UDP_PSEUDO_HEADER_LENGTH + udp_checksum_byte_count) & udp_frame(MAC_HEADER_LENGTH + IP_HEADER_LENGTH - UDP_PSEUDO_HEADER_LENGTH + udp_checksum_byte_count + 1);
-					udp_checksum_tmp            <= udp_checksum_tmp + resize(unsigned(udpWord), 32);
-					udp_checksum_byte_count     <= udp_checksum_byte_count + 2; -- we are reading two bytes at once
-				else
-					-- checksum is calculated -> make sure that we have only 2-byte checksum and add carryover above 16th bit to 16-bit checksum
-					if (udp_checksum_tmp(31 downto 16) > 0) then
-						udp_checksum_tmp <= resize(udp_checksum_tmp(15 downto 0), 32) + resize(udp_checksum_tmp(31 downto 16), 32);
-					else
-						-- calc inversion and stop checksum-calculation
-						udp_checksum                <= x"ffff" - udp_checksum_tmp(15 downto 0);
-						udp_calculating_checksum    <= '0';
+				when s_WaitForAllow =>
+					if (tx_allow_i = '1') then
+						SM_Tx <= s_LatchCDC;
 					end if;
-				end if;
-				
-				-- if both checksum are ready, go to next state
-				if ((calculating_checksum = '0') and (udp_calculating_checksum = '0')) then
-					s_SM_Ethernet <= s_waitForAllow;
-					tx_allow_req_o <= '1'; -- request permission to send from outside (e.g. to avoid collisions)
-				end if;
-			elsif (s_SM_Ethernet = s_waitForAllow) then
-				if (tx_allow_i = '1') then
-					s_SM_Ethernet <= s_Start;
-				end if;
-			elsif (s_SM_Ethernet = s_Start) then
-				-- wait until MAC is ready again
-				if (tx_busy = '0') then
-					udp_frame(MAC_HEADER_LENGTH + 10) <= std_logic_vector(checksum(15 downto 8)); -- MSB
-					udp_frame(MAC_HEADER_LENGTH + 11) <= std_logic_vector(checksum(7 downto 0)); -- LSB
-					udp_frame(MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 6) <= std_logic_vector(udp_checksum(15 downto 8)); -- MSB
-					udp_frame(MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 7) <= std_logic_vector(udp_checksum(7 downto 0)); -- LSB
-					
+
+				when s_LatchCDC =>
+					-- Initialize TX from assembled packet
+					tx_data <= first_packet_byte;
+					if (cap_packet_length > 1) then
+						tx_rd_addr <= 1;
+						tx_read_pointer <= 2;
+						tx_bytes_remaining <= cap_packet_length - 1;
+						SM_Tx <= s_PrimeTx;
+					else
+						tx_bytes_remaining <= 0;
+						SM_Tx <= s_End;
+					end if;
+					prime_wait <= 0;
+
+				when s_PrimeTx =>
+					-- Wait one cycle for tx_rd_data to be valid from RAM
+					tx_enable <= '0';
+					if (prime_wait = 0) then
+						prime_wait <= 1;
+					else
+						if (tx_busy = '0') then
+							tx_enable <= '1';
+							SM_Tx <= s_Transmit;
+						end if;
+					end if;
+
+				when s_Transmit =>
 					tx_enable <= '1';
-					byte_counter <= 0; -- preload to first byte again
-					tx_data <= udp_frame(0);
-
-					s_SM_Ethernet <= s_Transmit;
-				end if;
-			
-			elsif (s_SM_Ethernet = s_Transmit) then
-				-- wait until previous byte is sent
-				
-				if (tx_byte_sent = '1') then
-					-- send next byte and increment byte_counter
-					tx_data <= udp_frame(byte_counter);
-					
-					if (byte_counter = real_packet_length - 1) then
-						-- stop transmitting
-						s_SM_Ethernet <= s_End;
+					if (tx_byte_sent = '1') then
+						if (tx_bytes_remaining = 0) then
+							SM_Tx <= s_End;
+						else
+							tx_data <= tx_rd_data;
+							if (tx_read_pointer < cap_packet_length) then
+								tx_rd_addr <= tx_read_pointer;
+								tx_read_pointer <= tx_read_pointer + 1;
+							end if;
+							tx_bytes_remaining <= tx_bytes_remaining - 1;
+						end if;
 					end if;
-					
-					byte_counter <= byte_counter + 1;
-				end if;
-				
-			elsif (s_SM_Ethernet = s_End) then
-				tx_enable <= '0';
-				tx_data <= "00000000";
-                tx_ready_o <= '1';
-				s_SM_Ethernet <= s_Idle;
-				tx_allow_req_o <= '0'; -- default: do not request to send
-			end if;
+
+				when s_End =>
+					tx_enable <= '0';
+					tx_data <= (others => '0');
+					tx_ready_o <= '1';
+					tx_allow_req_o <= '0';
+					SM_Tx <= s_WaitDeassert;
+
+				when s_WaitDeassert =>
+					-- Wait for sys_clock_process to deassert tx_frame_start
+					if (tx_frame_start_sync2 = '0') then
+						tx_ack <= '0';
+						SM_Tx <= s_Idle;
+					end if;
+			end case;
 		end if;
-	end process;
+	end process tx_process;
+
 end Behavioral;

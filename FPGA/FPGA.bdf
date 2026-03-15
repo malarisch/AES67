@@ -4392,11 +4392,6 @@ on the Quartus Prime software download page.
 	(pt 2000 584)
 )
 (connector
-	(text "ptp_allow_req" (rect 2056 584 2122 595)(font "DejaVu Sans Condensed" ))
-	(pt 2088 600)
-	(pt 1992 600)
-)
-(connector
 	(text "audio_allow_req" (rect 2054 600 2130 611)(font "DejaVu Sans Condensed" ))
 	(pt 2088 616)
 	(pt 1992 616)

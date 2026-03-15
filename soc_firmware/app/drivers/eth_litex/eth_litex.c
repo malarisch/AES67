@@ -44,12 +44,14 @@ struct eth_litex_data {
 	struct k_sem rx_sem;           /* Signaled by ISR on RX packet */
 
 	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE];
+	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
 	K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
 };
 
-K_MSGQ_DEFINE(litex_tx_queue, sizeof(struct net_pkt *), 4, 4);
+K_MSGQ_DEFINE(litex_tx_queue, sizeof(struct net_pkt *),
+	      CONFIG_ETH_LITEX_TX_QUEUE_DEPTH, 4);
 
 /* Forward-declare the device so DEVICE_GET(eth_litex0) works in init */
 DEVICE_DECLARE(eth_litex0);
@@ -181,18 +183,59 @@ static inline uint8_t eth_buf_read_byte(uint16_t offset)
 	return (uint8_t)(*p & 0xFF);
 }
 
+/*
+ * Hand-written tight loops for packet buffer access.
+ *
+ * The CPU fetches instructions from HyperRAM which shares the Wishbone bus.
+ * A C for-loop generates ~6 instructions per byte, each requiring a HyperRAM
+ * fetch (~40+ cycles).  By using a tiny asm loop (3 instructions, fits in one
+ * ICache line), the instruction fetches happen only once and the CPU spends
+ * almost all its time on the actual Wishbone data transfers.
+ */
+
 static void eth_buf_read_packet(uint8_t *dst, uint16_t len)
 {
-	for (uint16_t i = 0; i < len; i++) {
-		dst[i] = eth_buf_read_byte(i);
-	}
+	__asm__ volatile("fence" ::: "memory");
+
+	if (len == 0) return;
+
+	uintptr_t src_base = ETH_BUF_RX_MEM;
+
+	/* a0 = dst pointer, a1 = src (Wishbone word addr), a2 = remaining */
+	__asm__ volatile(
+		"1:\n"
+		"    lw   t0, 0(%[src])\n"      /* read 32-bit word from RX buffer */
+		"    sb   t0, 0(%[dst])\n"       /* store low byte to dst */
+		"    addi %[dst], %[dst], 1\n"
+		"    addi %[src], %[src], 4\n"   /* next Wishbone word (4 bytes apart) */
+		"    addi %[rem], %[rem], -1\n"
+		"    bnez %[rem], 1b\n"
+		: [dst] "+r"(dst), [src] "+r"(src_base), [rem] "+r"(len)
+		:
+		: "t0", "memory"
+	);
 }
 
 static void eth_buf_write_packet(const uint8_t *src, uint16_t len)
 {
-	for (uint16_t i = 0; i < len; i++) {
-		eth_buf_write_byte(i, src[i]);
-	}
+	if (len == 0) return;
+
+	uintptr_t dst_base = ETH_BUF_TX_MEM;
+
+	__asm__ volatile(
+		"1:\n"
+		"    lbu  t0, 0(%[src])\n"       /* load byte from src */
+		"    sw   t0, 0(%[dst])\n"       /* write 32-bit word to TX buffer */
+		"    addi %[src], %[src], 1\n"
+		"    addi %[dst], %[dst], 4\n"   /* next Wishbone word */
+		"    addi %[rem], %[rem], -1\n"
+		"    bnez %[rem], 1b\n"
+		: [src] "+r"(src), [dst] "+r"(dst_base), [rem] "+r"(len)
+		:
+		: "t0", "memory"
+	);
+
+	__asm__ volatile("fence" ::: "memory");
 }
 
 /* ---- ISR ---- */
@@ -223,6 +266,7 @@ static volatile uint32_t tx_timeout_count;
 static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
+	struct eth_litex_data *data = dev->data;
 	struct net_pkt *pkt = NULL;
 
 	ARG_UNUSED(p2);
@@ -242,8 +286,7 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		uint8_t buf[ETH_LITEX_MAX_PKT_SIZE];
-		if (net_pkt_read(pkt, buf, len) < 0) {
+		if (net_pkt_read(pkt, data->tx_buf, len) < 0) {
 			LOG_ERR("TX pkt read failed");
 			net_pkt_unref(pkt);
 			continue;
@@ -252,15 +295,22 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		/* Wait for previous TX to complete (eth_tx_done status bit).
 		 * On the very first call tx_done starts de-asserted (FPGA reset
 		 * default), so we only wait if a transmit is actually in-flight
-		 * (i.e. we previously pulsed eth_tx_request). */
+		 * (i.e. we previously pulsed eth_tx_request).
+		 *
+		 * A 1518-byte frame at 100 Mbps takes ~122µs on the wire.
+		 * We use k_busy_wait() because the system tick (10ms at 100Hz)
+		 * is far too coarse for this — k_usleep/k_sleep would round up
+		 * to 10ms per iteration, making TX unbearably slow.
+		 * We yield once before spinning so other threads get a chance. */
 		static bool first_tx = true;
 		if (!first_tx) {
 			uint32_t status_before = litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
 			LOG_DBG("TX wait tx_done, status=0x%08x", status_before);
+			k_yield();
 			int wait = 0;
 			while (!(litex_csr_read(CSR_AES67_CSR_STATUS_ADDR) & AES67_STATUS_ETH_TX_DONE)) {
-				k_busy_wait(5);
-				if (++wait > 20000) { /* ~100ms timeout */
+				k_busy_wait(10);
+				if (++wait > 20000) { /* ~200ms timeout */
 					tx_timeout_count++;
 					LOG_WRN("TX done timeout (status=0x%08x, cnt=%u)",
 						litex_csr_read(CSR_AES67_CSR_STATUS_ADDR),
@@ -269,19 +319,22 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 				}
 			}
 			if (wait > 0 && wait <= 20000) {
-				LOG_DBG("TX done after %d iters (~%d us)", wait, wait * 5);
+				LOG_DBG("TX done after %d iters (~%d us)", wait, wait * 10);
 			}
 		}
 		first_tx = false;
 
 		/* Write packet data to TX buffer */
-		eth_buf_write_packet(buf, len);
+		uint32_t t0 = k_cycle_get_32();
+		eth_buf_write_packet(data->tx_buf, len);
+		uint32_t t1 = k_cycle_get_32();
+		uint32_t us = k_cyc_to_us_floor32(t1 - t0);
 
 		/* Set TX length */
 		litex_csr_write(CSR_ETH_BUF_TX_LEN_ADDR, len);
 
 		uint32_t ctrl_before = litex_csr_read(CSR_AES67_CSR_CTRL_ADDR);
-		LOG_DBG("TX fire: len=%zu ctrl=0x%08x", len, ctrl_before);
+		LOG_DBG("TX fire: len=%zu write=%uus ctrl=0x%08x", len, us, ctrl_before);
 
 		/* Assert eth_tx_request and hold long enough for CDC capture.
 		 * The FPGA synchronises this signal through a 2-FF chain clocked
@@ -347,6 +400,14 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		}
 
 		uint16_t pkt_len = litex_csr_read(CSR_ETH_BUF_RX_LEN_ADDR) & 0xFFFF;
+
+		/* The MAC includes the 4-byte FCS in the frame.  Strip it
+		 * before handing to the network stack which expects frames
+		 * without FCS. */
+		if (pkt_len >= 4) {
+			pkt_len -= 4;
+		}
+
 		LOG_DBG("RX ready=0x%x len=%u (wakeup=%s)",
 			ready, pkt_len,
 			(sem_ret == 0) ? "irq" : "poll");
@@ -360,16 +421,24 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		}
 
 		/* Read packet data from RX buffer */
+		uint32_t rt0 = k_cycle_get_32();
 		eth_buf_read_packet(data->rx_buf, pkt_len);
+		uint32_t rt1 = k_cycle_get_32();
 
-		LOG_DBG("RX #%u: %u bytes [%02x:%02x:%02x:%02x:%02x:%02x -> "
+		LOG_DBG("RX #%u: %u bytes (read=%uus) [%02x:%02x:%02x:%02x:%02x:%02x -> "
 			"%02x:%02x:%02x:%02x:%02x:%02x type=%02x%02x]",
 			rx_count + 1, pkt_len,
+			k_cyc_to_us_floor32(rt1 - rt0),
 			data->rx_buf[6], data->rx_buf[7], data->rx_buf[8],
 			data->rx_buf[9], data->rx_buf[10], data->rx_buf[11],
 			data->rx_buf[0], data->rx_buf[1], data->rx_buf[2],
 			data->rx_buf[3], data->rx_buf[4], data->rx_buf[5],
 			data->rx_buf[12], data->rx_buf[13]);
+
+		/* Hex dump first 34 bytes (ETH hdr + IP hdr) for debugging */
+		if (pkt_len >= 34) {
+			LOG_HEXDUMP_DBG(data->rx_buf, 34, "RX raw");
+		}
 
 		/* ACK: release the RX buffer for the next packet */
 		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
@@ -409,7 +478,10 @@ static int eth_litex_send(const struct device *dev, struct net_pkt *pkt)
 {
 	ARG_UNUSED(dev);
 
+	/* Must be non-blocking: Zephyr L2 send() is called from the
+	 * network processing context — blocking here deadlocks TCP. */
 	if (k_msgq_put(&litex_tx_queue, &pkt, K_NO_WAIT) != 0) {
+		LOG_WRN("TX queue full, dropping pkt (%zu bytes)", net_pkt_get_len(pkt));
 		return -ENOMEM;
 	}
 	net_pkt_ref(pkt);
@@ -561,7 +633,7 @@ static int eth_litex_init(const struct device *dev)
 	k_thread_create(&data->tx_thread, data->tx_stack,
 			CONFIG_ETH_LITEX_RX_STACK_SIZE,
 			eth_litex_tx_thread, (void *)dev, NULL, NULL,
-			K_PRIO_PREEMPT(2), 0, K_NO_WAIT);
+			K_PRIO_COOP(2), 0, K_NO_WAIT);
 	k_thread_name_set(&data->tx_thread, "eth_litex_tx");
 
 	/* Schedule link-up check */

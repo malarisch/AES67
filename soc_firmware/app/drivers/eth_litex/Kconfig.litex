@@ -22,4 +22,12 @@ config ETH_LITEX_RX_STACK_SIZE
 	help
 	  Stack size for RX and TX worker threads.
 
+config ETH_LITEX_TX_QUEUE_DEPTH
+	int "TX packet queue depth"
+	default 16
+	help
+	  Number of packets that can be queued for transmission.
+	  Increase this if the device handles bursty TCP traffic
+	  (e.g. a web server serving multiple browser connections).
+
 endif # ETH_LITEX

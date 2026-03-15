@@ -88,7 +88,7 @@ architecture rtl of litex_eth_buffer_bridge is
   signal tx_req_sync_d     : std_ulogic := '0';
 
   signal tx_done_reg       : std_ulogic := '0';
-  signal tx_bytes_remaining : unsigned(10 downto 0) := (others => '0');
+  
 
   type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_TRANSMIT, TX_END);
   signal sm_tx : t_tx_sm := TX_IDLE;
@@ -133,7 +133,7 @@ begin
       tx_req_sync       <= '0';
       tx_req_sync_d     <= '0';
       tx_done_reg       <= '0';
-      tx_bytes_remaining <= (others => '0');
+      
       buf_tx_addr_o     <= (others => '0');
       mac_tx_enable_o   <= '0';
       tx_allow_req_o    <= '0';
@@ -160,7 +160,7 @@ begin
         when TX_WAIT_ALLOW =>
           if tx_allow_i = '1' then
             
-            tx_bytes_remaining <= buf_tx_len_i;
+            
             sm_tx              <= TX_PRIME;
 
             --buf_tx_addr_o <= buf_tx_addr_o + 1;
@@ -181,8 +181,8 @@ begin
         when TX_TRANSMIT =>
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
-            tx_bytes_remaining <= tx_bytes_remaining - 1;
-            if tx_bytes_remaining = 1 then
+            
+            if buf_tx_addr_o = buf_tx_len_i - 1 then
               sm_tx <= TX_END;
             else
               
