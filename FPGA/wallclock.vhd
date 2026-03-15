@@ -117,8 +117,7 @@ architecture Behavioral of wallclock is
     -- Base media clock: seconds contribution (updated on second pulse)
     signal media_base       : unsigned(31 downto 0) := (others => '0');
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
-    signal media_init_done  : std_logic := '0';
-    
+
     -- Pipeline registers for media clock computation
     -- Breaks nsec_reg → media_clock_reg path into 3 stages:
     --   Stage 0: nsec_reg → media_nsec_reg (register input to multiply)
@@ -126,6 +125,15 @@ architecture Behavioral of wallclock is
     --   Stage 2: media_base + media_mult_reg[47:32] → media_clock_reg (add)
     signal media_nsec_reg   : unsigned(31 downto 0) := (others => '0');  -- Stage 0: registered nsec
     signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');  -- Stage 1: multiply result
+
+    -- Delayed second pulse aligned to media clock pipeline output (3-stage delay).
+    -- media_base must increment at the same time as the pipeline outputs the
+    -- new (small) nsec value after a seconds rollover. Without this delay,
+    -- media_base advances 3 cycles before the pipeline flushes the old nsec,
+    -- causing a 1-tick glitch of +48000 in the RTP timestamp.
+    signal second_pulse_d1  : std_logic := '0';
+    signal second_pulse_d2  : std_logic := '0';
+    signal second_pulse_d3  : std_logic := '0';
     
     -- ============================================================
     -- Pipeline registers to break freq_correction → sec_reg critical path.
@@ -237,28 +245,42 @@ begin
         if reset_n = '0' then
             media_base      <= (others => '0');
             media_clock_reg <= (others => '0');
-            media_init_done <= '0';
             media_nsec_reg  <= (others => '0');
             media_mult_reg  <= (others => '0');
+            second_pulse_d1 <= '0';
+            second_pulse_d2 <= '0';
+            second_pulse_d3 <= '0';
         elsif rising_edge(clk) then
+            -- ===== Delay second_pulse to align with pipeline output =====
+            -- The nsec→media_clock pipeline has 3 stages of latency.
+            -- media_base must advance at the same cycle that Stage 2
+            -- outputs the first result computed from the new (post-rollover)
+            -- nsec value, otherwise we get media_base(new) + sample_in_sec(old).
+            second_pulse_d1 <= second_pulse_int;
+            second_pulse_d2 <= second_pulse_d1;
+            second_pulse_d3 <= second_pulse_d2;
+
             if wallclock_set_i = '1' then
-                -- Hard set: compute base from new seconds value
+                -- Hard set: compute base from full 32-bit seconds (mod 2^32).
+                -- Uses lower 32 bits — upper bits don't matter since
+                -- RTP timestamp is 32-bit and wraps naturally.
                 media_base <= resize(
-                    wallclock_seconds_i(15 downto 0) * to_unsigned(audio_fs, 16), 32);
-                media_init_done <= '1';
-            elsif second_pulse_int = '1' then
-                -- Every second: advance base by audio_fs samples
+                    wallclock_seconds_i(31 downto 0)
+                    * to_unsigned(audio_fs, 32), 32);
+            elsif second_pulse_d3 = '1' then
+                -- Every second: advance base by audio_fs samples,
+                -- synchronized to pipeline output stage.
                 media_base <= media_base + to_unsigned(audio_fs, 32);
             end if;
 
             -- ===== STAGE 0: Register nsec input (breaks nsec_reg → mult path) =====
             media_nsec_reg <= unsigned(nsec_reg);
-            
+
             -- ===== STAGE 1: Multiply (32×18 = 50 bits) =====
             -- sample_in_sec = floor(nanoseconds * MEDIA_CLK_RECIP / 2^32)
             -- Uses media_nsec_reg from PREVIOUS cycle
             media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
-            
+
             -- ===== STAGE 2: Add (uses PREVIOUS cycle's multiply result) =====
             sample_in_sec := media_mult_reg(47 downto 32);
             media_clock_reg <= media_base + resize(sample_in_sec, 32);
