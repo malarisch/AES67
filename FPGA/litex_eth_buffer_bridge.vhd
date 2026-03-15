@@ -39,6 +39,8 @@ entity litex_eth_buffer_bridge is
 
     buf_tx_addr_o   : out unsigned(10 downto 0);
     buf_tx_len_i    : in  unsigned(10 downto 0);
+    buf_tx_dat_i    : in STD_ULOGIC_VECTOR(7 downto 0);
+    
 
     -- ================================================================
     -- Control signals from/to SoC pads (SoC sys_clk domain)
@@ -57,6 +59,7 @@ entity litex_eth_buffer_bridge is
 
     mac_tx_byte_sent_i : in  std_ulogic;
     mac_tx_busy_i      : in  std_ulogic;
+    mac_tx_dat_o    : out STD_ULOGIC_VECTOR(7 downto 0);
 
     -- TX arbitration
     tx_allow_req_o     : out std_ulogic;
@@ -139,12 +142,13 @@ begin
       tx_allow_req_o    <= '0';
       sm_tx             <= TX_IDLE;
       tx_preamble_bytes := (others => '0');
+      mac_tx_dat_o <= (others => '0');
     elsif rising_edge(mac_tx_clock_i) then
       -- CDC: sync eth_tx_request into mac_tx domain
       tx_req_meta   <= eth_tx_request_i;
       tx_req_sync   <= tx_req_meta;
       tx_req_sync_d <= tx_req_sync;
-
+      mac_tx_dat_o <= buf_tx_dat_i;
       case sm_tx is
         when TX_IDLE =>
           mac_tx_enable_o <= '0';
@@ -169,10 +173,12 @@ begin
               mac_tx_enable_o <= '1';
               if (mac_tx_busy_i = '1') then
                 tx_preamble_bytes := tx_preamble_bytes + 1;
-                if (tx_preamble_bytes = 7) then
+                if (tx_preamble_bytes >= 6) then
                   buf_tx_addr_o <= buf_tx_addr_o + 1;
+                  if (tx_preamble_bytes = 7) then 
                   sm_tx              <= TX_TRANSMIT;
                   tx_preamble_bytes := (others => '0');
+                  end if;
                 end if;
               end if;
               
@@ -182,7 +188,7 @@ begin
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
             
-            if buf_tx_addr_o = buf_tx_len_i - 1 then
+            if buf_tx_addr_o = buf_tx_len_i then
               sm_tx <= TX_END;
             else
               

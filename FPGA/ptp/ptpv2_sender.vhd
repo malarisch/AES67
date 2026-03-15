@@ -51,7 +51,7 @@ architecture Behavioral of ptpv2_sender is
 	constant MAX_UDP_PAYLOAD_LENGTH	: integer := 64;
 	constant MAX_PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + MAX_UDP_PAYLOAD_LENGTH;
 	-- RAM depth must be power-of-2 for M9K block RAM inference (106 bytes too small otherwise)
-	constant RAM_DEPTH					: integer := 128;
+	constant RAM_DEPTH					: integer := 256;
 
 	-- Message type enumeration
 	type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up);
