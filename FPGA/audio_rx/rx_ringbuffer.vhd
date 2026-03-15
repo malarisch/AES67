@@ -5,7 +5,7 @@ use IEEE.NUMERIC_STD.ALL;
 entity rx_ringbuffer is
     generic
     (
-        audio_buffer_sample_depth : integer := 128; -- must be power of 2
+        audio_buffer_sample_depth : integer := 64; -- must be power of 2
         global_channel_count : integer := 16; -- must be power of 2
         bytes_per_sample : integer := 3;
         max_streams : integer := 4
@@ -52,8 +52,8 @@ architecture Behavioral of rx_ringbuffer is
     constant SLOT_BYTES : integer := 4;
     -- Buffer size = depth * channels * slot_bytes * 2 (double buffer)
     -- = 128 * 16 * 4 * 2 = 16384 = 2^14
-    constant ADDR_BITS : integer := 7;
-    constant AUDIO_BUFFER_LENGTH : integer := 2**ADDR_BITS;
+    constant ADDR_BITS : integer := 13;
+    constant AUDIO_BUFFER_LENGTH : integer := audio_buffer_sample_depth * global_channel_count * SLOT_BYTES * 2;
     -- Stride constants (all powers of 2 since slot=4, channels=16)
     constant CHANNEL_STRIDE : integer := SLOT_BYTES; -- 4
     constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES; -- 64

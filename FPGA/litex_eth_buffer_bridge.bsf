@@ -130,6 +130,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 256)(pt 16 256)(line_width 1))
 	)
 	(port
+		(pt 0 272)
+		(input)
+		(text "mcu_clk_i" (rect 0 0 41 12)(font "Arial" ))
+		(text "mcu_clk_i" (rect 21 267 62 279)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 1))
+	)
+	(port
 		(pt 272 32)
 		(output)
 		(text "buf_rx_data_o[7..0]" (rect 0 0 80 12)(font "Arial" ))

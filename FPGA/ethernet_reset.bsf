@@ -34,9 +34,16 @@ on the Quartus Prime software download page.
 	(port
 		(pt 0 48)
 		(input)
-		(text "power_good" (rect 0 0 48 12)(font "Arial" ))
-		(text "power_good" (rect 21 43 69 55)(font "Arial" ))
+		(text "enet_clk" (rect 0 0 33 12)(font "Arial" ))
+		(text "enet_clk" (rect 21 43 54 55)(font "Arial" ))
 		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "power_good" (rect 0 0 48 12)(font "Arial" ))
+		(text "power_good" (rect 21 59 69 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 1))
 	)
 	(port
 		(pt 216 32)

@@ -135,6 +135,50 @@ uint32_t eth_litex_read_ptp_offset(const struct device *dev);
  */
 uint32_t eth_litex_read_status(const struct device *dev);
 
+/**
+ * @brief Write TX stream configuration to the stream config RAM.
+ *
+ * @param dev              Device pointer.
+ * @param stream_id        Stream index (0..7).
+ * @param dst_ip           Destination IP (network byte order).
+ * @param channel_count    Number of channels (1..8).
+ * @param samples_per_pkt  Samples per packet per channel.
+ * @param ch_ids           Array of channel IDs (up to 8).
+ * @param num_ch_ids       Number of entries in ch_ids.
+ * @param ssrc             32-bit SSRC for the RTP header (host byte order).
+ * @return 0 on success, negative errno on error.
+ */
+int eth_litex_write_tx_stream_config(const struct device *dev,
+				     uint8_t stream_id,
+				     const struct in_addr *dst_ip,
+				     uint8_t channel_count,
+				     uint8_t samples_per_pkt,
+				     const uint8_t *ch_ids,
+				     uint8_t num_ch_ids,
+				     uint32_t ssrc);
+
+/**
+ * @brief Write RX stream configuration to the stream config RAM.
+ *
+ * @param dev                  Device pointer.
+ * @param stream_id            Stream index (0..N).
+ * @param dst_ip               Destination IP to match (multicast group).
+ * @param dst_port             Destination UDP port to match (host byte order).
+ * @param ch_map               Output channel map.
+ * @param channel_count        Number of channels (1..8).
+ * @param output_delay         Output delay in samples.
+ * @param samples_per_channel  Samples per channel per packet.
+ * @return 0 on success, negative errno on error.
+ */
+int eth_litex_write_rx_stream_config(const struct device *dev,
+				     uint8_t stream_id,
+				     const struct in_addr *dst_ip,
+				     uint16_t dst_port,
+				     const uint8_t *ch_map,
+				     uint8_t channel_count,
+				     uint8_t output_delay,
+				     uint8_t samples_per_channel);
+
 #ifdef __cplusplus
 }
 #endif

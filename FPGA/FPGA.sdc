@@ -177,10 +177,10 @@ set_false_path -from [get_registers {*stream_cfg*storage*}]
 # --- Ethernet packet buffer CDC (mac_rx/mac_tx <-> litex_sys_clk) ---
 # CDC handled by dual-port SRAM and synchronizers in LiteX EthPacketBuffer
 
-# litex_eth_buffer_bridge (inst8): enet_rx_clk_125m -> litex_sys_clk
-set_false_path -from [get_registers {*inst8|rx_overflow_reg*}]
-set_false_path -from [get_registers {*inst8|rx_valid_reg*}]
-set_false_path -from [get_registers {*inst8|buf_rx_len_o[*]}]
+# litex_eth_buffer_bridge (inst2): enet_rx_clk_125m -> litex_sys_clk
+set_false_path -from [get_registers {*inst2|rx_overflow_reg*}]
+set_false_path -from [get_registers {*inst2|rx_valid_reg*}]
+set_false_path -from [get_registers {*inst2|buf_rx_len_o[*]}]
 
 # LiteX SoC internal RX buffer CDC synchronizers
 set_false_path -to [get_registers {*eth_buf_rx_valid_meta*}]

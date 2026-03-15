@@ -73,7 +73,9 @@ entity litex_eth_buffer_bridge is
     mac_rx_frame_i    : in  std_ulogic;
     mac_rx_data_i     : in  t_ethernet_data;
     mac_rx_byte_rcv_i : in  std_ulogic;
-    mac_rx_error_i    : in  std_ulogic
+    mac_rx_error_i    : in  std_ulogic;
+
+    mcu_clk_i         : in STD_ULOGIC
   );
 end entity;
 
@@ -91,6 +93,8 @@ architecture rtl of litex_eth_buffer_bridge is
   signal tx_req_sync_d     : std_ulogic := '0';
 
   signal tx_done_reg       : std_ulogic := '0';
+  signal tx_done_reg_1cdc  : std_ulogic := '0';
+  signal tx_done_reg_2cdc  : std_ulogic := '0';
   
 
   type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_TRANSMIT, TX_END);
@@ -105,7 +109,11 @@ architecture rtl of litex_eth_buffer_bridge is
   signal rx_frame_d    : std_ulogic := '0';
   signal rx_error_flag : std_ulogic := '0';
   signal rx_valid_reg  : std_ulogic := '0';
+  signal rx_valid_reg_1cdc  : std_ulogic := '0';
+  signal rx_valid_reg_2cdc  : std_ulogic := '0';
   signal rx_overflow_reg : std_ulogic := '0';
+  signal rx_overflow_reg_1cdc : std_ulogic := '0';
+  signal rx_overflow_reg_2cdc : std_ulogic := '0';
 
   -- CDC for buf_rx_ack (SoC sys_clk → mac_rx_clock)
   signal rx_ack_meta : std_ulogic := '0';
@@ -115,12 +123,28 @@ architecture rtl of litex_eth_buffer_bridge is
 begin
 
   -- ================================================================
-  -- Output assignments
+  -- Output assignments & cdc
   -- ================================================================
-  eth_tx_done_o     <= tx_done_reg;
-  eth_rx_overflow_o <= rx_overflow_reg;
-  buf_rx_valid_o    <= rx_valid_reg;
+  
+  
+  
+  mcu_cdc : process (mcu_clk_i)
+  begin
+    if (rising_edge(mcu_clk_i)) then
+      rx_valid_reg_1cdc <= rx_valid_reg;
+      rx_valid_reg_2cdc <= rx_valid_reg_1cdc;
+      buf_rx_valid_o    <= rx_valid_reg_2cdc;
 
+      rx_overflow_reg_1cdc <= rx_overflow_reg;
+      rx_overflow_reg_2cdc <= rx_overflow_reg_1cdc;
+      eth_rx_overflow_o <= rx_overflow_reg_2cdc;
+
+
+      tx_done_reg_1cdc <= tx_done_reg;
+      tx_done_reg_2cdc <= tx_done_reg_1cdc;
+      eth_tx_done_o     <= tx_done_reg_2cdc;
+    end if;
+  end process;
   -- ================================================================
   -- TX process (mac_tx_clock domain)
   --
@@ -175,7 +199,7 @@ begin
                 tx_preamble_bytes := tx_preamble_bytes + 1;
                 if (tx_preamble_bytes >= 6) then
                   buf_tx_addr_o <= buf_tx_addr_o + 1;
-                  
+
                   if (tx_preamble_bytes = 7) then
                   sm_tx              <= TX_TRANSMIT;
                   tx_preamble_bytes := (others => '0');
