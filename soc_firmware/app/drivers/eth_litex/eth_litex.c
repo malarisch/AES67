@@ -23,7 +23,7 @@
 
 #include "eth_litex.h"
 
-LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_INF);
 
 /* ---- Driver data structures ---- */
 
@@ -42,6 +42,7 @@ struct eth_litex_data {
 
 	struct k_spinlock ctrl_lock;   /* Protects AES67_CSR_CTRL read-modify-write */
 	struct k_sem rx_sem;           /* Signaled by ISR on RX packet */
+	bool link_up;                  /* Cached link state for edge detection */
 
 	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE];
 	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
@@ -90,12 +91,16 @@ int eth_litex_write_mac(const struct device *dev, const uint8_t mac[6])
 {
 	ARG_UNUSED(dev);
 
-	uint32_t lo = (uint32_t)mac[0] |
-		      ((uint32_t)mac[1] << 8) |
-		      ((uint32_t)mac[2] << 16) |
-		      ((uint32_t)mac[3] << 24);
-	uint32_t hi = (uint32_t)mac[4] |
-		      ((uint32_t)mac[5] << 8);
+	/* FPGA expects mac_addr(47 downto 0) in big-endian bit order:
+	 *   mac[0] → mac_addr(47..40), mac[1] → mac_addr(39..32), ...
+	 * mac_addr_lo holds bits 31..0, mac_addr_hi holds bits 47..32.
+	 * So mac[0..1] go into hi, mac[2..5] go into lo. */
+	uint32_t hi = ((uint32_t)mac[0] << 8) |
+		      (uint32_t)mac[1];
+	uint32_t lo = ((uint32_t)mac[2] << 24) |
+		      ((uint32_t)mac[3] << 16) |
+		      ((uint32_t)mac[4] << 8) |
+		      (uint32_t)mac[5];
 
 	litex_csr_write(CSR_AES67_CSR_MAC_ADDR_LO_ADDR, lo);
 	litex_csr_write(CSR_AES67_CSR_MAC_ADDR_HI_ADDR, hi);
@@ -106,7 +111,19 @@ int eth_litex_write_mac(const struct device *dev, const uint8_t mac[6])
 int eth_litex_write_ip(const struct device *dev, const struct in_addr *ip)
 {
 	ARG_UNUSED(dev);
-	litex_csr_write(CSR_AES67_CSR_IP_ADDR_ADDR, ip->s_addr);
+
+	/* ip->s_addr is in network byte order (big-endian).  On a
+	 * little-endian CPU a direct 32-bit store would byte-swap it,
+	 * putting the octets in the wrong CSR bit positions.
+	 * The FPGA expects ip_addr(31 downto 24) = first octet, so we
+	 * need the value in big-endian order in the CSR register. */
+	const uint8_t *b = (const uint8_t *)&ip->s_addr;
+	uint32_t val = ((uint32_t)b[0] << 24) |
+		       ((uint32_t)b[1] << 16) |
+		       ((uint32_t)b[2] << 8) |
+		       (uint32_t)b[3];
+
+	litex_csr_write(CSR_AES67_CSR_IP_ADDR_ADDR, val);
 	return 0;
 }
 
@@ -159,6 +176,123 @@ uint32_t eth_litex_read_status(const struct device *dev)
 {
 	ARG_UNUSED(dev);
 	return litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
+}
+
+/* ---- Stream config RAM access ----
+ *
+ * The StreamConfigRAM modules are Wishbone-mapped with 1 byte per 32-bit word.
+ * TX_STREAM_CFG_BASE = 0x90004000, RX_STREAM_CFG_BASE = 0x90005000.
+ * Each stream occupies 32 bytes (addresses stream_id*32 .. stream_id*32+31).
+ * The byte layout matches the FMC register protocol (config_ram_address_map.md).
+ */
+
+static inline void stream_cfg_write_byte(uintptr_t base, uint8_t addr, uint8_t val)
+{
+	volatile uint32_t *p = (volatile uint32_t *)(base + ((uint32_t)addr << 2));
+	*p = val;
+}
+
+int eth_litex_write_tx_stream_config(const struct device *dev,
+				     uint8_t stream_id,
+				     const struct in_addr *dst_ip,
+				     uint8_t channel_count,
+				     uint8_t samples_per_pkt,
+				     const uint8_t *ch_ids,
+				     uint8_t num_ch_ids,
+				     uint32_t ssrc)
+{
+	ARG_UNUSED(dev);
+
+	if (stream_id > 7) {
+		return -EINVAL;
+	}
+
+	uint8_t buf[20];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
+
+	memset(buf, 0, sizeof(buf));
+
+	buf[0]  = stream_id & 0x07;
+	buf[1]  = ip[0];
+	buf[2]  = ip[1];
+	buf[3]  = ip[2];
+	buf[4]  = ip[3];
+	buf[5]  = channel_count;
+	buf[6]  = samples_per_pkt;
+
+	for (uint8_t i = 0; i < num_ch_ids && i < 8; i++) {
+		buf[7 + i] = ch_ids[i];
+	}
+
+	/* Byte 15 reserved, bytes 16-19: SSRC (big-endian) */
+	buf[16] = (ssrc >> 24) & 0xFF;
+	buf[17] = (ssrc >> 16) & 0xFF;
+	buf[18] = (ssrc >> 8) & 0xFF;
+	buf[19] = ssrc & 0xFF;
+
+	/* Write all 20 bytes to the TX stream config RAM.
+	 * The FPGA-side StreamConfigRAM computes the actual RAM address
+	 * from stream_id (byte 0), so we write to Wishbone offset 0..19. */
+	uint8_t base_addr = stream_id * 32;
+	for (uint8_t i = 0; i < 20; i++) {
+		stream_cfg_write_byte(TX_STREAM_CFG_BASE, base_addr + i, buf[i]);
+	}
+
+	LOG_DBG("TX stream %u configured: ip=%u.%u.%u.%u ch=%u spp=%u ssrc=0x%08x",
+		stream_id, ip[0], ip[1], ip[2], ip[3],
+		channel_count, samples_per_pkt, ssrc);
+
+	return 0;
+}
+
+int eth_litex_write_rx_stream_config(const struct device *dev,
+				     uint8_t stream_id,
+				     const struct in_addr *dst_ip,
+				     uint16_t dst_port,
+				     const uint8_t *ch_map,
+				     uint8_t channel_count,
+				     uint8_t output_delay,
+				     uint8_t samples_per_channel)
+{
+	ARG_UNUSED(dev);
+
+	uint8_t buf[18];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
+
+	memset(buf, 0, sizeof(buf));
+
+	/* Byte 0: base address = stream_id * 32 */
+	buf[0] = (uint8_t)(stream_id * 32);
+	/* Bytes 1..4: destination IP address (network byte order) */
+	buf[1] = ip[0];
+	buf[2] = ip[1];
+	buf[3] = ip[2];
+	buf[4] = ip[3];
+	/* Bytes 5..6: destination UDP port (big-endian) */
+	buf[5] = (dst_port >> 8) & 0xFF;
+	buf[6] =  dst_port       & 0xFF;
+	/* Bytes 7..14: output channel map */
+	for (uint8_t i = 0; i < 8 && i < channel_count; i++) {
+		buf[7 + i] = ch_map[i];
+	}
+	/* Byte 15: channel count */
+	buf[15] = channel_count;
+	/* Byte 16: output delay in samples */
+	buf[16] = output_delay;
+	/* Byte 17: samples per channel per packet */
+	buf[17] = samples_per_channel;
+
+	/* Write all 18 bytes to the RX stream config RAM */
+	uint8_t base_addr = stream_id * 32;
+	for (uint8_t i = 0; i < 18; i++) {
+		stream_cfg_write_byte(RX_STREAM_CFG_BASE, base_addr + i, buf[i]);
+	}
+
+	LOG_DBG("RX stream %u configured: ip=%u.%u.%u.%u port=%u ch=%u delay=%u spc=%u",
+		stream_id, ip[0], ip[1], ip[2], ip[3],
+		dst_port, channel_count, output_delay, samples_per_channel);
+
+	return 0;
 }
 
 /* ---- Packet buffer access ----
@@ -240,14 +374,9 @@ static void eth_buf_write_packet(const uint8_t *src, uint16_t len)
 
 /* ---- ISR ---- */
 
-static volatile uint32_t isr_count;
-static volatile uint32_t isr_spurious_count;
-
 static void eth_litex_isr(const struct device *dev)
 {
 	struct eth_litex_data *data = dev->data;
-
-	isr_count++;
 
 	/* Unconditionally disable EventManager + clear pending.
 	 * Skip the ev_pending READ — if the Wishbone bus hangs on
@@ -260,9 +389,6 @@ static void eth_litex_isr(const struct device *dev)
 
 /* ---- TX path ---- */
 
-static volatile uint32_t tx_count;
-static volatile uint32_t tx_timeout_count;
-
 static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
@@ -272,13 +398,10 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	LOG_DBG("TX thread started");
-
 	while (1) {
 		k_msgq_get(&litex_tx_queue, &pkt, K_FOREVER);
 
 		size_t len = net_pkt_get_len(pkt);
-		LOG_DBG("TX pkt len=%zu", len);
 
 		if (len > ETH_LITEX_MAX_PKT_SIZE) {
 			LOG_ERR("TX too large: %zu", len);
@@ -304,37 +427,24 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		 * We yield once before spinning so other threads get a chance. */
 		static bool first_tx = true;
 		if (!first_tx) {
-			uint32_t status_before = litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
-			LOG_DBG("TX wait tx_done, status=0x%08x", status_before);
 			k_yield();
 			int wait = 0;
 			while (!(litex_csr_read(CSR_AES67_CSR_STATUS_ADDR) & AES67_STATUS_ETH_TX_DONE)) {
 				k_busy_wait(10);
 				if (++wait > 20000) { /* ~200ms timeout */
-					tx_timeout_count++;
-					LOG_WRN("TX done timeout (status=0x%08x, cnt=%u)",
-						litex_csr_read(CSR_AES67_CSR_STATUS_ADDR),
-						tx_timeout_count);
+					LOG_WRN("TX done timeout (status=0x%08x)",
+						litex_csr_read(CSR_AES67_CSR_STATUS_ADDR));
 					break;
 				}
-			}
-			if (wait > 0 && wait <= 20000) {
-				LOG_DBG("TX done after %d iters (~%d us)", wait, wait * 10);
 			}
 		}
 		first_tx = false;
 
 		/* Write packet data to TX buffer */
-		uint32_t t0 = k_cycle_get_32();
 		eth_buf_write_packet(data->tx_buf, len);
-		uint32_t t1 = k_cycle_get_32();
-		uint32_t us = k_cyc_to_us_floor32(t1 - t0);
 
 		/* Set TX length */
 		litex_csr_write(CSR_ETH_BUF_TX_LEN_ADDR, len);
-
-		uint32_t ctrl_before = litex_csr_read(CSR_AES67_CSR_CTRL_ADDR);
-		LOG_DBG("TX fire: len=%zu write=%uus ctrl=0x%08x", len, us, ctrl_before);
 
 		/* Assert eth_tx_request and hold long enough for CDC capture.
 		 * The FPGA synchronises this signal through a 2-FF chain clocked
@@ -344,18 +454,11 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		k_busy_wait(2);
 		eth_litex_ctrl_clear_bits(dev, AES67_CTRL_ETH_TX_REQUEST);
 
-		tx_count++;
-		LOG_DBG("TX #%u sent (%zu bytes)", tx_count, len);
-
 		net_pkt_unref(pkt);
 	}
 }
 
 /* ---- RX path ---- */
-
-static volatile uint32_t rx_count;
-static volatile uint32_t rx_poll_wakeup_count;
-static volatile uint32_t rx_irq_wakeup_count;
 
 static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 {
@@ -365,17 +468,9 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	LOG_DBG("RX thread started");
-
 	while (1) {
-		int sem_ret = k_sem_take(&data->rx_sem,
-					 K_MSEC(CONFIG_ETH_LITEX_POLL_INTERVAL_MS));
-
-		if (sem_ret == 0) {
-			rx_irq_wakeup_count++;
-		} else {
-			rx_poll_wakeup_count++;
-		}
+		k_sem_take(&data->rx_sem,
+			   K_MSEC(CONFIG_ETH_LITEX_POLL_INTERVAL_MS));
 
 		/* Check if a packet is ready */
 		uint32_t ready = litex_csr_read(CSR_ETH_BUF_RX_READY_ADDR);
@@ -383,19 +478,6 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			/* Re-enable EventManager in case ISR disabled it but
 			 * no packet was actually ready (race with ack). */
 			litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
-			/* Periodic debug dump every ~5s (poll interval based) */
-			if ((rx_poll_wakeup_count % 50) == 0) {
-				uint32_t status = litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
-				uint32_t ev_pend = litex_csr_read(CSR_ETH_BUF_EV_PENDING_ADDR);
-				uint32_t ev_en = litex_csr_read(CSR_ETH_BUF_EV_ENABLE_ADDR);
-				LOG_DBG("RX idle: status=0x%08x ev_pend=0x%x ev_en=0x%x "
-					"isr=%u(spur=%u) rx=%u tx=%u(tmo=%u) "
-					"irq_wake=%u poll_wake=%u",
-					status, ev_pend, ev_en,
-					isr_count, isr_spurious_count,
-					rx_count, tx_count, tx_timeout_count,
-					rx_irq_wakeup_count, rx_poll_wakeup_count);
-			}
 			continue;
 		}
 
@@ -408,12 +490,8 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			pkt_len -= 4;
 		}
 
-		LOG_DBG("RX ready=0x%x len=%u (wakeup=%s)",
-			ready, pkt_len,
-			(sem_ret == 0) ? "irq" : "poll");
-
 		if (pkt_len < 14 || pkt_len > ETH_LITEX_MAX_PKT_SIZE) {
-			LOG_WRN("RX invalid len %u (ready=0x%x)", pkt_len, ready);
+			LOG_WRN("RX invalid len %u", pkt_len);
 			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
 			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
 			litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
@@ -421,24 +499,7 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		}
 
 		/* Read packet data from RX buffer */
-		uint32_t rt0 = k_cycle_get_32();
 		eth_buf_read_packet(data->rx_buf, pkt_len);
-		uint32_t rt1 = k_cycle_get_32();
-
-		LOG_DBG("RX #%u: %u bytes (read=%uus) [%02x:%02x:%02x:%02x:%02x:%02x -> "
-			"%02x:%02x:%02x:%02x:%02x:%02x type=%02x%02x]",
-			rx_count + 1, pkt_len,
-			k_cyc_to_us_floor32(rt1 - rt0),
-			data->rx_buf[6], data->rx_buf[7], data->rx_buf[8],
-			data->rx_buf[9], data->rx_buf[10], data->rx_buf[11],
-			data->rx_buf[0], data->rx_buf[1], data->rx_buf[2],
-			data->rx_buf[3], data->rx_buf[4], data->rx_buf[5],
-			data->rx_buf[12], data->rx_buf[13]);
-
-		/* Hex dump first 34 bytes (ETH hdr + IP hdr) for debugging */
-		if (pkt_len >= 34) {
-			LOG_HEXDUMP_DBG(data->rx_buf, 34, "RX raw");
-		}
 
 		/* ACK: release the RX buffer for the next packet */
 		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
@@ -448,25 +509,23 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		 * re-entry while the pending clear propagates). */
 		litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
 
-		rx_count++;
-
 		/* Allocate net_pkt and deliver to stack */
 		struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(
 			data->iface, pkt_len, AF_UNSPEC, 0, K_NO_WAIT);
 		if (!pkt) {
-			LOG_ERR("RX alloc failed (pkt #%u)", rx_count);
+			LOG_ERR("RX alloc failed");
 			continue;
 		}
 
 		if (net_pkt_write(pkt, data->rx_buf, pkt_len)) {
-			LOG_ERR("RX write failed (pkt #%u)", rx_count);
+			LOG_ERR("RX write failed");
 			net_pkt_unref(pkt);
 			continue;
 		}
 
 		int ret = net_recv_data(data->iface, pkt);
 		if (ret < 0) {
-			LOG_ERR("RX deliver err %d (pkt #%u)", ret, rx_count);
+			LOG_ERR("RX deliver err %d", ret);
 			net_pkt_unref(pkt);
 		}
 	}
@@ -493,8 +552,6 @@ static void eth_litex_iface_init(struct net_if *iface)
 	const struct device *dev = net_if_get_device(iface);
 	struct eth_litex_data *data = dev->data;
 
-	LOG_DBG("iface_init called, dev=%p iface=%p", dev, iface);
-
 	data->iface = iface;
 	ethernet_init(iface);
 
@@ -516,7 +573,6 @@ static void eth_litex_iface_init(struct net_if *iface)
 		data->mac_addr[0], data->mac_addr[1], data->mac_addr[2],
 		data->mac_addr[3], data->mac_addr[4], data->mac_addr[5]);
 
-	LOG_DBG("iface_init complete, scheduling link check");
 }
 
 static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev)
@@ -530,18 +586,26 @@ static void eth_litex_link_work(struct k_work *work)
 	struct k_work_delayable *dwork = CONTAINER_OF(work, struct k_work_delayable, work);
 	struct eth_litex_data *data = CONTAINER_OF(dwork, struct eth_litex_data, link_work);
 
-	if (data->iface) {
-		uint32_t status = litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
-		LOG_DBG("Link check: status=0x%08x link_up=%u",
-			status, !!(status & AES67_STATUS_ETH_LINK_UP));
-		if (status & AES67_STATUS_ETH_LINK_UP) {
-			net_if_carrier_on(data->iface);
-			net_if_up(data->iface);
-			LOG_INF("Ethernet link up (status=0x%08x)", status);
-		} else {
-			k_work_schedule(dwork, K_MSEC(500));
-		}
+	if (!data->iface) {
+		return;
 	}
+
+	uint32_t status = litex_csr_read(CSR_AES67_CSR_STATUS_ADDR);
+	bool up = (status & AES67_STATUS_ETH_LINK_UP) != 0;
+
+	LOG_DBG("link poll: status=0x%08x up=%d cached=%d", status, up, data->link_up);
+
+	if (up && !data->link_up) {
+		data->link_up = true;
+		net_if_carrier_on(data->iface);
+		LOG_INF("Ethernet link up");
+	} else if (!up && data->link_up) {
+		data->link_up = false;
+		net_if_carrier_off(data->iface);
+		LOG_INF("Ethernet link down");
+	}
+
+	k_work_schedule(dwork, K_MSEC(500));
 }
 
 static const struct ethernet_api eth_litex_api = {
@@ -561,82 +625,42 @@ static int eth_litex_init(const struct device *dev)
 
 	LOG_INF("Initializing LiteX Ethernet driver (IRQ %u)", cfg->irq_num);
 
-	/* Dump all relevant CSR addresses for verification */
-	LOG_DBG("CSR addrs: ctrl=0x%lx status=0x%lx",
-		(unsigned long)CSR_AES67_CSR_CTRL_ADDR,
-		(unsigned long)CSR_AES67_CSR_STATUS_ADDR);
-	LOG_DBG("CSR addrs: ev_pending=0x%lx ev_enable=0x%lx ev_status=0x%lx",
-		(unsigned long)CSR_ETH_BUF_EV_PENDING_ADDR,
-		(unsigned long)CSR_ETH_BUF_EV_ENABLE_ADDR,
-		(unsigned long)CSR_ETH_BUF_EV_STATUS_ADDR);
-	LOG_DBG("CSR addrs: rx_ready=0x%lx rx_len=0x%lx rx_ack=0x%lx tx_len=0x%lx",
-		(unsigned long)CSR_ETH_BUF_RX_READY_ADDR,
-		(unsigned long)CSR_ETH_BUF_RX_LEN_ADDR,
-		(unsigned long)CSR_ETH_BUF_RX_ACK_ADDR,
-		(unsigned long)CSR_ETH_BUF_TX_LEN_ADDR);
-	LOG_DBG("MEM addrs: rx_mem=0x%lx tx_mem=0x%lx",
-		(unsigned long)ETH_BUF_RX_MEM,
-		(unsigned long)ETH_BUF_TX_MEM);
-
-	/* Read initial state of all CSRs */
-	LOG_DBG("Initial CSR state:");
-	LOG_DBG("  ctrl     = 0x%08x", litex_csr_read(CSR_AES67_CSR_CTRL_ADDR));
-	LOG_DBG("  status   = 0x%08x", litex_csr_read(CSR_AES67_CSR_STATUS_ADDR));
-	LOG_DBG("  rx_ready = 0x%08x", litex_csr_read(CSR_ETH_BUF_RX_READY_ADDR));
-	LOG_DBG("  rx_len   = 0x%08x", litex_csr_read(CSR_ETH_BUF_RX_LEN_ADDR));
-	LOG_DBG("  ev_pend  = 0x%08x", litex_csr_read(CSR_ETH_BUF_EV_PENDING_ADDR));
-	LOG_DBG("  ev_en    = 0x%08x", litex_csr_read(CSR_ETH_BUF_EV_ENABLE_ADDR));
-	LOG_DBG("  ev_stat  = 0x%08x", litex_csr_read(CSR_ETH_BUF_EV_STATUS_ADDR));
-
 	k_sem_init(&data->rx_sem, 0, 1);
 
 	/* Clear any stale pending events before enabling IRQ */
-	LOG_DBG("Clearing pending events...");
 	litex_csr_write(CSR_ETH_BUF_EV_PENDING_ADDR, ETH_BUF_EV_RX_READY);
 
 	/* Connect ISR BEFORE enabling EventManager or CPU IRQ */
-	LOG_DBG("Connecting IRQ %u...", (unsigned)ETH_BUF_INTERRUPT);
 	IRQ_CONNECT(ETH_BUF_INTERRUPT, 0, eth_litex_isr,
 		    DEVICE_GET(eth_litex0), 0);
 
 	/* Enable EventManager — from here, pending can set on new packets,
 	 * but CPU IRQ mask is not yet set so no trap yet. */
 	litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
-	LOG_DBG("EventManager enabled, ev_en=0x%08x",
-		litex_csr_read(CSR_ETH_BUF_EV_ENABLE_ADDR));
 
 	/* Now enable CPU IRQ — if an IRQ is already pending, the ISR
 	 * will fire immediately but is safe (ISR disables ev_enable
 	 * to prevent re-entry). */
 	irq_enable(ETH_BUF_INTERRUPT);
-	LOG_DBG("IRQ %u enabled", (unsigned)ETH_BUF_INTERRUPT);
 
 	/* Make sure RX buffer is released */
-	LOG_DBG("Releasing RX buffer (ack pulse)...");
 	litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
 	litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
-	LOG_DBG("  rx_ready after ack = 0x%08x",
-		litex_csr_read(CSR_ETH_BUF_RX_READY_ADDR));
 
 	k_work_init_delayable(&data->link_work, eth_litex_link_work);
 
-	/* Create RX thread */
-	LOG_DBG("Creating RX thread (stack=%u)...", CONFIG_ETH_LITEX_RX_STACK_SIZE);
 	k_thread_create(&data->rx_thread, data->rx_stack,
 			CONFIG_ETH_LITEX_RX_STACK_SIZE,
 			eth_litex_rx_thread, (void *)dev, NULL, NULL,
 			K_PRIO_COOP(1), 0, K_NO_WAIT);
 	k_thread_name_set(&data->rx_thread, "eth_litex_rx");
 
-	/* Create TX thread */
-	LOG_DBG("Creating TX thread...");
 	k_thread_create(&data->tx_thread, data->tx_stack,
 			CONFIG_ETH_LITEX_RX_STACK_SIZE,
 			eth_litex_tx_thread, (void *)dev, NULL, NULL,
 			K_PRIO_COOP(2), 0, K_NO_WAIT);
 	k_thread_name_set(&data->tx_thread, "eth_litex_tx");
 
-	/* Schedule link-up check */
 	k_work_schedule(&data->link_work, K_MSEC(100));
 
 	LOG_INF("LiteX Ethernet driver init complete");

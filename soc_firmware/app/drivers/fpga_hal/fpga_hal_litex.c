@@ -90,17 +90,14 @@ int fpga_hal_write_tx_stream_config(uint8_t stream_id,
 				    uint8_t num_ch_ids,
 				    uint32_t ssrc)
 {
-	/* TX stream config is not yet implemented in LiteX CSR.
-	 * TODO: add CSR registers in generate.py when audio TX is ported. */
-	LOG_WRN("TX stream config not yet supported on LiteX");
-	ARG_UNUSED(stream_id);
-	ARG_UNUSED(dst_ip);
-	ARG_UNUSED(channel_count);
-	ARG_UNUSED(samples_per_pkt);
-	ARG_UNUSED(ch_ids);
-	ARG_UNUSED(num_ch_ids);
-	ARG_UNUSED(ssrc);
-	return -ENOTSUP;
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+	return eth_litex_write_tx_stream_config(dev, stream_id, dst_ip,
+						channel_count, samples_per_pkt,
+						ch_ids, num_ch_ids, ssrc);
 }
 
 int fpga_hal_write_rx_stream_config(uint8_t stream_id,
@@ -111,17 +108,15 @@ int fpga_hal_write_rx_stream_config(uint8_t stream_id,
 				    uint8_t output_delay,
 				    uint8_t samples_per_channel)
 {
-	/* RX stream config is not yet implemented in LiteX CSR.
-	 * TODO: add CSR registers in generate.py when audio RX is ported. */
-	LOG_WRN("RX stream config not yet supported on LiteX");
-	ARG_UNUSED(stream_id);
-	ARG_UNUSED(dst_ip);
-	ARG_UNUSED(dst_port);
-	ARG_UNUSED(ch_map);
-	ARG_UNUSED(channel_count);
-	ARG_UNUSED(output_delay);
-	ARG_UNUSED(samples_per_channel);
-	return -ENOTSUP;
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+	return eth_litex_write_rx_stream_config(dev, stream_id, dst_ip,
+						dst_port, ch_map,
+						channel_count, output_delay,
+						samples_per_channel);
 }
 
 /* ---- Control register ---- */

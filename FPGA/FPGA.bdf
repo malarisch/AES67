@@ -547,6 +547,23 @@ on the Quartus Prime software download page.
 	(annotation_block (location)(rect 1240 1720 1296 1736))
 )
 (pin
+	(output)
+	(rect 3552 480 3728 496)
+	(text "OUTPUT" (rect 1 0 39 10)(font "Arial" (font_size 6)))
+	(text "user_led[2]" (rect 90 0 144 11)(font "DejaVu Sans Condensed" ))
+	(pt 0 8)
+	(drawing
+		(line (pt 0 8)(pt 52 8))
+		(line (pt 52 4)(pt 78 4))
+		(line (pt 52 12)(pt 78 12))
+		(line (pt 52 12)(pt 52 4))
+		(line (pt 78 4)(pt 82 8))
+		(line (pt 82 8)(pt 78 12))
+		(line (pt 78 12)(pt 82 8))
+	)
+	(annotation_block (location)(rect 3888 504 3944 520))
+)
+(pin
 	(bidir)
 	(rect 3592 456 3768 472)
 	(text "BIDIR" (rect 1 0 26 10)(font "Arial" (font_size 6)))
@@ -1124,278 +1141,6 @@ on the Quartus Prime software download page.
 		(rectangle (rect 16 16 240 128))
 	)
 	(annotation_block (parameter)(rect 3816 512 4034 538))
-)
-(symbol
-	(rect 3176 328 3448 728)
-	(text "ethernet" (rect 5 0 51 11)(font "Arial" ))
-	(text "inst4" (rect 8 384 35 395)(font "Arial" ))
-	(port
-		(pt 0 32)
-		(input)
-		(text "clock_125_i" (rect 0 0 61 11)(font "Arial" ))
-		(text "clock_125_i" (rect 21 27 82 38)(font "Arial" ))
-		(line (pt 0 32)(pt 16 32))
-	)
-	(port
-		(pt 0 48)
-		(input)
-		(text "reset_i" (rect 0 0 35 11)(font "Arial" ))
-		(text "reset_i" (rect 21 43 56 54)(font "Arial" ))
-		(line (pt 0 48)(pt 16 48))
-	)
-	(port
-		(pt 0 64)
-		(input)
-		(text "mac_address_i[47..0]" (rect 0 0 114 11)(font "Arial" ))
-		(text "mac_address_i[47..0]" (rect 21 59 135 70)(font "Arial" ))
-		(line (pt 0 64)(pt 16 64)(line_width 3))
-	)
-	(port
-		(pt 0 80)
-		(input)
-		(text "mii_tx_clk_i" (rect 0 0 61 11)(font "Arial" ))
-		(text "mii_tx_clk_i" (rect 21 75 82 86)(font "Arial" ))
-		(line (pt 0 80)(pt 16 80))
-	)
-	(port
-		(pt 0 96)
-		(input)
-		(text "mii_rx_clk_i" (rect 0 0 61 11)(font "Arial" ))
-		(text "mii_rx_clk_i" (rect 21 91 82 102)(font "Arial" ))
-		(line (pt 0 96)(pt 16 96))
-	)
-	(port
-		(pt 0 112)
-		(input)
-		(text "mii_rx_er_i" (rect 0 0 56 11)(font "Arial" ))
-		(text "mii_rx_er_i" (rect 21 107 77 118)(font "Arial" ))
-		(line (pt 0 112)(pt 16 112))
-	)
-	(port
-		(pt 0 128)
-		(input)
-		(text "mii_rx_dv_i" (rect 0 0 59 11)(font "Arial" ))
-		(text "mii_rx_dv_i" (rect 21 123 80 134)(font "Arial" ))
-		(line (pt 0 128)(pt 16 128))
-	)
-	(port
-		(pt 0 144)
-		(input)
-		(text "mii_rxd_i[7..0]" (rect 0 0 76 11)(font "Arial" ))
-		(text "mii_rxd_i[7..0]" (rect 21 139 97 150)(font "Arial" ))
-		(line (pt 0 144)(pt 16 144)(line_width 3))
-	)
-	(port
-		(pt 0 160)
-		(input)
-		(text "rgmii_rx_ctl_i" (rect 0 0 70 11)(font "Arial" ))
-		(text "rgmii_rx_ctl_i" (rect 21 155 91 166)(font "Arial" ))
-		(line (pt 0 160)(pt 16 160))
-	)
-	(port
-		(pt 0 176)
-		(input)
-		(text "miim_clock_i" (rect 0 0 68 11)(font "Arial" ))
-		(text "miim_clock_i" (rect 21 171 89 182)(font "Arial" ))
-		(line (pt 0 176)(pt 16 176))
-	)
-	(port
-		(pt 0 192)
-		(input)
-		(text "speed_override_i[1..0]" (rect 0 0 119 11)(font "Arial" ))
-		(text "speed_override_i[1..0]" (rect 21 187 140 198)(font "Arial" ))
-		(line (pt 0 192)(pt 16 192)(line_width 3))
-	)
-	(port
-		(pt 0 208)
-		(input)
-		(text "tx_enable_i" (rect 0 0 60 11)(font "Arial" ))
-		(text "tx_enable_i" (rect 21 203 81 214)(font "Arial" ))
-		(line (pt 0 208)(pt 16 208))
-	)
-	(port
-		(pt 0 224)
-		(input)
-		(text "tx_data_i[7..0]" (rect 0 0 76 11)(font "Arial" ))
-		(text "tx_data_i[7..0]" (rect 21 219 97 230)(font "Arial" ))
-		(line (pt 0 224)(pt 16 224)(line_width 3))
-	)
-	(port
-		(pt 272 32)
-		(output)
-		(text "reset_o" (rect 0 0 38 11)(font "Arial" ))
-		(text "reset_o" (rect 219 27 257 38)(font "Arial" ))
-		(line (pt 272 32)(pt 256 32))
-	)
-	(port
-		(pt 272 48)
-		(output)
-		(text "mii_tx_er_o" (rect 0 0 60 11)(font "Arial" ))
-		(text "mii_tx_er_o" (rect 201 43 261 54)(font "Arial" ))
-		(line (pt 272 48)(pt 256 48))
-	)
-	(port
-		(pt 272 64)
-		(output)
-		(text "mii_tx_en_o" (rect 0 0 62 11)(font "Arial" ))
-		(text "mii_tx_en_o" (rect 199 59 261 70)(font "Arial" ))
-		(line (pt 272 64)(pt 256 64))
-	)
-	(port
-		(pt 272 80)
-		(output)
-		(text "mii_txd_o[7..0]" (rect 0 0 79 11)(font "Arial" ))
-		(text "mii_txd_o[7..0]" (rect 185 75 264 86)(font "Arial" ))
-		(line (pt 272 80)(pt 256 80)(line_width 3))
-	)
-	(port
-		(pt 272 96)
-		(output)
-		(text "gmii_gtx_clk_o" (rect 0 0 77 11)(font "Arial" ))
-		(text "gmii_gtx_clk_o" (rect 186 91 263 102)(font "Arial" ))
-		(line (pt 272 96)(pt 256 96))
-	)
-	(port
-		(pt 272 112)
-		(output)
-		(text "rgmii_tx_ctl_o" (rect 0 0 73 11)(font "Arial" ))
-		(text "rgmii_tx_ctl_o" (rect 190 107 263 118)(font "Arial" ))
-		(line (pt 272 112)(pt 256 112))
-	)
-	(port
-		(pt 272 128)
-		(output)
-		(text "mdc_o" (rect 0 0 35 11)(font "Arial" ))
-		(text "mdc_o" (rect 222 123 257 134)(font "Arial" ))
-		(line (pt 272 128)(pt 256 128))
-	)
-	(port
-		(pt 272 160)
-		(output)
-		(text "link_up_o" (rect 0 0 49 11)(font "Arial" ))
-		(text "link_up_o" (rect 210 155 259 166)(font "Arial" ))
-		(line (pt 272 160)(pt 256 160))
-	)
-	(port
-		(pt 272 176)
-		(output)
-		(text "speed_o[1..0]" (rect 0 0 73 11)(font "Arial" ))
-		(text "speed_o[1..0]" (rect 190 171 263 182)(font "Arial" ))
-		(line (pt 272 176)(pt 256 176)(line_width 3))
-	)
-	(port
-		(pt 272 192)
-		(output)
-		(text "tx_clock_o" (rect 0 0 55 11)(font "Arial" ))
-		(text "tx_clock_o" (rect 205 187 260 198)(font "Arial" ))
-		(line (pt 272 192)(pt 256 192))
-	)
-	(port
-		(pt 272 208)
-		(output)
-		(text "tx_reset_o" (rect 0 0 55 11)(font "Arial" ))
-		(text "tx_reset_o" (rect 205 203 260 214)(font "Arial" ))
-		(line (pt 272 208)(pt 256 208))
-	)
-	(port
-		(pt 272 224)
-		(output)
-		(text "tx_byte_sent_o" (rect 0 0 80 11)(font "Arial" ))
-		(text "tx_byte_sent_o" (rect 184 219 264 230)(font "Arial" ))
-		(line (pt 272 224)(pt 256 224))
-	)
-	(port
-		(pt 272 240)
-		(output)
-		(text "tx_busy_o" (rect 0 0 53 11)(font "Arial" ))
-		(text "tx_busy_o" (rect 207 235 260 246)(font "Arial" ))
-		(line (pt 272 240)(pt 256 240))
-	)
-	(port
-		(pt 272 256)
-		(output)
-		(text "rx_clock_o" (rect 0 0 55 11)(font "Arial" ))
-		(text "rx_clock_o" (rect 205 251 260 262)(font "Arial" ))
-		(line (pt 272 256)(pt 256 256))
-	)
-	(port
-		(pt 272 272)
-		(output)
-		(text "rx_reset_o" (rect 0 0 55 11)(font "Arial" ))
-		(text "rx_reset_o" (rect 205 267 260 278)(font "Arial" ))
-		(line (pt 272 272)(pt 256 272))
-	)
-	(port
-		(pt 272 288)
-		(output)
-		(text "rx_frame_o" (rect 0 0 60 11)(font "Arial" ))
-		(text "rx_frame_o" (rect 201 283 261 294)(font "Arial" ))
-		(line (pt 272 288)(pt 256 288))
-	)
-	(port
-		(pt 272 304)
-		(output)
-		(text "rx_data_o[7..0]" (rect 0 0 80 11)(font "Arial" ))
-		(text "rx_data_o[7..0]" (rect 184 299 264 310)(font "Arial" ))
-		(line (pt 272 304)(pt 256 304)(line_width 3))
-	)
-	(port
-		(pt 272 320)
-		(output)
-		(text "rx_byte_received_o" (rect 0 0 102 11)(font "Arial" ))
-		(text "rx_byte_received_o" (rect 165 315 267 326)(font "Arial" ))
-		(line (pt 272 320)(pt 256 320))
-	)
-	(port
-		(pt 272 336)
-		(output)
-		(text "rx_error_o" (rect 0 0 54 11)(font "Arial" ))
-		(text "rx_error_o" (rect 206 331 260 342)(font "Arial" ))
-		(line (pt 272 336)(pt 256 336))
-	)
-	(port
-		(pt 272 352)
-		(output)
-		(text "frame_o" (rect 0 0 43 11)(font "Arial" ))
-		(text "frame_o" (rect 215 347 258 358)(font "Arial" ))
-		(line (pt 272 352)(pt 256 352))
-	)
-	(port
-		(pt 272 144)
-		(bidir)
-		(text "mdio_io" (rect 0 0 41 11)(font "Arial" ))
-		(text "mdio_io" (rect 221 139 262 150)(font "Arial" ))
-		(line (pt 272 144)(pt 256 144))
-	)
-	(parameter
-		"MIIM_PHY_ADDRESS"
-		"00001"
-		""
-		(type "PARAMETER_UNSIGNED_BIN")	)
-	(parameter
-		"MIIM_RESET_WAIT_TICKS"
-		"0"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"MIIM_POLL_WAIT_TICKS"
-		"10000000"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"MIIM_CLOCK_DIVIDER"
-		"50"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"MIIM_DISABLE"
-		"false"
-		""
-		(type "PARAMETER_ENUM")	)
-	(drawing
-		(rectangle (rect 16 16 256 384))
-	)
-	(annotation_block (parameter)(rect 3160 232 3446 316))
 )
 (symbol
 	(rect 40 360 296 528)
@@ -3877,6 +3622,300 @@ on the Quartus Prime software download page.
 		(rectangle (rect 16 16 256 288))
 	)
 )
+(symbol
+	(rect 2512 384 2792 464)
+	(text "reverse_mac" (rect 5 0 73 11)(font "Arial" ))
+	(text "inst8" (rect 8 64 31 75)(font "DejaVu Sans Condensed" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "mac_address_i[47..0]" (rect 0 0 114 11)(font "Arial" ))
+		(text "mac_address_i[47..0]" (rect 21 27 135 38)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 3))
+	)
+	(port
+		(pt 280 32)
+		(output)
+		(text "mac_address_o[47..0]" (rect 0 0 118 11)(font "Arial" ))
+		(text "mac_address_o[47..0]" (rect 160 27 278 38)(font "Arial" ))
+		(line (pt 280 32)(pt 264 32)(line_width 3))
+	)
+	(drawing
+		(rectangle (rect 16 16 264 64))
+	)
+)
+(symbol
+	(rect 3176 328 3448 728)
+	(text "ethernet" (rect 5 0 51 11)(font "Arial" ))
+	(text "inst4" (rect 8 384 35 395)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "clock_125_i" (rect 0 0 61 11)(font "Arial" ))
+		(text "clock_125_i" (rect 21 27 82 38)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "reset_i" (rect 0 0 35 11)(font "Arial" ))
+		(text "reset_i" (rect 21 43 56 54)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "mac_address_i[47..0]" (rect 0 0 114 11)(font "Arial" ))
+		(text "mac_address_i[47..0]" (rect 21 59 135 70)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "mii_tx_clk_i" (rect 0 0 61 11)(font "Arial" ))
+		(text "mii_tx_clk_i" (rect 21 75 82 86)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "mii_rx_clk_i" (rect 0 0 61 11)(font "Arial" ))
+		(text "mii_rx_clk_i" (rect 21 91 82 102)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "mii_rx_er_i" (rect 0 0 56 11)(font "Arial" ))
+		(text "mii_rx_er_i" (rect 21 107 77 118)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "mii_rx_dv_i" (rect 0 0 59 11)(font "Arial" ))
+		(text "mii_rx_dv_i" (rect 21 123 80 134)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "mii_rxd_i[7..0]" (rect 0 0 76 11)(font "Arial" ))
+		(text "mii_rxd_i[7..0]" (rect 21 139 97 150)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 3))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "rgmii_rx_ctl_i" (rect 0 0 70 11)(font "Arial" ))
+		(text "rgmii_rx_ctl_i" (rect 21 155 91 166)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "miim_clock_i" (rect 0 0 68 11)(font "Arial" ))
+		(text "miim_clock_i" (rect 21 171 89 182)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "speed_override_i[1..0]" (rect 0 0 119 11)(font "Arial" ))
+		(text "speed_override_i[1..0]" (rect 21 187 140 198)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 3))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "tx_enable_i" (rect 0 0 60 11)(font "Arial" ))
+		(text "tx_enable_i" (rect 21 203 81 214)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "tx_data_i[7..0]" (rect 0 0 76 11)(font "Arial" ))
+		(text "tx_data_i[7..0]" (rect 21 219 97 230)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 3))
+	)
+	(port
+		(pt 272 32)
+		(output)
+		(text "reset_o" (rect 0 0 38 11)(font "Arial" ))
+		(text "reset_o" (rect 219 27 257 38)(font "Arial" ))
+		(line (pt 272 32)(pt 256 32))
+	)
+	(port
+		(pt 272 48)
+		(output)
+		(text "mii_tx_er_o" (rect 0 0 60 11)(font "Arial" ))
+		(text "mii_tx_er_o" (rect 201 43 261 54)(font "Arial" ))
+		(line (pt 272 48)(pt 256 48))
+	)
+	(port
+		(pt 272 64)
+		(output)
+		(text "mii_tx_en_o" (rect 0 0 62 11)(font "Arial" ))
+		(text "mii_tx_en_o" (rect 199 59 261 70)(font "Arial" ))
+		(line (pt 272 64)(pt 256 64))
+	)
+	(port
+		(pt 272 80)
+		(output)
+		(text "mii_txd_o[7..0]" (rect 0 0 79 11)(font "Arial" ))
+		(text "mii_txd_o[7..0]" (rect 185 75 264 86)(font "Arial" ))
+		(line (pt 272 80)(pt 256 80)(line_width 3))
+	)
+	(port
+		(pt 272 96)
+		(output)
+		(text "gmii_gtx_clk_o" (rect 0 0 77 11)(font "Arial" ))
+		(text "gmii_gtx_clk_o" (rect 186 91 263 102)(font "Arial" ))
+		(line (pt 272 96)(pt 256 96))
+	)
+	(port
+		(pt 272 112)
+		(output)
+		(text "rgmii_tx_ctl_o" (rect 0 0 73 11)(font "Arial" ))
+		(text "rgmii_tx_ctl_o" (rect 190 107 263 118)(font "Arial" ))
+		(line (pt 272 112)(pt 256 112))
+	)
+	(port
+		(pt 272 128)
+		(output)
+		(text "mdc_o" (rect 0 0 35 11)(font "Arial" ))
+		(text "mdc_o" (rect 222 123 257 134)(font "Arial" ))
+		(line (pt 272 128)(pt 256 128))
+	)
+	(port
+		(pt 272 160)
+		(output)
+		(text "link_up_o" (rect 0 0 49 11)(font "Arial" ))
+		(text "link_up_o" (rect 210 155 259 166)(font "Arial" ))
+		(line (pt 272 160)(pt 256 160))
+	)
+	(port
+		(pt 272 176)
+		(output)
+		(text "speed_o[1..0]" (rect 0 0 73 11)(font "Arial" ))
+		(text "speed_o[1..0]" (rect 190 171 263 182)(font "Arial" ))
+		(line (pt 272 176)(pt 256 176)(line_width 3))
+	)
+	(port
+		(pt 272 192)
+		(output)
+		(text "tx_clock_o" (rect 0 0 55 11)(font "Arial" ))
+		(text "tx_clock_o" (rect 205 187 260 198)(font "Arial" ))
+		(line (pt 272 192)(pt 256 192))
+	)
+	(port
+		(pt 272 208)
+		(output)
+		(text "tx_reset_o" (rect 0 0 55 11)(font "Arial" ))
+		(text "tx_reset_o" (rect 205 203 260 214)(font "Arial" ))
+		(line (pt 272 208)(pt 256 208))
+	)
+	(port
+		(pt 272 224)
+		(output)
+		(text "tx_byte_sent_o" (rect 0 0 80 11)(font "Arial" ))
+		(text "tx_byte_sent_o" (rect 184 219 264 230)(font "Arial" ))
+		(line (pt 272 224)(pt 256 224))
+	)
+	(port
+		(pt 272 240)
+		(output)
+		(text "tx_busy_o" (rect 0 0 53 11)(font "Arial" ))
+		(text "tx_busy_o" (rect 207 235 260 246)(font "Arial" ))
+		(line (pt 272 240)(pt 256 240))
+	)
+	(port
+		(pt 272 256)
+		(output)
+		(text "rx_clock_o" (rect 0 0 55 11)(font "Arial" ))
+		(text "rx_clock_o" (rect 205 251 260 262)(font "Arial" ))
+		(line (pt 272 256)(pt 256 256))
+	)
+	(port
+		(pt 272 272)
+		(output)
+		(text "rx_reset_o" (rect 0 0 55 11)(font "Arial" ))
+		(text "rx_reset_o" (rect 205 267 260 278)(font "Arial" ))
+		(line (pt 272 272)(pt 256 272))
+	)
+	(port
+		(pt 272 288)
+		(output)
+		(text "rx_frame_o" (rect 0 0 60 11)(font "Arial" ))
+		(text "rx_frame_o" (rect 201 283 261 294)(font "Arial" ))
+		(line (pt 272 288)(pt 256 288))
+	)
+	(port
+		(pt 272 304)
+		(output)
+		(text "rx_data_o[7..0]" (rect 0 0 80 11)(font "Arial" ))
+		(text "rx_data_o[7..0]" (rect 184 299 264 310)(font "Arial" ))
+		(line (pt 272 304)(pt 256 304)(line_width 3))
+	)
+	(port
+		(pt 272 320)
+		(output)
+		(text "rx_byte_received_o" (rect 0 0 102 11)(font "Arial" ))
+		(text "rx_byte_received_o" (rect 165 315 267 326)(font "Arial" ))
+		(line (pt 272 320)(pt 256 320))
+	)
+	(port
+		(pt 272 336)
+		(output)
+		(text "rx_error_o" (rect 0 0 54 11)(font "Arial" ))
+		(text "rx_error_o" (rect 206 331 260 342)(font "Arial" ))
+		(line (pt 272 336)(pt 256 336))
+	)
+	(port
+		(pt 272 352)
+		(output)
+		(text "frame_o" (rect 0 0 43 11)(font "Arial" ))
+		(text "frame_o" (rect 215 347 258 358)(font "Arial" ))
+		(line (pt 272 352)(pt 256 352))
+	)
+	(port
+		(pt 272 144)
+		(bidir)
+		(text "mdio_io" (rect 0 0 41 11)(font "Arial" ))
+		(text "mdio_io" (rect 221 139 262 150)(font "Arial" ))
+		(line (pt 272 144)(pt 256 144))
+	)
+	(parameter
+		"MIIM_PHY_ADDRESS"
+		"00000"
+		""
+		(type "PARAMETER_UNSIGNED_BIN")	)
+	(parameter
+		"MIIM_RESET_WAIT_TICKS"
+		"0"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MIIM_POLL_WAIT_TICKS"
+		"10000000"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MIIM_CLOCK_DIVIDER"
+		"50"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MIIM_DISABLE"
+		"false"
+		""
+		(type "PARAMETER_ENUM")	)
+	(drawing
+		(rectangle (rect 16 16 256 384))
+	)
+	(annotation_block (parameter)(rect 3160 232 3459 310))
+)
 (connector
 	(pt 2320 472)
 	(pt 2352 472)
@@ -4127,18 +4166,8 @@ on the Quartus Prime software download page.
 	(pt 2312 2144)
 )
 (connector
-	(pt 2632 336)
-	(pt 2632 392)
-	(bus)
-)
-(connector
 	(pt 2352 472)
 	(pt 2352 520)
-	(bus)
-)
-(connector
-	(pt 2632 392)
-	(pt 3176 392)
 	(bus)
 )
 (connector
@@ -5033,12 +5062,6 @@ on the Quartus Prime software download page.
 	(bus)
 )
 (connector
-	(text "const_eth_speed[1..0]" (rect 2526 504 2632 515)(font "DejaVu Sans Condensed" ))
-	(pt 2352 520)
-	(pt 3176 520)
-	(bus)
-)
-(connector
 	(text "ch0o[23..0]" (rect 667 1760 722 1771)(font "DejaVu Sans Condensed" ))
 	(pt 720 1776)
 	(pt 592 1776)
@@ -5182,12 +5205,6 @@ on the Quartus Prime software download page.
 	(text "enet_clk" (rect 3090 344 3136 355)(font "Arial" ))
 	(pt 3080 360)
 	(pt 3176 360)
-)
-(connector
-	(text "const_eth_speed[1..0]" (rect 3170 -296 3276 -285)(font "DejaVu Sans Condensed" ))
-	(pt 3248 -280)
-	(pt 3152 -280)
-	(bus)
 )
 (connector
 	(pt 3456 456)
@@ -5597,12 +5614,6 @@ on the Quartus Prime software download page.
 	(pt 1448 776)
 )
 (connector
-	(text "mac_address[47..0]" (rect 1880 320 1986 331)(font "Arial" ))
-	(pt 1992 336)
-	(pt 2632 336)
-	(bus)
-)
-(connector
 	(pt 2000 600)
 	(pt 2000 592)
 )
@@ -5802,6 +5813,33 @@ on the Quartus Prime software download page.
 	(text "mcu_clk" (rect 800 136 838 147)(font "DejaVu Sans Condensed" ))
 	(pt 912 152)
 	(pt 792 152)
+)
+(connector
+	(text "mac_address[47..0]" (rect 2320 392 2426 403)(font "Arial" ))
+	(pt 2328 416)
+	(pt 2512 416)
+	(bus)
+)
+(connector
+	(pt 3176 392)
+	(pt 2816 392)
+	(bus)
+)
+(connector
+	(pt 2816 392)
+	(pt 2816 416)
+	(bus)
+)
+(connector
+	(pt 2816 416)
+	(pt 2792 416)
+	(bus)
+)
+(connector
+	(text "mac_speed[1..0]" (rect 3170 -296 3250 -285)(font "DejaVu Sans Condensed" ))
+	(pt 3248 -280)
+	(pt 3152 -280)
+	(bus)
 )
 (junction (pt 4288 504))
 (junction (pt 3776 568))
