@@ -317,6 +317,38 @@ set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rstn
 set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rwds
 set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_p
 set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_n
+
+# HyperRAM: use fast I/O registers for timing-critical signals
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_p
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_rwds
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_rwds
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_rwds
+
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio20
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio[20]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio21

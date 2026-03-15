@@ -426,8 +426,8 @@ architecture Behavioral of ptpv2_sender is
 	-- Assembly state machine (sys_clk domain)
 	-- ============================================================
 	type t_SM_Assemble is (s_A_Idle, s_A_CalcIpChkPartial, s_A_CalcIpChkFinal, s_A_PrepFrame,
-	                       s_A_CalcUdpChecksum, s_A_FinalizeChecksum, s_A_WriteChecksum,
-	                       s_A_RequestTx, s_A_WaitAckDone);
+	                       s_A_StartUdpChecksum, s_A_CalcUdpChecksum, s_A_FinalizeChecksum,
+	                       s_A_WriteChecksum, s_A_RequestTx, s_A_WaitAckDone);
 	signal SM_Assemble : t_SM_Assemble := s_A_Idle;
 
 	signal frame_write_index    : integer range 0 to RAM_DEPTH - 1 := 0;
@@ -611,7 +611,7 @@ begin
 				-- IP checksum pipeline stage 2
 				when s_A_CalcIpChkPartial =>
 					ip_checksum_acc <= ip_checksum_partial1 + ip_checksum_partial2 +
-						resize(to_unsigned(16#4500# + 16#B800#, 32), 32) +
+						resize(to_unsigned(16#45B8#, 16), 32) +
 						resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + cap_udp_payload_len, 16), 32) +
 						resize(packet_counter, 32);
 
@@ -651,23 +651,28 @@ begin
 					end if;
 
 					if (frame_write_index = cap_packet_length - 1) then
-						-- Packet fully written to RAM, start UDP checksum
+						-- Packet fully written to RAM. Transition to wait state so
+						-- packet_wr_en clears before first checksum RAM read.
 						udp_checksum_acc <= udp_pseudo_header_sum;
 						udp_checksum_upper_byte <= (others => '0');
 						udp_checksum_byte_phase <= '0';
 						udp_checksum_bytes_remaining <= UDP_HEADER_LENGTH + cap_udp_payload_len;
-						if (UDP_HEADER_LENGTH + cap_udp_payload_len > 0) then
-							udp_checksum_request_count <= 1;
-						else
-							udp_checksum_request_count <= 0;
-						end if;
+						udp_checksum_request_count <= 0;
 						udp_checksum_data_valid <= '0';
 						udp_checksum_data_valid_d <= '0';
 						asm_rd_addr <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH;
-						SM_Assemble <= s_A_CalcUdpChecksum;
+						SM_Assemble <= s_A_StartUdpChecksum;
 					else
 						frame_write_index <= frame_write_index + 1;
 					end if;
+
+				-- Wait one cycle for packet_wr_en to clear so RAM read port is active.
+				-- asm_rd_addr already points to first UDP byte (offset 34).
+				when s_A_StartUdpChecksum =>
+					-- packet_wr_en is now '0' (default), RAM reads addr 34 this cycle.
+					-- asm_rd_data will have ram[34] next cycle, asm_rd_data_r the cycle after.
+					udp_checksum_request_count <= 1;
+					SM_Assemble <= s_A_CalcUdpChecksum;
 
 				-- Read back UDP portion from RAM and compute checksum
 				when s_A_CalcUdpChecksum =>
@@ -781,7 +786,7 @@ begin
 					prime_wait <= 0;
 
 				when s_PrimeTx =>
-					-- Wait one cycle for tx_rd_data to be valid from RAM
+					-- Wait one cycle for tx_rd_data to be valid from RAM (falling_edge read)
 					tx_enable <= '0';
 					if (prime_wait = 0) then
 						prime_wait <= 1;
@@ -796,6 +801,7 @@ begin
 					tx_enable <= '1';
 					if (tx_byte_sent = '1') then
 						if (tx_bytes_remaining = 0) then
+							tx_enable <= '0';
 							SM_Tx <= s_End;
 						else
 							tx_data <= tx_rd_data;

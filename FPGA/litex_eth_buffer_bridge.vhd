@@ -148,9 +148,11 @@ begin
       tx_req_meta   <= eth_tx_request_i;
       tx_req_sync   <= tx_req_meta;
       tx_req_sync_d <= tx_req_sync;
-      mac_tx_dat_o <= buf_tx_dat_i;
+      -- Only drive data during active TX, otherwise hold at 0x00
+      -- to avoid OR-mux corruption in ethernet_packet_aggregator
       case sm_tx is
         when TX_IDLE =>
+          mac_tx_dat_o <= (others => '0');
           mac_tx_enable_o <= '0';
           tx_allow_req_o  <= '0';
           -- Detect rising edge of tx_request
@@ -162,41 +164,38 @@ begin
           end if;
 
         when TX_WAIT_ALLOW =>
+          mac_tx_dat_o <= (others => '0');
           if tx_allow_i = '1' then
-            
-            
             sm_tx              <= TX_PRIME;
-
-            --buf_tx_addr_o <= buf_tx_addr_o + 1;
           end if;
         when TX_PRIME =>
+              mac_tx_dat_o <= buf_tx_dat_i;
               mac_tx_enable_o <= '1';
               if (mac_tx_busy_i = '1') then
                 tx_preamble_bytes := tx_preamble_bytes + 1;
                 if (tx_preamble_bytes >= 6) then
                   buf_tx_addr_o <= buf_tx_addr_o + 1;
-                  if (tx_preamble_bytes = 7) then 
+                  
+                  if (tx_preamble_bytes = 7) then
                   sm_tx              <= TX_TRANSMIT;
                   tx_preamble_bytes := (others => '0');
                   end if;
                 end if;
               end if;
-              
-              
 
         when TX_TRANSMIT =>
+          mac_tx_dat_o <= buf_tx_dat_i;
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
-            
             if buf_tx_addr_o = buf_tx_len_i then
               sm_tx <= TX_END;
             else
-              
               buf_tx_addr_o <= buf_tx_addr_o + 1;
             end if;
           end if;
 
         when TX_END =>
+          mac_tx_dat_o <= (others => '0');
           mac_tx_enable_o <= '0';
           tx_allow_req_o  <= '0';
           tx_done_reg     <= '1';
