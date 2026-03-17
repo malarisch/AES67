@@ -66,3 +66,19 @@ target_sources_ifdef(CONFIG_MDNS_SD app PRIVATE src/mdns_sd.c)
 target_sources_ifdef(CONFIG_SD_CONFIG app PRIVATE src/sd_config.c)
 
 add_dependencies(app web_assets)
+
+# ---------- Generate Flash Boot Image (.fbi) after build ----------
+# The LiteX BIOS expects an 8-byte header (length + CRC-32) before the
+# firmware payload.  This runs make_fbi.py on the raw zephyr.bin to
+# produce zephyr.fbi, ready to flash at FLASH_BOOT_ADDRESS (0x010000).
+set(MAKE_FBI ${CMAKE_CURRENT_SOURCE_DIR}/../../dev_scripts/make_fbi.py)
+set(FBI_STAMP ${CMAKE_BINARY_DIR}/zephyr/zephyr.fbi)
+add_custom_command(
+  OUTPUT  ${FBI_STAMP}
+  DEPENDS ${CMAKE_BINARY_DIR}/zephyr/zephyr.bin
+  COMMAND ${PYTHON_EXECUTABLE} ${MAKE_FBI}
+          ${CMAKE_BINARY_DIR}/zephyr/zephyr.bin
+          ${FBI_STAMP}
+  COMMENT "Generating LiteX flash boot image (zephyr.fbi)"
+)
+add_custom_target(fbi ALL DEPENDS ${FBI_STAMP})

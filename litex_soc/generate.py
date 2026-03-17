@@ -81,6 +81,14 @@ _io = [
         Subsignal("cs_n", Pins(1)),
     ),
 
+    # SPI Flash: W25Q64 (8 MB, memory-mapped)
+    ("spiflash", 0,
+        Subsignal("clk",  Pins(1)),
+        Subsignal("mosi", Pins(1)),
+        Subsignal("miso", Pins(1)),
+        Subsignal("cs_n", Pins(1)),
+    ),
+
     # UART 1: AD/DA Card LEDs (115200 baud)
     ("serial", 1,
         Subsignal("tx", Pins(1)),
@@ -545,6 +553,7 @@ class AES67SoC(SoCCore):
     mem_map = dict(SoCCore.mem_map)
     mem_map.update({
         "main_ram":       0x20000000,  # HyperRAM serves as main RAM
+        "spiflash":       0x30000000,  # W25Q64 SPI Flash (8 MB, memory-mapped)
         # Place packet buffers and stream config in IO region (>= 0x80000000)
         # so VexRiscV data cache treats them as uncacheable.
         # Bit 31 of the physical address controls isIoAccess in VexRiscv.v.
@@ -553,25 +562,57 @@ class AES67SoC(SoCCore):
         "rx_stream_cfg":  0x90005000,
     })
 
-    def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_rom_size=24*1024, integrated_sram_size=4*1024, **kwargs):
+    def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_sram_size=4*1024, **kwargs):
+
+        # Boot flow: CPU resets to SPI flash where a tiny boot stub copies
+        # the BIOS into HyperRAM and jumps there.  The BIOS therefore runs
+        # at full RAM speed instead of slow SPI read speed (~1.5 MiB/s).
+        #
+        # SPI Flash layout (see boot_stub/):
+        #   0x30000000: boot_stub  (512 bytes, copies BIOS → HyperRAM)
+        #   0x30000200: bios.bin   (up to ~63.5 KB)
+        #   0x30010000: firmware   (Zephyr app, optional)
+        #
+        # CPU reset → 0x30000000 (flash), BIOS linked at top of HyperRAM.
+        # Boot stub copies BIOS from flash to top of HyperRAM so it doesn't
+        # collide with memtest (2 MB from base) or serialboot firmware upload.
+        cpu_reset_address = self.mem_map["spiflash"]  # 0x30000000
+        bios_size         = 0x10000                    # 64 KB
+        bios_run_address  = 0x20000000 + 8*1024*1024 - bios_size  # 0x207F0000
 
         # SoCCore - must be initialized before CRG
         SoCCore.__init__(self, platform, sys_clk_freq,
             cpu_type             = "vexriscv",
             cpu_variant          = "standard",
             bus_interconnect     = "crossbar",
-            integrated_rom_size  = integrated_rom_size,
+            integrated_rom_size  = 0,
+            cpu_reset_address    = cpu_reset_address,
             integrated_sram_size = integrated_sram_size,
             integrated_main_ram_size = 0,
             ident                = "AES67-LiteX-SoC",
             ident_version        = True,
             with_uart            = True,
             uart_name            = "serial",
-            uart_baudrate        = 921600,
+            uart_baudrate        = 115200,
             with_timer           = True,
             timer_uptime         = True,
             **kwargs,
         )
+
+        # ROM_DISABLE: no block-RAM ROM, BIOS is external.
+        # Linker region "rom" points to top of HyperRAM so BIOS gets linked
+        # at the address where it will actually execute (after boot stub
+        # copies it there).  Since cpu_reset_address (flash) != rom origin
+        # (RAM), LiteX won't auto-set cpu.use_rom — force it so the builder
+        # still compiles the BIOS.
+        self.add_constant("ROM_DISABLE", 1)
+        self.cpu.use_rom = True
+        self.bus.add_region("rom", SoCRegion(
+            origin = bios_run_address,
+            size   = bios_size,
+            mode   = "rx",
+            cached = True,
+            linker = True))
 
         # Determine if sys2x clock is needed (HyperRAM 2:1 mode)
         need_sys2x = with_hyperram and (hyperram_clk_ratio == "2:1")
@@ -579,7 +620,7 @@ class AES67SoC(SoCCore):
         # CRG - Clock and Reset Generator (must be after SoCCore.__init__)
         self.crg = _CRG(platform, sys_clk_freq, with_sys2x=need_sys2x)
 
-        # HyperRAM (16 MB IS66WVH16M8ALL on C10LP board)
+        # HyperRAM (16 MB IS66WVH16M8ALL-166B1LI on C10LP board, 1.8V, 166 MHz max)
         if with_hyperram:
             self.hyperram = HyperRAM(
                 pads         = platform.request("hyperram"),
@@ -602,6 +643,26 @@ class AES67SoC(SoCCore):
             sys_clk_freq = sys_clk_freq,
             spi_clk_freq = 400e3,  # SD card init requires ≤400 kHz
         )
+
+        # -- SPI Flash: W25Q64 (8 MB, memory-mapped, BIOS executes from here) --
+        # with_master=False: no SPI master port, only memory-mapped reads.
+        # The master port would let the BIOS issue SPI commands (read ID,
+        # freq calibration) which deadlocks when the CPU itself is executing
+        # from this same flash — the master asserts CS, blocking MMAP fetches,
+        # while the CPU stalls waiting for its next instruction fetch.
+        from litespi.modules import W25Q64
+        from litespi.opcodes import SpiNorFlashOpCodes
+        self.add_spi_flash(name="spiflash", mode="1x",
+            module=W25Q64(SpiNorFlashOpCodes.READ_1_1_1),
+            clk_freq=20e6,
+            with_master=False)
+
+        # Skip SPI Flash frequency auto-calibration (same reason as above).
+        self.add_constant("SPIFLASH_SKIP_FREQ_INIT", 1)
+
+        # Firmware image sits after stub + BIOS region in SPI flash.
+        self.add_constant("FLASH_BOOT_ADDRESS",
+            self.mem_map["spiflash"] + bios_size)
 
         # -- UART 1: AD/DA Card LEDs (115200) ----------------------------------
         self.uart1_phy = RS232PHY(platform.request("serial", 1), clk_freq=sys_clk_freq, baudrate=1e6)
@@ -702,9 +763,8 @@ def main():
     parser.add_argument("--sys-clk-freq",       default=80e6,  type=float, help="System clock frequency (Hz)")
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support")
     parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (2:1 = 2x faster)")
-    parser.add_argument("--rom-size",           default=24,    type=int,   help="ROM size in KB (default: 24)")
-    parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 8)")
-    parser.add_argument("--bios-console",       default="disable", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
+    parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
+    parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 
@@ -716,7 +776,6 @@ def main():
         sys_clk_freq         = int(args.sys_clk_freq),
         with_hyperram        = args.with_hyperram,
         hyperram_clk_ratio   = args.hyperram_clk_ratio,
-        integrated_rom_size  = args.rom_size * 1024,
         integrated_sram_size = args.sram_size * 1024,
     )
 
