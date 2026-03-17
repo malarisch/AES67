@@ -33,7 +33,7 @@
 #include "ieee1588_utils.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 
-LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_DBG);
 
 /* ---- Thread resources ---- */
 #define SAP_STACK_SIZE   2048
@@ -193,6 +193,7 @@ static int send_sap_announce_stream(int sock, const struct sockaddr_in *dst,
  * ================================================================ */
 static int send_sap_announce(int sock, const struct sockaddr_in *dst)
 {
+	LOG_INF("Sending SAP Announce");
 	static uint8_t tx_buf[SAP_TX_BUF_SIZE];
 	int offset = 0;
 
@@ -435,10 +436,13 @@ static void sap_thread_fn(void *p1, void *p2, void *p3)
 		LOG_ERR("SAP: Failed to bind socket: %d", errno);
 		zsock_close(sock);
 		return;
+	} else {
+		LOG_DBG("SAP: Socket Open");
 	}
 
 	/* Join SAP multicast group 239.255.255.255 */
 	struct ip_mreqn mreq;
+	
 
 	memset(&mreq, 0, sizeof(mreq));
 	zsock_inet_pton(AF_INET, SAP_MULTICAST_ADDR, &mreq.imr_multiaddr);

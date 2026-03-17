@@ -25,7 +25,7 @@
 #include "ieee1588_utils.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 
-LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_DBG);
 
 /* ---- Thread resources ---- */
 #define BMC_STACK_SIZE   4096
@@ -540,7 +540,7 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 	bind_addr.sin_family = AF_INET;
 	bind_addr.sin_port = htons(PTP_GENERAL_PORT);
 	bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
+	LOG_INF("BMC: IP ready, opening socket 2");
 	ret = zsock_bind(sock, (struct sockaddr *)&bind_addr,
 			 sizeof(bind_addr));
 	if (ret < 0) {
@@ -548,7 +548,7 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 		zsock_close(sock);
 		return;
 	}
-
+	LOG_INF("BMC: IP ready, joining mcast");
 	/* Join PTP multicast group 224.0.1.129 */
 	struct ip_mreqn mreq;
 

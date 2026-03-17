@@ -23,7 +23,7 @@
 
 #include "eth_litex.h"
 
-LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_DBG);
 
 /* ---- Driver data structures ---- */
 
@@ -537,13 +537,18 @@ static int eth_litex_send(const struct device *dev, struct net_pkt *pkt)
 {
 	ARG_UNUSED(dev);
 
-	/* Must be non-blocking: Zephyr L2 send() is called from the
-	 * network processing context — blocking here deadlocks TCP. */
+	/* Take a reference BEFORE posting to the TX queue.  The TX thread
+	 * runs at K_PRIO_COOP(2) and will preempt any preemptive-priority
+	 * caller as soon as k_msgq_put wakes it.  If we ref after the put,
+	 * the TX thread can dequeue, process, and unref the pkt (freeing it)
+	 * before we get a chance to ref — causing a use-after-free crash. */
+	net_pkt_ref(pkt);
+
 	if (k_msgq_put(&litex_tx_queue, &pkt, K_NO_WAIT) != 0) {
+		net_pkt_unref(pkt);
 		LOG_WRN("TX queue full, dropping pkt (%zu bytes)", net_pkt_get_len(pkt));
 		return -ENOMEM;
 	}
-	net_pkt_ref(pkt);
 	return 0;
 }
 

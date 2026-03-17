@@ -15,7 +15,7 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Sat Mar 14 15:26:09 2026"
+-- CREATED		"Tue Mar 17 18:15:26 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
@@ -34,6 +34,7 @@ ENTITY FPGA IS
 		arduino_io1 :  IN  STD_LOGIC;
 		arduino_io3 :  IN  STD_LOGIC;
 		gpio8 :  IN  STD_LOGIC;
+		gpio12 :  IN  STD_LOGIC;
 		enet_mdio :  INOUT  STD_LOGIC;
 		hbus_rwds :  INOUT  STD_LOGIC;
 		gpio0 :  INOUT  STD_LOGIC;
@@ -58,15 +59,29 @@ ENTITY FPGA IS
 		gpio5 :  OUT  STD_LOGIC;
 		gpio6 :  OUT  STD_LOGIC;
 		gpio7 :  OUT  STD_LOGIC;
+		gpio9 :  OUT  STD_LOGIC;
+		gpio10 :  OUT  STD_LOGIC;
+		gpio11 :  OUT  STD_LOGIC;
 		arduino_io :  OUT  STD_LOGIC_VECTOR(9 TO 9);
 		enet_tx_d :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
 		gpio33 :  OUT  STD_LOGIC;
 		gpio32 :  OUT  STD_LOGIC;
-		user_led :  OUT  STD_LOGIC_VECTOR(3 TO 3)
+		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 2)
 	);
 END FPGA;
 
 ARCHITECTURE bdf_type OF FPGA IS 
+
+COMPONENT ethernet_reset
+	PORT(clk : IN STD_LOGIC;
+		 enet_clk : IN STD_LOGIC;
+		 power_good : IN STD_LOGIC;
+		 phy_rstn : OUT STD_LOGIC;
+		 mac_rst : OUT STD_LOGIC;
+		 sendArpRequest : OUT STD_LOGIC;
+		 tx_online : OUT STD_LOGIC
+	);
+END COMPONENT;
 
 COMPONENT litex_soc
 	PORT(aes67_ctrl_eth_link_up : IN STD_LOGIC;
@@ -85,6 +100,7 @@ COMPONENT litex_soc
 		 serial1_rx : IN STD_LOGIC;
 		 serial_rx : IN STD_LOGIC;
 		 spi_miso : IN STD_LOGIC;
+		 spiflash_miso : IN STD_LOGIC;
 		 hyperram_rwds : INOUT STD_LOGIC;
 		 i2c0_scl : INOUT STD_LOGIC;
 		 i2c0_sda : INOUT STD_LOGIC;
@@ -114,6 +130,9 @@ COMPONENT litex_soc
 		 spi_clk : OUT STD_LOGIC;
 		 spi_cs_n : OUT STD_LOGIC;
 		 spi_mosi : OUT STD_LOGIC;
+		 spiflash_clk : OUT STD_LOGIC;
+		 spiflash_cs_n : OUT STD_LOGIC;
+		 spiflash_mosi : OUT STD_LOGIC;
 		 sys_clk_out : OUT STD_LOGIC;
 		 tx_stream_cfg_wr_en : OUT STD_LOGIC;
 		 aes67_ctrl_ip_addr : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -128,16 +147,6 @@ COMPONENT litex_soc
 		 rx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 tx_stream_cfg_wr_addr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 tx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT ethernet_reset
-	PORT(clk : IN STD_LOGIC;
-		 power_good : IN STD_LOGIC;
-		 phy_rstn : OUT STD_LOGIC;
-		 mac_rst : OUT STD_LOGIC;
-		 sendArpRequest : OUT STD_LOGIC;
-		 tx_online : OUT STD_LOGIC
 	);
 END COMPONENT;
 
@@ -180,12 +189,6 @@ GENERIC (udp_port : INTEGER;
 	);
 END COMPONENT;
 
-COMPONENT reverse_mac
-	PORT(mac_address_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 mac_address_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
-	);
-END COMPONENT;
-
 COMPONENT audio_tx_module
 	PORT(sys_clk : IN STD_LOGIC;
 		 fmc_clk : IN STD_LOGIC;
@@ -220,11 +223,6 @@ COMPONENT audio_tx_module
 		 tx_en_o : OUT STD_LOGIC;
 		 tx_req_o : OUT STD_LOGIC;
 		 tx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT const_eth_speed
-	PORT(		 result : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -283,7 +281,8 @@ COMPONENT litex_eth_buffer_bridge
 		 mac_rx_frame_i : IN STD_LOGIC;
 		 mac_rx_byte_rcv_i : IN STD_LOGIC;
 		 mac_rx_error_i : IN STD_LOGIC;
-		 buf_tx_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 mcu_clk_i : IN STD_LOGIC;
+		 buf_tx_dat_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 buf_tx_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 mac_rx_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 buf_rx_we_o : OUT STD_LOGIC;
@@ -296,7 +295,7 @@ COMPONENT litex_eth_buffer_bridge
 		 buf_rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 buf_rx_len_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 buf_tx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 mac_tx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -542,6 +541,12 @@ COMPONENT const_ch_output_debug
 	);
 END COMPONENT;
 
+COMPONENT reverse_mac
+	PORT(mac_address_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
+		 mac_address_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
+	);
+END COMPONENT;
+
 COMPONENT ethernet_clks
 	PORT(inclk0 : IN STD_LOGIC;
 		 c0 : OUT STD_LOGIC;
@@ -577,7 +582,7 @@ SIGNAL	buf_rx_len :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	buf_rx_valid :  STD_LOGIC;
 SIGNAL	buf_rx_we :  STD_LOGIC;
 SIGNAL	buf_tx_a :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	buf_tx_d :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	buf_tx_dat :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	buf_tx_len :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	ch0i :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	ch0o :  STD_LOGIC_VECTOR(23 DOWNTO 0);
@@ -600,7 +605,6 @@ SIGNAL	clk_125MHz :  STD_LOGIC;
 SIGNAL	clk_1kHz :  STD_LOGIC;
 SIGNAL	clk_1MHz :  STD_LOGIC;
 SIGNAL	clk_250MHz :  STD_LOGIC;
-SIGNAL	const_eth_speed :  STD_LOGIC_VECTOR(1 DOWNTO 0);
 SIGNAL	dst_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	enet_clk :  STD_LOGIC;
 SIGNAL	enet_clk_90 :  STD_LOGIC;
@@ -722,7 +726,14 @@ hbus_clk0_p <= SYNTHESIZED_WIRE_11;
 
 
 
-b2v_inst : litex_soc
+b2v_inst1 : ethernet_reset
+PORT MAP(clk => clk_1kHz,
+		 enet_clk => enet_clk,
+		 power_good => powerGood,
+		 mac_rst => mac_reset);
+
+
+b2v_inst10 : litex_soc
 PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 aes67_ctrl_eth_rx_overflow => mcu_rx_overflow,
 		 aes67_ctrl_eth_tx_done => mcu_tx_done,
@@ -739,6 +750,7 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 serial1_rx => arduino_io3,
 		 serial_rx => arduino_io1,
 		 spi_miso => gpio8,
+		 spiflash_miso => gpio12,
 		 hyperram_rwds => hbus_rwds,
 		 i2c0_scl => gpio0,
 		 i2c0_sda => gpio1,
@@ -768,6 +780,9 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 spi_clk => gpio5,
 		 spi_cs_n => gpio6,
 		 spi_mosi => gpio7,
+		 spiflash_clk => gpio9,
+		 spiflash_cs_n => gpio10,
+		 spiflash_mosi => gpio11,
 		 sys_clk_out => mcu_clk,
 		 tx_stream_cfg_wr_en => tx_wr_en,
 		 aes67_ctrl_ip_addr => ip_address,
@@ -776,18 +791,12 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 aes67_ctrl_ptp_leader_id => ptp_current_leader_id,
 		 aes67_ctrl_ptp_log_msg_interval => ptp_log_message_interval,
 		 aes67_ctrl_ptp_time_source => ptp_time_source,
-		 eth_buf_tx_data => buf_tx_d,
+		 eth_buf_tx_data => buf_tx_dat,
 		 eth_buf_tx_len => buf_tx_len,
 		 rx_stream_cfg_wr_addr => rx_conf_wr_addr,
 		 rx_stream_cfg_wr_data => rx_conf_wr_data,
 		 tx_stream_cfg_wr_addr => tx_wr_addr,
 		 tx_stream_cfg_wr_data => tx_wr_data);
-
-
-b2v_inst1 : ethernet_reset
-PORT MAP(clk => clk_1kHz,
-		 power_good => powerGood,
-		 mac_rst => mac_reset);
 
 
 b2v_inst11 : ethernet_packet_parser
@@ -814,11 +823,6 @@ PORT MAP(clk => mac_rx_clock,
 		 parse_ptp_packet => parse_ptp_packet,
 		 parse_rtp_packet => parse_rtp_packet,
 		 ram_read_address => SYNTHESIZED_WIRE_13);
-
-
-b2v_inst12 : reverse_mac
-PORT MAP(mac_address_i => mac_address,
-		 mac_address_o => SYNTHESIZED_WIRE_15);
 
 
 b2v_inst13 : audio_tx_module
@@ -860,9 +864,6 @@ PORT MAP(sys_clk => clk_125MHz,
 hbus_clk0_n <= NOT(SYNTHESIZED_WIRE_11);
 
 
-
-b2v_inst15 : const_eth_speed
-PORT MAP(		 result => const_eth_speed);
 
 
 b2v_inst16 : clk_by_x
@@ -910,7 +911,8 @@ PORT MAP(buf_rx_ack_i => buf_rx_ack,
 		 mac_rx_frame_i => mac_rx_frame,
 		 mac_rx_byte_rcv_i => mac_rx_byte_received,
 		 mac_rx_error_i => mac_rx_error,
-		 buf_tx_data_i => buf_tx_d,
+		 mcu_clk_i => mcu_clk,
+		 buf_tx_dat_i => buf_tx_dat,
 		 buf_tx_len_i => buf_tx_len,
 		 mac_rx_data_i => mac_rx_data,
 		 buf_rx_we_o => buf_rx_we,
@@ -923,7 +925,7 @@ PORT MAP(buf_rx_ack_i => buf_rx_ack,
 		 buf_rx_data_o => buf_rx_d,
 		 buf_rx_len_o => buf_rx_len,
 		 buf_tx_addr_o => buf_tx_a,
-		 mac_tx_data_o => mcu_tx_data);
+		 mac_tx_dat_o => mcu_tx_data);
 
 
 b2v_inst20 : rx_ringbuffer
@@ -1052,7 +1054,7 @@ PORT MAP(clk => enet_clk,
 		 phy_rgmii_rx_ctl => enet_rx_dv,
 		 mac_gmii_txd => gmii_txd,
 		 phy_rgmii_rxd => enet_rx_d,
-		 speed => const_eth_speed,
+		 speed => mac_speed,
 		 mac_gmii_rx_clk => gmii_rx_clk,
 		 mac_gmii_rx_dv => gmii_rx_dv,
 		 mac_gmii_rx_er => gmii_rx_err,
@@ -1098,7 +1100,7 @@ PORT MAP(clk_in => pll_fs512,
 b2v_inst4 : ethernet
 GENERIC MAP(MIIM_CLOCK_DIVIDER => 50,
 			MIIM_DISABLE => false,
-			MIIM_PHY_ADDRESS => "00001",
+			MIIM_PHY_ADDRESS => "00000",
 			MIIM_POLL_WAIT_TICKS => 10000000,
 			MIIM_RESET_WAIT_TICKS => 0
 			)
@@ -1113,7 +1115,6 @@ PORT MAP(clock_125_i => enet_clk,
 		 mdio_io => enet_mdio,
 		 mac_address_i => SYNTHESIZED_WIRE_15,
 		 mii_rxd_i => gmii_rxd,
-		 speed_override_i => const_eth_speed,
 		 tx_data_i => mac_tx_data,
 		 mii_tx_er_o => gmii_tx_err,
 		 mii_tx_en_o => gmii_tx_en,
@@ -1161,6 +1162,11 @@ PORT MAP(		 ch0_o => ch0i,
 		 ch9_o => ch9i);
 
 
+b2v_inst8 : reverse_mac
+PORT MAP(mac_address_i => mac_address,
+		 mac_address_o => SYNTHESIZED_WIRE_15);
+
+
 b2v_inst9 : ethernet_clks
 PORT MAP(inclk0 => enet_clk_125m,
 		 c0 => enet_clk,
@@ -1188,5 +1194,6 @@ arduino_io(9) <= i2s_o1;
 gpio33 <= pll_fs64;
 gpio32 <= fs;
 user_led(3) <= mac_tx_byte_sent_n;
+user_led(2) <= mac_linkup;
 
 END bdf_type;

@@ -143,11 +143,11 @@ set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registe
 
 # --- tx_router shadow register CDC (litex_sys_clk -> sys_clk_125m) ---
 # Slow-changing config values updated only during stream setup
-set_false_path -from [get_registers {*inst13|inst37|samples_per_packet_shadow[*][*]}] -to [get_registers {*inst13|inst37|samples_per_packet_sync[*][*]}]
-set_false_path -from [get_registers {*inst13|inst37|threshold_shadow[*][*]}] -to [get_registers {*inst13|inst37|threshold_sync[*][*]}]
+set_false_path -from [get_registers {*inst13|inst10|samples_per_packet_shadow[*][*]}] -to [get_registers {*inst13|inst10|samples_per_packet_sync[*][*]}]
+set_false_path -from [get_registers {*inst13|inst10|threshold_shadow[*][*]}] -to [get_registers {*inst13|inst10|threshold_sync[*][*]}]
 
 # --- tx_router tx_en CDC (tx_transmitter domain -> sys_clk) ---
-set_false_path -to [get_registers {*inst13|inst37|tx_en_meta}]
+set_false_path -to [get_registers {*inst13|inst10|tx_en_meta}]
 
 # --- LiteX SoC reset signals - static during normal operation ---
 set_false_path -from [get_registers {*aes67soc_reset_storage*}] -to *
@@ -260,6 +260,17 @@ set_false_path -from [get_ports {c10_resetn}] -to *
 
 derive_pll_clocks
 derive_clock_uncertainty
+
+# --- LiteX SoC internal PLL (auto-derived by derive_pll_clocks) ---
+# The PLL inside litex_soc (inst10) generates the SoC's system clock from clk50.
+# derive_pll_clocks creates this clock automatically, but it doesn't exist yet
+# when the main set_clock_groups runs above. Declare it asynchronous to all
+# other domains here, after derive_pll_clocks has created it.
+set_clock_groups -asynchronous \
+    -group [get_clocks {c10_clk50m sys_clk_125m}] \
+    -group [get_clocks {inst10|ALTPLL|auto_generated|pll1|clk[0]}] \
+    -group [get_clocks {audio_mclk pll_fs256 pll_fs128 pll_fs64 fs clk_1kHz}] \
+    -group [get_clocks {enet_clk_125m inst9|altpll_component|auto_generated|pll1|clk[0] inst9|altpll_component|auto_generated|pll1|clk[1]}]
 
 
 source ./rgmii_phy_if.sdc
