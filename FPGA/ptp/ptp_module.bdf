@@ -532,6 +532,22 @@ on the Quartus Prime software download page.
 		(line (pt 78 12)(pt 82 8))
 	)
 )
+(pin
+	(output)
+	(rect 3064 416 3240 432)
+	(text "OUTPUT" (rect 1 0 39 10)(font "Arial" (font_size 6)))
+	(text "pin_name1" (rect 90 0 149 11)(font "Arial" ))
+	(pt 0 8)
+	(drawing
+		(line (pt 0 8)(pt 52 8))
+		(line (pt 52 4)(pt 78 4))
+		(line (pt 52 12)(pt 78 12))
+		(line (pt 52 12)(pt 52 4))
+		(line (pt 78 4)(pt 82 8))
+		(line (pt 82 8)(pt 78 12))
+		(line (pt 78 12)(pt 82 8))
+	)
+)
 (symbol
 	(rect 1352 240 1704 480)
 	(text "wallclock" (rect 5 0 54 11)(font "Arial" ))
@@ -2276,6 +2292,20 @@ on the Quartus Prime software download page.
 	(text "sys_clk" (rect 2464 456 2498 467)(font "DejaVu Sans Condensed" ))
 	(pt 2520 472)
 	(pt 2456 472)
+)
+(connector
+	(pt 1808 336)
+	(pt 1808 328)
+)
+(connector
+	(text "wc_fs" (rect 1712 320 1739 331)(font "DejaVu Sans Condensed" ))
+	(pt 1704 336)
+	(pt 1808 336)
+)
+(connector
+	(text "wc_fs" (rect 2928 408 2955 419)(font "DejaVu Sans Condensed" ))
+	(pt 3064 424)
+	(pt 2920 424)
 )
 (junction (pt 2280 272))
 (junction (pt 2264 288))

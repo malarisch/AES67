@@ -256,35 +256,43 @@ int eth_litex_write_rx_stream_config(const struct device *dev,
 {
 	ARG_UNUSED(dev);
 
-	uint8_t buf[18];
+	/* The Wishbone StreamConfigRAM writes directly into the rx_ringbuffer's
+	 * stream_ram — no base-address indirection like the FMC protocol (0x59).
+	 * Layout in stream_ram (17 bytes at stream_id * 32):
+	 *   0..3:  dest IP (big-endian)
+	 *   4..5:  dest UDP port (big-endian)
+	 *   6..13: channel output map
+	 *   14:    channel count
+	 *   15:    output delay
+	 *   16:    samples per channel per packet
+	 */
+	uint8_t buf[17];
 	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
 
 	memset(buf, 0, sizeof(buf));
 
-	/* Byte 0: base address = stream_id * 32 */
-	buf[0] = (uint8_t)(stream_id * 32);
-	/* Bytes 1..4: destination IP address (network byte order) */
-	buf[1] = ip[0];
-	buf[2] = ip[1];
-	buf[3] = ip[2];
-	buf[4] = ip[3];
-	/* Bytes 5..6: destination UDP port (big-endian) */
-	buf[5] = (dst_port >> 8) & 0xFF;
-	buf[6] =  dst_port       & 0xFF;
-	/* Bytes 7..14: output channel map */
+	/* Bytes 0..3: destination IP address (network byte order) */
+	buf[0] = ip[0];
+	buf[1] = ip[1];
+	buf[2] = ip[2];
+	buf[3] = ip[3];
+	/* Bytes 4..5: destination UDP port (big-endian) */
+	buf[4] = (dst_port >> 8) & 0xFF;
+	buf[5] =  dst_port       & 0xFF;
+	/* Bytes 6..13: output channel map */
 	for (uint8_t i = 0; i < 8 && i < channel_count; i++) {
-		buf[7 + i] = ch_map[i];
+		buf[6 + i] = ch_map[i];
 	}
-	/* Byte 15: channel count */
-	buf[15] = channel_count;
-	/* Byte 16: output delay in samples */
-	buf[16] = output_delay;
-	/* Byte 17: samples per channel per packet */
-	buf[17] = samples_per_channel;
+	/* Byte 14: channel count */
+	buf[14] = channel_count;
+	/* Byte 15: output delay in samples */
+	buf[15] = output_delay;
+	/* Byte 16: samples per channel per packet */
+	buf[16] = samples_per_channel;
 
-	/* Write all 18 bytes to the RX stream config RAM */
+	/* Write 17 config bytes directly to the stream config RAM */
 	uint8_t base_addr = stream_id * 32;
-	for (uint8_t i = 0; i < 18; i++) {
+	for (uint8_t i = 0; i < 17; i++) {
 		stream_cfg_write_byte(RX_STREAM_CFG_BASE, base_addr + i, buf[i]);
 	}
 
@@ -402,6 +410,7 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		k_msgq_get(&litex_tx_queue, &pkt, K_FOREVER);
 
 		size_t len = net_pkt_get_len(pkt);
+		LOG_DBG("TX: dequeued pkt len=%zu", len);
 
 		if (len > ETH_LITEX_MAX_PKT_SIZE) {
 			LOG_ERR("TX too large: %zu", len);
@@ -440,11 +449,15 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		}
 		first_tx = false;
 
+		LOG_DBG("TX: writing %zu bytes to buffer", len);
+
 		/* Write packet data to TX buffer */
 		eth_buf_write_packet(data->tx_buf, len);
 
 		/* Set TX length */
 		litex_csr_write(CSR_ETH_BUF_TX_LEN_ADDR, len);
+
+		LOG_DBG("TX: pulsing tx_request");
 
 		/* Assert eth_tx_request and hold long enough for CDC capture.
 		 * The FPGA synchronises this signal through a 2-FF chain clocked
@@ -454,6 +467,7 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		k_busy_wait(2);
 		eth_litex_ctrl_clear_bits(dev, AES67_CTRL_ETH_TX_REQUEST);
 
+		LOG_DBG("TX: done, unref pkt");
 		net_pkt_unref(pkt);
 	}
 }
@@ -549,6 +563,7 @@ static int eth_litex_send(const struct device *dev, struct net_pkt *pkt)
 		LOG_WRN("TX queue full, dropping pkt (%zu bytes)", net_pkt_get_len(pkt));
 		return -ENOMEM;
 	}
+	LOG_DBG("TX: queued pkt (%zu bytes)", net_pkt_get_len(pkt));
 	return 0;
 }
 

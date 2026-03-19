@@ -234,6 +234,13 @@ on the Quartus Prime software download page.
 		(text "parse_rtp_packet" (rect 197 235 267 247)(font "Arial" ))
 		(line (pt 288 240)(pt 272 240)(line_width 1))
 	)
+	(port
+		(pt 288 256)
+		(output)
+		(text "parse_mcu_packet" (rect 0 0 77 12)(font "Arial" ))
+		(text "parse_mcu_packet" (rect 190 251 267 263)(font "Arial" ))
+		(line (pt 288 256)(pt 272 256)(line_width 1))
+	)
 	(parameter
 		"udp_port"
 		"4023"

@@ -5,10 +5,10 @@ use IEEE.NUMERIC_STD.ALL;
 entity rx_ringbuffer is
     generic
     (
-        audio_buffer_sample_depth : integer := 64; -- must be power of 2
+        audio_buffer_sample_depth : integer := 128; -- must be power of 2
         global_channel_count : integer := 16; -- must be power of 2
         bytes_per_sample : integer := 3;
-        max_streams : integer := 4
+        max_streams : integer := 8
     );
 	port
 	(
@@ -48,15 +48,27 @@ entity rx_ringbuffer is
 end entity;
 
 architecture Behavioral of rx_ringbuffer is
+    -- ceil(log2(n)) for computing address bits from generics
+    function clog2(n : positive) return natural is
+        variable result : natural := 0;
+        variable val    : natural := n - 1;
+    begin
+        while val > 0 loop
+            result := result + 1;
+            val := val / 2;
+        end loop;
+        return result;
+    end function;
+
     -- Internal slot size: 4 bytes per sample (pad 24-bit to 32-bit) for power-of-2 addressing
     constant SLOT_BYTES : integer := 4;
-    -- Buffer size = depth * channels * slot_bytes * 2 (double buffer)
-    -- = 128 * 16 * 4 * 2 = 16384 = 2^14
-    constant ADDR_BITS : integer := 13;
-    constant AUDIO_BUFFER_LENGTH : integer := audio_buffer_sample_depth * global_channel_count * SLOT_BYTES * 2;
-    -- Stride constants (all powers of 2 since slot=4, channels=16)
+    -- Buffer size = depth * channels * slot_bytes (all must be powers of 2)
+    constant ADDR_BITS : integer := clog2(audio_buffer_sample_depth * global_channel_count * SLOT_BYTES);
+    constant AUDIO_BUFFER_LENGTH : integer := 2**ADDR_BITS;
+    -- Stride constants (all must be powers of 2)
     constant CHANNEL_STRIDE : integer := SLOT_BYTES; -- 4
-    constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES; -- 64
+    constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES;
+    constant SAMPLE_SHIFT   : integer := clog2(SAMPLE_STRIDE); -- log2(SAMPLE_STRIDE) for address computation
 
     type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData, s_End);
     signal packetParserState : t_s_parsePacket := s_Idle;
@@ -69,7 +81,6 @@ architecture Behavioral of rx_ringbuffer is
 
     -- Synthesis attributes for Block RAM inference (Intel/Altera, Cyclone 10 LP = M9K blocks)
     attribute ramstyle : string;
-    attribute ramstyle of sample_ram : signal is "no_rw_check";
     attribute ramstyle of stream_ram : signal is "no_rw_check";
 
     -- Synchronous read port for stream_ram
@@ -180,7 +191,7 @@ begin
                 output_next_sample <= '1';
                 -- Derive read pointer directly from media clock (same as write side, but without delay)
                 -- This keeps read-write distance constant at exactly the configured delay
-                sample_rd_ptr <= resize(unsigned(media_clock_i(7 downto 0)), ADDR_BITS) sll 6;
+                sample_rd_ptr <= resize(unsigned(media_clock_i(7 downto 0)), ADDR_BITS) sll SAMPLE_SHIFT;
             end if;
 
             -- ======== Packet parser state machine ========
@@ -370,7 +381,7 @@ begin
                             current_packet_samples_per_channel <= to_integer(unsigned(stream_rd_data_r));
                             wr_sample_pos := unsigned(current_packet_media_clock(7 downto 0))
                                            + cached_delay;
-                            wr_addr_sample_base <= resize(wr_sample_pos, ADDR_BITS) sll 6;
+                            wr_addr_sample_base <= resize(wr_sample_pos, ADDR_BITS) sll SAMPLE_SHIFT;
                             prepare_step <= 11;
 
                         when 11 =>

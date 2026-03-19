@@ -248,6 +248,13 @@ on the Quartus Prime software download page.
 		(text "ptp_ram_addr[10..0]" (rect 275 235 395 248)(font "DejaVu Sans Condensed" (font_size 8)))
 		(line (pt 416 240)(pt 400 240)(line_width 3))
 	)
+	(port
+		(pt 416 256)
+		(output)
+		(text "pin_name1" (rect 0 0 64 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "pin_name1" (rect 331 251 395 264)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 416 256)(pt 400 256))
+	)
 	(drawing
 		(rectangle (rect 16 16 400 336))
 	)

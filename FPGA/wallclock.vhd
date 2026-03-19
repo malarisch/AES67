@@ -104,36 +104,27 @@ architecture Behavioral of wallclock is
     signal sample_pulse_int : std_logic := '0';
     
     -- ============================================================
-    -- Media Clock (AES67): epoch-aligned, computed from wallclock
-    -- media_clock = (seconds * audio_fs + sample_in_second) mod 2^32
-    -- where sample_in_second = floor(nanoseconds * audio_fs / 1e9)
-    -- Using reciprocal multiplication:
-    --   sample_in_sec = (nanoseconds * K) >> 32  where K = audio_fs * 2^32 / 1e9
-    --   For 48kHz: K = 48000 * 4294967296 / 1e9 = 206158
+    -- Media Clock (AES67): epoch-aligned, NCO-coherent
+    --
+    -- media_clock increments by 1 on each sample_pulse (NCO-driven),
+    -- keeping it phase-coherent with fs_clk/LRCK. The NCO is PTP-
+    -- disciplined via freq_correction_ppb, so the count stays accurate.
+    -- On wallclock_set_i, the absolute value is loaded from the
+    -- wallclock (sec*48000 + sample_in_sec) to establish epoch alignment.
     -- ============================================================
     constant MEDIA_CLK_RECIP : unsigned(17 downto 0) :=
         to_unsigned(integer(real(audio_fs) * 4294967296.0 / 1.0e9), 18);
 
-    -- Base media clock: seconds contribution (updated on second pulse)
-    signal media_base       : unsigned(31 downto 0) := (others => '0');
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
 
-    -- Pipeline registers for media clock computation
-    -- Breaks nsec_reg → media_clock_reg path into 3 stages:
-    --   Stage 0: nsec_reg → media_nsec_reg (register input to multiply)
-    --   Stage 1: media_nsec_reg * RECIP → media_mult_reg (32×18 multiply)
-    --   Stage 2: media_base + media_mult_reg[47:32] → media_clock_reg (add)
-    signal media_nsec_reg   : unsigned(31 downto 0) := (others => '0');  -- Stage 0: registered nsec
-    signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');  -- Stage 1: multiply result
+    -- For wallclock_set resync: pipeline to compute absolute media clock
+    -- Pipeline: Stage 0 (register nsec) → Stage 1 (multiply) → Stage 2 (add)
+    signal media_nsec_reg   : unsigned(31 downto 0) := (others => '0');
+    signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');
+    signal media_base       : unsigned(31 downto 0) := (others => '0');
 
-    -- Delayed second pulse aligned to media clock pipeline output (3-stage delay).
-    -- media_base must increment at the same time as the pipeline outputs the
-    -- new (small) nsec value after a seconds rollover. Without this delay,
-    -- media_base advances 3 cycles before the pipeline flushes the old nsec,
-    -- causing a 1-tick glitch of +48000 in the RTP timestamp.
-    signal second_pulse_d1  : std_logic := '0';
-    signal second_pulse_d2  : std_logic := '0';
-    signal second_pulse_d3  : std_logic := '0';
+    -- Resync counter: 0 = idle, 1..3 = pipeline flushing after wallclock_set
+    signal media_resync_cnt : unsigned(1 downto 0) := (others => '0');
     
     -- ============================================================
     -- Pipeline registers to break freq_correction → sec_reg critical path.
@@ -232,58 +223,55 @@ begin
     end process nco_proc;
 
     -- ============================================================
-    -- Media Clock Computation Process (AES67)
-    -- Epoch-aligned: media_clock = (sec * 48000 + sample_in_sec) mod 2^32
-    -- 
-    -- PIPELINED to meet 125 MHz timing:
-    --   Stage 1: ns_times_recip = nsec_reg * MEDIA_CLK_RECIP (32×18 multiply)
-    --   Stage 2: media_clock_reg = media_base + ns_times_recip[47:32]
+    -- Media Clock Process (AES67)
+    --
+    -- media_clock_reg increments by 1 on each sample_pulse_int
+    -- (NCO-driven), keeping it phase-coherent with fs_clk/LRCK.
+    -- No per-second resync — the NCO is already PTP-disciplined
+    -- via freq_correction_ppb, so the count stays accurate.
+    --
+    -- On wallclock_set_i: hard-set to the wallclock-derived
+    -- absolute value (sec*48000 + sample_in_sec) via a 3-stage
+    -- pipeline. This is the only time the media clock jumps.
     -- ============================================================
     media_proc: process(clk, reset_n)
         variable sample_in_sec  : unsigned(15 downto 0);  -- 0..47999
     begin
         if reset_n = '0' then
-            media_base      <= (others => '0');
-            media_clock_reg <= (others => '0');
-            media_nsec_reg  <= (others => '0');
-            media_mult_reg  <= (others => '0');
-            second_pulse_d1 <= '0';
-            second_pulse_d2 <= '0';
-            second_pulse_d3 <= '0';
+            media_clock_reg  <= (others => '0');
+            media_base       <= (others => '0');
+            media_nsec_reg   <= (others => '0');
+            media_mult_reg   <= (others => '0');
+            media_resync_cnt <= (others => '0');
         elsif rising_edge(clk) then
-            -- ===== Delay second_pulse to align with pipeline output =====
-            -- The nsec→media_clock pipeline has 3 stages of latency.
-            -- media_base must advance at the same cycle that Stage 2
-            -- outputs the first result computed from the new (post-rollover)
-            -- nsec value, otherwise we get media_base(new) + sample_in_sec(old).
-            second_pulse_d1 <= second_pulse_int;
-            second_pulse_d2 <= second_pulse_d1;
-            second_pulse_d3 <= second_pulse_d2;
+            -- ===== Pipeline: always running for wallclock_set resync =====
+            -- Stage 0: register nsec
+            media_nsec_reg <= unsigned(nsec_reg);
+            -- Stage 1: multiply (32×18 = 50 bits)
+            media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
 
             if wallclock_set_i = '1' then
-                -- Hard set: compute base from full 32-bit seconds (mod 2^32).
-                -- Uses lower 32 bits — upper bits don't matter since
-                -- RTP timestamp is 32-bit and wraps naturally.
+                -- Hard set: compute media_base from wallclock seconds
                 media_base <= resize(
                     wallclock_seconds_i(31 downto 0)
                     * to_unsigned(audio_fs, 32), 32);
-            elsif second_pulse_d3 = '1' then
-                -- Every second: advance base by audio_fs samples,
-                -- synchronized to pipeline output stage.
-                media_base <= media_base + to_unsigned(audio_fs, 32);
+                -- Start resync pipeline (3 cycles for nsec to propagate)
+                media_resync_cnt <= to_unsigned(1, 2);
+
+            elsif media_resync_cnt = 3 then
+                -- Pipeline output ready: load absolute wallclock-derived value
+                sample_in_sec := media_mult_reg(47 downto 32);
+                media_clock_reg <= media_base + resize(sample_in_sec, 32);
+                media_resync_cnt <= (others => '0');
+
+            elsif media_resync_cnt /= 0 then
+                -- Pipeline flushing, count up
+                media_resync_cnt <= media_resync_cnt + 1;
+
+            elsif sample_pulse_int = '1' then
+                -- Normal operation: increment by 1, coherent with NCO
+                media_clock_reg <= media_clock_reg + 1;
             end if;
-
-            -- ===== STAGE 0: Register nsec input (breaks nsec_reg → mult path) =====
-            media_nsec_reg <= unsigned(nsec_reg);
-
-            -- ===== STAGE 1: Multiply (32×18 = 50 bits) =====
-            -- sample_in_sec = floor(nanoseconds * MEDIA_CLK_RECIP / 2^32)
-            -- Uses media_nsec_reg from PREVIOUS cycle
-            media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
-
-            -- ===== STAGE 2: Add (uses PREVIOUS cycle's multiply result) =====
-            sample_in_sec := media_mult_reg(47 downto 32);
-            media_clock_reg <= media_base + resize(sample_in_sec, 32);
         end if;
     end process media_proc;
 
