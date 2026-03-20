@@ -464,11 +464,12 @@ begin
                                         clock_configured <= '1';
                                         clock_configure_timestamp_seconds_o <= ptp_origin_timestamp_seconds;
                                         clock_configure_timestamp_nanoseconds_o <= ptp_origin_timestamp_nanoseconds;
-                                    end if;
+                                    else
                                     stored_t1_seconds <= ptp_origin_timestamp_seconds;
                                     stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                     sequence_id_o <= ptp_sequence_id;
                                     send_delay_req_o <= '1';
+												end if;
                                 end if;
                             end if;
                             s_SM_PtpParser <= s_Done;

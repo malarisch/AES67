@@ -35,7 +35,8 @@ entity ptpv2_controller is
         t3_valid_o: out std_logic;
 		ptp_log_interval_o: out std_logic_vector(7 downto 0);
 
-        config_valid_i: in std_logic
+        config_valid_i: in std_logic;
+        sof_sent_i: in std_logic
 
 
     );
@@ -72,8 +73,13 @@ entity ptpv2_controller is
     signal sequence_id_i_latched : unsigned(15 downto 0) := (others => '0');
     signal request_port_identity_i_latched : std_logic_vector(79 downto 0) := (others => '0');
     signal send_delay_resp : std_logic := '0';
-    signal rx_timestamp_nanoseconds_i_latched : unsigned(31 downto 0) := (others => '0');
-    signal rx_timestamp_seconds_i_latched : unsigned(47 downto 0) := (others => '0');
+    signal timestamp_nanoseconds_i_latched : unsigned(31 downto 0) := (others => '0');
+    signal timestamp_seconds_i_latched : unsigned(47 downto 0) := (others => '0');
+
+    -- Separate latch for Sync TX timestamp (used in Follow_Up)
+    -- Prevents delay_resp RX timestamp from overwriting the Sync TX timestamp
+    signal sync_tx_ts_nanoseconds : unsigned(31 downto 0) := (others => '0');
+    signal sync_tx_ts_seconds     : unsigned(47 downto 0) := (others => '0');
 
     signal send_delay_req_i_reg : std_logic := '0';  -- Edge detection for same clock domain
 
@@ -148,11 +154,21 @@ entity ptpv2_controller is
     signal announce_next_sec_pre : unsigned(3 downto 0)  := (others => '0');
     signal announce_overflow     : std_logic := '0';
 
+    -- CDC for sof_sent toggle signal (from TX clock domain)
+    signal sof_toggle_meta : std_logic := '0';  -- metastability stage
+    signal sof_toggle_sync : std_logic := '0';  -- stable synchronized value
+    signal sof_toggle_prev : std_logic := '0';  -- previous value for edge detection
+    signal sof_detected    : std_logic;          -- combinational: toggle changed = SOF occurred
 
+    attribute PRESERVE of sof_toggle_meta : signal is true;
+    attribute PRESERVE of sof_toggle_sync : signal is true;
     end entity;
 architecture Behavioral of ptpv2_controller is
     constant ONE_SECOND_NS : unsigned(31 downto 0) := to_unsigned(1000000000, 32);
 begin
+
+    -- SOF toggle detection: any change in synchronized toggle means SOF occurred
+    sof_detected <= sof_toggle_sync xor sof_toggle_prev;
 
     -- ============================================================
     -- Decode ptp_log_message_interval_i to seconds + nanoseconds
@@ -366,6 +382,9 @@ begin
             wc_sec_r                <= (others => '0');
             wc_ns_r                 <= (others => '0');
             ptp_log_interval_o      <= (others => '0');
+            sof_toggle_meta         <= '0';
+            sof_toggle_sync         <= '0';
+            sof_toggle_prev         <= '0';
         elsif rising_edge(clk) then
             -- Register wallclock once per cycle for coherent sampling
             wc_sec_r <= wallclock_seconds_i(3 downto 0);
@@ -374,7 +393,10 @@ begin
             -- Edge detection registers (same clock domain - no CDC needed)
             second_pulse_i_reg <= second_pulse_i;
             send_delay_resp_in_reg <= send_delay_resp_in;
-
+            -- CDC synchronizer for SOF toggle from TX clock domain
+            sof_toggle_meta <= sof_sent_i;
+            sof_toggle_sync <= sof_toggle_meta;
+            sof_toggle_prev <= sof_toggle_sync;
             -- NOTE: frame_start_o is managed by the state machine only
             -- Do NOT clear it here based on tx_en - the state machine handles this
 
@@ -475,6 +497,11 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';  -- Can deassert now
                         end if;
+                        if (tx_started = '1' and sof_detected = '1') then
+                            -- latch tx timestamp into dedicated sync registers
+                            sync_tx_ts_nanoseconds <= wallclock_nanoseconds_i;
+                            sync_tx_ts_seconds <= wallclock_seconds_i;
+                        end if;
                         -- Wait for sender to finish (tx_en goes low after rising edge seen)
                         if (tx_started = '1' and tx_en_i_sync = '0') then
                             tx_started <= '0';
@@ -482,9 +509,9 @@ begin
                         end if;
 
                     when s_Wait_for_Sync_Done =>
-                        -- Extra cycle for CDC timestamp to settle
-                        timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
-                        timestamp_seconds_o <= wallclock_seconds_i;
+                        -- Copy dedicated sync TX timestamp to output 
+                        timestamp_nanoseconds_o <= sync_tx_ts_nanoseconds;
+                        timestamp_seconds_o <= sync_tx_ts_seconds;
                         leader_state <= s_Latch_Sync_Timestamp;
 
                     when s_Latch_Sync_Timestamp =>
@@ -546,9 +573,12 @@ begin
                     -- DELAY RESPONSE MESSAGE SEQUENCE
                     -- ========================================
                     when s_Send_Delay_Resp =>
-										ptp_log_interval_o <= ptp_log_message_interval_i;
-                        timestamp_nanoseconds_o <= rx_timestamp_nanoseconds_i_latched;
-                        timestamp_seconds_o <= rx_timestamp_seconds_i_latched;
+                        sequence_id_o <= sequence_id_i_latched;
+                        request_port_identity_o <= request_port_identity_i_latched;
+                        tx_message_type_o <= x"9"; 
+						ptp_log_interval_o <= ptp_log_message_interval_i;
+                        timestamp_nanoseconds_o <= timestamp_nanoseconds_i_latched;
+                        timestamp_seconds_o <= timestamp_seconds_i_latched;
                         frame_start_o <= '1';
                         tx_started <= '0';
                         leader_state <= s_Wait_for_Delay_Resp_Ack;
@@ -579,8 +609,8 @@ begin
                     send_delay_resp <= '1';
                     request_port_identity_i_latched <= request_port_identity_i;
                     sequence_id_i_latched <= sequence_id_i;
-                    rx_timestamp_nanoseconds_i_latched <= rx_timestamp_nanoseconds_i;
-                    rx_timestamp_seconds_i_latched <= rx_timestamp_seconds_i;
+                    timestamp_nanoseconds_i_latched <= rx_timestamp_nanoseconds_i;
+                    timestamp_seconds_i_latched <= rx_timestamp_seconds_i;
                 end if;
                 follower_state <= f_Idle;  -- Ensure follower state machine is reset
             elsif (is_leader_i = '0' and is_follower_i = '1') then
@@ -614,12 +644,15 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';
                         end if;
+                        -- Latch T3 at SOF (same measurement point as RX timestamps)
+                        if (tx_started = '1' and sof_detected = '1') then
+                            timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
+                            timestamp_seconds_o <= wallclock_seconds_i;
+                        end if;
+                        -- Wait for TX to finish
                         if (tx_started = '1' and tx_en_i_sync = '0') then
                             tx_started <= '0';
                             follower_state <= f_Wait_for_Delay_Req_Done;
-
-                            timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
-                            timestamp_seconds_o <= wallclock_seconds_i;
                         end if;
 
                     when f_Wait_for_Delay_Req_Done =>

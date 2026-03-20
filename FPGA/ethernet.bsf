@@ -256,6 +256,13 @@ on the Quartus Prime software download page.
 		(line (pt 272 352)(pt 256 352)(line_width 1))
 	)
 	(port
+		(pt 272 368)
+		(output)
+		(text "sof_sent_o" (rect 0 0 46 12)(font "Arial" ))
+		(text "sof_sent_o" (rect 205 363 251 375)(font "Arial" ))
+		(line (pt 272 368)(pt 256 368)(line_width 1))
+	)
+	(port
 		(pt 272 144)
 		(bidir)
 		(text "mdio_io" (rect 0 0 30 12)(font "Arial" ))

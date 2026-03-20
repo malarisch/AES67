@@ -23,7 +23,7 @@
 
 #include "eth_litex.h"
 
-LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_INF);
 
 /* ---- Driver data structures ---- */
 
@@ -135,9 +135,19 @@ int eth_litex_write_ptp_config(const struct device *dev,
 {
 	ARG_UNUSED(dev);
 
-	uint32_t id_lo, id_hi;
-	memcpy(&id_lo, &leader_clock_id[0], 4);
-	memcpy(&id_hi, &leader_clock_id[4], 4);
+	/* leader_clock_id is 8 bytes in network (big-endian) order.
+	 * FPGA expects id_hi(31..0) = bytes 0..3, id_lo(31..0) = bytes 4..7,
+	 * each in big-endian bit order within the CSR register.
+	 * On a little-endian CPU, memcpy into uint32_t would byte-swap,
+	 * so we pack manually — same pattern as write_mac / write_ip. */
+	uint32_t id_hi = ((uint32_t)leader_clock_id[0] << 24) |
+			 ((uint32_t)leader_clock_id[1] << 16) |
+			 ((uint32_t)leader_clock_id[2] << 8) |
+			 (uint32_t)leader_clock_id[3];
+	uint32_t id_lo = ((uint32_t)leader_clock_id[4] << 24) |
+			 ((uint32_t)leader_clock_id[5] << 16) |
+			 ((uint32_t)leader_clock_id[6] << 8) |
+			 (uint32_t)leader_clock_id[7];
 
 	litex_csr_write(CSR_AES67_CSR_PTP_LEADER_ID_LO_ADDR, id_lo);
 	litex_csr_write(CSR_AES67_CSR_PTP_LEADER_ID_HI_ADDR, id_hi);

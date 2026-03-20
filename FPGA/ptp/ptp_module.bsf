@@ -151,6 +151,13 @@ on the Quartus Prime software download page.
 		(line (pt 0 304)(pt 16 304))
 	)
 	(port
+		(pt 0 320)
+		(input)
+		(text "sof_sent_i" (rect 0 0 57 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "sof_sent_i" (rect 21 315 78 328)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 0 320)(pt 16 320))
+	)
+	(port
 		(pt 416 32)
 		(output)
 		(text "tx_en_ptpfu" (rect 0 0 69 13)(font "DejaVu Sans Condensed" (font_size 8)))

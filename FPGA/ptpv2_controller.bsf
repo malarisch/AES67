@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 424 320)
+	(rect 16 16 424 352)
 	(text "ptpv2_controller" (rect 5 0 68 12)(font "Arial" ))
-	(text "inst" (rect 8 288 20 300)(font "Arial" ))
+	(text "inst" (rect 8 320 20 332)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -137,6 +137,20 @@ on the Quartus Prime software download page.
 		(line (pt 0 272)(pt 16 272)(line_width 3))
 	)
 	(port
+		(pt 0 288)
+		(input)
+		(text "config_valid_i" (rect 0 0 54 12)(font "Arial" ))
+		(text "config_valid_i" (rect 21 283 75 295)(font "Arial" ))
+		(line (pt 0 288)(pt 16 288)(line_width 1))
+	)
+	(port
+		(pt 0 304)
+		(input)
+		(text "sof_sent_i" (rect 0 0 42 12)(font "Arial" ))
+		(text "sof_sent_i" (rect 21 299 63 311)(font "Arial" ))
+		(line (pt 0 304)(pt 16 304)(line_width 1))
+	)
+	(port
 		(pt 408 32)
 		(output)
 		(text "tx_message_type_o[3..0]" (rect 0 0 103 12)(font "Arial" ))
@@ -193,6 +207,6 @@ on the Quartus Prime software download page.
 		(line (pt 408 144)(pt 392 144)(line_width 3))
 	)
 	(drawing
-		(rectangle (rect 16 16 392 288)(line_width 1))
+		(rectangle (rect 16 16 392 320)(line_width 1))
 	)
 )

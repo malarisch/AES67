@@ -5,7 +5,7 @@ use IEEE.NUMERIC_STD.ALL;
 entity rx_ringbuffer is
     generic
     (
-        audio_buffer_sample_depth : integer := 128; -- must be power of 2
+        audio_buffer_sample_depth : integer := 256; -- must be power of 2
         global_channel_count : integer := 16; -- must be power of 2
         bytes_per_sample : integer := 3;
         max_streams : integer := 8
@@ -191,7 +191,7 @@ begin
                 output_next_sample <= '1';
                 -- Derive read pointer directly from media clock (same as write side, but without delay)
                 -- This keeps read-write distance constant at exactly the configured delay
-                sample_rd_ptr <= resize(unsigned(media_clock_i(7 downto 0)), ADDR_BITS) sll SAMPLE_SHIFT;
+                sample_rd_ptr <= unsigned(media_clock_i(7 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
             end if;
 
             -- ======== Packet parser state machine ========
@@ -381,7 +381,7 @@ begin
                             current_packet_samples_per_channel <= to_integer(unsigned(stream_rd_data_r));
                             wr_sample_pos := unsigned(current_packet_media_clock(7 downto 0))
                                            + cached_delay;
-                            wr_addr_sample_base <= resize(wr_sample_pos, ADDR_BITS) sll SAMPLE_SHIFT;
+                            wr_addr_sample_base <= wr_sample_pos & to_unsigned(0, SAMPLE_SHIFT);
                             prepare_step <= 11;
 
                         when 11 =>
