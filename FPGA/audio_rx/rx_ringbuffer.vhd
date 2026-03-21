@@ -106,6 +106,7 @@ architecture Behavioral of rx_ringbuffer is
     signal fs_clk_i_sync2 : std_logic := '0';
     signal packet_ready_i_sync1 : std_logic := '0';
     signal packet_ready_i_sync2 : std_logic := '0';
+    signal packet_ready_i_sync3 : std_logic := '0'; -- 3rd stage: toggle change detection
     signal zaudio_sync : std_logic := '0';
     signal byte_count_parser : integer range 0 to bytes_per_sample - 1 := 0;
     signal output_next_sample : std_logic := '0';
@@ -160,6 +161,7 @@ begin
             zaudio_sync <= '0';
             packet_ready_i_sync1 <= '0';
             packet_ready_i_sync2 <= '0';
+            packet_ready_i_sync3 <= '0';
             output_next_sample <= '0';
             current_stream_channel_count <= 0;
             media_clock_latch <= (others => '0');
@@ -184,8 +186,10 @@ begin
             fs_clk_i_sync2 <= fs_clk_i_sync1;
             zaudio_sync <= fs_clk_i_sync2;
 
+            -- CDC synchronizer for toggle signal from mac_rx_clock domain
             packet_ready_i_sync1 <= packet_ready_i;
             packet_ready_i_sync2 <= packet_ready_i_sync1;
+            packet_ready_i_sync3 <= packet_ready_i_sync2;
 
             if zaudio_sync = '0' and fs_clk_i_sync2 = '1' then
                 output_next_sample <= '1';
@@ -197,7 +201,7 @@ begin
             -- ======== Packet parser state machine ========
             case packetParserState is
                 when s_Idle =>
-                    if packet_ready_i_sync2 = '0' and packet_ready_i_sync1 = '1' then
+                    if packet_ready_i_sync2 /= packet_ready_i_sync3 then
                         media_clock_latch <= media_clock_i;
                         packetParserState <= s_readHeader;
                         packet_read_index <= 16;
