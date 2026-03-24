@@ -38,7 +38,7 @@ entity ptpv2_servo is
         FILTER_SHIFT : integer := 0;  -- alpha
         
         -- Warmup: ignore first N samples to let filter settle
-        WARMUP_SAMPLES : integer := 1;  -- Quick start
+        WARMUP_SAMPLES : integer := 8; 
         
         -- Lock thresholds
         LOCK_THRESHOLD_NS   : integer := 500;    -- Consider locked if offset < 500ns
@@ -297,13 +297,13 @@ begin
                     -- Determine action based on offset magnitude
                     inp_do_phase_jump <= '0';
                     inp_do_normal_op <= '0';
-                    
+
                     -- Sanity check: reject obviously invalid measurements
                     if inp_offset_abs < MAX_VALID_OFFSET then
                         inp_valid_meas <= '1';
-                        
+
                         -- Phase jump decision
-                        if inp_offset_abs > PHASE_JUMP_THRESHOLD then
+                        if inp_offset_abs > PHASE_JUMP_THRESHOLD and sample_count >= WARMUP_SAMPLES then
                             inp_do_phase_jump <= '1';
                             -- Calculate phase jump value (negate offset)
                             if inp_offset > to_signed(2**30 - 1, 32) then
@@ -334,18 +334,8 @@ begin
                             -- Apply phase jump
                             phase_jump_reg <= inp_phase_jump_val;
                             phase_jump_valid_reg <= '1';
-                            
-                            -- Reset filter and integrator
-                            filtered_offset <= (others => '0');
-                            integral_sum <= (others => '0');
-                            freq_correction <= (others => '0');
-                            sample_count <= 0;
                             locked <= '0';
                             lock_counter <= 0;
-                            
-                            -- Reset PI pipeline
-                            pi_state <= PI_IDLE;
-                            pi_trigger <= '0';
                             
                         elsif inp_do_normal_op = '1' then
                             -- Normal frequency correction operation
