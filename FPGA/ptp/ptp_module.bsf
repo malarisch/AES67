@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.2"))
 (symbol
-	(rect 16 16 432 368)
+	(rect 16 16 432 432)
 	(text "ptp_module" (rect 5 0 74 13)(font "DejaVu Sans Condensed" (font_size 8)))
-	(text "inst" (rect 8 337 25 348)(font "DejaVu Sans Condensed" ))
+	(text "inst" (rect 8 401 25 412)(font "DejaVu Sans Condensed" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -158,6 +158,34 @@ on the Quartus Prime software download page.
 		(line (pt 0 320)(pt 16 320))
 	)
 	(port
+		(pt 0 336)
+		(input)
+		(text "ptp_clock_accuracy[7..0]" (rect 0 0 145 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "ptp_clock_accuracy[7..0]" (rect 21 331 166 344)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 0 336)(pt 16 336)(line_width 3))
+	)
+	(port
+		(pt 0 352)
+		(input)
+		(text "ptp_clock_priorityone[7..0]" (rect 0 0 156 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "ptp_clock_priorityone[7..0]" (rect 21 347 177 360)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 0 352)(pt 16 352)(line_width 3))
+	)
+	(port
+		(pt 0 368)
+		(input)
+		(text "ptp_clock_prioritytwo[7..0]" (rect 0 0 155 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "ptp_clock_prioritytwo[7..0]" (rect 21 363 176 376)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 0 368)(pt 16 368)(line_width 3))
+	)
+	(port
+		(pt 0 384)
+		(input)
+		(text "ptp_clock_class[7..0]" (rect 0 0 121 13)(font "DejaVu Sans Condensed" (font_size 8)))
+		(text "ptp_clock_class[7..0]" (rect 21 379 142 392)(font "DejaVu Sans Condensed" (font_size 8)))
+		(line (pt 0 384)(pt 16 384)(line_width 3))
+	)
+	(port
 		(pt 416 32)
 		(output)
 		(text "tx_en_ptpfu" (rect 0 0 69 13)(font "DejaVu Sans Condensed" (font_size 8)))
@@ -263,6 +291,6 @@ on the Quartus Prime software download page.
 		(line (pt 416 256)(pt 400 256))
 	)
 	(drawing
-		(rectangle (rect 16 16 400 336))
+		(rectangle (rect 16 16 400 400))
 	)
 )

@@ -158,6 +158,20 @@ int eth_litex_write_ptp_config(const struct device *dev,
 	return 0;
 }
 
+int eth_litex_write_ptp_gm_quality(const struct device *dev,
+				   uint8_t priority1, uint8_t priority2,
+				   uint8_t clock_class, uint8_t clock_accuracy)
+{
+	ARG_UNUSED(dev);
+
+	litex_csr_write(CSR_AES67_CSR_PTP_GM_PRIORITY1_ADDR, priority1);
+	litex_csr_write(CSR_AES67_CSR_PTP_GM_PRIORITY2_ADDR, priority2);
+	litex_csr_write(CSR_AES67_CSR_PTP_GM_CLOCK_CLASS_ADDR, clock_class);
+	litex_csr_write(CSR_AES67_CSR_PTP_GM_CLOCK_ACCURACY_ADDR, clock_accuracy);
+
+	return 0;
+}
+
 bool eth_litex_read_ppb_counts(const struct device *dev,
 			       uint32_t *wc_count, uint32_t *pll_count)
 {

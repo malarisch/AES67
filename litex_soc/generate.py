@@ -121,6 +121,10 @@ _io = [
         Subsignal("ptp_time_source",    Pins(8)),
         Subsignal("ptp_log_msg_interval", Pins(8)),
         Subsignal("ptp_announce_msg_interval", Pins(8)),
+        Subsignal("ptp_gm_priority1",  Pins(8)),
+        Subsignal("ptp_gm_priority2",  Pins(8)),
+        Subsignal("ptp_gm_clock_class", Pins(8)),
+        Subsignal("ptp_gm_clock_accuracy", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
     ),
 
@@ -256,6 +260,10 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_ptp_time_source     = Signal(8)
         self.o_ptp_log_msg_interval = Signal(8)
         self.o_ptp_announce_msg_interval = Signal(8)
+        self.o_ptp_gm_priority1    = Signal(8)
+        self.o_ptp_gm_priority2    = Signal(8)
+        self.o_ptp_gm_clock_class  = Signal(8)
+        self.o_ptp_gm_clock_accuracy = Signal(8)
         self.o_eth_tx_request      = Signal()
 
         # =====================================================================
@@ -302,6 +310,11 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.ptp_log_msg_interval = CSRStorage(8, description="PTP logMessageInterval")
         self.ptp_announce_msg_interval = CSRStorage(8, description="PTP announce logMessageInterval")
 
+        self.ptp_gm_priority1     = CSRStorage(8, description="PTP GM priority1")
+        self.ptp_gm_priority2     = CSRStorage(8, description="PTP GM priority2")
+        self.ptp_gm_clock_class   = CSRStorage(8, description="PTP GM clock class")
+        self.ptp_gm_clock_accuracy = CSRStorage(8, description="PTP GM clock accuracy")
+
         # -- Scratch register (RW, no HW connection) --
         self.scratch = CSRStorage(32, description="Scratch register (read/write, no HW effect)")
 
@@ -342,6 +355,11 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_ptp_time_source.eq(self.ptp_time_source.storage),
             self.o_ptp_log_msg_interval.eq(self.ptp_log_msg_interval.storage),
             self.o_ptp_announce_msg_interval.eq(self.ptp_announce_msg_interval.storage),
+
+            self.o_ptp_gm_priority1.eq(self.ptp_gm_priority1.storage),
+            self.o_ptp_gm_priority2.eq(self.ptp_gm_priority2.storage),
+            self.o_ptp_gm_clock_class.eq(self.ptp_gm_clock_class.storage),
+            self.o_ptp_gm_clock_accuracy.eq(self.ptp_gm_clock_accuracy.storage),
         ]
 
 
@@ -702,6 +720,10 @@ class AES67SoC(SoCCore):
             aes67_pads.ptp_time_source.eq(self.aes67_csr.o_ptp_time_source),
             aes67_pads.ptp_log_msg_interval.eq(self.aes67_csr.o_ptp_log_msg_interval),
             aes67_pads.ptp_announce_msg_interval.eq(self.aes67_csr.o_ptp_announce_msg_interval),
+            aes67_pads.ptp_gm_priority1.eq(self.aes67_csr.o_ptp_gm_priority1),
+            aes67_pads.ptp_gm_priority2.eq(self.aes67_csr.o_ptp_gm_priority2),
+            aes67_pads.ptp_gm_clock_class.eq(self.aes67_csr.o_ptp_gm_clock_class),
+            aes67_pads.ptp_gm_clock_accuracy.eq(self.aes67_csr.o_ptp_gm_clock_accuracy),
             aes67_pads.eth_tx_request.eq(self.aes67_csr.o_eth_tx_request),
         ]
 

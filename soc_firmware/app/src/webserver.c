@@ -284,6 +284,19 @@ static int build_status_ptp(char *buf, size_t sz)
 		p = json_add_str(buf, sz, p, "best_master", "none");
 	}
 
+	/* Own dataset */
+	const struct ptp_announce_dataset *own = ptp_bmc_get_own_dataset();
+	if (own) {
+		p = json_add_uint(buf, sz, p, "own_priority1",
+				   own->gm_priority1);
+		p = json_add_uint(buf, sz, p, "own_priority2",
+				   own->gm_priority2);
+		p = json_add_uint(buf, sz, p, "own_clock_class",
+				   own->gm_clock_class);
+		p = json_add_uint(buf, sz, p, "own_clock_accuracy",
+				   own->gm_clock_accuracy);
+	}
+
 	/* Foreign masters */
 	int fm_count = 0;
 	const struct ptp_announce_dataset *fms =
@@ -501,6 +514,8 @@ static int build_config_json(char *buf, size_t sz)
 	p = json_add_uint(buf, sz, p, "ptp_domain", cfg->ptp_domain);
 	p = json_add_uint(buf, sz, p, "ptp_priority1", cfg->ptp_priority1);
 	p = json_add_uint(buf, sz, p, "ptp_priority2", cfg->ptp_priority2);
+	p = json_add_uint(buf, sz, p, "ptp_clock_class", cfg->ptp_clock_class);
+	p = json_add_uint(buf, sz, p, "ptp_clock_accuracy", cfg->ptp_clock_accuracy);
 	p = json_add_int(buf, sz, p, "ptp_log_sync_interval",
 			  cfg->ptp_log_sync_interval);
 	p = json_add_int(buf, sz, p, "ptp_log_announce_interval",
@@ -678,6 +693,12 @@ static int apply_config_json(const char *json, size_t len)
 	if (json_find_int(json, len, "ptp_priority2", &i_tmp)) {
 		cfg->ptp_priority2 = (uint8_t)i_tmp;
 	}
+	if (json_find_int(json, len, "ptp_clock_class", &i_tmp)) {
+		cfg->ptp_clock_class = (uint8_t)i_tmp;
+	}
+	if (json_find_int(json, len, "ptp_clock_accuracy", &i_tmp)) {
+		cfg->ptp_clock_accuracy = (uint8_t)i_tmp;
+	}
 	if (json_find_int(json, len, "ptp_log_sync_interval", &i_tmp)) {
 		cfg->ptp_log_sync_interval = (int8_t)i_tmp;
 	}
@@ -714,6 +735,9 @@ static int apply_config_json(const char *json, size_t len)
 	}
 
 	aes67_config_unlock();
+
+	/* Propagate PTP config changes to BMC's own dataset */
+	ptp_bmc_update_own_dataset();
 
 	LOG_INF("WEB: Configuration updated via REST API");
 	return 0;

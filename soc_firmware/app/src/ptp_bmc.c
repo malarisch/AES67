@@ -22,6 +22,7 @@
 #include <zephyr/sys/byteorder.h>
 
 #include "ptp_bmc.h"
+#include "aes67_config.h"
 #include "ieee1588_utils.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 
@@ -251,18 +252,36 @@ static struct ptp_announce_dataset *fm_find_or_create(const uint8_t sender_id[8]
 
 /**
  * Remove expired foreign masters (no announce received within timeout).
- * Announce interval at logMsgInterval=0 is 1 second.
- * Timeout = ANNOUNCE_RECEIPT_TIMEOUT x 2^logMsgInterval seconds.
- * We use a conservative 4-second timeout.
+ *
+ * IEEE 1588: timeout = announceReceiptTimeout × announceInterval.
+ * With announceReceiptTimeout = 3 and logAnnounceInterval = 0 (1s),
+ * the timeout is 3 seconds.  We use a configurable formula:
+ *   timeout_ms = PTP_ANNOUNCE_RECEIPT_TIMEOUT × 2^logAnnounceInterval × 1000
+ * Clamped to a minimum of 2000 ms.
  */
-#define FM_TIMEOUT_MS  4000
+static int fm_timeout_ms(void)
+{
+	/* 2^logAnnounceInterval in ms = 1000 × 2^interval */
+	int interval_ms = 1000;  /* logAnnounceInterval = 0 → 1 s */
+	int8_t log_ann = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
+
+	if (log_ann > 0 && log_ann <= 4) {
+		interval_ms = 1000 << log_ann;
+	} else if (log_ann < 0 && log_ann >= -3) {
+		interval_ms = 1000 >> (-log_ann);
+	}
+
+	int timeout = PTP_ANNOUNCE_RECEIPT_TIMEOUT * interval_ms;
+	return (timeout < 2000) ? 2000 : timeout;
+}
 
 static void fm_expire(void)
 {
 	int64_t now = k_uptime_get();
+	int timeout = fm_timeout_ms();
 
 	for (int i = 0; i < foreign_master_count; ) {
-		if ((now - foreign_masters[i].last_received_uptime_ms) > FM_TIMEOUT_MS) {
+		if ((now - foreign_masters[i].last_received_uptime_ms) > timeout) {
 			LOG_INF("BMC: Foreign master expired: "
 				"%02x%02x%02x%02x%02x%02x%02x%02x",
 				foreign_masters[i].sender_clock_id[0],
@@ -295,7 +314,11 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 				    const uint8_t leader_id[8],
 				    uint8_t time_source,
 				    int8_t log_msg_interval,
-				    int8_t log_announce_interval)
+				    int8_t log_announce_interval,
+				    uint8_t gm_priority1,
+				    uint8_t gm_priority2,
+				    uint8_t gm_clock_class,
+				    uint8_t gm_clock_accuracy)
 {
 	int ret;
 
@@ -308,15 +331,28 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 		return;
 	}
 
+	/* Write GM quality fields */
+	ret = fpga_hal_write_ptp_gm_quality(gm_priority1, gm_priority2,
+					    gm_clock_class, gm_clock_accuracy);
+	if (ret < 0) {
+		LOG_ERR("BMC: Failed to write GM quality: %d", ret);
+		return;
+	}
+
 	/* Write control flags.
 	 * Use set/clear to modify only the PTP_IS_LEADER / PTP_IS_FOLLOWER
 	 * bits, leaving other bits (PPB start, resets) untouched. */
 	if (role == PTP_ROLE_LEADER) {
 		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
 		ret = fpga_hal_ctrl_set_bits(FPGA_HAL_CTRL_PTP_IS_LEADER);
-	} else {
+	} else if (role == PTP_ROLE_FOLLOWER) {
 		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_LEADER);
 		ret = fpga_hal_ctrl_set_bits(FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
+	} else {
+		/* LISTENING: clear both flags — PTP core does nothing */
+		fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_LEADER |
+					 FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
+		ret = 0;
 	}
 
 	if (ret < 0) {
@@ -325,11 +361,14 @@ static void fpga_apply_bmc_decision(enum ptp_bmc_role role,
 	}
 
 	LOG_INF("BMC: FPGA updated — role=%s leader=%02x%02x%02x%02x%02x%02x%02x%02x "
-		"timeSrc=0x%02x logSyncInt=%d logAnnInt=%d",
-		(role == PTP_ROLE_LEADER) ? "LEADER" : "FOLLOWER",
+		"timeSrc=0x%02x logSyncInt=%d logAnnInt=%d "
+		"pri1=%u pri2=%u class=%u acc=0x%02x",
+		(role == PTP_ROLE_LEADER) ? "LEADER" :
+		(role == PTP_ROLE_FOLLOWER) ? "FOLLOWER" : "LISTENING",
 		leader_id[0], leader_id[1], leader_id[2], leader_id[3],
 		leader_id[4], leader_id[5], leader_id[6], leader_id[7],
-		time_source, log_msg_interval, log_announce_interval);
+		time_source, log_msg_interval, log_announce_interval,
+		gm_priority1, gm_priority2, gm_clock_class, gm_clock_accuracy);
 }
 
 /* ================================================================
@@ -373,9 +412,7 @@ static void run_bmc(void)
 		/* We are the best (or no foreign masters) → become leader */
 		new_role = PTP_ROLE_LEADER;
 		leader_id = my_clock_id;
-		/* Crystal oscillator for self-clocked AES67 device */
 		time_source = PTP_TIME_SRC_INTERNAL_OSC;
-		/* AES67: logMessageInterval for sync = -3 (0.125 sec) */
 		log_msg_interval = AES67_LOG_MSG_INTERVAL_SYNC;
 		log_announce_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
 	} else {
@@ -383,11 +420,13 @@ static void run_bmc(void)
 		new_role = PTP_ROLE_FOLLOWER;
 		leader_id = best_foreign->gm_identity;
 		time_source = best_foreign->time_source;
-		/* Use the foreign master's message interval info.
-		 * For the FPGA config we write the Sync interval. */
 		log_msg_interval = AES67_LOG_MSG_INTERVAL_SYNC;
 		log_announce_interval = AES67_LOG_MSG_INTERVAL_ANNOUNCE;
 	}
+
+	/* GM quality CSRs always carry our own config — we are not a
+	 * boundary clock, so the FPGA only needs our own values for
+	 * building Announce messages when we are leader. */
 
 	/* Only write to FPGA if something changed */
 	bool role_changed = (new_role != current_role);
@@ -401,7 +440,11 @@ static void run_bmc(void)
 
 		fpga_apply_bmc_decision(new_role, leader_id, time_source,
 					log_msg_interval,
-					log_announce_interval);
+					log_announce_interval,
+					my_dataset.gm_priority1,
+					my_dataset.gm_priority2,
+					my_dataset.gm_clock_class,
+					my_dataset.gm_clock_accuracy);
 
 		/* Notify registered listener (e.g. PLL reset) */
 		if (bmc_change_cb) {
@@ -411,7 +454,8 @@ static void run_bmc(void)
 		if (role_changed) {
 			LOG_INF("BMC: Role changed to %s",
 				(new_role == PTP_ROLE_LEADER) ?
-					"LEADER" : "FOLLOWER");
+				"LEADER" : (new_role == PTP_ROLE_FOLLOWER) ?
+				"FOLLOWER" : "LISTENING");
 		}
 	}
 
@@ -419,37 +463,44 @@ static void run_bmc(void)
 }
 
 /* ================================================================
- * Grace period: collect announces without making a decision.
+ * Initial listening period.
  *
- * Used at startup and after losing the current leader.
- * Listens for BMC_GRACE_PERIOD_MS, recording every foreign master
- * announce so that a subsequent run_bmc() has full data.
+ * IEEE 1588: A clock starts in LISTENING state and waits for at
+ * least one announce receipt timeout interval before making a BMC
+ * decision.  This gives existing masters time to announce themselves
+ * so we don't unnecessarily declare ourselves leader.
+ *
+ * During this period the PTP FPGA core is idle (both is_leader and
+ * is_follower are cleared), and we collect foreign master announces.
  * ================================================================ */
-#define BMC_GRACE_PERIOD_MS  4000
 
-static void bmc_grace_period(int sock, uint8_t *rx_buf, size_t rx_buf_len)
+static void bmc_initial_listening(int sock, uint8_t *rx_buf, size_t rx_buf_len)
 {
-	int64_t listen_start = k_uptime_get();
+	int listen_ms = fm_timeout_ms();
 
-	LOG_INF("BMC: Grace period — collecting announces for %d ms",
-		BMC_GRACE_PERIOD_MS);
+	LOG_INF("BMC: LISTENING — waiting %d ms for existing masters", listen_ms);
+
+	/* Ensure FPGA is in idle state (LISTENING) */
+	fpga_hal_ctrl_clear_bits(FPGA_HAL_CTRL_PTP_IS_LEADER |
+				 FPGA_HAL_CTRL_PTP_IS_FOLLOWER);
+
+	int64_t listen_start = k_uptime_get();
 
 	while (1) {
 		int64_t elapsed = k_uptime_get() - listen_start;
 
-		if (elapsed >= BMC_GRACE_PERIOD_MS) {
+		if (elapsed >= listen_ms) {
 			break;
 		}
 
-		int remaining_ms = BMC_GRACE_PERIOD_MS - (int)elapsed;
+		int remaining = listen_ms - (int)elapsed;
 		struct zsock_pollfd pfd = {
 			.fd = sock,
 			.events = ZSOCK_POLLIN,
 		};
-		int pret = zsock_poll(&pfd, 1, remaining_ms);
+		int pret = zsock_poll(&pfd, 1, remaining);
 
 		if (pret <= 0) {
-			/* Timeout (0) or error (-1) → grace period done */
 			break;
 		}
 
@@ -460,9 +511,6 @@ static void bmc_grace_period(int sock, uint8_t *rx_buf, size_t rx_buf_len)
 					   ZSOCK_MSG_DONTWAIT,
 					   (struct sockaddr *)&src_addr,
 					   &src_len);
-		if (n < 0) {
-			continue;
-		}
 		if (n < PTP_ANNOUNCE_MIN_LEN) {
 			continue;
 		}
@@ -476,7 +524,7 @@ static void bmc_grace_period(int sock, uint8_t *rx_buf, size_t rx_buf_len)
 			continue;
 		}
 
-		LOG_INF("BMC: Grace — announce from "
+		LOG_INF("BMC: Listening — announce from "
 			"%02x%02x%02x%02x%02x%02x%02x%02x",
 			incoming.sender_clock_id[0], incoming.sender_clock_id[1],
 			incoming.sender_clock_id[2], incoming.sender_clock_id[3],
@@ -494,7 +542,7 @@ static void bmc_grace_period(int sock, uint8_t *rx_buf, size_t rx_buf_len)
 		k_mutex_unlock(&fm_mutex);
 	}
 
-	LOG_INF("BMC: Grace period over — %d foreign masters collected",
+	LOG_INF("BMC: Listening period complete — %d foreign masters found",
 		foreign_master_count);
 }
 
@@ -567,45 +615,36 @@ static void bmc_thread_fn(void *p1, void *p2, void *p3)
 	LOG_INF("BMC: Listening for Announce messages on port %d",
 		PTP_GENERAL_PORT);
 
-	/* Initial grace period + first election */
-	bmc_grace_period(sock, rx_buf, sizeof(rx_buf));
+	/* Initial listening period (IEEE 1588: start in LISTENING state) */
+	bmc_initial_listening(sock, rx_buf, sizeof(rx_buf));
 	run_bmc();
 
-	/* ---- Main loop ---- */
+	/* ---- Main loop ----
+	 *
+	 * IEEE 1588 BMC runs continuously:
+	 * - Every received Announce triggers a BMC re-evaluation
+	 * - Periodic timeout runs expiry and BMC (catches lost masters)
+	 * - No grace period on leader loss — BMC immediately decides
+	 *   whether we should become leader or follow someone else
+	 */
 
 	while (1) {
-		/* Poll with 2 s timeout so we periodically run expiry
-		 * even when no packets arrive. */
+		/* Poll with timeout matching the announce interval so we
+		 * detect expired foreign masters promptly. */
+		int poll_timeout_ms = fm_timeout_ms() / PTP_ANNOUNCE_RECEIPT_TIMEOUT;
+		if (poll_timeout_ms < 500) {
+			poll_timeout_ms = 500;
+		}
+
 		struct zsock_pollfd pfd = {
 			.fd = sock,
 			.events = ZSOCK_POLLIN,
 		};
-		int pret = zsock_poll(&pfd, 1, 2000);
+		int pret = zsock_poll(&pfd, 1, poll_timeout_ms);
 
 		if (pret == 0) {
-			/* Timeout — no packet received for 2 s */
-			if (current_role == PTP_ROLE_FOLLOWER) {
-				int64_t now = k_uptime_get();
-				bool leader_alive = false;
-
-				k_mutex_lock(&fm_mutex, K_FOREVER);
-				for (int i = 0; i < foreign_master_count; i++) {
-					if (clock_id_cmp(foreign_masters[i].gm_identity,
-							 current_best_master_id) == 0 &&
-					    (now - foreign_masters[i].last_received_uptime_ms) <= FM_TIMEOUT_MS) {
-						leader_alive = true;
-						break;
-					}
-				}
-				k_mutex_unlock(&fm_mutex);
-
-				if (!leader_alive) {
-					LOG_WRN("BMC: Leader lost — starting grace period");
-					bmc_grace_period(sock, rx_buf, sizeof(rx_buf));
-					run_bmc();
-					continue;
-				}
-			}
+			/* Timeout — run BMC to expire stale masters and
+			 * potentially transition to leader. */
 			run_bmc();
 			continue;
 		}
@@ -708,14 +747,19 @@ int ptp_bmc_start(struct net_if *iface)
 		my_clock_id[0], my_clock_id[1], my_clock_id[2], my_clock_id[3],
 		my_clock_id[4], my_clock_id[5], my_clock_id[6], my_clock_id[7]);
 
-	/* Initialize our own dataset — what we'd advertise if we were leader.
-	 * AES67 default profile values. */
+	/* Initialize our own dataset from runtime config.
+	 * These values are what we'd advertise if we were leader. */
 	memset(&my_dataset, 0, sizeof(my_dataset));
-	my_dataset.gm_priority1 = PTP_CLOCK_CLASS_DEFAULT; /* 248 = default, not preferred */
-	my_dataset.gm_clock_class = PTP_CLOCK_CLASS_DEFAULT;
-	my_dataset.gm_clock_accuracy = PTP_CLOCK_ACCURACY_UNKNOWN;
+
+	aes67_config_lock();
+	const struct aes67_device_config *cfg = aes67_config_get();
+	my_dataset.gm_priority1 = cfg->ptp_priority1;
+	my_dataset.gm_priority2 = cfg->ptp_priority2;
+	my_dataset.gm_clock_class = cfg->ptp_clock_class;
+	my_dataset.gm_clock_accuracy = cfg->ptp_clock_accuracy;
+	aes67_config_unlock();
+
 	my_dataset.gm_offset_scaled_log_variance = 0xFFFF;
-	my_dataset.gm_priority2 = PTP_CLOCK_CLASS_DEFAULT;
 	memcpy(my_dataset.gm_identity, my_clock_id, 8);
 	my_dataset.steps_removed = 0;
 	my_dataset.time_source = PTP_TIME_SRC_INTERNAL_OSC;
@@ -757,15 +801,12 @@ void ptp_bmc_notify_fpga_ready(void)
 	k_mutex_lock(&fm_mutex, K_FOREVER);
 
 	if (bmc_decision_valid) {
-		/* Determine the time source based on role */
-		uint8_t time_source;
+		/* GM quality CSRs always carry our own config (not a
+		 * boundary clock).  Time source depends on role. */
+		uint8_t time_source = PTP_TIME_SRC_INTERNAL_OSC;
 
-		if (current_role == PTP_ROLE_LEADER) {
-			/* We are leader - use internal oscillator */
-			time_source = PTP_TIME_SRC_INTERNAL_OSC;
-		} else {
-			/* We are follower - find master's time source if available */
-			time_source = PTP_TIME_SRC_INTERNAL_OSC; /* default */
+		if (current_role == PTP_ROLE_FOLLOWER) {
+			/* Try to recover time_source from the foreign master */
 			for (int i = 0; i < foreign_master_count; i++) {
 				if (clock_id_cmp(current_best_master_id,
 						 foreign_masters[i].gm_identity) == 0) {
@@ -778,7 +819,11 @@ void ptp_bmc_notify_fpga_ready(void)
 		fpga_apply_bmc_decision(current_role, current_best_master_id,
 					time_source,
 					AES67_LOG_MSG_INTERVAL_SYNC,
-					AES67_LOG_MSG_INTERVAL_ANNOUNCE);
+					AES67_LOG_MSG_INTERVAL_ANNOUNCE,
+					my_dataset.gm_priority1,
+					my_dataset.gm_priority2,
+					my_dataset.gm_clock_class,
+					my_dataset.gm_clock_accuracy);
 	} else {
 		LOG_WRN("BMC: No valid BMC decision yet - FPGA not configured");
 	}
@@ -812,6 +857,33 @@ const struct ptp_announce_dataset *ptp_bmc_get_foreign_masters(int *count)
 void ptp_bmc_get_clock_identity(uint8_t out[8])
 {
 	memcpy(out, my_clock_id, 8);
+}
+
+void ptp_bmc_update_own_dataset(void)
+{
+	aes67_config_lock();
+	const struct aes67_device_config *cfg = aes67_config_get();
+
+	k_mutex_lock(&fm_mutex, K_FOREVER);
+	my_dataset.gm_priority1 = cfg->ptp_priority1;
+	my_dataset.gm_priority2 = cfg->ptp_priority2;
+	my_dataset.gm_clock_class = cfg->ptp_clock_class;
+	my_dataset.gm_clock_accuracy = cfg->ptp_clock_accuracy;
+	k_mutex_unlock(&fm_mutex);
+
+	aes67_config_unlock();
+
+	LOG_INF("BMC: Own dataset updated — pri1=%u pri2=%u class=%u acc=0x%02x",
+		my_dataset.gm_priority1, my_dataset.gm_priority2,
+		my_dataset.gm_clock_class, my_dataset.gm_clock_accuracy);
+
+	/* Re-run BMC with updated dataset */
+	run_bmc();
+}
+
+const struct ptp_announce_dataset *ptp_bmc_get_own_dataset(void)
+{
+	return &my_dataset;
 }
 
 /* ================================================================

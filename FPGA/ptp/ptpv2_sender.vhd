@@ -39,7 +39,11 @@ entity ptpv2_sender is
 		ptp_log_interval_i : in std_logic_vector(7 downto 0);
 
 		tx_allow_req_o : out std_logic := '0';
-		tx_allow_i : in std_logic
+		tx_allow_i : in std_logic;
+		ptp_prioone : std_logic_vector(7 downto 0);
+		ptp_priotwo : std_logic_vector(7 downto 0);
+		ptp_clockclass : std_logic_vector(7 downto 0);
+		ptp_clockaccuracy : std_logic_vector(7 downto 0)
 	);
 end entity;
 
@@ -127,7 +131,11 @@ architecture Behavioral of ptpv2_sender is
 		req_port_id    : std_logic_vector(79 downto 0);
 		udp_payload_len : integer;
 		log_interval   : std_logic_vector(7 downto 0);
-		time_source    : std_logic_vector(7 downto 0)
+		time_source    : std_logic_vector(7 downto 0);
+		ptp_prioone_var : std_logic_vector(7 downto 0);
+		ptp_priotwo_var : std_logic_vector(7 downto 0);
+		ptp_clockclass_var : std_logic_vector(7 downto 0);
+		ptp_clockaccuracy_var : std_logic_vector(7 downto 0)
 	) return std_logic_vector is
 		variable total_length : std_logic_vector(15 downto 0);
 		variable udp_length   : std_logic_vector(15 downto 0);
@@ -283,7 +291,7 @@ architecture Behavioral of ptpv2_sender is
 				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
 					return req_port_id(55 downto 48);
 				elsif (msg_type = t_Announce) then
-					return x"80"; -- grandmasterPriority1
+					return ptp_prioone_var(7 downto 0); -- grandmasterPriority1
 				else
 					return x"00";
 				end if;
@@ -291,7 +299,7 @@ architecture Behavioral of ptpv2_sender is
 				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
 					return req_port_id(47 downto 40);
 				elsif (msg_type = t_Announce) then
-					return x"F8"; -- clockQuality.clockClass
+					return ptp_clockclass_var(7 downto 0); -- clockQuality.clockClass
 				else
 					return x"00";
 				end if;
@@ -299,7 +307,7 @@ architecture Behavioral of ptpv2_sender is
 				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
 					return req_port_id(39 downto 32);
 				elsif (msg_type = t_Announce) then
-					return x"FE"; -- clockQuality.clockAccuracy
+					return ptp_clockaccuracy_var(7 downto 0); -- clockQuality.clockAccuracy
 				else
 					return x"00";
 				end if;
@@ -323,7 +331,7 @@ architecture Behavioral of ptpv2_sender is
 				if (msg_type = t_Delay_Resp) or (msg_type = t_Pdelay_Resp) then
 					return req_port_id(15 downto 8);
 				elsif (msg_type = t_Announce) then
-					return x"80"; -- grandmasterPriority2
+					return ptp_priotwo_var(7 downto 0); -- grandmasterPriority2
 				else
 					return x"00";
 				end if;
@@ -633,7 +641,7 @@ begin
 						cap_message_type, cap_message_type_raw, packet_counter,
 						cap_sequence_id, cap_timestamp_sec, cap_timestamp_nsec,
 						cap_req_port_id, cap_udp_payload_len,
-						cap_log_interval, cap_time_source
+						cap_log_interval, cap_time_source, ptp_prioone, ptp_priotwo, ptp_clockclass, ptp_clockaccuracy
 					);
 
 					-- Patch in computed IP checksum at offsets 24-25

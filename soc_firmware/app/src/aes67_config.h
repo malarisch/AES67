@@ -51,8 +51,10 @@ struct aes67_device_config {
 	uint8_t  ptp_domain;
 	uint8_t  ptp_priority1;
 	uint8_t  ptp_priority2;
+	uint8_t  ptp_clock_class;             /* IEEE 1588: 6=GPS, 248=default */
+	uint8_t  ptp_clock_accuracy;          /* IEEE 1588: 0xFE=unknown */
 	int8_t   ptp_log_sync_interval;       /* AES67: -3  (125 ms) */
-	int8_t   ptp_log_announce_interval;    /* AES67:  0  (1 s)   */
+	int8_t   ptp_log_announce_interval;   /* AES67:  0  (1 s)   */
 
 	/* -- PLL / PI controller -- */
 	int32_t  pi_kp_num;

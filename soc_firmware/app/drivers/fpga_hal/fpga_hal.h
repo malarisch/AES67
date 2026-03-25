@@ -125,6 +125,17 @@ int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
 			      int8_t log_announce_interval);
 
 /**
+ * @brief Write PTP grandmaster quality fields to the FPGA.
+ *
+ * @param priority1       GM priority1 (0–255).
+ * @param priority2       GM priority2 (0–255).
+ * @param clock_class     GM clock class (e.g. 6=GPS, 248=default).
+ * @param clock_accuracy  GM clock accuracy (IEEE 1588 enum).
+ */
+int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
+				  uint8_t clock_class, uint8_t clock_accuracy);
+
+/**
  * @brief Write TX stream configuration to the FPGA.
  *
  * @param stream_id        Stream index (0..7).

@@ -47,6 +47,8 @@ void aes67_config_reset_defaults(void)
 	g_config.ptp_domain                = 0;
 	g_config.ptp_priority1             = 248;
 	g_config.ptp_priority2             = 248;
+	g_config.ptp_clock_class           = 248;
+	g_config.ptp_clock_accuracy        = 0xFE;
 	g_config.ptp_log_sync_interval     = -3;
 	g_config.ptp_log_announce_interval = 0;
 

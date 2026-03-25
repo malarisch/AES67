@@ -180,6 +180,19 @@ const struct ptp_announce_dataset *ptp_bmc_get_foreign_masters(int *count);
  */
 void ptp_bmc_get_clock_identity(uint8_t out[8]);
 
+/**
+ * @brief Update the BMC's own dataset from the runtime config.
+ *
+ * Call after changing ptp_priority1, ptp_priority2, ptp_clock_class,
+ * or ptp_clock_accuracy in aes67_device_config.  Re-runs BMC.
+ */
+void ptp_bmc_update_own_dataset(void);
+
+/**
+ * @brief Get the BMC's own announce dataset (what we advertise as leader).
+ */
+const struct ptp_announce_dataset *ptp_bmc_get_own_dataset(void);
+
 #ifdef __cplusplus
 }
 #endif

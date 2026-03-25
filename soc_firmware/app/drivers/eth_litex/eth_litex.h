@@ -114,6 +114,13 @@ int eth_litex_write_ptp_config(const struct device *dev,
 			       int8_t log_announce_interval);
 
 /**
+ * @brief Write PTP grandmaster quality fields to FPGA CSR registers.
+ */
+int eth_litex_write_ptp_gm_quality(const struct device *dev,
+				   uint8_t priority1, uint8_t priority2,
+				   uint8_t clock_class, uint8_t clock_accuracy);
+
+/**
  * @brief Read the PPB measurement counters.
  * @return true if measurement is valid, false otherwise
  */

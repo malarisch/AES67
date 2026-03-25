@@ -82,6 +82,18 @@ int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
 					  log_msg_interval, log_announce_interval);
 }
 
+int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
+				  uint8_t clock_class, uint8_t clock_accuracy)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+	return eth_litex_write_ptp_gm_quality(dev, priority1, priority2,
+					       clock_class, clock_accuracy);
+}
+
 int fpga_hal_write_tx_stream_config(uint8_t stream_id,
 				    const struct in_addr *dst_ip,
 				    uint8_t channel_count,
