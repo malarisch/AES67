@@ -1,6 +1,6 @@
 # AES67
 
-A full AES67 Audio-over-IP implementation using FPGA and MCU. Currently targeting Cyclone 10LP (FPGA) and STM32H753ZI (MCU with Zephyr RTOS). Some code was LLM generated, but human-checked and debugged. 
+A full AES67 Audio-over-IP implementation on a single FPGA. A Cyclone 10LP handles both the data plane (Ethernet MAC, PTPv2, RTP audio) and the control plane (LiteX RISC-V SoC running Zephyr RTOS). Some code was LLM generated, but human-checked and debugged.
 
 For transparency, this is primarily a learning project. I had no FPGA experience before and only basic embedded experience (ESP32 + temperature sensor level).
 
@@ -8,39 +8,44 @@ For transparency, this is primarily a learning project. I had no FPGA experience
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              FPGA (Cyclone 10LP)                            │
-│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐  │
-│  │ Ethernet    │   │   PTPv2     │   │  Wallclock  │   │   Audio TX/RX   │  │
-│  │ MAC (YOL)   │◄──┤ Controller  │──►│  48b:32b    │──►│   RTP Packets   │  │
-│  │ + Timestamp │   │ + Servo PI  │   │ + Media Clk │   │   + I2S I/O     │  │
-│  └──────┬──────┘   └─────────────┘   └──────┬──────┘   └─────────────────┘  │
-│         │                                   │                               │
-│         │         ┌─────────────────────────┴───────────────┐               │
-│         │         │            FMC Bridge                   │               │
-│         │         │  (fmc_ethernet_client.vhd)              │               │
-│         │         │  - Register-mapped config               │               │
-│         │         │  - ETH TX/RX packet buffers             │               │
-│         └─────────┴─────────────────────────────────────────┘               │
-│                                    ▲                                        │
-│                                    │ FMC Bus @ 0x60000000                   │
-└────────────────────────────────────┼────────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────┼────────────────────────────────────────┐
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │            FMC Ethernet Driver (eth_fmc_basic)                  │        │
-│  │  - Zephyr network interface (eth0)                              │        │
-│  │  - FPGA state detection & recovery                              │        │
-│  └─────────────────────────────────────────────────────────────────┘        │
-│                                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   PTP BMC    │  │   SAP/SDP    │  │   Webserver  │  │   Si5351A    │    │
-│  │   Algorithm  │  │  Announce    │  │   Config UI  │  │   PLL Ctrl   │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
-│                                                                             │
-│                            MCU (STM32H753ZI + Zephyr)                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+│                           FPGA (Cyclone 10LP)                              │
+│                                                                            │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌───────────────┐  │
+│  │ Ethernet    │   │   PTPv2     │   │  Wallclock  │   │  Audio TX/RX  │  │
+│  │ MAC (YOL)   │◄──┤ Controller  │──►│  48b:32b    │──►│  RTP Packets  │  │
+│  │ + Timestamp │   │ + Servo PI  │   │ + Media Clk │   │  + I2S I/O    │  │
+│  └──────┬──────┘   └─────────────┘   └──────┬──────┘   └───────────────┘  │
+│         │                                   │                              │
+│         │     ┌─────────────────────────────┴──────────────────┐           │
+│         │     │       Wishbone Bus / LiteX CSR Interface       │           │
+│         │     │  - Register-mapped config                      │           │
+│         │     │  - ETH TX/RX packet buffers (dual-port RAM)    │           │
+│         └─────┴────────────────────────────────────────────────┘           │
+│                                   ▲                                        │
+│                                   │                                        │
+│  ┌────────────────────────────────┼───────────────────────────────────┐    │
+│  │                  LiteX VexRiscv SoC (80 MHz)                       │    │
+│  │                                                                    │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │    │
+│  │  │  Zephyr RTOS │  │  HyperRAM    │  │  SPI Flash   │             │    │
+│  │  │  (Firmware)  │  │  (16 MB RAM) │  │  (Boot+FW)   │             │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘             │    │
+│  │                                                                    │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │    │
+│  │  │   PTP BMC    │  │   SAP/SDP    │  │   Webserver  │             │    │
+│  │  │   Algorithm  │  │  Announce    │  │   Config UI  │             │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘             │    │
+│  │                                                                    │    │
+│  │  ┌──────────────┐  ┌──────────────┐                               │    │
+│  │  │   Si5351A    │  │   SSD1306    │                               │    │
+│  │  │   PLL Ctrl   │  │   Display    │                               │    │
+│  │  └──────────────┘  └──────────────┘                               │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The external STM32H753ZI MCU has been replaced by a LiteX-generated RISC-V softcore (VexRiscv) running directly on the FPGA. The SoC boots from external SPI flash via a boot stub that copies the BIOS into HyperRAM, then loads Zephyr firmware. Communication with the FPGA data plane uses LiteX CSR registers over the Wishbone bus instead of the previous FMC memory-mapped interface.
 
 ## FPGA Architecture (Data Plane)
 
@@ -51,7 +56,6 @@ The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
 |--------|------|-------------|
 | Ethernet MAC | `FPGA_Ethernet/` | Fork of YOL MAC with SOF timestamp output |
 | Timestamp | `ethernet_timestamp.vhd` | Latches 48b:32b wallclock at SOF delimiter |
-| FMC Bridge | `fmc_ethernet_client.vhd` | Register-mapped interface to MCU |
 
 ### PTP (IEEE 1588)
 | Module | File | Description |
@@ -85,9 +89,9 @@ The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
   I2S IN   │    TX Path                                                │
     ──────►│  I2S_IN → tx_sample_buffer → tx_router → tx_transmitter   │───► RTP out
            │                                    ↑                      │
-           │                              config from MCU              │
+           │                              config from SoC              │
            └───────────────────────────────────────────────────────────┘
-           
+
            ┌───────────────────────────────────────────────────────────┐
   RTP IN   │    RX Path                                                │
     ──────►│  UDP parser → rx_ringbuffer (stream demux) → i2s_out      │───► I2S OUT
@@ -96,30 +100,63 @@ The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
            └───────────────────────────────────────────────────────────┘
 ```
 
+## LiteX SoC
+
+The control plane runs on a LiteX-generated VexRiscv RISC-V softcore, generated by `litex_soc/generate.py`.
+
+### SoC Resources
+| Resource | Details |
+|----------|---------|
+| CPU | VexRiscv RISC-V @ 80 MHz (PLL from 50 MHz input) |
+| RAM | IS66WVH16M8ALL HyperRAM, 16 MB @ 0x20000000 |
+| Flash | W25Q64 SPI flash @ 0x30000000 (BIOS + firmware) |
+| CSR | Peripheral registers @ 0xf0000000 |
+| I2C0 | SSD1306 display + Si5351A PLL |
+| I2C1 | AD/DA card control |
+| SPI0 | SD card |
+| UART0 | Console |
+
+### Boot Flow
+1. FPGA configures from internal flash, bringing up both data plane and SoC
+2. Boot stub at SPI flash reset vector (0x30000000) copies LiteX BIOS to HyperRAM (0x207F0000)
+3. Sets HyperRAM controller latency (6 CK for power-on default)
+4. BIOS loads Zephyr firmware image (`.fbi` format with CRC-32 header) from flash
+5. Zephyr boots, initializes drivers, starts DHCP and application threads
+
 ## Firmware Architecture (Control Plane)
 
-The STM32H753ZI runs Zephyr RTOS and handles all non-realtime tasks. Source in `soc_firmware/app/`:
+Zephyr RTOS runs on the LiteX VexRiscv SoC and handles all non-realtime tasks. Source in `soc_firmware/app/`:
 
 ### Core Modules
 | Module | File | Description |
 |--------|------|-------------|
-| Main | `src/main.c` | Init, DHCP, FPGA recovery callback |
+| Main | `src/main.c` | Init, DHCP, network setup |
 | PTP BMC | `src/ptp_bmc.c` | IEEE 1588 Best Master Clock algorithm on 224.0.1.129:320 |
 | SAP/SDP | `src/sap_sdp.c` | Session announcement (239.255.255.255:9875), stream config |
 | Webserver | `src/webserver.c` | HTTP config UI |
-| FPGA Regs | `src/fpga_regs.c` | High-level register write helpers |
+| FPGA Regs | `src/fpga_regs.c` | High-level register write helpers (via FPGA HAL) |
 | FPGA Poll | `src/fpga_poll.c` | Status polling (PTP lock, link state) |
 | PLL Control | `src/pll_ctrl.c` | Si5351A PPB correction from FPGA measurements |
 
 ### Drivers
 | Driver | Path | Description |
 |--------|------|-------------|
-| FMC Ethernet | `drivers/eth_fmc_basic/` | Zephyr network interface via FMC bus |
+| FPGA HAL | `drivers/fpga_hal/` | Backend-agnostic hardware abstraction (LiteX CSR or FMC) |
+| LiteX Ethernet | `drivers/eth_litex/` | Zephyr network interface via LiteX CSR + Wishbone packet buffers |
 | Si5351A | `drivers/si5351a/` | I2C clock generator with PPB correction |
 | Display | `drivers/display_ctrl/` | SSD1306 OLED status display |
 | MI Card | `drivers/mi_card/` | 8-channel ADC preamp control |
 
-### FMC Register Map (MCU ↔ FPGA)
+### FPGA HAL
+
+Application code accesses FPGA registers through `fpga_hal.h`, which abstracts the underlying transport:
+
+- **LiteX backend** (`fpga_hal_litex.c`): Uses LiteX CSR registers. FPGA is always ready (integrated SoC).
+- **FMC backend** (`fpga_hal_fmc.c`): Legacy STM32H7 FMC memory-mapped access. Retained for backward compatibility.
+
+Backend selection via Kconfig: `CONFIG_FPGA_HAL_LITEX=y` (default) or `CONFIG_FPGA_HAL_FMC=y`.
+
+### CSR Register Map (SoC ↔ FPGA)
 
 | Address | R/W | Description |
 |---------|-----|-------------|
@@ -141,13 +178,19 @@ Full register map: see [config_ram_address_map.md](config_ram_address_map.md)
 
 ## Build Instructions
 
+### LiteX SoC Generation
+```bash
+cd litex_soc
+make    # Generates SoC HDL + device tree + CSR headers
+```
+
 ### Firmware (Zephyr)
 ```bash
 cd soc_firmware/app
-source ../.venv/bin/activate  # Activate Python venv for west
-west build -b nucleo_h753zi -p  # Clean build
-west flash                       # Flash to board
+source ../.venv/bin/activate         # Activate Python venv for west
+west build -b litex_vexriscv -p      # Clean build
 ```
+The build produces a `.fbi` flash image (Zephyr binary with length + CRC-32 header) for loading via LiteX BIOS.
 
 ### FPGA
 Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G.
@@ -155,8 +198,8 @@ Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G
 ## Current Status
 
 ### Working
-- Ethernet RX + TX on FPGA and MCU (via FMC bridge)
-- Network config via MCU (MAC, DHCP IP)
+- Ethernet RX + TX via LiteX CSR interface
+- Network config (MAC, DHCP IP)
 - PTPv2 Leader and Follower mode with BMC
 - Wallclock discipline and media clock derivation
 - Si5351A driver with PPB correction
@@ -164,14 +207,13 @@ Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G
 - RTP packet generation and parsing
 - SAP/SDP announcements
 - Webserver configuration UI
-- FPGA/MCU reset recovery
 - Internal audio routing matrix
+- LiteX SoC boot from SPI flash via HyperRAM
 
 ### Todo
 - Further tune PI controller (currently ±30ns jitter when locked)
 - FPGA resource optimization (PTP servo uses ~1600 LUTs)
 - Phase jump handling
-- FPGA bitstream upload from MCU
 
 ## Technical Details
 
@@ -191,13 +233,5 @@ The FPGA implements a PI controller in `ptpv2_servo.vhd`:
 
 The NCO has ±8ns jitter (1 sys_clk period), which is fine for measurement but not for direct I2S use.
 
-### FMC Bridge Considerations
-The FMC bridge requires special handling:
-1. **MPU Region**: FMC memory must be marked `ATTR_MPU_IO` to prevent Cortex-M7 speculative reads
-2. **Stack Size**: RX thread needs 4096 bytes due to on-stack frame buffer
-3. **FPGA Ready**: GPIO PC13 gates FMC access until FPGA is configured
-
 ## License
 See [LICENSE.md](LICENSE.md)
-
-
