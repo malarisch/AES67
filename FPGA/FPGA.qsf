@@ -297,7 +297,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[0]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[2]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[3]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[4]
+set_instance_assignment -name IO_STANDARD LVDS -to arduino_io[4]
 set_instance_assignment -name IO_STANDARD "3.0-V LVCMOS" -to arduino_io[5]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io3
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io4
@@ -464,5 +464,14 @@ set_global_assignment -name QIP_FILE pll_systemclocks.qip
 set_global_assignment -name BDF_FILE audio_tx/audio_tx_module.bdf
 set_global_assignment -name QIP_FILE ethernet_clks.qip
 set_global_assignment -name REMOVE_REDUNDANT_LOGIC_CELLS ON
+set_location_assignment PIN_G1 -to "arduino_io[4](n)"
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[6]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[7]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[8]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[10]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[11]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[12]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[13]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_rstn
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

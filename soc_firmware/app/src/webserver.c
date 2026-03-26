@@ -32,6 +32,7 @@
 #endif
 #include <zephyr/sys/reboot.h>
 #include "../drivers/fpga_hal/fpga_hal.h"
+#include "fw_update.h"
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
@@ -1145,7 +1146,7 @@ static int apply_lo_global_json(const char *json, size_t len)
  * POST body accumulator
  * ================================================================ */
 
-#define POST_BODY_MAX 1024
+#define POST_BODY_MAX 4096
 static char post_body[POST_BODY_MAX];
 static size_t post_body_len;
 
@@ -1168,6 +1169,13 @@ static int api_handler(struct http_client_ctx *client,
 
 	const char *url = (const char *)client->url_buffer;
 	enum http_method method = client->method;
+
+	/* Firmware update needs streaming (body too large to buffer).
+	 * Delegate immediately, before accumulating POST data. */
+	if (strcmp(url, "/api/fw_update") == 0) {
+		return fw_update_http_handler(client, status,
+					      request_ctx, response_ctx);
+	}
 
 	/* ----- Accumulate POST body ----- */
 	if ((method == HTTP_POST || method == HTTP_DELETE) &&

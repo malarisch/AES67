@@ -1,0 +1,6 @@
+config SPI_FLASH_LITESPI
+	bool "SPI NOR Flash via LiteSPI master (W25Q64)"
+	default y
+	help
+	  Enable in-system read/write access to the SPI NOR flash
+	  via the LiteSPI master CSR interface.

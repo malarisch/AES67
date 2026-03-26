@@ -50,6 +50,7 @@ static struct k_mutex fm_mutex;
 static enum ptp_bmc_role current_role = PTP_ROLE_LISTENING;
 static uint8_t current_best_master_id[8];
 static bool bmc_decision_valid;
+static bool own_dataset_dirty;
 
 /* ---- Change callback ---- */
 static ptp_bmc_change_cb_t bmc_change_cb;
@@ -432,8 +433,11 @@ static void run_bmc(void)
 	bool role_changed = (new_role != current_role);
 	bool leader_changed = (clock_id_cmp(leader_id,
 					     current_best_master_id) != 0);
+	bool dataset_dirty = own_dataset_dirty;
+	own_dataset_dirty = false;
 
-	if (role_changed || leader_changed || !bmc_decision_valid) {
+	if (role_changed || leader_changed || !bmc_decision_valid ||
+	    dataset_dirty) {
 		current_role = new_role;
 		memcpy(current_best_master_id, leader_id, 8);
 		bmc_decision_valid = true;
@@ -872,6 +876,8 @@ void ptp_bmc_update_own_dataset(void)
 	k_mutex_unlock(&fm_mutex);
 
 	aes67_config_unlock();
+
+	own_dataset_dirty = true;
 
 	LOG_INF("BMC: Own dataset updated — pri1=%u pri2=%u class=%u acc=0x%02x",
 		my_dataset.gm_priority1, my_dataset.gm_priority2,

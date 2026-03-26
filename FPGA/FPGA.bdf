@@ -629,6 +629,7 @@ on the Quartus Prime software download page.
 		(line (pt 82 8)(pt 78 12))
 		(line (pt 78 12)(pt 82 8))
 	)
+	(annotation_block (location)(rect 2712 1600 2776 1616))
 )
 (pin
 	(output)
@@ -645,6 +646,7 @@ on the Quartus Prime software download page.
 		(line (pt 82 8)(pt 78 12))
 		(line (pt 78 12)(pt 82 8))
 	)
+	(annotation_block (location)(rect 2712 1616 2776 1632))
 )
 (pin
 	(output)
@@ -661,6 +663,7 @@ on the Quartus Prime software download page.
 		(line (pt 82 8)(pt 78 12))
 		(line (pt 78 12)(pt 82 8))
 	)
+	(annotation_block (location)(rect 2712 1632 2768 1648))
 )
 (pin
 	(bidir)
@@ -1382,31 +1385,6 @@ on the Quartus Prime software download page.
 	)
 	(drawing
 		(rectangle (rect 16 16 144 288))
-	)
-)
-(symbol
-	(rect 3088 1024 3136 1056)
-	(text "NOT" (rect 1 0 22 10)(font "Arial" (font_size 6)))
-	(text "inst17" (rect 3 21 33 32)(font "DejaVu Sans Condensed" ))
-	(port
-		(pt 0 16)
-		(input)
-		(text "IN" (rect 2 7 16 18)(font "Courier New" (bold))(invisible))
-		(text "IN" (rect 2 7 16 18)(font "Courier New" (bold))(invisible))
-		(line (pt 0 16)(pt 13 16))
-	)
-	(port
-		(pt 48 16)
-		(output)
-		(text "OUT" (rect 32 7 53 18)(font "Courier New" (bold))(invisible))
-		(text "OUT" (rect 32 7 53 18)(font "Courier New" (bold))(invisible))
-		(line (pt 39 16)(pt 48 16))
-	)
-	(drawing
-		(line (pt 13 25)(pt 13 7))
-		(line (pt 13 7)(pt 31 16))
-		(line (pt 13 25)(pt 31 16))
-		(circle (rect 31 12 39 20))
 	)
 )
 (symbol
@@ -4622,10 +4600,6 @@ on the Quartus Prime software download page.
 	(pt 3072 960)
 )
 (connector
-	(pt 3136 1040)
-	(pt 3152 1040)
-)
-(connector
 	(text "mac_tx_clock" (rect 2008 552 2072 563)(font "DejaVu Sans Condensed" ))
 	(pt 2088 568)
 	(pt 2000 568)
@@ -4689,18 +4663,6 @@ on the Quartus Prime software download page.
 (connector
 	(pt 3072 960)
 	(pt 3072 1040)
-)
-(connector
-	(pt 3064 1040)
-	(pt 3064 1104)
-)
-(connector
-	(pt 3064 1040)
-	(pt 3072 1040)
-)
-(connector
-	(pt 3072 1040)
-	(pt 3088 1040)
 )
 (connector
 	(text "tx_en_audiotx" (rect 2594 672 2661 683)(font "DejaVu Sans Condensed" ))
@@ -6169,6 +6131,14 @@ on the Quartus Prime software download page.
 	(pt 1944 1288)
 	(bus)
 )
+(connector
+	(pt 3064 1040)
+	(pt 3072 1040)
+)
+(connector
+	(pt 3072 1040)
+	(pt 3152 1040)
+)
 (junction (pt 4288 504))
 (junction (pt 3776 568))
 (junction (pt 3072 960))
@@ -6186,6 +6156,7 @@ on the Quartus Prime software download page.
 (text "combine all output signals to single ports" (rect 2544 816 2813 829)(font "Arial" (font_size 8)))
 (text "Here a 100byte frame is stored in RAM" (rect 4320 816 4572 829)(font "Arial" (font_size 8)))
 (text "Audio RX" (rect 0 1448 53 1461)(font "DejaVu Sans Condensed" (font_size 8)))
+(text "LVDS!!!" (rect 3336 1024 3382 1037)(font "DejaVu Sans Condensed" (font_size 8)))
 (rectangle (rect -248 328 408 1096)(color 0 0 255)(line_width 3))
 (rectangle (rect 1760 736 4784 2328)(color 0 0 255)(line_width 3))
 (rectangle (rect -1048 -728 5784 3200))

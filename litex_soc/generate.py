@@ -663,17 +663,31 @@ class AES67SoC(SoCCore):
         )
 
         # -- SPI Flash: W25Q64 (8 MB, memory-mapped, BIOS executes from here) --
-        # with_master=False: no SPI master port, only memory-mapped reads.
-        # The master port would let the BIOS issue SPI commands (read ID,
-        # freq calibration) which deadlocks when the CPU itself is executing
-        # from this same flash — the master asserts CS, blocking MMAP fetches,
-        # while the CPU stalls waiting for its next instruction fetch.
+        # with_master=True: enables the SPI master port alongside memory-mapped
+        # reads.  The master port allows the firmware to issue raw SPI commands
+        # (write-enable, page-program, sector-erase) for in-system firmware
+        # updates.  The BIOS still skips frequency calibration (see
+        # SPIFLASH_SKIP_FREQ_INIT below) so it never activates the master
+        # during boot — avoiding the XIP deadlock.  By the time Zephyr runs,
+        # all code executes from HyperRAM, so master access is safe.
         from litespi.modules import W25Q64
         from litespi.opcodes import SpiNorFlashOpCodes
         self.add_spi_flash(name="spiflash", mode="1x",
             module=W25Q64(SpiNorFlashOpCodes.READ_1_1_1),
             clk_freq=20e6,
-            with_master=False)
+            with_master=True)
+
+        # Gate the MMAP port's crossbar request with a CSR so firmware can
+        # disable memory-mapped reads while using the SPI master port.
+        # Without this, the MMAP port's round-robin arbitration interferes
+        # with master transactions, corrupting SPI flash writes/reads.
+        from litex.soc.interconnect.csr import CSRStorage
+        self.spiflash_mmap_en = CSRStorage(1, reset=1,
+            description="Set to 0 to disable MMAP flash access (allows clean master access).")
+        original_mmap_req = self.spiflash.crossbar.user_request[0]
+        gated_req = Signal()
+        self.comb += gated_req.eq(original_mmap_req & self.spiflash_mmap_en.storage)
+        self.spiflash.crossbar.user_request[0] = gated_req
 
         # Skip SPI Flash frequency auto-calibration (same reason as above).
         self.add_constant("SPIFLASH_SKIP_FREQ_INIT", 1)

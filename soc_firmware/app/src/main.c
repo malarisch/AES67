@@ -28,6 +28,8 @@
 #include "sap_sdp.h"
 #include "webserver.h"
 #include "aes67_config.h"
+// TODO: FW Update is broken, SPI flash reads garbage when in master mode
+#include "fw_update.h"
 #ifdef CONFIG_RTSP
 #include "rtsp.h"
 #endif
@@ -344,6 +346,7 @@ int main(void)
 	}
 
 	/* ---- Start HTTP server (REST API + Web UI) ---- */
+	fw_update_init();
 	int web_ret = webserver_start();
 	if (web_ret < 0) {
 		LOG_ERR("Failed to start HTTP server: %d", web_ret);
