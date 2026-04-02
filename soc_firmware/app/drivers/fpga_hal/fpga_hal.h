@@ -191,6 +191,14 @@ int fpga_hal_ctrl_set_bits(uint32_t bits);
  */
 int fpga_hal_ctrl_clear_bits(uint32_t bits);
 
+/**
+ * @brief Assert or release the AD/DA card hardware reset line.
+ *
+ * @param released  true  = release reset (nRST high, board runs normally).
+ *                  false = assert reset  (nRST low,  board held in reset).
+ */
+int fpga_hal_set_adda_nrst(bool released);
+
 /* ========================================================================
  * Status reads
  * ======================================================================== */

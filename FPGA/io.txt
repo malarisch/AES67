@@ -1,0 +1,31 @@
+r 0 ain
+r gpio1 in mclk
+r 2 ain
+3 ain
+4 ain
+r 5 aout
+r 6 aout
+7 aout
+8 aout
+
+r 9 adda bclkdac
+r 10 lrclk adc
+r gpio11 out mclk to LVDS
+r 12 adda bclkadc
+r 13 lrclk dac
+
+r 23 adda sdc
+r 24 adda sda
+25 adda rst
+
+r gpio27 io i2c pll
+r gpio26 out i2c pll
+
+28 adda cs
+29 adda mosi
+30 adda sck
+31 adda miso
+r 32 flash cs
+r 33 flash miso
+r 34 flash clk_
+r 35 flash mosi

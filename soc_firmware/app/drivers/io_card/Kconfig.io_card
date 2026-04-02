@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config IO_CARD
+	bool "IO Card 16-in/8-out analog I/O board driver"
+	depends on I2C
+	help
+	  Enable driver for the IO card with 16 analog inputs (ADC preamp)
+	  and 8 analog outputs (DAC line output).
+
+	  Input side: 2x LPC controllers (0x40, 0x41) and 2x CS5368 ADCs
+	  (0x4C, 0x4D) directly on the I2C bus.
+
+	  Output side: LPC controller (0x43) and 1x CS4385 DAC (0x18)
+	  with 8 output channels, accessed directly on the I2C bus.
+
+if IO_CARD
+
+config IO_CARD_LOG_LEVEL
+	int "IO card driver log level"
+	default 3
+	range 0 4
+	help
+	  Log level for IO card driver.
+	  0 = OFF, 1 = ERR, 2 = WRN, 3 = INF, 4 = DBG
+
+config IO_CARD_MUX_ADDR
+	hex "I2C address of the output-side MUX device"
+	default 0x70
+	help
+	  I2C address of the PCA9540B / TCA9543A-compatible 2-channel
+	  I2C multiplexer used to reach the output LPC and DAC chips.
+
+endif # IO_CARD

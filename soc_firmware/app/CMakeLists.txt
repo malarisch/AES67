@@ -55,6 +55,7 @@ target_sources(app PRIVATE
   src/aes67_sdp_utils.c
   src/webserver.c
   src/fw_update.c
+  src/card_manager.c
 )
 
 # RTSP server/client (RAVENNA stream control)

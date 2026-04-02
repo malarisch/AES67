@@ -180,6 +180,21 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits)
 	return eth_litex_ctrl_clear_bits(dev, litex_bits);
 }
 
+int fpga_hal_set_adda_nrst(bool released)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+
+	if (released) {
+		return eth_litex_ctrl_set_bits(dev, AES67_CTRL_ADDA_NRST);
+	} else {
+		return eth_litex_ctrl_clear_bits(dev, AES67_CTRL_ADDA_NRST);
+	}
+}
+
 /* ---- Status reads ---- */
 
 uint32_t fpga_hal_read_status(void)

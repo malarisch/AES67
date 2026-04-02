@@ -2,9 +2,12 @@
  * SPI Flash -> HyperRAM boot stub for LiteX VexRiscv.
  *
  * This tiny stub is placed at the CPU reset address (start of SPI flash).
- * It sets the HyperRAM controller latency to match the chip's power-on
- * default (6 CK for IS66WVH8M8ALL), copies the BIOS image from SPI flash
- * into HyperRAM, flushes caches, and jumps there.
+ *
+ * It resets the HyperRAM chip via the CSR (pulse stretcher in the SoC
+ * extends this to 32 sys_clk cycles = 400 ns), waits for the chip to
+ * recover, sets the HyperRAM controller latency to match the chip's
+ * power-on default (6 CK), copies the BIOS image from SPI flash into
+ * HyperRAM, flushes caches, and jumps there.
  *
  * Flash layout:
  *   0x30000000  boot_stub  (this file, <=512 bytes)
@@ -25,13 +28,44 @@
 .equ HYPERRAM_CFG,  0xF0001800
 .equ HR_LATENCY,    6           /* IS66WVH8M8ALL power-on default */
 
+.equ UART_RXTX,    0xF0005800
+.equ UART_TXFULL,  0xF0005804
+
 _start:
     li      sp, 0x10001000
 
-    /* Set HyperRAM controller latency to match chip power-on default */
+    /* --- Debug: print "B" (Boot stub entered) --- */
+    li      s0, UART_RXTX
+    li      a0, 'B'
+    jal     ra, uart_putc
+
+    /*
+     * Reset the HyperRAM chip via CSR.
+     */
+    li      t0, HYPERRAM_CFG
+    li      t1, (HR_LATENCY << 8) | 1  /* rst=1 (bit 0) + latency=6 (bits 15:8) */
+    sw      t1, 0(t0)
+
+    /* --- Debug: print "R" (RST# triggered) --- */
+    li      a0, 'R'
+    jal     ra, uart_putc
+
+    /*
+     * Wait for HyperRAM chip recovery.
+     */
+    li      t2, 10000
+.rst_wait:
+    addi    t2, t2, -1
+    bnez    t2, .rst_wait
+
+    /* Set HyperRAM controller latency to match chip power-on default (6 CK). */
     li      t0, HYPERRAM_CFG
     li      t1, (HR_LATENCY << 8)
     sw      t1, 0(t0)
+
+    /* --- Debug: print "L" (Latency set) --- */
+    li      a0, 'L'
+    jal     ra, uart_putc
 
     /* Copy BIOS from SPI flash to HyperRAM */
     li      a0, BIOS_DST
@@ -45,6 +79,11 @@ copy_loop:
     addi    a2, a2, -4
     bnez    a2, copy_loop
 
+    /* --- Debug: print "C" (Copy done) --- */
+    li      s0, UART_RXTX
+    li      a0, 'C'
+    jal     ra, uart_putc
+
     /* Flush D-cache then I-cache */
     .word   0x500F
     .word   0x100F
@@ -54,6 +93,25 @@ copy_loop:
     nop
     nop
 
+    /* --- Debug: print "J\n" (Jumping to BIOS) --- */
+    li      s0, UART_RXTX
+    li      a0, 'J'
+    jal     ra, uart_putc
+    li      a0, '\n'
+    jal     ra, uart_putc
+
     /* Jump to BIOS in HyperRAM */
     li      t0, BIOS_DST
     jr      t0
+
+/*
+ * uart_putc: send byte in a0 via LiteX UART.
+ * Clobbers: t3, t4.  Expects s0 = UART_RXTX base address.
+ */
+uart_putc:
+    li      t3, UART_TXFULL
+.uart_wait:
+    lw      t4, 0(t3)
+    bnez    t4, .uart_wait       /* spin while TX FIFO full */
+    sw      a0, 0(s0)            /* write byte to RXTX */
+    ret

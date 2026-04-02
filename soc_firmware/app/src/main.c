@@ -17,6 +17,10 @@
 #ifdef CONFIG_LO_CARD
 #include "../drivers/lo_card/lo_card.h"
 #endif
+#ifdef CONFIG_IO_CARD
+#include "../drivers/io_card/io_card.h"
+#endif
+#include "card_manager.h"
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
@@ -175,6 +179,13 @@ int main(void)
 {
 	LOG_INF("AES67 System starting...");
 
+	/* Hold the IO card in reset from the very start.
+	 * The CS5368 ADCs must not leave reset until MCLK is stable.
+	 * nRST will be released later by card_manager_init() after
+	 * the Si5351A PLL has locked and clocks have settled. */
+	fpga_hal_set_adda_nrst(false);
+	LOG_INF("ADDA nRST asserted (held in reset)");
+
 	/* ---- Early Initialization (before FPGA ready) ---- */
 	ui_display_init();
 
@@ -201,47 +212,29 @@ int main(void)
 		si5351a_set_drive_strength(clkgen, 0, SI5351A_DRIVE_8MA);
 
 		LOG_INF("Si5351A clocks configured: CLK0=24.576 MHz");
+
+		/* CS5368 ADCs require a stable MCLK before their reset is
+		 * released — otherwise the I2C interface won't initialise.
+		 * Give the Si5351A PLL time to lock and the clock to settle. */
+		LOG_INF("Waiting 2 s for MCLK to stabilise...");
+		k_msleep(2000);
 	}
 
-#ifdef CONFIG_MI_CARD
-	/* ---- MI Card 8-Channel ADC Preamp Setup ---- */
-#ifdef CONFIG_MI_CARD_NRST_GPIO
-	if (mi_card_nrst_gpio_init() < 0) {
-		LOG_WRN("MI card nRST GPIO init failed (hw reset unavailable)");
-	}
-#endif
-	const struct device *mi_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
-	if (!device_is_ready(mi_i2c)) {
-		LOG_ERR("MI card I2C bus (i2c2) not ready");
-	} else {
-		int mi_ret = mi_card_init(mi_i2c);
-		if (mi_ret < 0) {
-			LOG_WRN("MI card init failed: %d (board may not be connected)", mi_ret);
-		} else {
-			LOG_INF("MI card initialized successfully");
-		}
-	}
-#endif
+	/* ---- Analog I/O Card Autodetect ---- */
+	{
+		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
 
-#ifdef CONFIG_LO_CARD
-	/* ---- LO Card 8-Channel DAC Line Output Setup ---- */
-#ifdef CONFIG_LO_CARD_NRST_GPIO
-	if (lo_card_nrst_gpio_init() < 0) {
-		LOG_WRN("LO card nRST GPIO init failed (hw reset unavailable)");
-	}
-#endif
-	const struct device *lo_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
-	if (!device_is_ready(lo_i2c)) {
-		LOG_ERR("LO card I2C bus (i2c2) not ready");
-	} else {
-		int lo_ret = lo_card_init(lo_i2c);
-		if (lo_ret < 0) {
-			LOG_WRN("LO card init failed: %d (board may not be connected)", lo_ret);
+		if (!device_is_ready(card_i2c)) {
+			LOG_ERR("Card I2C bus (i2c2) not ready");
 		} else {
-			LOG_INF("LO card initialized successfully");
+			int cm_ret = card_manager_init(card_i2c);
+
+			if (cm_ret < 0) {
+				LOG_WRN("Card manager init error: %d", cm_ret);
+			}
+			/* Individual result is logged by card_manager */
 		}
 	}
-#endif
 
 #ifdef CONFIG_DISPLAY_CTRL
 	/* ---- Display Controller (LEDs, Buttons, 7-Segment) Setup ---- */

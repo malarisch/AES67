@@ -6,6 +6,7 @@ rsource "fpga_hal/Kconfig.fpga_hal"
 rsource "si5351a/Kconfig.si5351a"
 rsource "mi_card/Kconfig.mi_card"
 rsource "lo_card/Kconfig.lo_card"
+rsource "io_card/Kconfig.io_card"
 rsource "display_ctrl/Kconfig.display_ctrl"
 rsource "spi_flash/Kconfig.spi_flash"
 endmenu

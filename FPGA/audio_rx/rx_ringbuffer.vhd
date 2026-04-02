@@ -494,14 +494,14 @@ begin
                             when 5 => audio_ch5_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
                             when 6 => audio_ch6_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
                             when 7 => audio_ch7_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                          --  when 8 => audio_ch8_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                          --  when 9 => audio_ch9_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                          --  when 10 => audio_ch10_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                         --   when 11 => audio_ch11_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                         --   when 12 => audio_ch12_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                         --   when 13 => audio_ch13_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                         --   when 14 => audio_ch14_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                         --   when 15 => audio_ch15_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 8 => audio_ch8_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 9 => audio_ch9_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 10 => audio_ch10_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 11 => audio_ch11_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 12 => audio_ch12_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 13 => audio_ch13_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 14 => audio_ch14_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                            when 15 => audio_ch15_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
                             when others => null;
                         end case;
 

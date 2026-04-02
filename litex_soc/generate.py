@@ -30,6 +30,131 @@ from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr_eventmanager import EventManager, EventSourceProcess
 from migen.genlib.fifo import SyncFIFOBuffered
 
+
+# -- HyperRAM subclass with warm-reset recovery -------------------------------
+
+class AES67HyperRAM(HyperRAM):
+    """HyperRAM with automatic startup reset for warm-reset recovery.
+
+    Problem: after an FPGA-only reconfiguration (no power cycle) the HyperRAM
+    *chip* retains whatever CR0 the BIOS previously programmed (e.g. 3 CK
+    latency), while the LiteX controller CSR resets to its default (7 CK).
+    The resulting latency mismatch corrupts every access.
+
+    The upstream CSR "rst" field uses pulse=True which asserts RST# for only
+    1 sys_clk cycle (12.5 ns at 80 MHz).  The IS66WVH16M8ALL/8M8ALL datasheet
+    requires tRPH >= 200 ns.  The chip ignores the sub-spec pulse.
+
+    Fix: this subclass overrides add_csr() to drive core.rst with:
+      1) An automatic startup counter that holds RST# for 4096 sys_clk cycles
+         (~51 µs at 80 MHz) after every FPGA configuration.
+      2) A CSR-pulse stretcher that extends any software-triggered RST# to
+         32 sys_clk cycles (400 ns).
+
+    After either reset, the chip returns to power-on defaults (6 CK latency,
+    128 B wrapped burst, fixed latency mode).
+    """
+
+    def add_csr(self, default_latency=7, latency_mode="fixed"):
+        # -- Config / Status CSRs (identical to upstream) ----------------------
+        self.config = CSRStorage(fields=[
+            CSRField("rst",     offset=0, size=1, pulse=True, description="HyperRAM Rst."),
+            CSRField("latency", offset=8, size=8,             description="HyperRAM Latency (X1).", reset=default_latency),
+        ])
+
+        # -- Startup reset counter (fires on every FPGA configuration) ---------
+        startup_cnt  = Signal(13, reset=0)
+        startup_done = Signal(reset=0)
+        self.sync += [
+            If(~startup_done,
+                If(startup_cnt < 4096,
+                    startup_cnt.eq(startup_cnt + 1),
+                ).Else(
+                    startup_done.eq(1),
+                ),
+            ),
+        ]
+
+        # -- CSR-pulse stretcher (extends 1-cycle pulse to 32 cycles) ----------
+        csr_rst_cnt = Signal(6, reset=0)
+        self.sync += [
+            If(self.config.fields.rst,
+                csr_rst_cnt.eq(32),
+            ).Elif(csr_rst_cnt != 0,
+                csr_rst_cnt.eq(csr_rst_cnt - 1),
+            ),
+        ]
+
+        # -- Combined rst → core.rst ------------------------------------------
+        rst_combined = Signal()
+        self.comb += rst_combined.eq(
+            ~startup_done                  # automatic startup period
+            | self.config.fields.rst       # CSR pulse (1 cycle)
+            | (csr_rst_cnt != 0)           # CSR pulse stretched
+        )
+        self.comb += [
+            self.core.rst.eq(rst_combined),
+            self.core.latency.eq(self.config.fields.latency),
+        ]
+
+        # -- Status CSR --------------------------------------------------------
+        self.status = CSRStatus(fields=[
+            CSRField("latency_mode", offset=0, size=1, values=[
+                ("``0b0``", "Fixed Latency."),
+                ("``0b1``", "Variable Latency."),
+            ], reset={"fixed": 0b0, "variable": 0b1}[latency_mode]),
+            CSRField("clk_ratio", offset=1, size=4, values=[
+                ("``4``", "HyperRAM Clk = Sys Clk/4."),
+                ("``2``", "HyperRAM Clk = Sys Clk/2."),
+            ], reset={"4:1": 4, "2:1": 2}[self.clk_ratio]),
+        ])
+
+        # -- Register access interface (identical to upstream) -----------------
+        self.reg_control = CSRStorage(fields=[
+            CSRField("write", offset=0, size=1, pulse=True, description="Issue Register Write."),
+            CSRField("read",  offset=1, size=1, pulse=True, description="Issue Register Read."),
+            CSRField("addr",  offset=8, size=2, values=[
+                ("``0b00``", "Identification Register 0 (Read Only)."),
+                ("``0b01``", "Identification Register 1 (Read Only)."),
+                ("``0b10``", "Configuration Register 0."),
+                ("``0b11``", "Configuration Register 1."),
+            ]),
+        ])
+        self.reg_status = CSRStatus(fields=[
+            CSRField("done", offset=0, size=1, description="Register Access Done."),
+        ])
+        self.reg_wdata = CSRStorage(16, description="Register Write Data.")
+        self.reg_rdata = CSRStatus( 16, description="Register Read Data.")
+
+        self.reg_fsm = reg_fsm = FSM(reset_state="IDLE")
+        reg_fsm.act("IDLE",
+            self.reg_status.fields.done.eq(1),
+            If(self.reg_control.fields.write,
+                NextState("WRITE"),
+            ).Elif(self.reg_control.fields.read,
+                NextState("READ"),
+            )
+        )
+        reg_fsm.act("WRITE",
+            self.core.reg.stb.eq(1),
+            self.core.reg.we.eq(1),
+            self.core.reg.adr.eq(self.reg_control.fields.addr),
+            self.core.reg.dat_w.eq(self.reg_wdata.storage),
+            If(self.core.reg.ack,
+                NextState("IDLE"),
+            )
+        )
+        reg_fsm.act("READ",
+            self.core.reg.stb.eq(1),
+            self.core.reg.we.eq(0),
+            self.core.reg.adr.eq(self.reg_control.fields.addr),
+            If(self.core.reg.ack,
+                NextValue(self.reg_rdata.status, self.core.reg.dat_r),
+                NextState("IDLE"),
+            )
+        )
+from migen.genlib.fifo import SyncFIFOBuffered
+
 # -- Minimal platform stub (no toolchain, just pin definitions) ---------------
 
 from litex.build.generic_platform import Pins, Subsignal, IOStandard
@@ -126,6 +251,7 @@ _io = [
         Subsignal("ptp_gm_clock_class", Pins(8)),
         Subsignal("ptp_gm_clock_accuracy", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
+        Subsignal("adda_nrst",          Pins(1)),   # AD/DA card nRST (output, active-high release)
     ),
 
     # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)
@@ -207,7 +333,27 @@ class _CRG(LiteXModule):
         # PLL
         # Note: 10CL025YU256I7G is Industrial temp with speed grade 7 (-I7)
         self.pll = pll = Cyclone10LPPLL(speedgrade="-I7")
-        self.comb += pll.reset.eq(self.rst)
+
+        # Stretch the incoming rst pulse for reliable CDC capture.
+        #
+        # LiteX's SoCCore drives self.rst with a single sys_clk pulse
+        # (12.5 ns at 80 MHz) on soc_rst.  This pulse must cross a CDC
+        # boundary into the 50 MHz PLL input clock domain (via an 8-stage
+        # DFFE pipeline).  A 12.5 ns pulse can be missed by a 20 ns clock.
+        #
+        # We stretch it to 8 sys_clk cycles (~100 ns), guaranteeing at least
+        # 5 rising edges of clk50 see it high.
+        rst_stretch_cnt = Signal(4, reset=0)
+        rst_stretched   = Signal()
+        self.sync += [
+            If(self.rst,
+                rst_stretch_cnt.eq(8),
+            ).Elif(rst_stretch_cnt != 0,
+                rst_stretch_cnt.eq(rst_stretch_cnt - 1),
+            ),
+        ]
+        self.comb += rst_stretched.eq(self.rst | (rst_stretch_cnt != 0))
+        self.comb += pll.reset.eq(rst_stretched)
         pll.register_clkin(clk50, 50e6)
         pll.create_clkout(self.cd_sys, sys_clk_freq)
 
@@ -265,6 +411,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_ptp_gm_clock_class  = Signal(8)
         self.o_ptp_gm_clock_accuracy = Signal(8)
         self.o_eth_tx_request      = Signal()
+        self.o_adda_nrst           = Signal()  # AD/DA card hardware reset (active-high → nRST pin)
 
         # =====================================================================
         # CSR: Status registers (RO) — directly sampled from input signals
@@ -297,6 +444,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("ptp_is_leader",   size=1, offset=1, description="PTP leader mode"),
             CSRField("ptp_is_follower", size=1, offset=2, description="PTP follower mode"),
             CSRField("eth_tx_request",  size=1, offset=3, description="Request Ethernet TX"),
+            CSRField("adda_nrst",       size=1, offset=4, description="AD/DA card reset release: 0=held in reset, 1=released"),
         ])
 
         self.mac_addr_lo = CSRStorage(32, description="MAC address [31:0]")
@@ -347,6 +495,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_ptp_is_leader.eq(self.ctrl.fields.ptp_is_leader),
             self.o_ptp_is_follower.eq(self.ctrl.fields.ptp_is_follower),
             self.o_eth_tx_request.eq(self.ctrl.fields.eth_tx_request),
+            self.o_adda_nrst.eq(self.ctrl.fields.adda_nrst),
 
             self.o_mac_addr.eq(Cat(self.mac_addr_lo.storage, self.mac_addr_hi.storage[:16])),
             self.o_ip_addr.eq(self.ip_addr.storage),
@@ -639,8 +788,9 @@ class AES67SoC(SoCCore):
         self.crg = _CRG(platform, sys_clk_freq, with_sys2x=need_sys2x)
 
         # HyperRAM (16 MB IS66WVH16M8ALL-166B1LI on C10LP board, 1.8V, 166 MHz max)
+        # Uses AES67HyperRAM subclass for automatic startup reset on warm reboot.
         if with_hyperram:
-            self.hyperram = HyperRAM(
+            self.hyperram = AES67HyperRAM(
                 pads         = platform.request("hyperram"),
                 sys_clk_freq = sys_clk_freq,
                 clk_ratio    = hyperram_clk_ratio,  # "4:1" = safe, "2:1" = 2x faster
@@ -651,8 +801,11 @@ class AES67SoC(SoCCore):
         # -- I2C 0: Display (SSD1306) + PLL (Si5351A) -------------------------
         self.i2c0 = I2CMaster(platform.request("i2c", 0))
 
-        # -- I2C 1: AD/DA Card Controller --------------------------------------
-        self.i2c1 = I2CMaster(platform.request("i2c", 1))
+        # -- I2C 1: AD/DA Card Controller (hardware I2C via LiteI2C) -----------
+        self.add_i2c_master(
+            name  = "i2c1",
+            pads  = platform.request("i2c", 1),
+        )
 
         # -- SPI: SD Card ------------------------------------------------------
         self.spi0 = SPIMaster(
@@ -739,6 +892,7 @@ class AES67SoC(SoCCore):
             aes67_pads.ptp_gm_clock_class.eq(self.aes67_csr.o_ptp_gm_clock_class),
             aes67_pads.ptp_gm_clock_accuracy.eq(self.aes67_csr.o_ptp_gm_clock_accuracy),
             aes67_pads.eth_tx_request.eq(self.aes67_csr.o_eth_tx_request),
+            aes67_pads.adda_nrst.eq(self.aes67_csr.o_adda_nrst),
         ]
 
         # -- Ethernet Packet Buffers -------------------------------------------

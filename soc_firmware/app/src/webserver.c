@@ -39,6 +39,10 @@
 #ifdef CONFIG_LO_CARD
 #include "../drivers/lo_card/lo_card.h"
 #endif
+#ifdef CONFIG_IO_CARD
+#include "../drivers/io_card/io_card.h"
+#endif
+#include "card_manager.h"
 
 /* local_memmem is a GNU extension not available in picolibc / Zephyr */
 static void *local_memmem(const void *haystack, size_t haystacklen,
@@ -1143,6 +1147,183 @@ static int apply_lo_global_json(const char *json, size_t len)
 #endif /* CONFIG_LO_CARD */
 
 /* ================================================================
+ * Card Manager — /api/cards/* builders and apply helpers
+ * ================================================================ */
+
+/**
+ * Build a JSON object for one card slot:
+ * {
+ *   "slot": 0,
+ *   "type": "MI (8-ch ADC preamp)",
+ *   "type_id": 1,
+ *   "present": true,
+ *   "initialized": true,
+ *   "board_id": 1,
+ *   "soft_id": 0,
+ *   "hard_rev": 0
+ * }
+ */
+static int build_card_slot_json(char *buf, size_t sz, int slot)
+{
+	const struct card_info *info = card_manager_get_info(slot);
+	int p = json_start_object(buf, sz);
+
+	p = json_add_int(buf, sz, p, "slot", slot);
+
+	if (info == NULL) {
+		p = json_add_bool(buf, sz, p, "present", false);
+		p = json_add_str(buf, sz, p, "type", "none");
+		p = json_add_int(buf, sz, p, "type_id", 0);
+		p = json_end_object(buf, sz, p);
+		return p;
+	}
+
+	p = json_add_bool(buf, sz, p, "present",     info->present);
+	p = json_add_bool(buf, sz, p, "initialized", info->initialized);
+	p = json_add_str(buf, sz, p, "type", card_type_name(info->type));
+	p = json_add_int(buf, sz, p, "type_id", (int)info->type);
+
+	if (info->present) {
+		p = json_add_int(buf, sz, p, "board_id", info->ident.board_id);
+		p = json_add_int(buf, sz, p, "soft_id",  info->ident.soft_id);
+		p = json_add_int(buf, sz, p, "hard_rev", info->ident.hard_rev);
+	}
+
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+/** GET /api/cards — summary of all slots + last I2C scan */
+static int build_cards_overview(char *buf, size_t sz)
+{
+	int p = json_start_object(buf, sz);
+
+	/* Per-slot info */
+	p = json_add_key(buf, sz, p, "slots");
+	p = json_start_array(buf, sz, p);
+	for (int s = 0; s < CARD_MAX_SLOTS; s++) {
+		p += build_card_slot_json(buf + p, sz - p, s);
+		p += snprintf(buf + p, sz - p, ",");
+	}
+	p = json_end_array(buf, sz, p);
+
+	/* Last I2C bus scan result */
+	struct card_i2c_scan_result scan;
+	card_manager_get_scan_result(&scan);
+
+	p = json_add_key(buf, sz, p, "i2c_devices");
+	p = json_start_array(buf, sz, p);
+	for (int i = 0; i < scan.count; i++) {
+		p += snprintf(buf + p, sz - p, "%d,", scan.addr[i]);
+	}
+	p = json_end_array(buf, sz, p);
+
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+#ifdef CONFIG_IO_CARD
+/** GET /api/cards/io — full IO card status (inputs + outputs) */
+static int build_io_card_status(char *buf, size_t sz)
+{
+	int p = json_start_object(buf, sz);
+
+	/* Global */
+	p = json_add_bool(buf, sz, p, "output_enable",
+			  io_card_get_output_enable() > 0);
+
+	/* Input channels */
+	p = json_add_key(buf, sz, p, "inputs");
+	p = json_start_array(buf, sz, p);
+	for (int ch = 0; ch < IO_NUM_IN_CHANNELS; ch++) {
+		p += snprintf(buf + p, sz - p, "{");
+		p = json_add_uint(buf, sz, p, "id", (uint32_t)ch);
+		p = json_add_int(buf, sz, p,  "gain",    io_card_get_in_gain(ch));
+		p = json_add_bool(buf, sz, p, "phantom",  io_card_get_in_phantom(ch) > 0);
+		p = json_add_bool(buf, sz, p, "muted",    io_card_get_in_mute(ch) > 0);
+		if (buf[p - 1] == ',') { p--; }
+		p += snprintf(buf + p, sz - p, "},");
+	}
+	p = json_end_array(buf, sz, p);
+
+	/* Output channels */
+	p = json_add_key(buf, sz, p, "outputs");
+	p = json_start_array(buf, sz, p);
+	for (int ch = 0; ch < IO_NUM_OUT_CHANNELS; ch++) {
+		p += snprintf(buf + p, sz - p, "{");
+		p = json_add_uint(buf, sz, p, "id", (uint32_t)ch);
+		p = json_add_int(buf, sz, p,  "clip",  io_card_get_out_clip(ch));
+		p = json_add_bool(buf, sz, p, "muted", io_card_get_out_mute(ch) > 0);
+		if (buf[p - 1] == ',') { p--; }
+		p += snprintf(buf + p, sz - p, "},");
+	}
+	p = json_end_array(buf, sz, p);
+
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+static int apply_io_in_channel_json(int ch, const char *json, size_t len)
+{
+	int32_t val;
+	bool bval;
+
+	if (ch < 0 || ch >= IO_NUM_IN_CHANNELS) {
+		return -EINVAL;
+	}
+
+	if (json_find_int(json, len, "gain", &val)) {
+		int ret = io_card_set_in_gain((uint8_t)ch, (int8_t)val);
+		if (ret < 0) { return ret; }
+	}
+	if (json_find_bool(json, len, "phantom", &bval)) {
+		int ret = io_card_set_in_phantom((uint8_t)ch, bval);
+		if (ret < 0) { return ret; }
+	}
+	if (json_find_bool(json, len, "muted", &bval)) {
+		int ret = io_card_set_in_mute((uint8_t)ch, bval);
+		if (ret < 0) { return ret; }
+	}
+	return 0;
+}
+
+static int apply_io_out_channel_json(int ch, const char *json, size_t len)
+{
+	int32_t val;
+	bool bval;
+
+	if (ch < 0 || ch >= IO_NUM_OUT_CHANNELS) {
+		return -EINVAL;
+	}
+
+	if (json_find_int(json, len, "clip", &val)) {
+		int ret = io_card_set_out_clip((uint8_t)ch, (int8_t)val);
+		if (ret < 0) { return ret; }
+	}
+	if (json_find_bool(json, len, "muted", &bval)) {
+		int ret = io_card_set_out_mute((uint8_t)ch, bval);
+		if (ret < 0) { return ret; }
+	}
+	return 0;
+}
+
+static int apply_io_global_json(const char *json, size_t len)
+{
+	bool bval;
+
+	if (json_find_bool(json, len, "output_enable", &bval)) {
+		int ret = io_card_enable_outputs(bval);
+		if (ret < 0) { return ret; }
+	}
+	if (json_find_bool(json, len, "f96khz", &bval)) {
+		int ret = io_card_set_96khz(bval);
+		if (ret < 0) { return ret; }
+	}
+	return 0;
+}
+#endif /* CONFIG_IO_CARD */
+
+/* ================================================================
  * POST body accumulator
  * ================================================================ */
 
@@ -1255,6 +1436,24 @@ static int api_handler(struct http_client_ctx *client,
 			} else {
 				json_len = snprintf(json_buf, JSON_BUF_SIZE,
 					"{\"error\":\"board not detected\"}");
+				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
+			}
+#endif
+		/* ---- Card Manager ---- */
+		} else if (strcmp(url, "/api/cards") == 0) {
+			json_len = build_cards_overview(json_buf, JSON_BUF_SIZE);
+		} else if (strcmp(url, "/api/cards/scan") == 0) {
+			/* GET triggers a fresh scan AND returns result */
+			card_manager_rescan();
+			json_len = build_cards_overview(json_buf, JSON_BUF_SIZE);
+#ifdef CONFIG_IO_CARD
+		} else if (strcmp(url, "/api/cards/io") == 0) {
+			const struct card_info *ci = card_manager_get_info(CARD_SLOT_MAIN);
+			if (ci && ci->type == CARD_TYPE_IO && ci->initialized) {
+				json_len = build_io_card_status(json_buf, JSON_BUF_SIZE);
+			} else {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"error\":\"IO card not present\"}");
 				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
 			}
 #endif
@@ -1380,6 +1579,60 @@ static int api_handler(struct http_client_ctx *client,
 					"{\"ok\":true,\"message\":\"Board reset complete\"}");
 			}
 #endif
+		/* ---- Card Manager POST ---- */
+		} else if (strcmp(url, "/api/cards/scan") == 0) {
+			/* POST /api/cards/scan — trigger rescan, return new state */
+			card_manager_rescan();
+			json_len = build_cards_overview(json_buf, JSON_BUF_SIZE);
+#ifdef CONFIG_IO_CARD
+		} else if (strcmp(url, "/api/cards/io") == 0) {
+			/* POST /api/cards/io — global IO card settings */
+			const struct card_info *ci = card_manager_get_info(CARD_SLOT_MAIN);
+			if (ci && ci->type == CARD_TYPE_IO && ci->initialized) {
+				ret = apply_io_global_json(post_body, post_body_len);
+				if (ret == 0) {
+					json_len = build_io_card_status(json_buf, JSON_BUF_SIZE);
+				}
+			} else {
+				ret = -ENODEV;
+			}
+		} else if (strncmp(url, "/api/cards/io/in/", 17) == 0) {
+			/* POST /api/cards/io/in/0 — per input-channel settings */
+			int ch = atoi(url + 17);
+			const struct card_info *ci = card_manager_get_info(CARD_SLOT_MAIN);
+			if (ci && ci->type == CARD_TYPE_IO && ci->initialized) {
+				ret = apply_io_in_channel_json(ch, post_body, post_body_len);
+				if (ret == 0) {
+					json_len = build_io_card_status(json_buf, JSON_BUF_SIZE);
+				}
+			} else {
+				ret = -ENODEV;
+			}
+		} else if (strncmp(url, "/api/cards/io/out/", 18) == 0) {
+			/* POST /api/cards/io/out/0 — per output-channel settings */
+			int ch = atoi(url + 18);
+			const struct card_info *ci = card_manager_get_info(CARD_SLOT_MAIN);
+			if (ci && ci->type == CARD_TYPE_IO && ci->initialized) {
+				ret = apply_io_out_channel_json(ch, post_body, post_body_len);
+				if (ret == 0) {
+					json_len = build_io_card_status(json_buf, JSON_BUF_SIZE);
+				}
+			} else {
+				ret = -ENODEV;
+			}
+		} else if (strcmp(url, "/api/cards/io/reset") == 0) {
+			/* POST /api/cards/io/reset — reinit IO card */
+			const struct card_info *ci = card_manager_get_info(CARD_SLOT_MAIN);
+			if (ci && ci->type == CARD_TYPE_IO) {
+				ret = io_card_reset();
+				if (ret == 0) {
+					json_len = snprintf(json_buf, JSON_BUF_SIZE,
+						"{\"ok\":true}");
+				}
+			} else {
+				ret = -ENODEV;
+			}
+#endif /* CONFIG_IO_CARD */
 		} else if (strcmp(url, "/api/system/reboot") == 0) {
 			/* POST /api/system/reboot - reboot MCU */
 			LOG_WRN("Reboot requested via REST API");
