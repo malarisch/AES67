@@ -96,20 +96,53 @@ static int uart_write_buf(const uint8_t *buf, size_t len)
 
 /**
  * @brief Send channel LED update command
+ *
+ * For 8-channel cards: single 3-byte UART message.
+ * For extended cards (>8 channels): three 3-byte messages covering
+ * channels 0-7, 8-15, and 16-23 respectively.
  */
 static int send_channel_leds(enum dc_chn_led_type type)
 {
 	uint8_t buf[3];
-	uint8_t pattern = dc_data.chn_led[type];
+	uint32_t pattern = dc_data.chn_led[type];
+	int ret = 0;
 
+#if DC_MAX_CHANNELS > 8
+	/* Extended mode: 3 UART writes for up to 24 channels */
+
+	/* Channels 16-23 */
+	buf[0] = DC_CHNLEDBASE + (type * 2);
+	buf[1] = (pattern >> 16) & 0x0F;
+	buf[2] = (pattern >> 20) & 0x0F;
+	ret = uart_write_buf(buf, 3);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Channels 8-15 */
+	buf[0] = DC_CHNLEDBASEHI + (type * 2);
+	buf[1] = (pattern >> 8) & 0x0F;
+	buf[2] = (pattern >> 12) & 0x0F;
+	ret = uart_write_buf(buf, 3);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Channels 0-7 */
+	buf[0] = DC_CHNLEDBASEHI + (type * 2) + 0x08;
+	buf[1] = pattern & 0x0F;
+	buf[2] = (pattern >> 4) & 0x0F;
+#else
+	/* Standard 8-channel mode: single UART write */
 	buf[0] = DC_CHNLEDBASE + (type * 2);
 	buf[1] = pattern & 0x0F;         /* Channels 0-3 */
 	buf[2] = (pattern >> 4) & 0x0F;  /* Channels 4-7 */
+#endif
 
-	LOG_DBG("Channel LED type %d: pattern=0x%02x, cmd=[0x%02x, 0x%02x, 0x%02x]",
-		type, pattern, buf[0], buf[1], buf[2]);
+	LOG_DBG("Channel LED type %d: pattern=0x%06x", type, pattern);
 
-	return uart_write_buf(buf, 3);
+	ret = uart_write_buf(buf, 3);
+	return ret;
 }
 
 /**
@@ -264,6 +297,7 @@ int display_ctrl_init(const struct device *uart_dev)
 	dc_data.button_cb = NULL;
 	dc_data.button_cb_user_data = NULL;
 	dc_data.rx_idx = 0;
+	/* nrst_callbacks are preserved across re-init */
 
 	/* Configure UART for interrupt-driven RX */
 	uart_irq_callback_user_data_set(uart_dev, uart_rx_callback, NULL);
@@ -280,6 +314,11 @@ int display_ctrl_init(const struct device *uart_dev)
 bool display_ctrl_ready(void)
 {
 	return dc_data.initialized;
+}
+
+const struct device *display_ctrl_get_uart(void)
+{
+	return dc_data.uart_dev;
 }
 
 /*******************************************************************************
@@ -334,6 +373,22 @@ int display_ctrl_show_hex(enum dc_display which, uint8_t value)
 	uint8_t low = VCC_NUM0 + (value & 0x0F);
 
 	return display_ctrl_set_segment(which, high, low);
+}
+
+int display_ctrl_get_segment_left(enum dc_display which)
+{
+	if (which >= DC_NUM_DISPLAYS) {
+		return -EINVAL;
+	}
+	return dc_data.segment[which][0];
+}
+
+int display_ctrl_get_segment_right(enum dc_display which)
+{
+	if (which >= DC_NUM_DISPLAYS) {
+		return -EINVAL;
+	}
+	return dc_data.segment[which][1];
 }
 
 int display_ctrl_set_blink(enum dc_display which, bool blink)
@@ -474,7 +529,7 @@ int display_ctrl_set_channel_led(uint8_t channel, enum dc_chn_led_type type, boo
 {
 	int ret;
 
-	if (channel >= 8 || type >= DC_CHNLED_LAST) {
+	if (channel >= DC_MAX_CHANNELS || type >= DC_CHNLED_LAST) {
 		return -EINVAL;
 	}
 
@@ -485,9 +540,9 @@ int display_ctrl_set_channel_led(uint8_t channel, enum dc_chn_led_type type, boo
 	k_mutex_lock(&dc_data.lock, K_FOREVER);
 
 	if (on) {
-		dc_data.chn_led[type] |= (1 << channel);
+		dc_data.chn_led[type] |= (1U << channel);
 	} else {
-		dc_data.chn_led[type] &= ~(1 << channel);
+		dc_data.chn_led[type] &= ~(1U << channel);
 	}
 
 	ret = send_channel_leds(type);
@@ -508,7 +563,7 @@ int display_ctrl_set_channel_led(uint8_t channel, enum dc_chn_led_type type, boo
 
 int display_ctrl_get_channel_led(uint8_t channel, enum dc_chn_led_type type)
 {
-	if (channel >= 8 || type >= DC_CHNLED_LAST) {
+	if (channel >= DC_MAX_CHANNELS || type >= DC_CHNLED_LAST) {
 		return -EINVAL;
 	}
 
@@ -516,10 +571,10 @@ int display_ctrl_get_channel_led(uint8_t channel, enum dc_chn_led_type type)
 		return -ENODEV;
 	}
 
-	return (dc_data.chn_led[type] & (1 << channel)) ? 1 : 0;
+	return (dc_data.chn_led[type] & (1U << channel)) ? 1 : 0;
 }
 
-int display_ctrl_set_channel_leds_by_type(enum dc_chn_led_type type, uint8_t pattern)
+int display_ctrl_set_channel_leds_by_type(enum dc_chn_led_type type, uint32_t pattern)
 {
 	int ret;
 
@@ -539,6 +594,14 @@ int display_ctrl_set_channel_leds_by_type(enum dc_chn_led_type type, uint8_t pat
 	k_mutex_unlock(&dc_data.lock);
 
 	return ret;
+}
+
+uint32_t display_ctrl_get_channel_led_pattern(enum dc_chn_led_type type)
+{
+	if (type >= DC_CHNLED_LAST) {
+		return 0;
+	}
+	return dc_data.chn_led[type];
 }
 
 /*******************************************************************************
@@ -578,6 +641,19 @@ int display_ctrl_set_sys_led(enum dc_sys_led which, enum dc_sys_led_state state)
 	}
 
 	return ret;
+}
+
+int display_ctrl_get_sys_led(enum dc_sys_led which)
+{
+	if (which >= DC_SYSLED_LAST) {
+		return -EINVAL;
+	}
+	if (which < 8) {
+		uint8_t index = which / 2;
+		uint8_t shift = (which & 1) * 2;
+		return (dc_data.sys_led[index] >> shift) & 3;
+	}
+	return -ENOTSUP;
 }
 
 /*******************************************************************************
@@ -629,10 +705,12 @@ int display_ctrl_full_test(void)
 	ret |= display_ctrl_test_pattern();
 
 	/* All channel LEDs on */
-	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_MUTE, 0xFF);
-	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_SIGNAL, 0xFF);
-	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_CLIP, 0xFF);
-	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_PHANTOM, 0xFF);
+	uint32_t all_on = (1U << DC_MAX_CHANNELS) - 1;
+
+	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_MUTE, all_on);
+	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_SIGNAL, all_on);
+	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_CLIP, all_on);
+	ret |= display_ctrl_set_channel_leds_by_type(DC_CHNLED_PHANTOM, all_on);
 
 	/* All system LEDs on */
 	for (int i = 0; i < 8; i++) {
@@ -668,7 +746,63 @@ int display_ctrl_all_off(void)
 	return ret;
 }
 
-#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO)
+#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+
+/**
+ * @brief Invoke all registered post-reset callbacks
+ */
+static void nrst_notify_callbacks(void)
+{
+	LOG_INF("Shared nRST reset complete, notifying %d callbacks",
+		dc_data.num_nrst_callbacks);
+
+	for (int i = 0; i < dc_data.num_nrst_callbacks; i++) {
+		if (dc_data.nrst_callbacks[i].cb) {
+			dc_data.nrst_callbacks[i].cb(
+				dc_data.nrst_callbacks[i].user_data);
+		}
+	}
+}
+
+#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+/* ---- HAL backend (LiteX): nRST via FPGA CSR bit ---- */
+#include "../fpga_hal/fpga_hal.h"
+
+int display_ctrl_hw_reset(void)
+{
+	LOG_INF("Performing hardware reset via FPGA HAL adda_nrst "
+		"(display + IO card)");
+
+	k_mutex_lock(&dc_data.lock, K_FOREVER);
+
+	/* Assert reset (nRST low → released=false) */
+	fpga_hal_set_adda_nrst(false);
+
+	/* Hold reset for configured duration */
+	k_sleep(K_MSEC(CONFIG_DISPLAY_CTRL_NRST_PULSE_MS));
+
+	/* Release reset (nRST high → released=true) */
+	fpga_hal_set_adda_nrst(true);
+
+	/* Wait for controllers to recover */
+	k_sleep(K_MSEC(CONFIG_DISPLAY_CTRL_NRST_RECOVERY_MS));
+
+	k_mutex_unlock(&dc_data.lock);
+
+	nrst_notify_callbacks();
+	return 0;
+}
+
+int display_ctrl_nrst_init(void)
+{
+	/* HAL is always available — nothing to initialise */
+	LOG_INF("Shared nRST via FPGA HAL initialized (display + IO card)");
+	return 0;
+}
+
+#elif defined(CONFIG_DISPLAY_CTRL_NRST_GPIO)
+/* ---- GPIO backend (STM32H7): nRST via direct GPIO pin ---- */
+
 int display_ctrl_hw_reset(void)
 {
 #if DC_NRST_GPIO_VALID
@@ -677,7 +811,8 @@ int display_ctrl_hw_reset(void)
 		return -ENODEV;
 	}
 
-	LOG_INF("Performing hardware reset via nRST GPIO");
+	LOG_INF("Performing hardware reset via shared nRST GPIO "
+		"(display + IO card)");
 
 	k_mutex_lock(&dc_data.lock, K_FOREVER);
 
@@ -690,12 +825,12 @@ int display_ctrl_hw_reset(void)
 	/* Release reset */
 	gpio_pin_set_dt(&dc_nrst_gpio, 0);
 
-	/* Wait for controller to recover */
+	/* Wait for controllers to recover */
 	k_sleep(K_MSEC(CONFIG_DISPLAY_CTRL_NRST_RECOVERY_MS));
 
 	k_mutex_unlock(&dc_data.lock);
 
-	LOG_INF("Display controller reset complete");
+	nrst_notify_callbacks();
 	return 0;
 #else
 	LOG_WRN("nRST GPIO not defined in device tree");
@@ -703,7 +838,7 @@ int display_ctrl_hw_reset(void)
 #endif
 }
 
-int display_ctrl_nrst_gpio_init(void)
+int display_ctrl_nrst_init(void)
 {
 #if DC_NRST_GPIO_VALID
 	int ret;
@@ -721,11 +856,28 @@ int display_ctrl_nrst_gpio_init(void)
 	}
 
 	dc_nrst_gpio_ready = true;
-	LOG_INF("Display controller nRST GPIO initialized");
+	LOG_INF("Shared nRST GPIO initialized (display + IO card)");
 	return 0;
 #else
 	LOG_WRN("nRST GPIO not defined in device tree");
 	return -ENOTSUP;
 #endif
 }
-#endif /* CONFIG_DISPLAY_CTRL_NRST_GPIO */
+#endif /* GPIO vs HAL */
+
+int display_ctrl_register_nrst_callback(dc_nrst_callback_t cb, void *user_data)
+{
+	if (dc_data.num_nrst_callbacks >= DC_MAX_NRST_CALLBACKS) {
+		LOG_ERR("nRST callback table full");
+		return -ENOMEM;
+	}
+
+	dc_data.nrst_callbacks[dc_data.num_nrst_callbacks].cb = cb;
+	dc_data.nrst_callbacks[dc_data.num_nrst_callbacks].user_data = user_data;
+	dc_data.num_nrst_callbacks++;
+
+	LOG_DBG("nRST callback registered (%d/%d)",
+		dc_data.num_nrst_callbacks, DC_MAX_NRST_CALLBACKS);
+	return 0;
+}
+#endif /* CONFIG_DISPLAY_CTRL_NRST_GPIO || CONFIG_DISPLAY_CTRL_NRST_HAL */

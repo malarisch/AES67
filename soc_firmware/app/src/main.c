@@ -173,6 +173,15 @@ static void on_bmc_change(enum ptp_bmc_role new_role)
 #endif
 }
 
+/* ---- Shared nRST post-reset callback: rescan IO card ---- */
+#if defined(CONFIG_DISPLAY_CTRL) && (defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL))
+static void nrst_card_rescan_cb(void *unused)
+{
+	ARG_UNUSED(unused);
+	card_manager_rescan();
+}
+#endif
+
 /* ---- Entry point ---- */
 
 int main(void)
@@ -220,6 +229,19 @@ int main(void)
 		k_msleep(2000);
 	}
 
+	/* ---- Shared nRST: reset display controller + IO card hardware ---- */
+#ifdef CONFIG_DISPLAY_CTRL
+#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+	if (display_ctrl_nrst_init() < 0) {
+		LOG_WRN("Shared nRST init failed (hw reset unavailable)");
+	} else {
+		/* Pulse nRST before any driver init — this resets both the
+		 * display controller and the IO card (shared reset line). */
+		display_ctrl_hw_reset();
+	}
+#endif
+#endif
+
 	/* ---- Analog I/O Card Autodetect ---- */
 	{
 		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
@@ -238,12 +260,9 @@ int main(void)
 
 #ifdef CONFIG_DISPLAY_CTRL
 	/* ---- Display Controller (LEDs, Buttons, 7-Segment) Setup ---- */
-#ifdef CONFIG_DISPLAY_CTRL_NRST_GPIO
-	if (display_ctrl_nrst_gpio_init() < 0) {
-		LOG_WRN("Display controller nRST GPIO init failed (hw reset unavailable)");
-	} else {
-		display_ctrl_hw_reset();
-	}
+	/* Register IO card re-init callback for runtime nRST resets */
+#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+	display_ctrl_register_nrst_callback(nrst_card_rescan_cb, NULL);
 #endif
 	const struct device *dc_uart = DEVICE_DT_GET(DT_ALIAS(display_ctrl_uart));
 	if (!device_is_ready(dc_uart)) {

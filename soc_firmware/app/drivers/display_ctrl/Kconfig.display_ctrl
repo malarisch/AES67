@@ -31,6 +31,16 @@ config DISPLAY_CTRL_UART_BAUD
 	help
 	  Baud rate for communication with the display controller.
 
+config DISPLAY_CTRL_NUM_CHANNELS
+	int "Number of channel LEDs"
+	default 8
+	range 8 24
+	help
+	  Number of channel LEDs supported by the front panel.
+	  8 for standard cards (MI, LO), 24 for 16in/8out cards (IO, OI).
+	  When set to more than 8, the driver uses the extended
+	  multi-layer UART addressing scheme.
+
 config DISPLAY_CTRL_AUTO_SYNC_MI_CARD
 	bool "Auto-sync with MI card driver"
 	default y
@@ -40,18 +50,37 @@ config DISPLAY_CTRL_AUTO_SYNC_MI_CARD
 	  phantom and mute states change.
 
 config DISPLAY_CTRL_NRST_GPIO
-	bool "Enable hardware reset via nRST GPIO"
-	default y
+	bool "Enable hardware reset via shared nRST GPIO"
+	default n
 	depends on GPIO
 	help
 	  Enable hardware reset functionality via a dedicated GPIO pin.
-	  The GPIO is active-low (asserted low to reset the display controller).
+	  The GPIO is active-low (asserted low to reset).
+
+	  NOTE: The nRST line is shared between the display controller
+	  and the IO card.  A hardware reset will reset BOTH devices.
+	  Other drivers can register post-reset callbacks via
+	  display_ctrl_register_nrst_callback().
+
+	  Use this on STM32H7 boards where nRST is a direct GPIO.
+
+config DISPLAY_CTRL_NRST_HAL
+	bool "Enable hardware reset via FPGA HAL (CSR)"
+	default y
+	depends on FPGA_HAL_LITEX
+	help
+	  Enable hardware reset via the FPGA HAL adda_nrst CSR bit.
+	  The nRST line is shared between the display controller
+	  and the IO card.
+
+	  Use this on LiteX boards where nRST is an FPGA output
+	  controlled via fpga_hal_set_adda_nrst().
 
 config DISPLAY_CTRL_NRST_PULSE_MS
 	int "nRST pulse duration in milliseconds"
 	default 50
 	range 1 500
-	depends on DISPLAY_CTRL_NRST_GPIO
+	depends on DISPLAY_CTRL_NRST_GPIO || DISPLAY_CTRL_NRST_HAL
 	help
 	  Duration of the reset pulse in milliseconds.
 
@@ -59,7 +88,7 @@ config DISPLAY_CTRL_NRST_RECOVERY_MS
 	int "Post-reset recovery time in milliseconds"
 	default 200
 	range 10 1000
-	depends on DISPLAY_CTRL_NRST_GPIO
+	depends on DISPLAY_CTRL_NRST_GPIO || DISPLAY_CTRL_NRST_HAL
 	help
 	  Time to wait after releasing reset before UART communication.
 

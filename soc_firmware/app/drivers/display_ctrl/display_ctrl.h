@@ -2,7 +2,7 @@
  * Display Controller Driver - LEDs, Buttons, 7-Segment Displays
  *
  * UART control interface (115200 baud) for the front panel:
- * - 8 channels x 4 LED types (Mute, Signal, Clip, Phantom/48V)
+ * - Up to 24 channels x 4 LED types (Mute, Signal, Clip, Phantom/48V)
  * - System LEDs (USB, ETH, LIP, LOP, etc.)
  * - 3 pairs of 7-segment displays (6 digits total)
  * - Button/Key input
@@ -30,6 +30,12 @@ extern "C" {
 #define DC_BLINKBASE            0x92    /* Blink control */
 #define DC_POINTBASE            0x93    /* Decimal points */
 #define DC_CHNLEDBASEHI         0x94    /* Upper channel LEDs (>8 channels) */
+
+#ifdef CONFIG_DISPLAY_CTRL_NUM_CHANNELS
+#define DC_MAX_CHANNELS         CONFIG_DISPLAY_CTRL_NUM_CHANNELS
+#else
+#define DC_MAX_CHANNELS         8
+#endif
 
 /*******************************************************************************
  * Keyboard Constants
@@ -144,6 +150,19 @@ typedef void (*dc_button_callback_t)(const struct dc_button_event *event,
 				     void *user_data);
 
 /*******************************************************************************
+ * nRST Post-Reset Callback
+ *
+ * The nRST pin is shared between the display controller and the IO card.
+ * When a hardware reset is performed, ALL devices on the shared nRST line
+ * are reset.  Other drivers can register a callback to re-initialise
+ * themselves after the reset pulse.
+ ******************************************************************************/
+
+#define DC_MAX_NRST_CALLBACKS 4
+
+typedef void (*dc_nrst_callback_t)(void *user_data);
+
+/*******************************************************************************
  * Driver State Structure
  ******************************************************************************/
 
@@ -152,7 +171,7 @@ struct display_ctrl_data {
 	struct k_mutex lock;
 	
 	/* LED state cache */
-	uint8_t chn_led[DC_CHNLED_LAST]; /* 8 bits per type */
+	uint32_t chn_led[DC_CHNLED_LAST]; /* 1 bit per channel, up to 24 */
 	uint8_t sys_led[4];              /* System LED registers */
 	
 	/* 7-segment state cache */
@@ -169,7 +188,14 @@ struct display_ctrl_data {
 	struct k_work_delayable rx_work;
 	uint8_t rx_buf[16];
 	size_t rx_idx;
-	
+
+	/* nRST post-reset callbacks (shared reset line) */
+	struct {
+		dc_nrst_callback_t cb;
+		void *user_data;
+	} nrst_callbacks[DC_MAX_NRST_CALLBACKS];
+	int num_nrst_callbacks;
+
 	bool initialized;
 };
 
@@ -191,6 +217,13 @@ int display_ctrl_init(const struct device *uart_dev);
  * @return true if initialized, false otherwise
  */
 bool display_ctrl_ready(void);
+
+/**
+ * @brief Get the UART device used by the display controller
+ *
+ * @return pointer to the UART device, or NULL if not initialized
+ */
+const struct device *display_ctrl_get_uart(void);
 
 /*******************************************************************************
  * 7-Segment Display Functions
@@ -223,6 +256,22 @@ int display_ctrl_show_number(enum dc_display which, int8_t value);
  * @return 0 on success, negative errno on failure
  */
 int display_ctrl_show_hex(enum dc_display which, uint8_t value);
+
+/**
+ * @brief Get left digit of a 7-segment display pair
+ *
+ * @param which Display index
+ * @return VCC character code, or negative errno
+ */
+int display_ctrl_get_segment_left(enum dc_display which);
+
+/**
+ * @brief Get right digit of a 7-segment display pair
+ *
+ * @param which Display index
+ * @return VCC character code, or negative errno
+ */
+int display_ctrl_get_segment_right(enum dc_display which);
 
 /**
  * @brief Set display blink state
@@ -262,7 +311,7 @@ int display_ctrl_clear(void);
 /**
  * @brief Set a single channel LED
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param type LED type (DC_CHNLED_xxx)
  * @param on true to turn on, false to turn off
  * @return 0 on success, negative errno on failure
@@ -272,7 +321,7 @@ int display_ctrl_set_channel_led(uint8_t channel, enum dc_chn_led_type type, boo
 /**
  * @brief Get a single channel LED state
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param type LED type (DC_CHNLED_xxx)
  * @return 1 if on, 0 if off, negative errno on failure
  */
@@ -285,12 +334,20 @@ int display_ctrl_get_channel_led(uint8_t channel, enum dc_chn_led_type type);
  * @param pattern Bitmask (bit N = channel N, 1=on, 0=off)
  * @return 0 on success, negative errno on failure
  */
-int display_ctrl_set_channel_leds_by_type(enum dc_chn_led_type type, uint8_t pattern);
+int display_ctrl_set_channel_leds_by_type(enum dc_chn_led_type type, uint32_t pattern);
+
+/**
+ * @brief Get channel LED pattern for a type
+ *
+ * @param type LED type (DC_CHNLED_xxx)
+ * @return Bitmask of channels with that LED on
+ */
+uint32_t display_ctrl_get_channel_led_pattern(enum dc_chn_led_type type);
 
 /**
  * @brief Set mute LED for a channel
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param on true to turn on, false to turn off
  * @return 0 on success, negative errno on failure
  */
@@ -302,7 +359,7 @@ static inline int display_ctrl_set_mute_led(uint8_t channel, bool on)
 /**
  * @brief Set signal LED for a channel
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param on true to turn on, false to turn off
  * @return 0 on success, negative errno on failure
  */
@@ -314,7 +371,7 @@ static inline int display_ctrl_set_signal_led(uint8_t channel, bool on)
 /**
  * @brief Set clip LED for a channel
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param on true to turn on, false to turn off
  * @return 0 on success, negative errno on failure
  */
@@ -326,7 +383,7 @@ static inline int display_ctrl_set_clip_led(uint8_t channel, bool on)
 /**
  * @brief Set 48V/phantom LED for a channel
  *
- * @param channel Channel number (0-7)
+ * @param channel Channel number (0 to DC_MAX_CHANNELS-1)
  * @param on true to turn on, false to turn off
  * @return 0 on success, negative errno on failure
  */
@@ -347,6 +404,14 @@ static inline int display_ctrl_set_48v_led(uint8_t channel, bool on)
  * @return 0 on success, negative errno on failure
  */
 int display_ctrl_set_sys_led(enum dc_sys_led which, enum dc_sys_led_state state);
+
+/**
+ * @brief Get a system LED state
+ *
+ * @param which System LED index (DC_SYSLED_xxx)
+ * @return LED state (0-3), or negative errno
+ */
+int display_ctrl_get_sys_led(enum dc_sys_led which);
 
 /*******************************************************************************
  * Button Input Functions
@@ -406,26 +471,47 @@ int display_ctrl_full_test(void);
  */
 int display_ctrl_all_off(void);
 
-#ifdef CONFIG_DISPLAY_CTRL_NRST_GPIO
+#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
 /**
- * @brief Hardware reset the display controller via nRST GPIO
+ * @brief Hardware reset via the shared nRST line
  *
- * Pulses the nRST GPIO low to perform a hardware reset,
- * then waits for the controller to recover.
+ * Pulses nRST low to perform a hardware reset of ALL devices
+ * on the shared reset line (display controller AND IO card).
+ * After the recovery delay, all registered post-reset callbacks are
+ * invoked so that other drivers can re-initialise.
+ *
+ * The actual mechanism depends on the platform:
+ * - GPIO backend (STM32H7): direct GPIO pin toggle
+ * - HAL backend (LiteX):    FPGA CSR bit via fpga_hal_set_adda_nrst()
  *
  * @return 0 on success, negative errno on failure
  */
 int display_ctrl_hw_reset(void);
 
 /**
- * @brief Initialize the nRST GPIO pin
+ * @brief Initialize the nRST backend
  *
  * Must be called before display_ctrl_hw_reset() can be used.
+ * On GPIO platforms, configures the GPIO pin.
+ * On HAL platforms, this is a no-op (HAL is always ready).
  *
  * @return 0 on success, negative errno on failure
  */
-int display_ctrl_nrst_gpio_init(void);
-#endif /* CONFIG_DISPLAY_CTRL_NRST_GPIO */
+int display_ctrl_nrst_init(void);
+
+/**
+ * @brief Register a callback for post-nRST-reset notification
+ *
+ * The nRST line is shared between the display controller and the IO card.
+ * Drivers that need to re-initialise after a hardware reset should register
+ * a callback here.
+ *
+ * @param cb    Callback function (called after reset recovery delay)
+ * @param user_data Opaque pointer passed to the callback
+ * @return 0 on success, -ENOMEM if callback table full
+ */
+int display_ctrl_register_nrst_callback(dc_nrst_callback_t cb, void *user_data);
+#endif /* CONFIG_DISPLAY_CTRL_NRST_GPIO || CONFIG_DISPLAY_CTRL_NRST_HAL */
 
 #ifdef __cplusplus
 }

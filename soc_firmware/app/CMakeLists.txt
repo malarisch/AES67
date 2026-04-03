@@ -41,7 +41,21 @@ add_custom_command(
   DEPENDS ${WEB_SRC}
   COMMENT "Generating gzipped web UI include"
 )
-add_custom_target(web_assets DEPENDS ${WEB_INC})
+
+# ---------- Debug page (display/LED tester) ----------
+set(DBG_SRC  ${CMAKE_CURRENT_SOURCE_DIR}/src/web/debug.html)
+set(DBG_GZ   ${CMAKE_CURRENT_BINARY_DIR}/debug.html.gz)
+set(DBG_INC  ${CMAKE_CURRENT_SOURCE_DIR}/src/debug.html.gz.inc)
+
+add_custom_command(
+  OUTPUT  ${DBG_INC}
+  COMMAND gzip -c -9 ${DBG_SRC} > ${DBG_GZ}
+  COMMAND xxd -i < ${DBG_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${DBG_INC}
+  DEPENDS ${DBG_SRC}
+  COMMENT "Generating gzipped debug page include"
+)
+
+add_custom_target(web_assets DEPENDS ${WEB_INC} ${DBG_INC})
 
 target_sources(app PRIVATE
   src/main.c

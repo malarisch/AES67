@@ -42,6 +42,9 @@
 #ifdef CONFIG_IO_CARD
 #include "../drivers/io_card/io_card.h"
 #endif
+#ifdef CONFIG_DISPLAY_CTRL
+#include "../drivers/display_ctrl/display_ctrl.h"
+#endif
 #include "card_manager.h"
 
 /* local_memmem is a GNU extension not available in picolibc / Zephyr */
@@ -1332,6 +1335,226 @@ static char post_body[POST_BODY_MAX];
 static size_t post_body_len;
 
 /* ================================================================
+ * Display debug helpers
+ * ================================================================ */
+
+#ifdef CONFIG_DISPLAY_CTRL
+
+static int build_display_debug_status(char *buf, size_t sz)
+{
+	int p = json_start_object(buf, sz);
+
+	p = json_add_bool(buf, sz, p, "ready", display_ctrl_ready());
+
+	/* 7-segment state (character names) */
+	static const char *vcc_names[] = {
+		"0","1","2","3","4","5","6","7","8","9",
+		"A","b","C","d","E","F","G","h","I","J",
+		"L","M","n","O","P","q","r","S","t","U",
+		"X","y"," ","-"
+	};
+
+	p = json_add_key(buf, sz, p, "segments");
+	p += snprintf(buf + p, sz - p, "{");
+	for (int d = 0; d < DC_NUM_DISPLAYS; d++) {
+		const char *dname = d == 0 ? "left" : d == 1 ? "mid" : "right";
+		p = json_add_key(buf, sz, p, dname);
+		p += snprintf(buf + p, sz - p, "{");
+
+		int l = display_ctrl_get_segment_left(d);
+		int r = display_ctrl_get_segment_right(d);
+
+		if (l >= 0 && l < VCC_LAST) {
+			p = json_add_str(buf, sz, p, "left", vcc_names[l]);
+		}
+		if (r >= 0 && r < VCC_LAST) {
+			p = json_add_str(buf, sz, p, "right", vcc_names[r]);
+		}
+		if (p > 1 && buf[p - 1] == ',') p--;
+		p += snprintf(buf + p, sz - p, "},");
+	}
+	if (p > 1 && buf[p - 1] == ',') p--;
+	p += snprintf(buf + p, sz - p, "},");
+
+	/* Channel LEDs */
+	p = json_add_key(buf, sz, p, "channel_leds");
+	p += snprintf(buf + p, sz - p, "{");
+	p = json_add_uint(buf, sz, p, "mute",
+			  display_ctrl_get_channel_led_pattern(DC_CHNLED_MUTE));
+	p = json_add_uint(buf, sz, p, "signal",
+			  display_ctrl_get_channel_led_pattern(DC_CHNLED_SIGNAL));
+	p = json_add_uint(buf, sz, p, "clip",
+			  display_ctrl_get_channel_led_pattern(DC_CHNLED_CLIP));
+	p = json_add_uint(buf, sz, p, "phantom",
+			  display_ctrl_get_channel_led_pattern(DC_CHNLED_PHANTOM));
+	if (p > 1 && buf[p - 1] == ',') p--;
+	p += snprintf(buf + p, sz - p, "},");
+
+	/* System LEDs */
+	p = json_add_key(buf, sz, p, "sys_leds");
+	p += snprintf(buf + p, sz - p, "{");
+	static const char *sled_names[] = {
+		"psu_b","lop","ext","96k","master","48k","lip","psu_a",
+		"usb","eth","rem_lip","rem_lop","pwr"
+	};
+	for (int i = 0; i < DC_SYSLED_LAST && i < 13; i++) {
+		p = json_add_int(buf, sz, p, sled_names[i],
+				 display_ctrl_get_sys_led(i));
+	}
+	if (p > 1 && buf[p - 1] == ',') p--;
+	p += snprintf(buf + p, sz - p, "},");
+
+	p = json_add_int(buf, sz, p, "max_channels", DC_MAX_CHANNELS);
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+/* ASCII to VCC helper for web API */
+static uint8_t ascii_to_vcc_web(char c)
+{
+	if (c >= '0' && c <= '9') return VCC_NUM0 + (c - '0');
+	switch (c) {
+	case 'A': case 'a': return VCC_A;
+	case 'B': case 'b': return VCC_B;
+	case 'C': case 'c': return VCC_C;
+	case 'D': case 'd': return VCC_D;
+	case 'E': case 'e': return VCC_E;
+	case 'F': case 'f': return VCC_F;
+	case 'G': case 'g': return VCC_G;
+	case 'H': case 'h': return VCC_H;
+	case 'I': case 'i': return VCC_I;
+	case 'J': case 'j': return VCC_J;
+	case 'L': case 'l': return VCC_L;
+	case 'M': case 'm': return VCC_M;
+	case 'N': case 'n': return VCC_N;
+	case 'O': case 'o': return VCC_O;
+	case 'P': case 'p': return VCC_P;
+	case 'Q': case 'q': return VCC_Q;
+	case 'R': case 'r': return VCC_R;
+	case 'S': case 's': return VCC_S;
+	case 'T': case 't': return VCC_T;
+	case 'U': case 'u': return VCC_U;
+	case 'X': case 'x': return VCC_X;
+	case 'Y': case 'y': return VCC_Y;
+	case '-': return VCC_MINUS;
+	case ' ': default: return VCC_SPACE;
+	}
+}
+
+/* POST /api/debug/display/segment
+ * Body: {"display":0, "left":"A", "right":"3"} */
+static int apply_display_segment_json(const char *json, size_t len)
+{
+	int32_t disp = 0;
+	char left_str[4] = {0}, right_str[4] = {0};
+
+	if (!display_ctrl_ready()) {
+		return -ENODEV;
+	}
+
+	if (!json_find_int(json, len, "display", &disp)) {
+		return -EINVAL;
+	}
+	if (disp < 0 || disp >= DC_NUM_DISPLAYS) {
+		return -EINVAL;
+	}
+
+	json_find_str(json, len, "left", left_str, sizeof(left_str));
+	json_find_str(json, len, "right", right_str, sizeof(right_str));
+
+	/* Convert single characters to VCC codes */
+	uint8_t lc = VCC_SPACE, rc = VCC_SPACE;
+
+	if (left_str[0]) {
+		lc = ascii_to_vcc_web(left_str[0]);
+	}
+	if (right_str[0]) {
+		rc = ascii_to_vcc_web(right_str[0]);
+	}
+
+	return display_ctrl_set_segment(disp, lc, rc);
+}
+
+/* POST /api/debug/display/text
+ * Body: {"text":"Ab Cd"} — up to 6 chars, spread across 3 displays */
+static int apply_display_text_json(const char *json, size_t len)
+{
+	char text[8] = {0};
+
+	if (!display_ctrl_ready()) {
+		return -ENODEV;
+	}
+
+	if (json_find_str(json, len, "text", text, sizeof(text)) <= 0) {
+		return -EINVAL;
+	}
+
+	return display_ctrl_show_status(text);
+}
+
+/* POST /api/debug/display/sysled
+ * Body: {"led":0, "state":3}   (state: 0=off,1=blink1,2=blink2,3=on) */
+static int apply_display_sysled_json(const char *json, size_t len)
+{
+	int32_t led = -1, state = -1;
+
+	if (!display_ctrl_ready()) {
+		return -ENODEV;
+	}
+
+	if (!json_find_int(json, len, "led", &led) ||
+	    !json_find_int(json, len, "state", &state)) {
+		return -EINVAL;
+	}
+	if (led < 0 || led >= DC_SYSLED_LAST || state < 0 || state > 4) {
+		return -EINVAL;
+	}
+
+	return display_ctrl_set_sys_led(led, state);
+}
+
+/* POST /api/debug/display/chnled
+ * Body: {"channel":0, "type":0, "on":true}
+ *   type: 0=mute, 1=signal, 2=clip, 3=phantom
+ * OR set all at once:
+ * Body: {"type":0, "pattern":255}  — bitmask of channels */
+static int apply_display_chnled_json(const char *json, size_t len)
+{
+	int32_t channel = -1, type = -1, pattern = -1;
+	bool on = false;
+
+	if (!display_ctrl_ready()) {
+		return -ENODEV;
+	}
+
+	if (!json_find_int(json, len, "type", &type)) {
+		return -EINVAL;
+	}
+	if (type < 0 || type >= DC_CHNLED_LAST) {
+		return -EINVAL;
+	}
+
+	/* Bulk mode: set entire pattern */
+	if (json_find_int(json, len, "pattern", &pattern)) {
+		return display_ctrl_set_channel_leds_by_type(type,
+							     (uint32_t)pattern);
+	}
+
+	/* Single channel mode */
+	if (!json_find_int(json, len, "channel", &channel)) {
+		return -EINVAL;
+	}
+	if (channel < 0 || channel >= DC_MAX_CHANNELS) {
+		return -EINVAL;
+	}
+	json_find_bool(json, len, "on", &on);
+
+	return display_ctrl_set_channel_led(channel, type, on);
+}
+
+#endif /* CONFIG_DISPLAY_CTRL */
+
+/* ================================================================
  * Dynamic handler for /api/ wildcard
  *
  * Dispatches based on client->url_buffer and client->method.
@@ -1456,6 +1679,12 @@ static int api_handler(struct http_client_ctx *client,
 					"{\"error\":\"IO card not present\"}");
 				response_ctx->status = HTTP_503_SERVICE_UNAVAILABLE;
 			}
+#endif
+#ifdef CONFIG_DISPLAY_CTRL
+		/* ---- Display Debug ---- */
+		} else if (strcmp(url, "/api/debug/display") == 0) {
+			json_len = build_display_debug_status(json_buf,
+							      JSON_BUF_SIZE);
 #endif
 		} else if (strcmp(url, "/api/system") == 0) {
 			/* GET /api/system - returns system status including SD */
@@ -1633,6 +1862,62 @@ static int api_handler(struct http_client_ctx *client,
 				ret = -ENODEV;
 			}
 #endif /* CONFIG_IO_CARD */
+#ifdef CONFIG_DISPLAY_CTRL
+		/* ---- Display Debug POST ---- */
+		} else if (strcmp(url, "/api/debug/display/segment") == 0) {
+			ret = apply_display_segment_json(post_body,
+							 post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true}");
+			}
+		} else if (strcmp(url, "/api/debug/display/sysled") == 0) {
+			ret = apply_display_sysled_json(post_body,
+							post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true}");
+			}
+		} else if (strcmp(url, "/api/debug/display/chnled") == 0) {
+			ret = apply_display_chnled_json(post_body,
+							post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true}");
+			}
+		} else if (strcmp(url, "/api/debug/display/test") == 0) {
+			ret = display_ctrl_full_test();
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":\"All LEDs on, 888888\"}");
+			}
+		} else if (strcmp(url, "/api/debug/display/clear") == 0) {
+			ret = display_ctrl_all_off();
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":\"All off\"}");
+			}
+		} else if (strcmp(url, "/api/debug/display/reset") == 0) {
+#if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+			ret = display_ctrl_hw_reset();
+			if (ret == 0) {
+				/* Re-init display UART after hw reset */
+				display_ctrl_init(display_ctrl_get_uart());
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true,\"message\":"
+					"\"Shared nRST reset complete\"}");
+			}
+#else
+			ret = -ENOTSUP;
+#endif
+		} else if (strcmp(url, "/api/debug/display/text") == 0) {
+			ret = apply_display_text_json(post_body,
+						      post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+					"{\"ok\":true}");
+			}
+#endif /* CONFIG_DISPLAY_CTRL */
 		} else if (strcmp(url, "/api/system/reboot") == 0) {
 			/* POST /api/system/reboot - reboot MCU */
 			LOG_WRN("Reboot requested via REST API");
@@ -1792,6 +2077,30 @@ static struct http_resource_detail_static index_resource_detail = {
 
 HTTP_RESOURCE_DEFINE(index_resource, aes67_http, "/",
 		     &index_resource_detail);
+
+/* ================================================================
+ * Debug page — display & LED tester served from /debug
+ * ================================================================ */
+
+#ifdef CONFIG_DISPLAY_CTRL
+static const uint8_t debug_html_gz[] = {
+#include "debug.html.gz.inc"
+};
+
+static struct http_resource_detail_static debug_resource_detail = {
+	.common = {
+		.type = HTTP_RESOURCE_TYPE_STATIC,
+		.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+		.content_encoding = "gzip",
+		.content_type = "text/html",
+	},
+	.static_data = debug_html_gz,
+	.static_data_len = sizeof(debug_html_gz),
+};
+
+HTTP_RESOURCE_DEFINE(debug_resource, aes67_http, "/debug",
+		     &debug_resource_detail);
+#endif /* CONFIG_DISPLAY_CTRL */
 
 /* ================================================================
  * Public API

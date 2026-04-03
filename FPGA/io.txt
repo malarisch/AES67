@@ -21,10 +21,8 @@ r 24 adda sda
 r gpio27 io i2c pll
 r gpio26 out i2c pll
 
-28 adda cs
-29 adda mosi
-30 adda sck
-31 adda miso
+28 led rx
+29 led tx
 r 32 flash cs
 r 33 flash miso
 r 34 flash clk_

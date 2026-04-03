@@ -850,7 +850,7 @@ class AES67SoC(SoCCore):
             self.mem_map["spiflash"] + bios_size)
 
         # -- UART 1: AD/DA Card LEDs (115200) ----------------------------------
-        self.uart1_phy = RS232PHY(platform.request("serial", 1), clk_freq=sys_clk_freq, baudrate=1e6)
+        self.uart1_phy = RS232PHY(platform.request("serial", 1), clk_freq=sys_clk_freq, baudrate=115200)
         self.uart1 = UART(self.uart1_phy, tx_fifo_depth=16, rx_fifo_depth=16)
         self.irq.add("uart1")
 
