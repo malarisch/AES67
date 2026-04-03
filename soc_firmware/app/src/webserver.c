@@ -1236,6 +1236,8 @@ static int build_io_card_status(char *buf, size_t sz)
 			  io_card_get_output_enable() > 0);
 
 	/* Input channels */
+	uint16_t overflow_mask = io_card_get_in_overflow();
+
 	p = json_add_key(buf, sz, p, "inputs");
 	p = json_start_array(buf, sz, p);
 	for (int ch = 0; ch < IO_NUM_IN_CHANNELS; ch++) {
@@ -1244,6 +1246,8 @@ static int build_io_card_status(char *buf, size_t sz)
 		p = json_add_int(buf, sz, p,  "gain",    io_card_get_in_gain(ch));
 		p = json_add_bool(buf, sz, p, "phantom",  io_card_get_in_phantom(ch) > 0);
 		p = json_add_bool(buf, sz, p, "muted",    io_card_get_in_mute(ch) > 0);
+		p = json_add_bool(buf, sz, p, "clip",
+				   (overflow_mask & (1U << ch)) != 0);
 		if (buf[p - 1] == ',') { p--; }
 		p += snprintf(buf + p, sz - p, "},");
 	}
@@ -1566,19 +1570,19 @@ static int api_handler(struct http_client_ctx *client,
 		       struct http_response_ctx *response_ctx,
 		       void *user_data)
 {
-	if (status == HTTP_SERVER_DATA_ABORTED) {
-		post_body_len = 0;
-		return 0;
-	}
-
 	const char *url = (const char *)client->url_buffer;
 	enum http_method method = client->method;
 
 	/* Firmware update needs streaming (body too large to buffer).
-	 * Delegate immediately, before accumulating POST data. */
+	 * Delegate immediately, including abort notifications. */
 	if (strcmp(url, "/api/fw_update") == 0) {
 		return fw_update_http_handler(client, status,
 					      request_ctx, response_ctx);
+	}
+
+	if (status == HTTP_SERVER_DATA_ABORTED) {
+		post_body_len = 0;
+		return 0;
 	}
 
 	/* ----- Accumulate POST body ----- */

@@ -42,8 +42,10 @@ entity rx_ringbuffer is
         stream_config_wr_clk_i: in std_logic;
         stream_config_wr_en_i: in std_logic;
         stream_config_addr_i: in std_logic_vector(7 downto 0);
-        stream_config_data_i: in std_logic_vector(7 downto 0)
-
+        stream_config_data_i: in std_logic_vector(7 downto 0);
+        metering_signal_o : out std_logic_vector(global_channel_count - 1 downto 0);
+        metering_clip_o : out std_logic_vector(global_channel_count - 1 downto 0);
+        metering_clear_i : in std_logic
 	);
 end entity;
 
@@ -145,13 +147,26 @@ architecture Behavioral of rx_ringbuffer is
     -- Cached channel map from stream_ram (avoids repeated stream_ram reads during parsing)
     type t_channel_map is array (0 to 7) of unsigned(3 downto 0);
     signal channel_map : t_channel_map := (others => (others => '0'));
+    signal metering_clear_i_sync1 : std_logic := '0';
+    signal metering_clear_i_sync2 : std_logic := '0';
+    signal metering_clear_last : std_logic := '0';
 
+    -- Metering
+    constant SAMPLE_BITS : integer := bytes_per_sample * 8;
+
+    -- Thresholds for clip/signal detection (signed audio, magnitude only = SAMPLE_BITS-1 wide)
+    -- Clip:   0x640000 ≈ -2 dBFS
+    -- Signal: 0x004000 ≈ -42 dBFS
+    constant CLIP_THRESHOLD   : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#640000#, SAMPLE_BITS - 1);
+    constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
 begin
 
     process(sys_clk, reset_n)
         variable comp_byte : integer range 0 to 32 := 0;
         variable wr_sample_pos : unsigned(7 downto 0);
         variable v_channel_addr : unsigned(ADDR_BITS - 1 downto 0);
+        variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
+        variable v_playout_sample : std_logic_vector(SAMPLE_BITS - 1 downto 0);
     begin
         if reset_n = '0' then
             eth_read_addr_o <= (others => '0');
@@ -178,6 +193,10 @@ begin
             ram_read_wait <= '0';
             channel_map_idx <= 0;
             cached_delay <= (others => '0');
+            metering_clear_i_sync1 <= '0';
+            metering_clear_i_sync2 <= '0';
+            metering_clear_last <= '0';
+            
         elsif rising_edge(sys_clk) then
             sample_wr_en <= '0';
 
@@ -190,6 +209,14 @@ begin
             packet_ready_i_sync1 <= packet_ready_i;
             packet_ready_i_sync2 <= packet_ready_i_sync1;
             packet_ready_i_sync3 <= packet_ready_i_sync2;
+
+            metering_clear_i_sync1 <= metering_clear_i;
+            metering_clear_i_sync2 <= metering_clear_i_sync1;
+            if (metering_clear_i_sync2 /= metering_clear_last) then
+                metering_clear_last <= metering_clear_i_sync2;
+                metering_clip_o <= (others => '0');
+                metering_signal_o <= (others => '0');
+            end if;
 
             if zaudio_sync = '0' and fs_clk_i_sync2 = '1' then
                 output_next_sample <= '1';
@@ -504,6 +531,22 @@ begin
                             when 15 => audio_ch15_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
                             when others => null;
                         end case;
+
+                        -- Metering: clip & signal detection on assembled sample
+                        -- Use variable for combinational abs + compare in same cycle
+                        -- Assemble full sample first, then extract magnitude bits
+                        v_playout_sample := playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                        v_sample_abs := unsigned(v_playout_sample(SAMPLE_BITS - 2 downto 0));
+                        if v_playout_sample(SAMPLE_BITS - 1) = '1' then
+                            v_sample_abs := not v_sample_abs; -- one's complement ≈ abs (off by 1 LSB, fine for threshold)
+                        end if;
+                        -- Set sticky bits (cleared only by metering_clear toggle)
+                        if v_sample_abs >= CLIP_THRESHOLD then
+                            metering_clip_o(playout_channel_id) <= '1';
+                        end if;
+                        if v_sample_abs >= SIGNAL_THRESHOLD then
+                            metering_signal_o(playout_channel_id) <= '1';
+                        end if;
 
                         playout_byte <= 0;
                         playout_data_latch <= (others => '0');

@@ -252,6 +252,12 @@ _io = [
         Subsignal("ptp_gm_clock_accuracy", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
         Subsignal("adda_nrst",          Pins(1)),   # AD/DA card nRST (output, active-high release)
+        # Audio metering (from external FPGA logic -> SoC)
+        Subsignal("rx_meter_signal",    Pins(16)),  # RX signal detect (1 bit per channel)
+        Subsignal("rx_meter_clip",      Pins(16)),  # RX clip detect (1 bit per channel)
+        Subsignal("tx_meter_signal",    Pins(16)),  # TX signal detect (1 bit per channel)
+        Subsignal("tx_meter_clip",      Pins(16)),  # TX clip detect (1 bit per channel)
+        Subsignal("meter_clear",        Pins(1)),   # Metering clear toggle (SoC -> FPGA)
     ),
 
     # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)
@@ -393,6 +399,10 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.i_ptp_offset          = Signal(32)
         self.i_eth_tx_done         = Signal()
         self.i_eth_rx_overflow     = Signal()
+        self.i_rx_meter_signal     = Signal(16)
+        self.i_rx_meter_clip       = Signal(16)
+        self.i_tx_meter_signal     = Signal(16)
+        self.i_tx_meter_clip       = Signal(16)
 
         # =====================================================================
         # Output signals (directly active to external FPGA logic)
@@ -412,6 +422,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_ptp_gm_clock_accuracy = Signal(8)
         self.o_eth_tx_request      = Signal()
         self.o_adda_nrst           = Signal()  # AD/DA card hardware reset (active-high → nRST pin)
+        self.o_meter_clear         = Signal()  # Metering clear toggle (to FPGA)
 
         # =====================================================================
         # CSR: Status registers (RO) — directly sampled from input signals
@@ -463,6 +474,15 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.ptp_gm_clock_class   = CSRStorage(8, description="PTP GM clock class")
         self.ptp_gm_clock_accuracy = CSRStorage(8, description="PTP GM clock accuracy")
 
+        # -- Audio metering status (RO) --
+        self.rx_meter_signal = CSRStatus(16, description="RX signal detect (1 bit per channel, sticky)")
+        self.rx_meter_clip   = CSRStatus(16, description="RX clip detect (1 bit per channel, sticky)")
+        self.tx_meter_signal = CSRStatus(16, description="TX signal detect (1 bit per channel, sticky)")
+        self.tx_meter_clip   = CSRStatus(16, description="TX clip detect (1 bit per channel, sticky)")
+
+        # -- Metering clear (RW, directly drives output toggle) --
+        self.meter_clear = CSRStorage(1, description="Toggle to clear metering sticky bits in FPGA")
+
         # -- Scratch register (RW, no HW connection) --
         self.scratch = CSRStorage(32, description="Scratch register (read/write, no HW effect)")
 
@@ -485,6 +505,11 @@ class AES67CSRs(LiteXModule, AutoCSR):
 
             self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
             self.ptp_offset.status.eq(self.i_ptp_offset),
+
+            self.rx_meter_signal.status.eq(self.i_rx_meter_signal),
+            self.rx_meter_clip.status.eq(self.i_rx_meter_clip),
+            self.tx_meter_signal.status.eq(self.i_tx_meter_signal),
+            self.tx_meter_clip.status.eq(self.i_tx_meter_clip),
         ]
 
         # =====================================================================
@@ -496,6 +521,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_ptp_is_follower.eq(self.ctrl.fields.ptp_is_follower),
             self.o_eth_tx_request.eq(self.ctrl.fields.eth_tx_request),
             self.o_adda_nrst.eq(self.ctrl.fields.adda_nrst),
+            self.o_meter_clear.eq(self.meter_clear.storage),
 
             self.o_mac_addr.eq(Cat(self.mac_addr_lo.storage, self.mac_addr_hi.storage[:16])),
             self.o_ip_addr.eq(self.ip_addr.storage),
@@ -877,6 +903,10 @@ class AES67SoC(SoCCore):
             self.aes67_csr.i_ptp_offset.eq(aes67_pads.ptp_offset),
             self.aes67_csr.i_eth_tx_done.eq(aes67_pads.eth_tx_done),
             self.aes67_csr.i_eth_rx_overflow.eq(aes67_pads.eth_rx_overflow),
+            self.aes67_csr.i_rx_meter_signal.eq(aes67_pads.rx_meter_signal),
+            self.aes67_csr.i_rx_meter_clip.eq(aes67_pads.rx_meter_clip),
+            self.aes67_csr.i_tx_meter_signal.eq(aes67_pads.tx_meter_signal),
+            self.aes67_csr.i_tx_meter_clip.eq(aes67_pads.tx_meter_clip),
             # Outputs: CSR -> pads
             aes67_pads.pll_ppb_start.eq(self.aes67_csr.o_pll_ppb_start),
             aes67_pads.ptp_is_leader.eq(self.aes67_csr.o_ptp_is_leader),
@@ -893,6 +923,7 @@ class AES67SoC(SoCCore):
             aes67_pads.ptp_gm_clock_accuracy.eq(self.aes67_csr.o_ptp_gm_clock_accuracy),
             aes67_pads.eth_tx_request.eq(self.aes67_csr.o_eth_tx_request),
             aes67_pads.adda_nrst.eq(self.aes67_csr.o_adda_nrst),
+            aes67_pads.meter_clear.eq(self.aes67_csr.o_meter_clear),
         ]
 
         # -- Ethernet Packet Buffers -------------------------------------------

@@ -25,6 +25,10 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/logging/log.h>
 
+#ifdef CONFIG_DISPLAY_CTRL
+#include "../display_ctrl/display_ctrl.h"
+#endif
+
 LOG_MODULE_REGISTER(io_card, CONFIG_IO_CARD_LOG_LEVEL);
 
 /*******************************************************************************
@@ -65,6 +69,46 @@ static const uint8_t in_adc_addr[IO_NUM_IN_LPC] = {
 	IO_IN_ADC_ADDR1,
 };
 
+/*******************************************************************************
+ * ADC Channel Remapping Tables
+ *
+ * The 16in/8out IO board uses two CS5368 8-ch ADCs with non-sequential
+ * channel mapping:
+ *
+ *   ADC 0 (0x4C): internal ch 0-3 → logical 0-3,   ch 4-7 → logical 8-11
+ *   ADC 1 (0x4D): internal ch 0-3 → logical 4-7,   ch 4-7 → logical 12-15
+ *
+ * The FPGA receives ADC0 as channels 0-7 and ADC1 as channels 8-15.
+ ******************************************************************************/
+
+/* logical channel → ADC index (0 or 1) */
+static const uint8_t logical_to_adc_idx[IO_NUM_IN_CHANNELS] = {
+	0, 0, 0, 0,  1, 1, 1, 1,  0, 0, 0, 0,  1, 1, 1, 1,
+};
+
+/* logical channel → bit position within that ADC's register */
+static const uint8_t logical_to_adc_bit[IO_NUM_IN_CHANNELS] = {
+	0, 1, 2, 3,  0, 1, 2, 3,  4, 5, 6, 7,  4, 5, 6, 7,
+};
+
+/* (adc_index, adc_bit) → logical channel */
+static const uint8_t adc_bit_to_logical[IO_NUM_IN_LPC][8] = {
+	{ 0,  1,  2,  3,  8,  9, 10, 11},   /* ADC 0 */
+	{ 4,  5,  6,  7, 12, 13, 14, 15},   /* ADC 1 */
+};
+
+/* logical channel → FPGA channel index (for TX stream config) */
+static const uint8_t logical_to_fpga[IO_NUM_IN_CHANNELS] = {
+	 0,  1,  2,  3,   /* logical  0- 3 → FPGA  0- 3 (ADC0 ch0-3) */
+	 8,  9, 10, 11,   /* logical  4- 7 → FPGA  8-11 (ADC1 ch0-3) */
+	 4,  5,  6,  7,   /* logical  8-11 → FPGA  4- 7 (ADC0 ch4-7) */
+	12, 13, 14, 15,   /* logical 12-15 → FPGA 12-15 (ADC1 ch4-7) */
+};
+
+/* Clip hold: number of poll ticks the clip LED stays on */
+#define CLIP_HOLD_TICKS \
+	(CONFIG_IO_CARD_CLIP_HOLD_MS / CONFIG_IO_CARD_OVERFLOW_POLL_MS)
+
 /* Driver instance */
 static struct io_card_data io_data;
 
@@ -74,6 +118,11 @@ static bool out_scrambled;
 /* Whether a PCA9540B/TCA9543A MUX is present on the bus.
  * Auto-detected during init.  When false, 0x43 is accessed directly. */
 static bool mux_present;
+
+/* Overflow polling thread */
+static K_THREAD_STACK_DEFINE(io_overflow_stack, CONFIG_IO_CARD_OVERFLOW_STACK_SIZE);
+static struct k_thread io_overflow_thread;
+static bool overflow_thread_running;
 
 /*******************************************************************************
  * Internal: I2C helpers
@@ -263,6 +312,79 @@ static int gain_db_to_index(int8_t gain_db)
 }
 
 /*******************************************************************************
+ * Overflow polling thread
+ *
+ * Reads the CS5368 Overflow Status Register (0x02) from each ADC every
+ * CONFIG_IO_CARD_OVERFLOW_POLL_MS milliseconds.  Bits are active-low and
+ * sticky (cleared on read).  Detected overflows set the clip LED for the
+ * corresponding logical channel and hold it for CLIP_HOLD_TICKS polls.
+ ******************************************************************************/
+
+static void io_overflow_poll_fn(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	while (1) {
+		k_msleep(CONFIG_IO_CARD_OVERFLOW_POLL_MS);
+
+		if (!io_data.initialized) {
+			continue;
+		}
+
+		k_mutex_lock(&io_data.lock, K_FOREVER);
+
+		/* Read overflow register from each ADC */
+		for (int adc = 0; adc < IO_NUM_IN_LPC; adc++) {
+			if (io_data.adc_addr[adc] == 0) {
+				continue;
+			}
+
+			uint8_t ovfl_reg = 0xFF;
+			int ret = lpc_read(io_data.adc_addr[adc],
+					   IO_ADC_OVFL_REG, &ovfl_reg, 1);
+			if (ret < 0) {
+				continue;
+			}
+
+			/* Active LOW: invert so 1 = overflow */
+			uint8_t ovfl = (uint8_t)~ovfl_reg;
+
+			for (int bit = 0; bit < 8; bit++) {
+				if (ovfl & (1U << bit)) {
+					uint8_t lch = adc_bit_to_logical[adc][bit];
+
+					io_data.clip_hold[lch] = CLIP_HOLD_TICKS;
+				}
+			}
+		}
+
+		/* Update hold counters and build active clip mask */
+		uint16_t clip_active = 0;
+
+		for (int ch = 0; ch < IO_NUM_IN_CHANNELS; ch++) {
+			if (io_data.clip_hold[ch] > 0) {
+				io_data.clip_hold[ch]--;
+				clip_active |= (1U << ch);
+			}
+		}
+
+		io_data.in_overflow = clip_active;
+
+		k_mutex_unlock(&io_data.lock);
+
+		/* Update clip LEDs (outside lock) */
+#ifdef CONFIG_DISPLAY_CTRL
+		for (int ch = 0; ch < IO_NUM_IN_CHANNELS; ch++) {
+			display_ctrl_set_clip_led(ch,
+						  (clip_active & (1U << ch)) != 0);
+		}
+#endif
+	}
+}
+
+/*******************************************************************************
  * Public API
  ******************************************************************************/
 
@@ -443,6 +565,18 @@ int io_card_init(const struct device *i2c_dev)
 		} else {
 			LOG_INF("Found %d CS5368 ADC(s)", found_count);
 		}
+
+		/* Store detected ADC addresses for mute/overflow access */
+		for (int i = 0; i < found_count && i < IO_NUM_IN_LPC; i++) {
+			io_data.adc_addr[i] = found_addr[i];
+		}
+
+		/* Clear ADC mute registers (all channels unmuted) */
+		for (int i = 0; i < found_count && i < IO_NUM_IN_LPC; i++) {
+			io_data.adc_mute[i] = 0x00;
+			data8 = 0x00;
+			lpc_write(io_data.adc_addr[i], IO_ADC_MUTE_REG, &data8, 1);
+		}
 	}
 
 	/* ---- Init output LPC (release from reset, clear OE) via MUX ---- */
@@ -501,6 +635,16 @@ int io_card_init(const struct device *i2c_dev)
 
 	io_data.initialized = true;
 	k_mutex_unlock(&io_data.lock);
+
+	/* Start overflow polling thread */
+	if (!overflow_thread_running) {
+		k_thread_create(&io_overflow_thread, io_overflow_stack,
+				K_THREAD_STACK_SIZEOF(io_overflow_stack),
+				io_overflow_poll_fn, NULL, NULL, NULL,
+				K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+		k_thread_name_set(&io_overflow_thread, "io_overflow");
+		overflow_thread_running = true;
+	}
 
 	LOG_INF("IO card initialized: 16 inputs, 8 outputs");
 	return 0;
@@ -623,6 +767,9 @@ int io_card_set_in_phantom(uint8_t channel, bool enable)
 
 	if (ret == 0) {
 		LOG_INF("In ch%d phantom %s", channel, enable ? "ON" : "OFF");
+#ifdef CONFIG_DISPLAY_CTRL
+		display_ctrl_set_48v_led(channel, enable);
+#endif
 	}
 	return ret;
 }
@@ -649,44 +796,52 @@ int io_card_set_in_mute(uint8_t channel, bool mute)
 		return -ENODEV;
 	}
 
-	/* Input mute is done by zeroing the gain register on the LPC.
-	 * The original firmware used FPGARampMute() for a ramp, which is
-	 * not available here. We write directly.
-	 */
+	uint8_t adc_idx = logical_to_adc_idx[channel];
+	uint8_t adc_bit = logical_to_adc_bit[channel];
+
 	k_mutex_lock(&io_data.lock, K_FOREVER);
 
-	uint8_t saved_high = io_data.in_chn_reg[channel].high;
-	uint8_t saved_low  = io_data.in_chn_reg[channel].low;
+	if (io_data.adc_addr[adc_idx] == 0) {
+		k_mutex_unlock(&io_data.lock);
+		return -ENODEV;
+	}
 
 	if (mute) {
-		io_data.in_chn_reg[channel].low = 0x00;
+		io_data.adc_mute[adc_idx] |= (1U << adc_bit);
 	} else {
-		/* Restore to current gain (already in register cache) */
+		io_data.adc_mute[adc_idx] &= (uint8_t)~(1U << adc_bit);
 	}
 
-	int ret = update_in_channel_reg(channel);
-
-	if (mute && ret == 0) {
-		/* Cache stays intact so unmute restores full gain */
-		io_data.in_chn_reg[channel].high = saved_high;
-		io_data.in_chn_reg[channel].low  = saved_low;
-	}
+	int ret = lpc_write(io_data.adc_addr[adc_idx], IO_ADC_MUTE_REG,
+			    &io_data.adc_mute[adc_idx], 1);
 
 	k_mutex_unlock(&io_data.lock);
 
 	if (ret == 0) {
-		LOG_INF("In ch%d %s", channel, mute ? "muted" : "unmuted");
+		LOG_INF("In ch%d %s (ADC 0x%02x mute=0x%02x)",
+			channel, mute ? "muted" : "unmuted",
+			io_data.adc_addr[adc_idx], io_data.adc_mute[adc_idx]);
+#ifdef CONFIG_DISPLAY_CTRL
+		display_ctrl_set_mute_led(channel, mute);
+#endif
 	}
 	return ret;
 }
 
 int io_card_get_in_mute(uint8_t channel)
 {
-	/* Mute state is not cached separately; always report unmuted. */
 	if (channel >= IO_NUM_IN_CHANNELS || !io_data.initialized) {
 		return -EINVAL;
 	}
-	return 0;
+
+	uint8_t adc_idx = logical_to_adc_idx[channel];
+	uint8_t adc_bit = logical_to_adc_bit[channel];
+
+	k_mutex_lock(&io_data.lock, K_FOREVER);
+	bool muted = (io_data.adc_mute[adc_idx] & (1U << adc_bit)) != 0;
+	k_mutex_unlock(&io_data.lock);
+
+	return muted ? 1 : 0;
 }
 
 int io_card_set_96khz(bool enable)
@@ -804,6 +959,9 @@ int io_card_set_out_mute(uint8_t channel, bool mute)
 
 	if (ret == 0) {
 		LOG_INF("Out ch%d %s", channel, mute ? "muted" : "unmuted");
+#ifdef CONFIG_DISPLAY_CTRL
+		display_ctrl_set_mute_led(IO_NUM_IN_CHANNELS + channel, mute);
+#endif
 	}
 	return ret;
 }
@@ -862,4 +1020,30 @@ int io_card_reset(void)
 
 	io_data.initialized = false;
 	return io_card_init(dev);
+}
+
+uint16_t io_card_get_in_overflow(void)
+{
+	if (!io_data.initialized) {
+		return 0;
+	}
+
+	k_mutex_lock(&io_data.lock, K_FOREVER);
+	uint16_t ovfl = io_data.in_overflow;
+	k_mutex_unlock(&io_data.lock);
+
+	return ovfl;
+}
+
+bool io_card_is_io_board(void)
+{
+	return io_data.initialized;
+}
+
+uint8_t io_card_logical_to_fpga_ch(uint8_t logical_ch)
+{
+	if (logical_ch >= IO_NUM_IN_CHANNELS) {
+		return logical_ch;
+	}
+	return logical_to_fpga[logical_ch];
 }

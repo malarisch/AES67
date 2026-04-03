@@ -269,3 +269,17 @@ bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)
 	}
 	return eth_litex_read_ppb_counts(dev, wc_count, pll_count);
 }
+
+void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
+			    uint16_t *tx_signal, uint16_t *tx_clip)
+{
+	/* Read all four metering status registers */
+	*rx_signal = (uint16_t)litex_csr_read(CSR_AES67_CSR_RX_METER_SIGNAL_ADDR);
+	*rx_clip   = (uint16_t)litex_csr_read(CSR_AES67_CSR_RX_METER_CLIP_ADDR);
+	*tx_signal = (uint16_t)litex_csr_read(CSR_AES67_CSR_TX_METER_SIGNAL_ADDR);
+	*tx_clip   = (uint16_t)litex_csr_read(CSR_AES67_CSR_TX_METER_CLIP_ADDR);
+
+	/* Toggle the clear bit so FPGA resets its sticky detectors */
+	uint32_t cur = litex_csr_read(CSR_AES67_CSR_METER_CLEAR_ADDR);
+	litex_csr_write(CSR_AES67_CSR_METER_CLEAR_ADDR, cur ^ 1);
+}

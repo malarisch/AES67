@@ -34,17 +34,57 @@ LOG_MODULE_REGISTER(fw_update, LOG_LEVEL_INF);
 /* Max firmware size: flash total minus firmware offset */
 #define FW_MAX_SIZE       (SPI_FLASH_TOTAL_SIZE - FW_FLASH_ADDR)
 
-/* ── Streaming flash writer state ────────────────────────────────── */
+/* Forward declarations for FBI helpers (used by writer thread) */
+struct fbi_header {
+	uint32_t length;
+	uint32_t crc32;
+};
+static bool read_fbi_header(struct fbi_header *hdr);
+static bool verify_fbi_crc(const struct fbi_header *hdr);
+
+/* ── Async flash writer ──────────────────────────────────────────
+ *
+ * The HTTP handler copies incoming chunks into a ring buffer; a
+ * separate low-priority thread drains the ring buffer to SPI flash.
+ * This keeps flash sector-erase latency (~150 ms) off the HTTP thread
+ * so the TCP connection stays alive.
+ * ─────────────────────────────────────────────────────────────────── */
+
+/* Ring buffer: must be a power-of-two and large enough to absorb
+ * at least one HTTP receive window while a sector erase runs. */
+#define FW_RING_SIZE  8192
+#define FW_RING_MASK  (FW_RING_SIZE - 1)
+
+BUILD_ASSERT((FW_RING_SIZE & FW_RING_MASK) == 0,
+	     "FW_RING_SIZE must be power of two");
+
+static uint8_t  fw_ring[FW_RING_SIZE];
+static volatile uint32_t fw_ring_head;    /* written by HTTP thread */
+static volatile uint32_t fw_ring_tail;    /* read by writer thread */
+
+/* Writer thread */
+#define FW_WRITER_STACK_SIZE 2048
+static K_THREAD_STACK_DEFINE(fw_writer_stack, FW_WRITER_STACK_SIZE);
+static struct k_thread fw_writer_thread;
+static struct k_sem    fw_data_sem;       /* signalled when data available */
+
+enum fw_phase {
+	FW_IDLE,
+	FW_RECEIVING,     /* HTTP handler is feeding data */
+	FW_RX_COMPLETE,   /* all HTTP data received, writer still draining */
+	FW_DONE,          /* writer finished (success or error) */
+};
 
 struct fw_writer {
 	uint32_t flash_addr;     /* next write address in flash */
-	uint32_t total_received; /* bytes received so far */
-	uint32_t total_expected; /* from Content-Length, or 0 if unknown */
+	uint32_t total_received; /* bytes fed by HTTP handler */
+	uint32_t total_written;  /* bytes flushed to flash */
 	uint32_t erased_up_to;   /* sectors erased up to this address */
 	uint8_t  page_buf[SPI_FLASH_PAGE_SIZE];
 	size_t   page_buf_len;   /* bytes buffered in page_buf */
-	bool     active;         /* update in progress */
+	volatile enum fw_phase phase;
 	int      error;          /* non-zero on failure */
+	bool     crc_ok;         /* set by writer thread after verification */
 };
 
 static struct fw_writer fw_state;
@@ -54,6 +94,9 @@ static void fw_writer_reset(void)
 	memset(&fw_state, 0, sizeof(fw_state));
 	fw_state.flash_addr = FW_FLASH_ADDR;
 	fw_state.erased_up_to = FW_FLASH_ADDR;
+	fw_state.phase = FW_IDLE;
+	fw_ring_head = 0;
+	fw_ring_tail = 0;
 }
 
 /**
@@ -90,50 +133,110 @@ static int fw_flush_page(void)
 	}
 
 	fw_state.flash_addr += fw_state.page_buf_len;
+	fw_state.total_written += fw_state.page_buf_len;
 	fw_state.page_buf_len = 0;
 	return 0;
 }
 
 /**
- * Feed data into the streaming flash writer.
+ * Ring buffer: number of bytes available to read.
  */
-static int fw_writer_feed(const uint8_t *data, size_t len)
+static inline uint32_t fw_ring_avail(void)
 {
-	while (len > 0) {
-		size_t space = SPI_FLASH_PAGE_SIZE - fw_state.page_buf_len;
-		size_t copy = (len < space) ? len : space;
+	return fw_ring_head - fw_ring_tail;
+}
 
-		memcpy(fw_state.page_buf + fw_state.page_buf_len, data, copy);
-		fw_state.page_buf_len += copy;
-		fw_state.total_received += copy;
-		data += copy;
-		len -= copy;
+/**
+ * Ring buffer: free space for writing.
+ */
+static inline uint32_t fw_ring_free(void)
+{
+	return FW_RING_SIZE - fw_ring_avail();
+}
 
-		if (fw_state.page_buf_len == SPI_FLASH_PAGE_SIZE) {
-			int ret = fw_flush_page();
-
-			if (ret < 0) {
-				return ret;
-			}
-		}
+/**
+ * HTTP handler calls this to push data into the ring buffer.
+ * Returns 0 on success, -ENOMEM if the ring buffer overflows.
+ */
+static int fw_ring_push(const uint8_t *data, size_t len)
+{
+	if (len > fw_ring_free()) {
+		return -ENOMEM;
 	}
+
+	for (size_t i = 0; i < len; i++) {
+		fw_ring[fw_ring_head & FW_RING_MASK] = data[i];
+		fw_ring_head++;
+	}
+
+	/* Wake writer thread */
+	k_sem_give(&fw_data_sem);
 	return 0;
 }
 
 /**
- * Finalise the write — flush remaining data.
+ * Writer thread: drain ring buffer into the page buffer and flash.
  */
-static int fw_writer_finish(void)
+static void fw_writer_thread_fn(void *p1, void *p2, void *p3)
 {
-	return fw_flush_page();
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	while (1) {
+		/* Wait for data or completion signal */
+		k_sem_take(&fw_data_sem, K_FOREVER);
+
+		if (fw_state.phase == FW_IDLE) {
+			continue;
+		}
+
+		/* Drain all available data from ring buffer */
+		while (fw_ring_avail() > 0 && fw_state.error == 0) {
+			size_t space = SPI_FLASH_PAGE_SIZE - fw_state.page_buf_len;
+			size_t avail = fw_ring_avail();
+			size_t n = (avail < space) ? avail : space;
+
+			for (size_t i = 0; i < n; i++) {
+				fw_state.page_buf[fw_state.page_buf_len++] =
+					fw_ring[fw_ring_tail & FW_RING_MASK];
+				fw_ring_tail++;
+			}
+
+			if (fw_state.page_buf_len == SPI_FLASH_PAGE_SIZE) {
+				int ret = fw_flush_page();
+				if (ret < 0) {
+					fw_state.error = ret;
+				}
+			}
+		}
+
+		/* If HTTP reception is complete and ring is drained, finalize */
+		if (fw_state.phase == FW_RX_COMPLETE && fw_ring_avail() == 0 &&
+		    fw_state.error == 0) {
+			fw_state.error = fw_flush_page();
+			if (fw_state.error == 0) {
+				/* Verify the written image */
+				struct fbi_header hdr;
+
+				fw_state.crc_ok = read_fbi_header(&hdr) &&
+						  verify_fbi_crc(&hdr);
+				LOG_INF("FW: writer done, %u bytes, CRC %s",
+					fw_state.total_written,
+					fw_state.crc_ok ? "OK" : "FAIL");
+			} else {
+				LOG_ERR("FW: final flush failed (%d)",
+					fw_state.error);
+			}
+			fw_state.phase = FW_DONE;
+		} else if (fw_state.error != 0 &&
+			   fw_state.phase != FW_DONE) {
+			fw_state.phase = FW_DONE;
+		}
+	}
 }
 
 /* ── FBI header helpers ──────────────────────────────────────────── */
-
-struct fbi_header {
-	uint32_t length;
-	uint32_t crc32;
-};
 
 static bool read_fbi_header(struct fbi_header *hdr)
 {
@@ -299,25 +402,49 @@ int fw_update_http_handler(struct http_client_ctx *client,
 		return 0;
 	}
 
-	/* ── GET /api/fw_update → return firmware info ── */
+	/* ── GET /api/fw_update → return firmware info + writer status ── */
 	if (method == HTTP_GET) {
-		struct fbi_header hdr;
 		int len;
 
-		if (read_fbi_header(&hdr)) {
-			bool crc_ok = verify_fbi_crc(&hdr);
-
+		if (fw_state.phase == FW_RECEIVING ||
+		    fw_state.phase == FW_RX_COMPLETE) {
 			len = snprintf(resp_buf, sizeof(resp_buf),
-				"{\"jedec_id\":\"0x%06X\",\"fw_size\":%u,"
-				"\"fw_crc\":\"0x%08X\",\"crc_ok\":%s}",
-				spi_flash_read_jedec_id(),
-				hdr.length, hdr.crc32,
-				crc_ok ? "true" : "false");
+				"{\"phase\":\"writing\","
+				"\"received\":%u,\"written\":%u}",
+				fw_state.total_received,
+				fw_state.total_written);
+		} else if (fw_state.phase == FW_DONE) {
+			if (fw_state.error != 0) {
+				len = snprintf(resp_buf, sizeof(resp_buf),
+					"{\"phase\":\"error\","
+					"\"error\":%d,\"written\":%u}",
+					fw_state.error, fw_state.total_written);
+			} else {
+				len = snprintf(resp_buf, sizeof(resp_buf),
+					"{\"phase\":\"done\","
+					"\"bytes\":%u,\"crc_ok\":%s}",
+					fw_state.total_written,
+					fw_state.crc_ok ? "true" : "false");
+			}
 		} else {
-			len = snprintf(resp_buf, sizeof(resp_buf),
-				"{\"jedec_id\":\"0x%06X\",\"fw_size\":0,"
-				"\"fw_crc\":null,\"crc_ok\":false}",
-				spi_flash_read_jedec_id());
+			/* FW_IDLE — show stored firmware info */
+			struct fbi_header hdr;
+
+			if (read_fbi_header(&hdr)) {
+				len = snprintf(resp_buf, sizeof(resp_buf),
+					"{\"phase\":\"idle\","
+					"\"jedec_id\":\"0x%06X\","
+					"\"fw_size\":%u,"
+					"\"fw_crc\":\"0x%08X\"}",
+					spi_flash_read_jedec_id(),
+					hdr.length, hdr.crc32);
+			} else {
+				len = snprintf(resp_buf, sizeof(resp_buf),
+					"{\"phase\":\"idle\","
+					"\"jedec_id\":\"0x%06X\","
+					"\"fw_size\":0}",
+					spi_flash_read_jedec_id());
+			}
 		}
 
 		response_ctx->body = (const uint8_t *)resp_buf;
@@ -338,32 +465,46 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	/* Aborted? */
 	if (status == HTTP_SERVER_DATA_ABORTED) {
-		if (fw_state.active) {
+		if (fw_state.phase == FW_RECEIVING ||
+		    fw_state.phase == FW_RX_COMPLETE) {
 			LOG_WRN("FW: upload aborted after %u bytes",
 				fw_state.total_received);
-			fw_state.active = false;
+			fw_state.error = -ECANCELED;
+			fw_state.phase = FW_IDLE;
 		}
 		return 0;
 	}
 
 	/* First chunk — initialise writer */
-	if (!fw_state.active) {
+	if (fw_state.phase == FW_IDLE || fw_state.phase == FW_DONE) {
 		fw_writer_reset();
-		fw_state.active = true;
+		fw_state.phase = FW_RECEIVING;
 		LOG_INF("FW: upload started");
 	}
 
-	/* Feed incoming data */
+	/* Push incoming data into ring buffer (non-blocking) */
 	if (request_ctx->data_len > 0 && fw_state.error == 0) {
 		/* Bounds check */
 		if (fw_state.total_received + request_ctx->data_len > FW_MAX_SIZE) {
 			LOG_ERR("FW: image too large (>%u bytes)", FW_MAX_SIZE);
 			fw_state.error = -ENOMEM;
 		} else {
-			int ret = fw_writer_feed(request_ctx->data,
-						 request_ctx->data_len);
+			/* If ring buffer is full, yield briefly to let
+			 * writer thread drain it. */
+			int retries = 200;
+
+			while (fw_ring_free() < request_ctx->data_len &&
+			       --retries > 0) {
+				k_msleep(5);
+			}
+
+			int ret = fw_ring_push(request_ctx->data,
+					       request_ctx->data_len);
 			if (ret < 0) {
+				LOG_ERR("FW: ring buffer overflow");
 				fw_state.error = ret;
+			} else {
+				fw_state.total_received += request_ctx->data_len;
 			}
 		}
 	}
@@ -374,13 +515,11 @@ int fw_update_http_handler(struct http_client_ctx *client,
 		return 0;
 	}
 
-	/* ── Final chunk — flush and respond ── */
-	fw_state.active = false;
-	int len;
+	/* ── Final chunk received — signal writer, respond immediately ── */
+	fw_state.phase = FW_RX_COMPLETE;
+	k_sem_give(&fw_data_sem);
 
-	if (fw_state.error == 0) {
-		fw_state.error = fw_writer_finish();
-	}
+	int len;
 
 	if (fw_state.error != 0) {
 		len = snprintf(resp_buf, sizeof(resp_buf),
@@ -388,17 +527,13 @@ int fw_update_http_handler(struct http_client_ctx *client,
 			fw_state.error, fw_state.total_received);
 		response_ctx->status = HTTP_500_INTERNAL_SERVER_ERROR;
 	} else {
-		/* Verify the written image */
-		struct fbi_header hdr;
-		bool valid = read_fbi_header(&hdr) && verify_fbi_crc(&hdr);
-
+		/* Writer still draining ring buffer → tell client to poll */
 		len = snprintf(resp_buf, sizeof(resp_buf),
-			"{\"status\":\"ok\",\"bytes\":%u,\"crc_ok\":%s}",
-			fw_state.total_received,
-			valid ? "true" : "false");
+			"{\"status\":\"writing\",\"bytes\":%u}",
+			fw_state.total_received);
 		response_ctx->status = HTTP_200_OK;
-		LOG_INF("FW: upload complete: %u bytes, CRC %s",
-			fw_state.total_received, valid ? "OK" : "FAIL");
+		LOG_INF("FW: upload received: %u bytes, writing to flash",
+			fw_state.total_received);
 	}
 
 	response_ctx->body = (const uint8_t *)resp_buf;
@@ -424,4 +559,12 @@ void fw_update_init(void)
 	if (read_fbi_header(&hdr)) {
 		LOG_INF("Firmware image: %u bytes, CRC-32: 0x%08X", hdr.length, hdr.crc32);
 	}
+
+	k_sem_init(&fw_data_sem, 0, 1);
+
+	k_thread_create(&fw_writer_thread, fw_writer_stack,
+			 K_THREAD_STACK_SIZEOF(fw_writer_stack),
+			 fw_writer_thread_fn, NULL, NULL, NULL,
+			 K_PRIO_PREEMPT(12), 0, K_NO_WAIT);
+	k_thread_name_set(&fw_writer_thread, "fw_writer");
 }

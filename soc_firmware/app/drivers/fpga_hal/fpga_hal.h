@@ -231,6 +231,24 @@ int32_t fpga_hal_read_ptp_offset(void);
  */
 bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count);
 
+/* ========================================================================
+ * Audio metering
+ * ======================================================================== */
+
+/**
+ * @brief Read audio metering registers and clear sticky bits.
+ *
+ * Reads all four metering registers (RX/TX signal/clip), then toggles
+ * the clear bit so the FPGA resets its sticky detectors.
+ *
+ * @param rx_signal  Output: RX signal detect bitmask (1 bit per channel).
+ * @param rx_clip    Output: RX clip detect bitmask (1 bit per channel).
+ * @param tx_signal  Output: TX signal detect bitmask (1 bit per channel).
+ * @param tx_clip    Output: TX clip detect bitmask (1 bit per channel).
+ */
+void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
+			    uint16_t *tx_signal, uint16_t *tx_clip);
+
 #ifdef __cplusplus
 }
 #endif

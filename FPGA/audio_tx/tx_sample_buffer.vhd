@@ -35,10 +35,11 @@ entity tx_sample_buffer is
         wr_ready_o					: out std_logic := '0';
 
         read0Addr		: in unsigned(15 downto 0);
-		data0_out		: out std_logic_vector(7 downto 0) -- 8 bit
+		data0_out		: out std_logic_vector(7 downto 0); -- 8 bit
 
-		
-		
+        metering_signal_o : out std_logic_vector(global_channel_count - 1 downto 0);
+        metering_clip_o : out std_logic_vector(global_channel_count - 1 downto 0);
+        metering_clear_i : in std_logic
 	);
 end entity;
 
@@ -58,11 +59,22 @@ architecture Behavioral of tx_sample_buffer is
     -- Delayed wr_ready to ensure wr_ptr_o is stable when consumer reads it
     signal wr_ready_pending : std_logic := '0';
 
+    -- Metering CDC
+    signal metering_clear_i_sync1 : std_logic := '0';
+    signal metering_clear_i_sync2 : std_logic := '0';
+    signal metering_clear_last : std_logic := '0';
 
+    -- Metering thresholds (same as rx_ringbuffer)
+    constant SAMPLE_BITS : integer := bytes_per_sample * 8;
+    -- Clip:   0x640000 ≈ -2 dBFS
+    -- Signal: 0x004000 ≈ -42 dBFS
+    constant CLIP_THRESHOLD   : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#640000#, SAMPLE_BITS - 1);
+    constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
 begin
     
     process(sys_clk, reset_n)
     variable data_latch : std_logic_vector(23 downto 0);
+    variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
     begin
         if reset_n = '0' then
             wr_ptr_o <= (others => '0');
@@ -75,13 +87,25 @@ begin
             byte_count <= 0;
             wr_ready_o <= '0';
             wr_ready_pending <= '0';
+            metering_clear_i_sync1 <= '0';
+            metering_clear_i_sync2 <= '0';
+            metering_clear_last <= '0';
         elsif rising_edge(sys_clk) then
             
             -- Delay wr_ready by 1 clock: wr_ready_pending -> wr_ready_o
             -- This ensures wr_ptr_o is stable when downstream logic reads it
             wr_ready_o <= wr_ready_pending;
             wr_ready_pending <= '0';
-            
+
+            -- Metering clear CDC (toggle detect)
+            metering_clear_i_sync1 <= metering_clear_i;
+            metering_clear_i_sync2 <= metering_clear_i_sync1;
+            if (metering_clear_i_sync2 /= metering_clear_last) then
+                metering_clear_last <= metering_clear_i_sync2;
+                metering_clip_o <= (others => '0');
+                metering_signal_o <= (others => '0');
+            end if;
+
             -- cdc for fs_clk_i to sys_clk domain
             fs_clk_i_sync1 <= fs_clk_i;
             fs_clk_i_sync2 <= fs_clk_i_sync1;
@@ -111,6 +135,20 @@ begin
                     when 15 => data_latch := audio_ch15_in;
                     when others => data_latch := (others => '0');
                 end case;
+
+                -- Metering: clip & signal detection on first byte cycle
+                if byte_count = 0 then
+                    v_sample_abs := unsigned(data_latch(SAMPLE_BITS - 2 downto 0));
+                    if data_latch(SAMPLE_BITS - 1) = '1' then
+                        v_sample_abs := not v_sample_abs;
+                    end if;
+                    if v_sample_abs >= CLIP_THRESHOLD then
+                        metering_clip_o(current_channel_id) <= '1';
+                    end if;
+                    if v_sample_abs >= SIGNAL_THRESHOLD then
+                        metering_signal_o(current_channel_id) <= '1';
+                    end if;
+                end if;
 
                 sample_ram(sample_wr_ptr + current_channel_id * bytes_per_sample + byte_count) <= data_latch(byte_count*8 + 7 downto byte_count*8);
                 byte_count <= byte_count + 1;

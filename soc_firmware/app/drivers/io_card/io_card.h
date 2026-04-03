@@ -100,6 +100,8 @@ extern "C" {
  ******************************************************************************/
 
 #define IO_ADC_GMCR_REG         0x01    /* General Mode Configuration Register (GCTL) */
+#define IO_ADC_OVFL_REG         0x02    /* Overflow Status Register (active low, sticky) */
+#define IO_ADC_MUTE_REG         0x08    /* Mute Control Register (8 bits = 8 channels) */
 #define IO_ADC_GMCR_VALUE       0x9B    /* CP-EN|MDIV1|DIF=TDM|MODE=Slave */
 
 /* CS5368 I2C addresses depend on AD1/AD0 pin strapping (= DIF1/DIF0 in Stand-Alone Mode).
@@ -195,6 +197,12 @@ struct io_card_data {
 	/* Input side state */
 	struct io_in_chn_reg in_chn_reg[IO_NUM_IN_CHANNELS];
 	uint8_t in_glb_reg[IO_NUM_IN_LPC];     /* Global reg per LPC chip */
+
+	/* ADC state */
+	uint8_t adc_addr[IO_NUM_IN_LPC];       /* Detected ADC I2C addresses */
+	uint8_t adc_mute[IO_NUM_IN_LPC];       /* Mute register cache per ADC */
+	uint16_t in_overflow;                   /* Logical channel overflow bitmask */
+	uint8_t clip_hold[IO_NUM_IN_CHANNELS]; /* Per-channel clip hold counter */
 
 	/* Output side state */
 	uint8_t out_glb_reg[IO_NUM_OUT_LPC_BANKS];
@@ -350,6 +358,36 @@ int io_card_get_output_enable(void);
  * @return 0 on success, negative errno on failure
  */
 int io_card_reset(void);
+
+/**
+ * @brief Get current input overflow status
+ *
+ * Returns a 16-bit bitmask where each bit corresponds to a logical
+ * input channel. A bit is set if that channel has had an overflow
+ * within the clip hold period.
+ *
+ * @return 16-bit overflow bitmask (logical channel mapping)
+ */
+uint16_t io_card_get_in_overflow(void);
+
+/**
+ * @brief Check if the IO board (16-in/8-out) is present and initialized
+ *
+ * @return true if IO board is active
+ */
+bool io_card_is_io_board(void);
+
+/**
+ * @brief Remap a logical input channel to the FPGA channel index
+ *
+ * On the 16in/8out IO board, ADC channels are not sequentially mapped.
+ * This function converts a user-visible logical channel number to the
+ * physical FPGA channel index used in TX stream configuration.
+ *
+ * @param logical_ch Logical channel (0-15)
+ * @return FPGA channel index, or logical_ch unchanged if out of range
+ */
+uint8_t io_card_logical_to_fpga_ch(uint8_t logical_ch);
 
 #ifdef __cplusplus
 }

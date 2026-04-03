@@ -275,6 +275,7 @@ int main(void)
 			LOG_INF("Display controller initialized");
 			display_ctrl_all_off();
 			display_ctrl_show_status("  FPGA");
+			display_ctrl_start_metering();
 		}
 	}
 #endif

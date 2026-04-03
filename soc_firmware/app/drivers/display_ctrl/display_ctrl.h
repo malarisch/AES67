@@ -471,6 +471,20 @@ int display_ctrl_full_test(void);
  */
 int display_ctrl_all_off(void);
 
+/*******************************************************************************
+ * Audio Metering
+ ******************************************************************************/
+
+#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL) || defined(CONFIG_FPGA_HAL_LITEX)
+/**
+ * @brief Start the metering polling thread
+ *
+ * Polls FPGA metering CSRs (RX/TX signal and clip detect) and updates
+ * the corresponding channel LEDs. Call after display_ctrl_init().
+ */
+void display_ctrl_start_metering(void);
+#endif
+
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
 /**
  * @brief Hardware reset via the shared nRST line

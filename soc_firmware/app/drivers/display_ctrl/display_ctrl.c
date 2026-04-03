@@ -746,6 +746,95 @@ int display_ctrl_all_off(void)
 	return ret;
 }
 
+/*******************************************************************************
+ * Audio Metering Thread (polls FPGA metering CSRs → signal/clip LEDs)
+ ******************************************************************************/
+
+#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL) || defined(CONFIG_FPGA_HAL_LITEX)
+#include "../fpga_hal/fpga_hal.h"
+
+#define METERING_STACK_SIZE 512
+#define METERING_POLL_MS    20
+
+/* FPGA TX channel → logical input channel (inverse of logical_to_fpga in io_card.c)
+ *   logical  0- 3 → FPGA  0- 3    logical  4- 7 → FPGA  8-11
+ *   logical  8-11 → FPGA  4- 7    logical 12-15 → FPGA 12-15  */
+static const uint8_t fpga_to_logical_in[16] = {
+	 0,  1,  2,  3,   /* FPGA  0- 3 → logical  0- 3 */
+	 8,  9, 10, 11,   /* FPGA  4- 7 → logical  8-11 */
+	 4,  5,  6,  7,   /* FPGA  8-11 → logical  4- 7 */
+	12, 13, 14, 15,   /* FPGA 12-15 → logical 12-15 */
+};
+
+/**
+ * @brief Remap a 16-bit FPGA channel bitmask to logical channel bitmask.
+ */
+static uint32_t remap_fpga_to_logical(uint16_t fpga_mask, const uint8_t *map)
+{
+	uint32_t out = 0;
+
+	while (fpga_mask) {
+		int bit = __builtin_ctz(fpga_mask);
+		out |= (1U << map[bit]);
+		fpga_mask &= fpga_mask - 1;
+	}
+	return out;
+}
+
+static K_THREAD_STACK_DEFINE(metering_stack, METERING_STACK_SIZE);
+static struct k_thread metering_thread;
+
+static void metering_thread_fn(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	uint16_t rx_signal, rx_clip, tx_signal, tx_clip;
+	uint32_t poll_count = 0;
+
+	while (1) {
+		k_msleep(METERING_POLL_MS);
+
+		if (!dc_data.initialized) {
+			continue;
+		}
+
+		fpga_hal_read_metering(&rx_signal, &rx_clip,
+				       &tx_signal, &tx_clip);
+
+		/* Log raw CSR values every ~1s (every 10th poll) */
+		if ((poll_count % 10) == 0) {
+			LOG_INF("meter: rx_sig=0x%04x rx_clip=0x%04x "
+				"tx_sig=0x%04x tx_clip=0x%04x",
+				rx_signal, rx_clip, tx_signal, tx_clip);
+		}
+		poll_count++;
+
+		/* TX (inputs) on LED channels 0-15, remapped from FPGA channel order.
+		 * RX (outputs) on LED channels 16-23 (1:1, no remap needed). */
+		uint32_t signal_pattern = remap_fpga_to_logical(tx_signal, fpga_to_logical_in)
+					| ((uint32_t)rx_signal << 16);
+		uint32_t clip_pattern   = remap_fpga_to_logical(tx_clip, fpga_to_logical_in)
+					| ((uint32_t)rx_clip << 16);
+
+		display_ctrl_set_channel_leds_by_type(DC_CHNLED_SIGNAL, signal_pattern);
+		display_ctrl_set_channel_leds_by_type(DC_CHNLED_CLIP, clip_pattern);
+	}
+}
+
+void display_ctrl_start_metering(void)
+{
+	k_thread_create(&metering_thread, metering_stack,
+			METERING_STACK_SIZE, metering_thread_fn,
+			NULL, NULL, NULL,
+			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+	k_thread_name_set(&metering_thread, "dc_meter");
+	LOG_INF("Metering polling thread started (%d ms interval)", METERING_POLL_MS);
+}
+
+#endif /* CONFIG_DISPLAY_CTRL_NRST_HAL || CONFIG_FPGA_HAL_LITEX */
+
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
 
 /**

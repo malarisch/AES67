@@ -30,4 +30,24 @@ config IO_CARD_MUX_ADDR
 	  I2C address of the PCA9540B / TCA9543A-compatible 2-channel
 	  I2C multiplexer used to reach the output LPC and DAC chips.
 
+config IO_CARD_OVERFLOW_POLL_MS
+	int "ADC overflow poll interval in milliseconds"
+	default 100
+	help
+	  Interval for polling the CS5368 overflow status register.
+	  Each poll reads register 0x02 from both ADCs and updates
+	  clip LEDs accordingly.
+
+config IO_CARD_CLIP_HOLD_MS
+	int "Clip LED hold time in milliseconds"
+	default 1000
+	help
+	  How long the clip LED stays on after an overflow is detected.
+	  The LED remains active for this duration even if no further
+	  overflows occur.
+
+config IO_CARD_OVERFLOW_STACK_SIZE
+	int "ADC overflow polling thread stack size"
+	default 1024
+
 endif # IO_CARD

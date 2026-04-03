@@ -21,9 +21,9 @@ on the Quartus Prime software download page.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 408 352)
+	(rect 16 16 408 384)
 	(text "rx_ringbuffer" (rect 5 0 58 12)(font "Arial" ))
-	(text "inst" (rect 8 320 20 332)(font "Arial" ))
+	(text "inst" (rect 8 352 20 364)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -93,6 +93,13 @@ on the Quartus Prime software download page.
 		(text "stream_config_data_i[7..0]" (rect 0 0 107 12)(font "Arial" ))
 		(text "stream_config_data_i[7..0]" (rect 21 171 128 183)(font "Arial" ))
 		(line (pt 0 176)(pt 16 176)(line_width 3))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "metering_clear_i" (rect 0 0 66 12)(font "Arial" ))
+		(text "metering_clear_i" (rect 21 187 87 199)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 1))
 	)
 	(port
 		(pt 392 32)
@@ -213,9 +220,23 @@ on the Quartus Prime software download page.
 		(text "eth_read_addr_o[10..0]" (rect 278 283 371 295)(font "Arial" ))
 		(line (pt 392 288)(pt 376 288)(line_width 3))
 	)
+	(port
+		(pt 392 304)
+		(output)
+		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 0 0 184 12)(font "Arial" ))
+		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 187 299 371 311)(font "Arial" ))
+		(line (pt 392 304)(pt 376 304)(line_width 3))
+	)
+	(port
+		(pt 392 320)
+		(output)
+		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 0 0 174 12)(font "Arial" ))
+		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 197 315 371 327)(font "Arial" ))
+		(line (pt 392 320)(pt 376 320)(line_width 3))
+	)
 	(parameter
 		"audio_buffer_sample_depth"
-		"128"
+		"256"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
@@ -230,11 +251,11 @@ on the Quartus Prime software download page.
 		(type "PARAMETER_SIGNED_DEC")	)
 	(parameter
 		"max_streams"
-		"4"
+		"8"
 		""
 		(type "PARAMETER_SIGNED_DEC")	)
 	(drawing
-		(rectangle (rect 16 16 376 320)(line_width 1))
+		(rectangle (rect 16 16 376 352)(line_width 1))
 	)
 	(annotation_block (parameter)(rect 408 -64 508 16))
 )

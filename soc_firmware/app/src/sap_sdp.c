@@ -32,6 +32,9 @@
 #include "sd_config.h"
 #include "ieee1588_utils.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
+#ifdef CONFIG_IO_CARD
+#include "../drivers/io_card/io_card.h"
+#endif
 
 LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_DBG);
 
@@ -1045,11 +1048,30 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	}
 
 	/* Write to FPGA */
+#ifdef CONFIG_IO_CARD
+	/* Remap logical channel IDs to FPGA channel indices for 16in/8out board */
+	uint8_t remapped_ch_ids[AES67_MAX_CH_PER_STREAM];
+
+	if (io_card_is_io_board()) {
+		for (uint8_t i = 0; i < num_ch_ids && i < AES67_MAX_CH_PER_STREAM; i++) {
+			remapped_ch_ids[i] = io_card_logical_to_fpga_ch(ch_ids[i]);
+		}
+	} else {
+		memcpy(remapped_ch_ids, ch_ids,
+		       MIN(num_ch_ids, AES67_MAX_CH_PER_STREAM));
+	}
+	int ret = fpga_hal_write_tx_stream_config(stream_id, dst_ip,
+						  channel_count,
+						  samples_per_pkt,
+						  remapped_ch_ids, num_ch_ids,
+						  effective_ssrc);
+#else
 	int ret = fpga_hal_write_tx_stream_config(stream_id, dst_ip,
 						  channel_count,
 						  samples_per_pkt,
 						  ch_ids, num_ch_ids,
 						  effective_ssrc);
+#endif
 	if (ret < 0) {
 		LOG_ERR("SAP: Failed to write stream %u to FPGA: %d",
 			stream_id, ret);
@@ -1140,6 +1162,29 @@ int sap_sdp_configure_rx_stream(uint8_t stream_id,
 	}
 	k_mutex_unlock(&sap_mutex);
 
+	/* Join the audio multicast group via IGMP so that IGMP-snooping
+	 * switches forward these packets to our port.  The RTP data is
+	 * received directly by the FPGA (not the Zephyr stack), but the
+	 * switch still needs to see an IGMP membership report. */
+	uint8_t first_octet = ntohl(dst_ip->s_addr) >> 24;
+	if (first_octet >= 224 && first_octet <= 239 && sap_sock >= 0) {
+		struct ip_mreqn mreq;
+
+		memset(&mreq, 0, sizeof(mreq));
+		mreq.imr_multiaddr = *dst_ip;
+		mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
+
+		int igmp_ret = zsock_setsockopt(sap_sock, IPPROTO_IP,
+						IP_ADD_MEMBERSHIP,
+						&mreq, sizeof(mreq));
+		if (igmp_ret < 0 && errno != EADDRINUSE) {
+			LOG_WRN("SAP: IGMP join %s failed: %d", addr_str, errno);
+		} else {
+			LOG_INF("SAP: IGMP joined %s for RX stream %u",
+				addr_str, stream_id);
+		}
+	}
+
 	LOG_INF("SAP: RX stream %u configured: dst=%s port=%u ch=%u spc=%u delay=%u",
 		stream_id, addr_str, dst_port, channel_count,
 		samples_per_channel, output_delay);
@@ -1178,4 +1223,31 @@ void sap_sdp_notify_link_up(void)
 	} else {
 		LOG_INF("SAP: Rejoined SAP multicast group %s", SAP_MULTICAST_ADDR);
 	}
+
+	/* Rejoin multicast groups for all active RX streams so that
+	 * IGMP-snooping switches resume forwarding audio after link-up. */
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		if (!rx_streams[i].active) {
+			continue;
+		}
+		struct ip_mreqn rx_mreq;
+
+		memset(&rx_mreq, 0, sizeof(rx_mreq));
+		rx_mreq.imr_multiaddr = rx_streams[i].dst_ip;
+		rx_mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
+
+		ret = zsock_setsockopt(sap_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+				       &rx_mreq, sizeof(rx_mreq));
+		if (ret < 0 && errno != EADDRINUSE) {
+			LOG_WRN("SAP: Failed to rejoin RX stream %d mcast: %d",
+				i, errno);
+		} else {
+			char addr_str[INET_ADDRSTRLEN];
+			zsock_inet_ntop(AF_INET, &rx_streams[i].dst_ip,
+					addr_str, sizeof(addr_str));
+			LOG_INF("SAP: Rejoined RX stream %d mcast %s", i, addr_str);
+		}
+	}
+	k_mutex_unlock(&sap_mutex);
 }
