@@ -15,7 +15,7 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Fri Apr  3 00:20:34 2026"
+-- CREATED		"Sat Apr  4 16:20:53 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
@@ -32,7 +32,6 @@ ENTITY FPGA IS
 		enet_rx_dv :  IN  STD_LOGIC;
 		enet_resetn :  IN  STD_LOGIC;
 		arduino_io1 :  IN  STD_LOGIC;
-		arduino_io3 :  IN  STD_LOGIC;
 		enet_mdio :  INOUT  STD_LOGIC;
 		hbus_rwds :  INOUT  STD_LOGIC;
 		enet_rx_d :  IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
@@ -40,6 +39,7 @@ ENTITY FPGA IS
 		gpio0 :  IN  STD_LOGIC;
 		gpio2 :  IN  STD_LOGIC;
 		gpio33 :  IN  STD_LOGIC;
+		gpio28 :  IN  STD_LOGIC;
 		gpio26 :  INOUT  STD_LOGIC;
 		gpio27 :  INOUT  STD_LOGIC;
 		gpio23 :  INOUT  STD_LOGIC;
@@ -65,6 +65,7 @@ ENTITY FPGA IS
 		gpio32 :  OUT  STD_LOGIC;
 		gpio35 :  OUT  STD_LOGIC;
 		gpio25 :  OUT  STD_LOGIC;
+		gpio29 :  OUT  STD_LOGIC;
 		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
 	);
 END FPGA;
@@ -123,78 +124,6 @@ COMPONENT ethernet_reset
 		 mac_rst : OUT STD_LOGIC;
 		 sendArpRequest : OUT STD_LOGIC;
 		 tx_online : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-COMPONENT litex_soc
-	PORT(aes67_ctrl_eth_link_up : IN STD_LOGIC;
-		 aes67_ctrl_eth_rx_overflow : IN STD_LOGIC;
-		 aes67_ctrl_eth_tx_done : IN STD_LOGIC;
-		 aes67_ctrl_pll_ppb_valid : IN STD_LOGIC;
-		 aes67_ctrl_ptp_sync_lost : IN STD_LOGIC;
-		 aes67_ctrl_wallclock_configured : IN STD_LOGIC;
-		 aes67_ctrl_wallclock_locked : IN STD_LOGIC;
-		 aes67_ctrl_wallclock_phasejump : IN STD_LOGIC;
-		 clk50 : IN STD_LOGIC;
-		 clk_mac_rx : IN STD_LOGIC;
-		 clk_mac_tx : IN STD_LOGIC;
-		 eth_buf_rx_valid : IN STD_LOGIC;
-		 eth_buf_rx_we : IN STD_LOGIC;
-		 serial1_rx : IN STD_LOGIC;
-		 serial_rx : IN STD_LOGIC;
-		 spi_miso : IN STD_LOGIC;
-		 spiflash_miso : IN STD_LOGIC;
-		 hyperram_rwds : INOUT STD_LOGIC;
-		 i2c0_scl : INOUT STD_LOGIC;
-		 i2c0_sda : INOUT STD_LOGIC;
-		 i2c1_scl : INOUT STD_LOGIC;
-		 i2c1_sda : INOUT STD_LOGIC;
-		 aes67_ctrl_eth_speed : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
-		 aes67_ctrl_pll_ppb_pll_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
-		 aes67_ctrl_pll_ppb_wc_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
-		 aes67_ctrl_ptp_offset : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 aes67_ctrl_ptp_path_delay : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 eth_buf_rx_addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 eth_buf_rx_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 eth_buf_rx_len : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 eth_buf_tx_addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 hyperram_dq : INOUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_adda_nrst : OUT STD_LOGIC;
-		 aes67_ctrl_eth_tx_request : OUT STD_LOGIC;
-		 aes67_ctrl_pll_ppb_start : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_follower : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_leader : OUT STD_LOGIC;
-		 eth_buf_rx_ack : OUT STD_LOGIC;
-		 hyperram_clk : OUT STD_LOGIC;
-		 hyperram_cs_n : OUT STD_LOGIC;
-		 hyperram_rst_n : OUT STD_LOGIC;
-		 rx_stream_cfg_wr_en : OUT STD_LOGIC;
-		 serial1_tx : OUT STD_LOGIC;
-		 serial_tx : OUT STD_LOGIC;
-		 spi_clk : OUT STD_LOGIC;
-		 spi_cs_n : OUT STD_LOGIC;
-		 spi_mosi : OUT STD_LOGIC;
-		 spiflash_clk : OUT STD_LOGIC;
-		 spiflash_cs_n : OUT STD_LOGIC;
-		 spiflash_mosi : OUT STD_LOGIC;
-		 sys_clk_out : OUT STD_LOGIC;
-		 tx_stream_cfg_wr_en : OUT STD_LOGIC;
-		 aes67_ctrl_ip_addr : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 aes67_ctrl_mac_addr : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 aes67_ctrl_ptp_announce_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_gm_clock_accuracy : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_gm_clock_class : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_gm_priority1 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_gm_priority2 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_leader_id : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
-		 aes67_ctrl_ptp_log_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_time_source : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 eth_buf_tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 eth_buf_tx_len : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 rx_stream_cfg_wr_addr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 rx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 tx_stream_cfg_wr_addr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 tx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -268,6 +197,7 @@ COMPONENT audio_tx_module
 		 mac_tx_busy : IN STD_LOGIC;
 		 mac_tx_byte_sent : IN STD_LOGIC;
 		 mac_audio_allow_i : IN STD_LOGIC;
+		 metering_clear_i : IN STD_LOGIC;
 		 cfg_wr_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 cfg_wr_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 ch0i : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
@@ -291,6 +221,8 @@ COMPONENT audio_tx_module
 		 media_clock_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 tx_en_o : OUT STD_LOGIC;
 		 tx_req_o : OUT STD_LOGIC;
+		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 metering_signal_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
 		 tx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END COMPONENT;
@@ -348,6 +280,83 @@ COMPONENT ethernet_packet_aggregator
 	);
 END COMPONENT;
 
+COMPONENT litex_soc
+	PORT(aes67_ctrl_eth_link_up : IN STD_LOGIC;
+		 aes67_ctrl_eth_rx_overflow : IN STD_LOGIC;
+		 aes67_ctrl_eth_tx_done : IN STD_LOGIC;
+		 aes67_ctrl_pll_ppb_valid : IN STD_LOGIC;
+		 aes67_ctrl_ptp_sync_lost : IN STD_LOGIC;
+		 aes67_ctrl_wallclock_configured : IN STD_LOGIC;
+		 aes67_ctrl_wallclock_locked : IN STD_LOGIC;
+		 aes67_ctrl_wallclock_phasejump : IN STD_LOGIC;
+		 clk50 : IN STD_LOGIC;
+		 clk_mac_rx : IN STD_LOGIC;
+		 clk_mac_tx : IN STD_LOGIC;
+		 eth_buf_rx_valid : IN STD_LOGIC;
+		 eth_buf_rx_we : IN STD_LOGIC;
+		 serial1_rx : IN STD_LOGIC;
+		 serial_rx : IN STD_LOGIC;
+		 spi_miso : IN STD_LOGIC;
+		 spiflash_miso : IN STD_LOGIC;
+		 hyperram_rwds : INOUT STD_LOGIC;
+		 i2c0_scl : INOUT STD_LOGIC;
+		 i2c0_sda : INOUT STD_LOGIC;
+		 i2c1_scl : INOUT STD_LOGIC;
+		 i2c1_sda : INOUT STD_LOGIC;
+		 aes67_ctrl_eth_speed : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
+		 aes67_ctrl_pll_ppb_pll_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
+		 aes67_ctrl_pll_ppb_wc_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
+		 aes67_ctrl_ptp_offset : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_ptp_path_delay : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_rx_meter_clip : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 aes67_ctrl_rx_meter_signal : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 aes67_ctrl_tx_meter_clip : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 aes67_ctrl_tx_meter_signal : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 eth_buf_rx_addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 eth_buf_rx_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 eth_buf_rx_len : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 eth_buf_tx_addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 hyperram_dq : INOUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_adda_nrst : OUT STD_LOGIC;
+		 aes67_ctrl_eth_tx_request : OUT STD_LOGIC;
+		 aes67_ctrl_meter_clear : OUT STD_LOGIC;
+		 aes67_ctrl_pll_ppb_start : OUT STD_LOGIC;
+		 aes67_ctrl_ptp_is_follower : OUT STD_LOGIC;
+		 aes67_ctrl_ptp_is_leader : OUT STD_LOGIC;
+		 eth_buf_rx_ack : OUT STD_LOGIC;
+		 hyperram_clk : OUT STD_LOGIC;
+		 hyperram_cs_n : OUT STD_LOGIC;
+		 hyperram_rst_n : OUT STD_LOGIC;
+		 rx_stream_cfg_wr_en : OUT STD_LOGIC;
+		 serial1_tx : OUT STD_LOGIC;
+		 serial_tx : OUT STD_LOGIC;
+		 spi_clk : OUT STD_LOGIC;
+		 spi_cs_n : OUT STD_LOGIC;
+		 spi_mosi : OUT STD_LOGIC;
+		 spiflash_clk : OUT STD_LOGIC;
+		 spiflash_cs_n : OUT STD_LOGIC;
+		 spiflash_mosi : OUT STD_LOGIC;
+		 sys_clk_out : OUT STD_LOGIC;
+		 tx_stream_cfg_wr_en : OUT STD_LOGIC;
+		 aes67_ctrl_ip_addr : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_mac_addr : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
+		 aes67_ctrl_ptp_announce_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_gm_clock_accuracy : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_gm_clock_class : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_gm_priority1 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_gm_priority2 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_leader_id : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 aes67_ctrl_ptp_log_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_ptp_time_source : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 eth_buf_tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 eth_buf_tx_len : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 rx_stream_cfg_wr_addr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 rx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 tx_stream_cfg_wr_addr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 tx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+	);
+END COMPONENT;
+
 COMPONENT rx_ringbuffer
 GENERIC (audio_buffer_sample_depth : INTEGER;
 			bytes_per_sample : INTEGER;
@@ -360,6 +369,7 @@ GENERIC (audio_buffer_sample_depth : INTEGER;
 		 packet_ready_i : IN STD_LOGIC;
 		 stream_config_wr_clk_i : IN STD_LOGIC;
 		 stream_config_wr_en_i : IN STD_LOGIC;
+		 metering_clear_i : IN STD_LOGIC;
 		 eth_read_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 media_clock_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 stream_config_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -380,7 +390,9 @@ GENERIC (audio_buffer_sample_depth : INTEGER;
 		 audio_ch7_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
 		 audio_ch8_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
 		 audio_ch9_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 eth_read_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
+		 eth_read_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 metering_signal_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -592,6 +604,11 @@ SIGNAL	arp_ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	arp_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	audio_allow :  STD_LOGIC;
 SIGNAL	audio_allow_req :  STD_LOGIC;
+SIGNAL	audio_meter_clear :  STD_LOGIC;
+SIGNAL	audio_meter_rx_clip :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	audio_meter_rx_signal :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	audio_meter_tx_clip :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	audio_meter_tx_signal :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	bclk_f :  STD_LOGIC;
 SIGNAL	bclk_r :  STD_LOGIC;
 SIGNAL	buf_rx_a :  STD_LOGIC_VECTOR(10 DOWNTO 0);
@@ -728,19 +745,19 @@ SIGNAL	wallclock_phasejump :  STD_LOGIC;
 SIGNAL	wc_64fs :  STD_LOGIC;
 SIGNAL	wc_counter :  STD_LOGIC_VECTOR(21 DOWNTO 0);
 SIGNAL	wc_fs :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC;
+SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_1 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_2 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_3 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_4 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_2 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_3 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_4 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_5 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_6 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_7 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_8 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_6 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_7 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_8 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_9 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_10 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_11 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_12 :  STD_LOGIC;
+SIGNAL	SYNTHESIZED_WIRE_11 :  STD_LOGIC;
+SIGNAL	SYNTHESIZED_WIRE_12 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_13 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_14 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_15 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
@@ -748,7 +765,7 @@ SIGNAL	SYNTHESIZED_WIRE_16 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_17 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_18 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_19 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_20 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_20 :  STD_LOGIC;
 SIGNAL	SYNTHESIZED_WIRE_21 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_22 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_23 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
@@ -764,15 +781,14 @@ SIGNAL	SYNTHESIZED_WIRE_32 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 
 
 BEGIN 
-hbus_clk0_p <= SYNTHESIZED_WIRE_12;
-SYNTHESIZED_WIRE_0 <= '0';
+hbus_clk0_p <= SYNTHESIZED_WIRE_11;
+SYNTHESIZED_WIRE_20 <= '0';
 
 
 
 b2v_audioclocks : audioclock_generator
 PORT MAP(mclk => pll_fs512,
 		 rst_n => powerGood,
-		 clk_256fs => pll_fs256,
 		 clk_64fs => pll_fs64,
 		 fs => fs,
 		 bclk_r => bclk_r,
@@ -817,73 +833,6 @@ PORT MAP(clk => clk_1kHz,
 		 mac_rst => mac_reset);
 
 
-b2v_inst10 : litex_soc
-PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
-		 aes67_ctrl_eth_rx_overflow => mcu_rx_overflow,
-		 aes67_ctrl_eth_tx_done => mcu_tx_done,
-		 aes67_ctrl_pll_ppb_valid => pll_meas_valid,
-		 aes67_ctrl_ptp_sync_lost => ptp_sync_lost,
-		 aes67_ctrl_wallclock_configured => wallclock_configured,
-		 aes67_ctrl_wallclock_locked => wallclock_locked,
-		 aes67_ctrl_wallclock_phasejump => wallclock_phasejump,
-		 clk50 => clk50m,
-		 clk_mac_rx => mac_rx_clock,
-		 clk_mac_tx => mac_tx_clock,
-		 eth_buf_rx_valid => buf_rx_valid,
-		 eth_buf_rx_we => buf_rx_we,
-		 serial1_rx => arduino_io3,
-		 serial_rx => arduino_io1,
-		 spi_miso => SYNTHESIZED_WIRE_0,
-		 spiflash_miso => gpio33,
-		 hyperram_rwds => hbus_rwds,
-		 i2c0_scl => gpio26,
-		 i2c0_sda => gpio27,
-		 i2c1_scl => gpio23,
-		 i2c1_sda => gpio24,
-		 aes67_ctrl_eth_speed => mac_speed,
-		 aes67_ctrl_pll_ppb_pll_count => pll_counter,
-		 aes67_ctrl_pll_ppb_wc_count => wc_counter,
-		 aes67_ctrl_ptp_offset => ptp_offset_from_master,
-		 aes67_ctrl_ptp_path_delay => ptp_mean_path_delay,
-		 eth_buf_rx_addr => buf_rx_a,
-		 eth_buf_rx_data => buf_rx_d,
-		 eth_buf_rx_len => buf_rx_len,
-		 eth_buf_tx_addr => buf_tx_a,
-		 hyperram_dq => hbus_dq,
-		 aes67_ctrl_adda_nrst => gpio25,
-		 aes67_ctrl_eth_tx_request => mcu_tx_req_i,
-		 aes67_ctrl_pll_ppb_start => ppb_meter_start,
-		 aes67_ctrl_ptp_is_follower => ptp_is_follower,
-		 aes67_ctrl_ptp_is_leader => ptp_is_leader,
-		 eth_buf_rx_ack => buf_rx_ack,
-		 hyperram_clk => SYNTHESIZED_WIRE_12,
-		 hyperram_cs_n => hbus_cs2n,
-		 hyperram_rst_n => hbus_rstn,
-		 rx_stream_cfg_wr_en => rx_conf_wr_en,
-		 serial_tx => arduino_io2,
-		 spiflash_clk => gpio34,
-		 spiflash_cs_n => gpio32,
-		 spiflash_mosi => gpio35,
-		 sys_clk_out => mcu_clk,
-		 tx_stream_cfg_wr_en => tx_wr_en,
-		 aes67_ctrl_ip_addr => ip_address,
-		 aes67_ctrl_mac_addr => mac_address,
-		 aes67_ctrl_ptp_announce_msg_interval => ptp_announce_interval,
-		 aes67_ctrl_ptp_gm_clock_accuracy => ptp_clock_accuracy,
-		 aes67_ctrl_ptp_gm_clock_class => ptp_clock_class,
-		 aes67_ctrl_ptp_gm_priority1 => ptp_gm_prioone,
-		 aes67_ctrl_ptp_gm_priority2 => ptp_gm_priotwo,
-		 aes67_ctrl_ptp_leader_id => ptp_current_leader_id,
-		 aes67_ctrl_ptp_log_msg_interval => ptp_log_message_interval,
-		 aes67_ctrl_ptp_time_source => ptp_time_source,
-		 eth_buf_tx_data => buf_tx_dat,
-		 eth_buf_tx_len => buf_tx_len,
-		 rx_stream_cfg_wr_addr => rx_conf_wr_addr,
-		 rx_stream_cfg_wr_data => rx_conf_wr_data,
-		 tx_stream_cfg_wr_addr => tx_wr_addr,
-		 tx_stream_cfg_wr_data => tx_wr_data);
-
-
 b2v_inst11 : ethernet_packet_parser
 GENERIC MAP(udp_port => 4023,
 			udp_port_ptpv2_event => 319,
@@ -892,19 +841,19 @@ GENERIC MAP(udp_port => 4023,
 			)
 PORT MAP(clk => mac_rx_clock,
 		 sync_in => ethernet_parser_sync,
-		 arp_dst_ip => SYNTHESIZED_WIRE_1,
-		 arp_src_ip => SYNTHESIZED_WIRE_2,
-		 arp_type => SYNTHESIZED_WIRE_3,
+		 arp_dst_ip => SYNTHESIZED_WIRE_0,
+		 arp_src_ip => SYNTHESIZED_WIRE_1,
+		 arp_type => SYNTHESIZED_WIRE_2,
 		 ip_address => ip_address,
-		 ip_type => SYNTHESIZED_WIRE_4,
+		 ip_type => SYNTHESIZED_WIRE_3,
 		 mac_address => mac_address,
-		 pkt_dst_mac => SYNTHESIZED_WIRE_5,
-		 pkt_src_mac => SYNTHESIZED_WIRE_6,
-		 pkt_type => SYNTHESIZED_WIRE_7,
-		 ram_data => SYNTHESIZED_WIRE_8,
-		 udp_dst_port => SYNTHESIZED_WIRE_9,
-		 udp_length => SYNTHESIZED_WIRE_10,
-		 udp_src_port => SYNTHESIZED_WIRE_11,
+		 pkt_dst_mac => SYNTHESIZED_WIRE_4,
+		 pkt_src_mac => SYNTHESIZED_WIRE_5,
+		 pkt_type => SYNTHESIZED_WIRE_6,
+		 ram_data => SYNTHESIZED_WIRE_7,
+		 udp_dst_port => SYNTHESIZED_WIRE_8,
+		 udp_length => SYNTHESIZED_WIRE_9,
+		 udp_src_port => SYNTHESIZED_WIRE_10,
 		 parse_ptp_packet => parse_ptp_packet,
 		 parse_rtp_packet => parse_rtp_packet,
 		 parse_mcu_packet => parse_mcu_packet,
@@ -939,6 +888,7 @@ PORT MAP(sys_clk => clk_125MHz,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
 		 mac_audio_allow_i => audio_allow_req,
+		 metering_clear_i => audio_meter_clear,
 		 cfg_wr_addr_i => tx_wr_addr,
 		 cfg_wr_data_i => tx_wr_data,
 		 ch0i => ch0i,
@@ -962,10 +912,12 @@ PORT MAP(sys_clk => clk_125MHz,
 		 media_clock_i => media_clock,
 		 tx_en_o => tx_en_audiotx,
 		 tx_req_o => audio_allow_req,
+		 metering_clip_o => audio_meter_tx_clip,
+		 metering_signal_o => audio_meter_tx_signal,
 		 tx_data_o => tx_data_audiotx);
 
 
-hbus_clk0_n <= NOT(SYNTHESIZED_WIRE_12);
+hbus_clk0_n <= NOT(SYNTHESIZED_WIRE_11);
 
 
 
@@ -973,17 +925,17 @@ hbus_clk0_n <= NOT(SYNTHESIZED_WIRE_12);
 b2v_inst17 : tdm8_out
 GENERIC MAP(width => 24
 			)
-PORT MAP(FSYNC => fs,
-		 BIT_CLK => pll_fs256,
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_r,
 		 RESET => powerGood,
-		 DATA_CH0 => SYNTHESIZED_WIRE_13,
-		 DATA_CH1 => SYNTHESIZED_WIRE_14,
-		 DATA_CH2 => SYNTHESIZED_WIRE_15,
-		 DATA_CH3 => SYNTHESIZED_WIRE_16,
-		 DATA_CH4 => SYNTHESIZED_WIRE_17,
-		 DATA_CH5 => SYNTHESIZED_WIRE_18,
-		 DATA_CH6 => SYNTHESIZED_WIRE_19,
-		 DATA_CH7 => SYNTHESIZED_WIRE_20,
+		 DATA_CH0 => SYNTHESIZED_WIRE_12,
+		 DATA_CH1 => SYNTHESIZED_WIRE_13,
+		 DATA_CH2 => SYNTHESIZED_WIRE_14,
+		 DATA_CH3 => SYNTHESIZED_WIRE_15,
+		 DATA_CH4 => SYNTHESIZED_WIRE_16,
+		 DATA_CH5 => SYNTHESIZED_WIRE_17,
+		 DATA_CH6 => SYNTHESIZED_WIRE_18,
+		 DATA_CH7 => SYNTHESIZED_WIRE_19,
 		 DOUT => gpio5);
 
 
@@ -1008,6 +960,79 @@ PORT MAP(tx_en3_i => mcu_tx_enable,
 		 data_o => mac_tx_data);
 
 
+b2v_inst2 : litex_soc
+PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
+		 aes67_ctrl_eth_rx_overflow => mcu_rx_overflow,
+		 aes67_ctrl_eth_tx_done => mcu_tx_done,
+		 aes67_ctrl_pll_ppb_valid => pll_meas_valid,
+		 aes67_ctrl_ptp_sync_lost => ptp_sync_lost,
+		 aes67_ctrl_wallclock_configured => wallclock_configured,
+		 aes67_ctrl_wallclock_locked => wallclock_locked,
+		 aes67_ctrl_wallclock_phasejump => wallclock_phasejump,
+		 clk50 => clk50m,
+		 clk_mac_rx => mac_rx_clock,
+		 clk_mac_tx => mac_tx_clock,
+		 eth_buf_rx_valid => buf_rx_valid,
+		 eth_buf_rx_we => buf_rx_we,
+		 serial1_rx => gpio28,
+		 serial_rx => arduino_io1,
+		 spi_miso => SYNTHESIZED_WIRE_20,
+		 spiflash_miso => gpio33,
+		 hyperram_rwds => hbus_rwds,
+		 i2c0_scl => gpio26,
+		 i2c0_sda => gpio27,
+		 i2c1_scl => gpio23,
+		 i2c1_sda => gpio24,
+		 aes67_ctrl_eth_speed => mac_speed,
+		 aes67_ctrl_pll_ppb_pll_count => pll_counter,
+		 aes67_ctrl_pll_ppb_wc_count => wc_counter,
+		 aes67_ctrl_ptp_offset => ptp_offset_from_master,
+		 aes67_ctrl_ptp_path_delay => ptp_mean_path_delay,
+		 aes67_ctrl_rx_meter_clip => audio_meter_rx_clip,
+		 aes67_ctrl_rx_meter_signal => audio_meter_rx_signal,
+		 aes67_ctrl_tx_meter_clip => audio_meter_tx_clip,
+		 aes67_ctrl_tx_meter_signal => audio_meter_tx_signal,
+		 eth_buf_rx_addr => buf_rx_a,
+		 eth_buf_rx_data => buf_rx_d,
+		 eth_buf_rx_len => buf_rx_len,
+		 eth_buf_tx_addr => buf_tx_a,
+		 hyperram_dq => hbus_dq,
+		 aes67_ctrl_adda_nrst => gpio25,
+		 aes67_ctrl_eth_tx_request => mcu_tx_req_i,
+		 aes67_ctrl_meter_clear => audio_meter_clear,
+		 aes67_ctrl_pll_ppb_start => ppb_meter_start,
+		 aes67_ctrl_ptp_is_follower => ptp_is_follower,
+		 aes67_ctrl_ptp_is_leader => ptp_is_leader,
+		 eth_buf_rx_ack => buf_rx_ack,
+		 hyperram_clk => SYNTHESIZED_WIRE_11,
+		 hyperram_cs_n => hbus_cs2n,
+		 hyperram_rst_n => hbus_rstn,
+		 rx_stream_cfg_wr_en => rx_conf_wr_en,
+		 serial1_tx => gpio29,
+		 serial_tx => arduino_io2,
+		 spiflash_clk => gpio34,
+		 spiflash_cs_n => gpio32,
+		 spiflash_mosi => gpio35,
+		 sys_clk_out => mcu_clk,
+		 tx_stream_cfg_wr_en => tx_wr_en,
+		 aes67_ctrl_ip_addr => ip_address,
+		 aes67_ctrl_mac_addr => mac_address,
+		 aes67_ctrl_ptp_announce_msg_interval => ptp_announce_interval,
+		 aes67_ctrl_ptp_gm_clock_accuracy => ptp_clock_accuracy,
+		 aes67_ctrl_ptp_gm_clock_class => ptp_clock_class,
+		 aes67_ctrl_ptp_gm_priority1 => ptp_gm_prioone,
+		 aes67_ctrl_ptp_gm_priority2 => ptp_gm_priotwo,
+		 aes67_ctrl_ptp_leader_id => ptp_current_leader_id,
+		 aes67_ctrl_ptp_log_msg_interval => ptp_log_message_interval,
+		 aes67_ctrl_ptp_time_source => ptp_time_source,
+		 eth_buf_tx_data => buf_tx_dat,
+		 eth_buf_tx_len => buf_tx_len,
+		 rx_stream_cfg_wr_addr => rx_conf_wr_addr,
+		 rx_stream_cfg_wr_data => rx_conf_wr_data,
+		 tx_stream_cfg_wr_addr => tx_wr_addr,
+		 tx_stream_cfg_wr_data => tx_wr_data);
+
+
 b2v_inst20 : rx_ringbuffer
 GENERIC MAP(audio_buffer_sample_depth => 256,
 			bytes_per_sample => 3,
@@ -1020,34 +1045,37 @@ PORT MAP(sys_clk => clk_125MHz,
 		 packet_ready_i => parse_rtp_packet,
 		 stream_config_wr_clk_i => mcu_clk,
 		 stream_config_wr_en_i => rx_conf_wr_en,
+		 metering_clear_i => audio_meter_clear,
 		 eth_read_data_i => rtp_ram_data,
 		 media_clock_i => media_clock,
 		 stream_config_addr_i => rx_conf_wr_addr,
 		 stream_config_data_i => rx_conf_wr_data,
-		 audio_ch0_out => SYNTHESIZED_WIRE_13,
+		 audio_ch0_out => SYNTHESIZED_WIRE_12,
 		 audio_ch10_out => SYNTHESIZED_WIRE_23,
 		 audio_ch11_out => SYNTHESIZED_WIRE_24,
 		 audio_ch12_out => SYNTHESIZED_WIRE_25,
 		 audio_ch13_out => SYNTHESIZED_WIRE_26,
 		 audio_ch14_out => SYNTHESIZED_WIRE_27,
 		 audio_ch15_out => SYNTHESIZED_WIRE_28,
-		 audio_ch1_out => SYNTHESIZED_WIRE_14,
-		 audio_ch2_out => SYNTHESIZED_WIRE_15,
-		 audio_ch3_out => SYNTHESIZED_WIRE_16,
-		 audio_ch4_out => SYNTHESIZED_WIRE_17,
-		 audio_ch5_out => SYNTHESIZED_WIRE_18,
-		 audio_ch6_out => SYNTHESIZED_WIRE_19,
-		 audio_ch7_out => SYNTHESIZED_WIRE_20,
+		 audio_ch1_out => SYNTHESIZED_WIRE_13,
+		 audio_ch2_out => SYNTHESIZED_WIRE_14,
+		 audio_ch3_out => SYNTHESIZED_WIRE_15,
+		 audio_ch4_out => SYNTHESIZED_WIRE_16,
+		 audio_ch5_out => SYNTHESIZED_WIRE_17,
+		 audio_ch6_out => SYNTHESIZED_WIRE_18,
+		 audio_ch7_out => SYNTHESIZED_WIRE_19,
 		 audio_ch8_out => SYNTHESIZED_WIRE_21,
 		 audio_ch9_out => SYNTHESIZED_WIRE_22,
-		 eth_read_addr_o => rtp_ram_addr);
+		 eth_read_addr_o => rtp_ram_addr,
+		 metering_clip_o => audio_meter_rx_clip,
+		 metering_signal_o => audio_meter_rx_signal);
 
 
 b2v_inst21 : tdm8_out
 GENERIC MAP(width => 24
 			)
-PORT MAP(FSYNC => fs,
-		 BIT_CLK => pll_fs256,
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_r,
 		 RESET => powerGood,
 		 DATA_CH0 => SYNTHESIZED_WIRE_21,
 		 DATA_CH1 => SYNTHESIZED_WIRE_22,
@@ -1072,20 +1100,20 @@ PORT MAP(rx_clk => mac_rx_clock,
 		 read3Addr => mcu_read_addr,
 		 writeAddr => SYNTHESIZED_WIRE_31,
 		 sync_out => ethernet_parser_sync,
-		 arp_dst_ip => SYNTHESIZED_WIRE_1,
-		 arp_src_ip => SYNTHESIZED_WIRE_2,
-		 arp_type => SYNTHESIZED_WIRE_3,
-		 data0_out => SYNTHESIZED_WIRE_8,
+		 arp_dst_ip => SYNTHESIZED_WIRE_0,
+		 arp_src_ip => SYNTHESIZED_WIRE_1,
+		 arp_type => SYNTHESIZED_WIRE_2,
+		 data0_out => SYNTHESIZED_WIRE_7,
 		 data1_out => ptp_ram_data,
 		 data2_out => rtp_ram_data,
 		 data3_out => mcu_ram_data,
-		 ip_type => SYNTHESIZED_WIRE_4,
-		 pkt_dst_mac => SYNTHESIZED_WIRE_5,
-		 pkt_src_mac => SYNTHESIZED_WIRE_6,
-		 pkt_type => SYNTHESIZED_WIRE_7,
-		 udp_dst_port => SYNTHESIZED_WIRE_9,
-		 udp_length => SYNTHESIZED_WIRE_10,
-		 udp_src_port => SYNTHESIZED_WIRE_11);
+		 ip_type => SYNTHESIZED_WIRE_3,
+		 pkt_dst_mac => SYNTHESIZED_WIRE_4,
+		 pkt_src_mac => SYNTHESIZED_WIRE_5,
+		 pkt_type => SYNTHESIZED_WIRE_6,
+		 udp_dst_port => SYNTHESIZED_WIRE_8,
+		 udp_length => SYNTHESIZED_WIRE_9,
+		 udp_src_port => SYNTHESIZED_WIRE_10);
 
 
 b2v_inst23 : tdm8_in
