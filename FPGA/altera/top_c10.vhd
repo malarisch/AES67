@@ -15,14 +15,14 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Sat Apr  4 16:20:53 2026"
+-- CREATED		"Sat Apr  4 17:24:55 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 
 LIBRARY work;
 
-ENTITY FPGA IS 
+ENTITY top_c10 IS 
 	PORT
 	(
 		c10_resetn :  IN  STD_LOGIC;
@@ -68,9 +68,17 @@ ENTITY FPGA IS
 		gpio29 :  OUT  STD_LOGIC;
 		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
 	);
-END FPGA;
+END top_c10;
 
-ARCHITECTURE bdf_type OF FPGA IS 
+ARCHITECTURE bdf_type OF top_c10 IS 
+
+COMPONENT clk_by_x
+GENERIC (divider : INTEGER
+			);
+	PORT(clk_in : IN STD_LOGIC;
+		 clk_out : OUT STD_LOGIC
+	);
+END COMPONENT;
 
 COMPONENT audioclock_generator
 	PORT(mclk : IN STD_LOGIC;
@@ -82,108 +90,6 @@ COMPONENT audioclock_generator
 		 bclk_r : OUT STD_LOGIC;
 		 bclk_f : OUT STD_LOGIC;
 		 fs_pulse : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-COMPONENT litex_eth_buffer_bridge
-	PORT(buf_rx_ack_i : IN STD_LOGIC;
-		 eth_tx_request_i : IN STD_LOGIC;
-		 mac_tx_clock_i : IN STD_LOGIC;
-		 mac_tx_reset_i : IN STD_LOGIC;
-		 mac_tx_byte_sent_i : IN STD_LOGIC;
-		 mac_tx_busy_i : IN STD_LOGIC;
-		 tx_allow_i : IN STD_LOGIC;
-		 mac_rx_clock_i : IN STD_LOGIC;
-		 mac_rx_reset_i : IN STD_LOGIC;
-		 parse_mcu_packet_i : IN STD_LOGIC;
-		 mcu_clk_i : IN STD_LOGIC;
-		 buf_tx_dat_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 buf_tx_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 eth_ram_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 pkt_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 buf_rx_we_o : OUT STD_LOGIC;
-		 buf_rx_valid_o : OUT STD_LOGIC;
-		 eth_tx_done_o : OUT STD_LOGIC;
-		 eth_rx_overflow_o : OUT STD_LOGIC;
-		 mac_tx_enable_o : OUT STD_LOGIC;
-		 tx_allow_req_o : OUT STD_LOGIC;
-		 buf_rx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 buf_rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 buf_rx_len_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 buf_tx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 eth_ram_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT ethernet_reset
-	PORT(clk : IN STD_LOGIC;
-		 enet_clk : IN STD_LOGIC;
-		 power_good : IN STD_LOGIC;
-		 phy_rstn : OUT STD_LOGIC;
-		 mac_rst : OUT STD_LOGIC;
-		 sendArpRequest : OUT STD_LOGIC;
-		 tx_online : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-COMPONENT ethernet_packet_parser
-GENERIC (udp_port : INTEGER;
-			udp_port_ptpv2_event : INTEGER;
-			udp_port_ptpv2_general : INTEGER;
-			udp_port_rtp : INTEGER
-			);
-	PORT(clk : IN STD_LOGIC;
-		 sync_in : IN STD_LOGIC;
-		 arp_dst_ip : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 arp_src_ip : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 arp_type : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 dst_ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 ip_type : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 mac_address : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 pkt_dst_mac : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 pkt_src_mac : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 pkt_type : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 ram_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 udp_dst_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_length : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_src_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 send_arp_response : OUT STD_LOGIC;
-		 send_icmp_response : OUT STD_LOGIC;
-		 send_udp_response : OUT STD_LOGIC;
-		 parse_ptp_packet : OUT STD_LOGIC;
-		 parse_rtp_packet : OUT STD_LOGIC;
-		 parse_mcu_packet : OUT STD_LOGIC;
-		 arp_ip_address : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 arp_mac_address : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 dst_mac_address : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 icmp_dst_ip : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 icmp_dst_mac : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 icmp_id : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 icmp_sequence : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 ram_read_address : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 udp_payload : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT tdm8_in
-GENERIC (width : INTEGER
-			);
-	PORT(FSYNC : IN STD_LOGIC;
-		 BIT_CLK : IN STD_LOGIC;
-		 DIN : IN STD_LOGIC;
-		 RESET : IN STD_LOGIC;
-		 SYS_CLK : IN STD_LOGIC;
-		 DATA_RDY : OUT STD_LOGIC;
-		 DATA_CH0 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH1 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH2 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH3 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH4 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH5 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH6 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH7 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -227,56 +133,74 @@ COMPONENT audio_tx_module
 	);
 END COMPONENT;
 
-COMPONENT tdm8_out
-GENERIC (width : INTEGER
+COMPONENT eth_ram
+GENERIC (lastAddress : INTEGER
 			);
-	PORT(FSYNC : IN STD_LOGIC;
-		 BIT_CLK : IN STD_LOGIC;
-		 RESET : IN STD_LOGIC;
-		 DATA_CH0 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH1 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH2 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH3 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH4 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH5 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH6 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DATA_CH7 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 DOUT : OUT STD_LOGIC;
-		 LRCK : OUT STD_LOGIC
+	PORT(rx_clk : IN STD_LOGIC;
+		 sync_in : IN STD_LOGIC;
+		 data_in : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 read0Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 read1Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 read2Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 read3Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 writeAddr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 sync_out : OUT STD_LOGIC;
+		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 data1_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 data2_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 data3_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 ip_type : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 pkt_type : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 udp_dst_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 udp_length : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 udp_src_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
 	);
 END COMPONENT;
 
-COMPONENT eth_tx_arbiter
-	PORT(clk_i : IN STD_LOGIC;
-		 rst_n_i : IN STD_LOGIC;
-		 ptp_req_i : IN STD_LOGIC;
-		 audio_req_i : IN STD_LOGIC;
-		 mcu_req_i : IN STD_LOGIC;
-		 ptp_allow_o : OUT STD_LOGIC;
-		 audio_allow_o : OUT STD_LOGIC;
-		 mcu_allow_o : OUT STD_LOGIC
+COMPONENT ethernet_packet_parser
+GENERIC (
+			udp_port_ptpv2_event : INTEGER;
+			udp_port_ptpv2_general : INTEGER;
+			udp_port_rtp : INTEGER
+			);
+	PORT(clk : IN STD_LOGIC;
+		 sync_in : IN STD_LOGIC;
+		 ip_type : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 pkt_type : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 ram_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 udp_dst_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 udp_length : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 udp_src_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 parse_ptp_packet : OUT STD_LOGIC;
+		 parse_rtp_packet : OUT STD_LOGIC;
+		 parse_mcu_packet : OUT STD_LOGIC;
+		 ram_read_address : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
 	);
 END COMPONENT;
 
-COMPONENT ethernet_packet_aggregator
-	PORT(tx_en0_i : IN STD_LOGIC;
-		 tx_en1_i : IN STD_LOGIC;
-		 tx_en2_i : IN STD_LOGIC;
-		 tx_en3_i : IN STD_LOGIC;
-		 tx_en4_i : IN STD_LOGIC;
-		 tx_en5_i : IN STD_LOGIC;
-		 tx_en6_i : IN STD_LOGIC;
-		 tx_en7_i : IN STD_LOGIC;
-		 data0_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data1_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data2_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data3_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data4_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data5_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data6_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data7_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 tx_en_o : OUT STD_LOGIC;
-		 data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+COMPONENT ethernet_receive
+GENERIC (lastRamAddress : INTEGER
+			);
+	PORT(rx_clk : IN STD_LOGIC;
+		 rx_frame : IN STD_LOGIC;
+		 rx_byte_received : IN STD_LOGIC;
+		 rx_error : IN STD_LOGIC;
+		 rx_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 frame_rdy : OUT STD_LOGIC;
+		 ram_addr : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 ram_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 rx_byte_count : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
+	);
+END COMPONENT;
+
+COMPONENT ethernet_reset
+	PORT(clk : IN STD_LOGIC;
+		 enet_clk : IN STD_LOGIC;
+		 power_good : IN STD_LOGIC;
+		 phy_rstn : OUT STD_LOGIC;
+		 mac_rst : OUT STD_LOGIC;
+		 sendArpRequest : OUT STD_LOGIC;
+		 tx_online : OUT STD_LOGIC
 	);
 END COMPONENT;
 
@@ -357,71 +281,71 @@ COMPONENT litex_soc
 	);
 END COMPONENT;
 
-COMPONENT rx_ringbuffer
-GENERIC (audio_buffer_sample_depth : INTEGER;
-			bytes_per_sample : INTEGER;
-			global_channel_count : INTEGER;
-			max_streams : INTEGER
-			);
-	PORT(sys_clk : IN STD_LOGIC;
-		 reset_n : IN STD_LOGIC;
-		 fs_clk_i : IN STD_LOGIC;
-		 packet_ready_i : IN STD_LOGIC;
-		 stream_config_wr_clk_i : IN STD_LOGIC;
-		 stream_config_wr_en_i : IN STD_LOGIC;
-		 metering_clear_i : IN STD_LOGIC;
-		 eth_read_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 media_clock_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 stream_config_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 stream_config_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 audio_ch0_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch10_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch11_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch12_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch13_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch14_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch15_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch1_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch2_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch3_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch4_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch5_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch6_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch7_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch8_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch9_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 eth_read_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 metering_signal_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+COMPONENT litex_eth_buffer_bridge
+	PORT(buf_rx_ack_i : IN STD_LOGIC;
+		 eth_tx_request_i : IN STD_LOGIC;
+		 mac_tx_clock_i : IN STD_LOGIC;
+		 mac_tx_reset_i : IN STD_LOGIC;
+		 mac_tx_byte_sent_i : IN STD_LOGIC;
+		 mac_tx_busy_i : IN STD_LOGIC;
+		 tx_allow_i : IN STD_LOGIC;
+		 mac_rx_clock_i : IN STD_LOGIC;
+		 mac_rx_reset_i : IN STD_LOGIC;
+		 parse_mcu_packet_i : IN STD_LOGIC;
+		 mcu_clk_i : IN STD_LOGIC;
+		 buf_tx_dat_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 buf_tx_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 eth_ram_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 pkt_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 buf_rx_we_o : OUT STD_LOGIC;
+		 buf_rx_valid_o : OUT STD_LOGIC;
+		 eth_tx_done_o : OUT STD_LOGIC;
+		 eth_rx_overflow_o : OUT STD_LOGIC;
+		 mac_tx_enable_o : OUT STD_LOGIC;
+		 tx_allow_req_o : OUT STD_LOGIC;
+		 buf_rx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 buf_rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 buf_rx_len_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 buf_tx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 eth_ram_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END COMPONENT;
 
-COMPONENT eth_ram
-GENERIC (lastAddress : INTEGER
-			);
-	PORT(rx_clk : IN STD_LOGIC;
-		 sync_in : IN STD_LOGIC;
-		 data_in : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 read0Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read1Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read2Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read3Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 writeAddr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 sync_out : OUT STD_LOGIC;
-		 arp_dst_ip : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 arp_src_ip : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 arp_type : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data1_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data2_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data3_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 ip_type : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 pkt_dst_mac : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 pkt_src_mac : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 pkt_type : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_dst_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_length : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_src_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+COMPONENT ethernet_packet_aggregator
+	PORT(tx_en0_i : IN STD_LOGIC;
+		 tx_en1_i : IN STD_LOGIC;
+		 tx_en2_i : IN STD_LOGIC;
+		 data0_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 data1_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 data2_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 tx_en_o : OUT STD_LOGIC;
+		 data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+	);
+END COMPONENT;
+
+COMPONENT eth_tx_arbiter
+	PORT(clk_i : IN STD_LOGIC;
+		 rst_n_i : IN STD_LOGIC;
+		 ptp_req_i : IN STD_LOGIC;
+		 audio_req_i : IN STD_LOGIC;
+		 mcu_req_i : IN STD_LOGIC;
+		 ptp_allow_o : OUT STD_LOGIC;
+		 audio_allow_o : OUT STD_LOGIC;
+		 mcu_allow_o : OUT STD_LOGIC
+	);
+END COMPONENT;
+
+COMPONENT clock_ppb_meter
+	PORT(sys_clk : IN STD_LOGIC;
+		 reset_n : IN STD_LOGIC;
+		 wallclock_64fs_in : IN STD_LOGIC;
+		 pll_64fs_in : IN STD_LOGIC;
+		 wallclock_second_pulse_i : IN STD_LOGIC;
+		 start_i : IN STD_LOGIC;
+		 valid_o : OUT STD_LOGIC;
+		 count_pll_o : OUT STD_LOGIC_VECTOR(21 DOWNTO 0);
+		 count_wc_o : OUT STD_LOGIC_VECTOR(21 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -467,6 +391,12 @@ COMPONENT ptp_module
 	);
 END COMPONENT;
 
+COMPONENT reverse_mac
+	PORT(mac_address_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
+		 mac_address_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
+	);
+END COMPONENT;
+
 COMPONENT rgmii_phy_if
 GENERIC (CLOCK_INPUT_STYLE : STRING;
 			IODDR_STYLE : STRING;
@@ -497,31 +427,97 @@ GENERIC (CLOCK_INPUT_STYLE : STRING;
 	);
 END COMPONENT;
 
-COMPONENT clock_ppb_meter
-	PORT(sys_clk : IN STD_LOGIC;
-		 reset_n : IN STD_LOGIC;
-		 wallclock_64fs_in : IN STD_LOGIC;
-		 pll_64fs_in : IN STD_LOGIC;
-		 wallclock_second_pulse_i : IN STD_LOGIC;
-		 start_i : IN STD_LOGIC;
-		 valid_o : OUT STD_LOGIC;
-		 count_pll_o : OUT STD_LOGIC_VECTOR(21 DOWNTO 0);
-		 count_wc_o : OUT STD_LOGIC_VECTOR(21 DOWNTO 0)
+COMPONENT ethernet_clks
+	PORT(inclk0 : IN STD_LOGIC;
+		 c0 : OUT STD_LOGIC;
+		 c1 : OUT STD_LOGIC;
+		 locked : OUT STD_LOGIC
 	);
 END COMPONENT;
 
-COMPONENT ethernet_receive
-GENERIC (lastRamAddress : INTEGER
+COMPONENT rx_ringbuffer
+GENERIC (audio_buffer_sample_depth : INTEGER;
+			bytes_per_sample : INTEGER;
+			global_channel_count : INTEGER;
+			max_streams : INTEGER
 			);
-	PORT(rx_clk : IN STD_LOGIC;
-		 rx_frame : IN STD_LOGIC;
-		 rx_byte_received : IN STD_LOGIC;
-		 rx_error : IN STD_LOGIC;
-		 rx_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 frame_rdy : OUT STD_LOGIC;
-		 ram_addr : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 ram_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 rx_byte_count : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
+	PORT(sys_clk : IN STD_LOGIC;
+		 reset_n : IN STD_LOGIC;
+		 fs_clk_i : IN STD_LOGIC;
+		 packet_ready_i : IN STD_LOGIC;
+		 stream_config_wr_clk_i : IN STD_LOGIC;
+		 stream_config_wr_en_i : IN STD_LOGIC;
+		 metering_clear_i : IN STD_LOGIC;
+		 eth_read_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 media_clock_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 stream_config_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 stream_config_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 audio_ch0_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch10_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch11_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch12_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch13_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch14_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch15_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch1_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch2_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch3_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch4_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch5_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch6_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch7_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch8_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_ch9_out : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 eth_read_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 metering_signal_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+	);
+END COMPONENT;
+
+COMPONENT pll_systemclocks
+	PORT(inclk0 : IN STD_LOGIC;
+		 c0 : OUT STD_LOGIC;
+		 c1 : OUT STD_LOGIC;
+		 c3 : OUT STD_LOGIC
+	);
+END COMPONENT;
+
+COMPONENT tdm8_out
+GENERIC (width : INTEGER
+			);
+	PORT(FSYNC : IN STD_LOGIC;
+		 BIT_CLK : IN STD_LOGIC;
+		 RESET : IN STD_LOGIC;
+		 DATA_CH0 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH1 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH2 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH3 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH4 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH5 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH6 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH7 : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DOUT : OUT STD_LOGIC;
+		 LRCK : OUT STD_LOGIC
+	);
+END COMPONENT;
+
+COMPONENT tdm8_in
+GENERIC (width : INTEGER
+			);
+	PORT(FSYNC : IN STD_LOGIC;
+		 BIT_CLK : IN STD_LOGIC;
+		 DIN : IN STD_LOGIC;
+		 RESET : IN STD_LOGIC;
+		 SYS_CLK : IN STD_LOGIC;
+		 DATA_RDY : OUT STD_LOGIC;
+		 DATA_CH0 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH1 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH2 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH3 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH4 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH5 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH6 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 DATA_CH7 : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -538,19 +534,16 @@ GENERIC (MIIM_CLOCK_DIVIDER : INTEGER;
 		 mii_rx_clk_i : IN STD_LOGIC;
 		 mii_rx_er_i : IN STD_LOGIC;
 		 mii_rx_dv_i : IN STD_LOGIC;
-		 rgmii_rx_ctl_i : IN STD_LOGIC;
 		 miim_clock_i : IN STD_LOGIC;
 		 tx_enable_i : IN STD_LOGIC;
 		 mdio_io : INOUT STD_LOGIC;
 		 mac_address_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
 		 mii_rxd_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 speed_override_i : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
 		 tx_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 reset_o : OUT STD_LOGIC;
 		 mii_tx_er_o : OUT STD_LOGIC;
 		 mii_tx_en_o : OUT STD_LOGIC;
 		 gmii_gtx_clk_o : OUT STD_LOGIC;
-		 rgmii_tx_ctl_o : OUT STD_LOGIC;
 		 mdc_o : OUT STD_LOGIC;
 		 link_up_o : OUT STD_LOGIC;
 		 tx_clock_o : OUT STD_LOGIC;
@@ -570,38 +563,7 @@ GENERIC (MIIM_CLOCK_DIVIDER : INTEGER;
 	);
 END COMPONENT;
 
-COMPONENT clk_by_x
-GENERIC (divider : INTEGER
-			);
-	PORT(clk_in : IN STD_LOGIC;
-		 clk_out : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-COMPONENT pll_systemclocks
-	PORT(inclk0 : IN STD_LOGIC;
-		 c0 : OUT STD_LOGIC;
-		 c1 : OUT STD_LOGIC;
-		 c3 : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-COMPONENT reverse_mac
-	PORT(mac_address_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 mac_address_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT ethernet_clks
-	PORT(inclk0 : IN STD_LOGIC;
-		 c0 : OUT STD_LOGIC;
-		 c1 : OUT STD_LOGIC;
-		 locked : OUT STD_LOGIC
-	);
-END COMPONENT;
-
-SIGNAL	arp_ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	arp_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	adda_nRST :  STD_LOGIC;
 SIGNAL	audio_allow :  STD_LOGIC;
 SIGNAL	audio_allow_req :  STD_LOGIC;
 SIGNAL	audio_meter_clear :  STD_LOGIC;
@@ -639,14 +601,18 @@ SIGNAL	clk_125MHz :  STD_LOGIC;
 SIGNAL	clk_1kHz :  STD_LOGIC;
 SIGNAL	clk_1MHz :  STD_LOGIC;
 SIGNAL	clk_250MHz :  STD_LOGIC;
-SIGNAL	dst_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	enet_clk :  STD_LOGIC;
 SIGNAL	enet_clk_90 :  STD_LOGIC;
 SIGNAL	eth_byte_cnt :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	eth_frame_o :  STD_LOGIC;
 SIGNAL	eth_frame_rdy :  STD_LOGIC;
-SIGNAL	eth_send_arp_response :  STD_LOGIC;
-SIGNAL	eth_send_icmp_response :  STD_LOGIC;
+SIGNAL	eth_ip_type :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	eth_pkt_type :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	eth_ram_wr_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
+SIGNAL	eth_ram_wr_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	eth_udp_dst_prt :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	eth_udp_length :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	eth_udp_src_prt :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	ethernet_parser_sync :  STD_LOGIC;
 SIGNAL	fs :  STD_LOGIC;
 SIGNAL	fs_tdm :  STD_LOGIC;
@@ -661,10 +627,11 @@ SIGNAL	gmii_tx_en :  STD_LOGIC;
 SIGNAL	gmii_tx_err :  STD_LOGIC;
 SIGNAL	gmii_tx_rst :  STD_LOGIC;
 SIGNAL	gmii_txd :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	icmp_dst_ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	icmp_dst_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	icmp_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	icmp_sequence :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	hram_clk :  STD_LOGIC;
+SIGNAL	hram_cs :  STD_LOGIC;
+SIGNAL	hram_dq :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	hram_rstn :  STD_LOGIC;
+SIGNAL	hram_rwds :  STD_LOGIC;
 SIGNAL	inch2i :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	inch3i :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -696,9 +663,12 @@ SIGNAL	mcu_tx_done :  STD_LOGIC;
 SIGNAL	mcu_tx_enable :  STD_LOGIC;
 SIGNAL	mcu_tx_req_i :  STD_LOGIC;
 SIGNAL	media_clock :  STD_LOGIC_VECTOR(31 DOWNTO 0);
+SIGNAL	nhram_clk :  STD_LOGIC;
 SIGNAL	parse_mcu_packet :  STD_LOGIC;
 SIGNAL	parse_ptp_packet :  STD_LOGIC;
 SIGNAL	parse_rtp_packet :  STD_LOGIC;
+SIGNAL	parser_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
+SIGNAL	parser_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	phy_reset :  STD_LOGIC;
 SIGNAL	pll_counter :  STD_LOGIC_VECTOR(21 DOWNTO 0);
 SIGNAL	pll_fs128 :  STD_LOGIC;
@@ -725,6 +695,7 @@ SIGNAL	ptp_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	ptp_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	ptp_sync_lost :  STD_LOGIC;
 SIGNAL	ptp_time_source :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	rev_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	rtp_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	rtp_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	rx_conf_wr_addr :  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -732,6 +703,14 @@ SIGNAL	rx_conf_wr_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	rx_conf_wr_en :  STD_LOGIC;
 SIGNAL	second_pulse_sys :  STD_LOGIC;
 SIGNAL	sof_sent :  STD_LOGIC;
+SIGNAL	spi0_clk :  STD_LOGIC;
+SIGNAL	spi0_cs :  STD_LOGIC;
+SIGNAL	spi0_miso :  STD_LOGIC;
+SIGNAL	spi0_mosi :  STD_LOGIC;
+SIGNAL	spiflash_clk :  STD_LOGIC;
+SIGNAL	spiflash_cs :  STD_LOGIC;
+SIGNAL	spiflash_miso :  STD_LOGIC;
+SIGNAL	spiflash_mosi :  STD_LOGIC;
 SIGNAL	tx_data_audiotx :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_data_ptpfu :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_en_audiotx :  STD_LOGIC;
@@ -739,51 +718,43 @@ SIGNAL	tx_en_ptpfu :  STD_LOGIC;
 SIGNAL	tx_wr_addr :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_wr_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_wr_en :  STD_LOGIC;
+SIGNAL	uart0_rx :  STD_LOGIC;
+SIGNAL	uart0_tx :  STD_LOGIC;
+SIGNAL	uart1_rx :  STD_LOGIC;
+SIGNAL	uart1_tx :  STD_LOGIC;
 SIGNAL	wallclock_configured :  STD_LOGIC;
 SIGNAL	wallclock_locked :  STD_LOGIC;
 SIGNAL	wallclock_phasejump :  STD_LOGIC;
 SIGNAL	wc_64fs :  STD_LOGIC;
 SIGNAL	wc_counter :  STD_LOGIC_VECTOR(21 DOWNTO 0);
 SIGNAL	wc_fs :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_1 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_2 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_3 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_4 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_5 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_6 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_7 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_8 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_9 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_10 :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_11 :  STD_LOGIC;
+SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_1 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_2 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_3 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_4 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_5 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_6 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_7 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_8 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_9 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_10 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
+SIGNAL	SYNTHESIZED_WIRE_11 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_12 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_13 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_14 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_15 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_16 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_17 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_18 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_19 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_20 :  STD_LOGIC;
-SIGNAL	SYNTHESIZED_WIRE_21 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_22 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_23 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_24 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_25 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_26 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_27 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_28 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_29 :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_30 :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_31 :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	SYNTHESIZED_WIRE_32 :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 
 
 BEGIN 
-hbus_clk0_p <= SYNTHESIZED_WIRE_11;
-SYNTHESIZED_WIRE_20 <= '0';
 
+
+
+b2v_1khzclkdiv : clk_by_x
+GENERIC MAP(divider => 48
+			)
+PORT MAP(clk_in => fs,
+		 clk_out => clk_1kHz);
 
 
 b2v_audioclocks : audioclock_generator
@@ -796,89 +767,7 @@ PORT MAP(mclk => pll_fs512,
 		 fs_pulse => fs_tdm);
 
 
-b2v_inst : litex_eth_buffer_bridge
-PORT MAP(buf_rx_ack_i => buf_rx_ack,
-		 eth_tx_request_i => mcu_tx_req_i,
-		 mac_tx_clock_i => mac_tx_clock,
-		 mac_tx_reset_i => mac_reset,
-		 mac_tx_byte_sent_i => mac_tx_byte_sent,
-		 mac_tx_busy_i => mac_tx_busy,
-		 tx_allow_i => mcu_allow,
-		 mac_rx_clock_i => mac_rx_clock,
-		 mac_rx_reset_i => mac_rx_reset,
-		 parse_mcu_packet_i => parse_mcu_packet,
-		 mcu_clk_i => mcu_clk,
-		 buf_tx_dat_i => buf_tx_dat,
-		 buf_tx_len_i => buf_tx_len,
-		 eth_ram_data_i => mcu_ram_data,
-		 pkt_len_i => eth_byte_cnt,
-		 buf_rx_we_o => buf_rx_we,
-		 buf_rx_valid_o => buf_rx_valid,
-		 eth_tx_done_o => mcu_tx_done,
-		 eth_rx_overflow_o => mcu_rx_overflow,
-		 mac_tx_enable_o => mcu_tx_enable,
-		 tx_allow_req_o => mcu_allow_req,
-		 buf_rx_addr_o => buf_rx_a,
-		 buf_rx_data_o => buf_rx_d,
-		 buf_rx_len_o => buf_rx_len,
-		 buf_tx_addr_o => buf_tx_a,
-		 eth_ram_addr_o => mcu_read_addr,
-		 mac_tx_dat_o => mcu_tx_data);
-
-
-b2v_inst1 : ethernet_reset
-PORT MAP(clk => clk_1kHz,
-		 enet_clk => enet_clk,
-		 power_good => powerGood,
-		 mac_rst => mac_reset);
-
-
-b2v_inst11 : ethernet_packet_parser
-GENERIC MAP(udp_port => 4023,
-			udp_port_ptpv2_event => 319,
-			udp_port_ptpv2_general => 320,
-			udp_port_rtp => 5004
-			)
-PORT MAP(clk => mac_rx_clock,
-		 sync_in => ethernet_parser_sync,
-		 arp_dst_ip => SYNTHESIZED_WIRE_0,
-		 arp_src_ip => SYNTHESIZED_WIRE_1,
-		 arp_type => SYNTHESIZED_WIRE_2,
-		 ip_address => ip_address,
-		 ip_type => SYNTHESIZED_WIRE_3,
-		 mac_address => mac_address,
-		 pkt_dst_mac => SYNTHESIZED_WIRE_4,
-		 pkt_src_mac => SYNTHESIZED_WIRE_5,
-		 pkt_type => SYNTHESIZED_WIRE_6,
-		 ram_data => SYNTHESIZED_WIRE_7,
-		 udp_dst_port => SYNTHESIZED_WIRE_8,
-		 udp_length => SYNTHESIZED_WIRE_9,
-		 udp_src_port => SYNTHESIZED_WIRE_10,
-		 parse_ptp_packet => parse_ptp_packet,
-		 parse_rtp_packet => parse_rtp_packet,
-		 parse_mcu_packet => parse_mcu_packet,
-		 ram_read_address => SYNTHESIZED_WIRE_30);
-
-
-b2v_inst12 : tdm8_in
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => fs_tdm,
-		 BIT_CLK => bclk_f,
-		 DIN => gpio0,
-		 RESET => powerGood,
-		 SYS_CLK => clk_125MHz,
-		 DATA_CH0 => ch0i,
-		 DATA_CH1 => ch1i,
-		 DATA_CH2 => inch2i,
-		 DATA_CH3 => inch3i,
-		 DATA_CH4 => ch4i,
-		 DATA_CH5 => ch5i,
-		 DATA_CH6 => ch6i,
-		 DATA_CH7 => ch7i);
-
-
-b2v_inst13 : audio_tx_module
+b2v_audiotx : audio_tx_module
 PORT MAP(sys_clk => clk_125MHz,
 		 fmc_clk => mcu_clk,
 		 rst_n => powerGood,
@@ -917,50 +806,80 @@ PORT MAP(sys_clk => clk_125MHz,
 		 tx_data_o => tx_data_audiotx);
 
 
-hbus_clk0_n <= NOT(SYNTHESIZED_WIRE_11);
-
-
-
-
-b2v_inst17 : tdm8_out
-GENERIC MAP(width => 24
+b2v_eth_buf : eth_ram
+GENERIC MAP(lastAddress => 1500
 			)
-PORT MAP(FSYNC => fs_tdm,
-		 BIT_CLK => bclk_r,
-		 RESET => powerGood,
-		 DATA_CH0 => SYNTHESIZED_WIRE_12,
-		 DATA_CH1 => SYNTHESIZED_WIRE_13,
-		 DATA_CH2 => SYNTHESIZED_WIRE_14,
-		 DATA_CH3 => SYNTHESIZED_WIRE_15,
-		 DATA_CH4 => SYNTHESIZED_WIRE_16,
-		 DATA_CH5 => SYNTHESIZED_WIRE_17,
-		 DATA_CH6 => SYNTHESIZED_WIRE_18,
-		 DATA_CH7 => SYNTHESIZED_WIRE_19,
-		 DOUT => gpio5);
+PORT MAP(rx_clk => mac_rx_clock,
+		 sync_in => eth_frame_rdy,
+		 data_in => eth_ram_wr_data,
+		 read0Addr => parser_ram_addr,
+		 read1Addr => ptp_ram_addr,
+		 read2Addr => rtp_ram_addr,
+		 read3Addr => mcu_read_addr,
+		 writeAddr => eth_ram_wr_addr,
+		 sync_out => ethernet_parser_sync,
+		 data0_out => parser_ram_data,
+		 data1_out => ptp_ram_data,
+		 data2_out => rtp_ram_data,
+		 data3_out => mcu_ram_data,
+		 ip_type => eth_ip_type,
+		 pkt_type => eth_pkt_type,
+		 udp_dst_port => eth_udp_dst_prt,
+		 udp_length => eth_udp_length,
+		 udp_src_port => eth_udp_src_prt);
 
 
-b2v_inst18 : eth_tx_arbiter
-PORT MAP(clk_i => mac_tx_clock,
-		 rst_n_i => powerGood,
-		 ptp_req_i => ptp_allow_req,
-		 audio_req_i => audio_allow_req,
-		 mcu_req_i => mcu_allow_req,
-		 ptp_allow_o => ptp_allow,
-		 mcu_allow_o => mcu_allow);
+b2v_eth_parser : ethernet_packet_parser
+GENERIC MAP(
+			udp_port_ptpv2_event => 319,
+			udp_port_ptpv2_general => 320,
+			udp_port_rtp => 5004
+			)
+PORT MAP(clk => mac_rx_clock,
+		 sync_in => ethernet_parser_sync,
+		 ip_type => eth_ip_type,
+		 pkt_type => eth_pkt_type,
+		 ram_data => parser_ram_data,
+		 udp_dst_port => eth_udp_dst_prt,
+		 udp_length => eth_udp_length,
+		 udp_src_port => eth_udp_src_prt,
+		 parse_ptp_packet => parse_ptp_packet,
+		 parse_rtp_packet => parse_rtp_packet,
+		 parse_mcu_packet => parse_mcu_packet,
+		 ram_read_address => parser_ram_addr);
 
 
-b2v_inst19 : ethernet_packet_aggregator
-PORT MAP(tx_en3_i => mcu_tx_enable,
-		 tx_en4_i => tx_en_audiotx,
-		 tx_en6_i => tx_en_ptpfu,
-		 data3_i => mcu_tx_data,
-		 data4_i => tx_data_audiotx,
-		 data6_i => tx_data_ptpfu,
-		 tx_en_o => mac_tx_enable,
-		 data_o => mac_tx_data);
+b2v_eth_rx : ethernet_receive
+GENERIC MAP(lastRamAddress => 1500
+			)
+PORT MAP(rx_clk => mac_rx_clock,
+		 rx_frame => mac_rx_frame,
+		 rx_byte_received => mac_rx_byte_received,
+		 rx_error => mac_rx_error,
+		 rx_data => mac_rx_data,
+		 frame_rdy => eth_frame_rdy,
+		 ram_addr => eth_ram_wr_addr,
+		 ram_data => eth_ram_wr_data,
+		 rx_byte_count => eth_byte_cnt);
 
 
-b2v_inst2 : litex_soc
+b2v_ethrst : ethernet_reset
+PORT MAP(clk => clk_1kHz,
+		 enet_clk => enet_clk,
+		 power_good => powerGood,
+		 mac_rst => mac_reset);
+
+
+nhram_clk <= NOT(hram_clk);
+
+
+
+mac_tx_byte_sent_n <= NOT(mac_tx_byte_sent);
+
+
+
+
+b2v_litex : litex_soc
 PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 aes67_ctrl_eth_rx_overflow => mcu_rx_overflow,
 		 aes67_ctrl_eth_tx_done => mcu_tx_done,
@@ -974,11 +893,11 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 clk_mac_tx => mac_tx_clock,
 		 eth_buf_rx_valid => buf_rx_valid,
 		 eth_buf_rx_we => buf_rx_we,
-		 serial1_rx => gpio28,
-		 serial_rx => arduino_io1,
-		 spi_miso => SYNTHESIZED_WIRE_20,
-		 spiflash_miso => gpio33,
-		 hyperram_rwds => hbus_rwds,
+		 serial1_rx => uart1_rx,
+		 serial_rx => uart0_rx,
+		 spi_miso => spi0_miso,
+		 spiflash_miso => spiflash_miso,
+		 hyperram_rwds => hram_rwds,
 		 i2c0_scl => gpio26,
 		 i2c0_sda => gpio27,
 		 i2c1_scl => gpio23,
@@ -996,23 +915,23 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 eth_buf_rx_data => buf_rx_d,
 		 eth_buf_rx_len => buf_rx_len,
 		 eth_buf_tx_addr => buf_tx_a,
-		 hyperram_dq => hbus_dq,
-		 aes67_ctrl_adda_nrst => gpio25,
+		 hyperram_dq => hram_dq,
+		 aes67_ctrl_adda_nrst => adda_nRST,
 		 aes67_ctrl_eth_tx_request => mcu_tx_req_i,
 		 aes67_ctrl_meter_clear => audio_meter_clear,
 		 aes67_ctrl_pll_ppb_start => ppb_meter_start,
 		 aes67_ctrl_ptp_is_follower => ptp_is_follower,
 		 aes67_ctrl_ptp_is_leader => ptp_is_leader,
 		 eth_buf_rx_ack => buf_rx_ack,
-		 hyperram_clk => SYNTHESIZED_WIRE_11,
-		 hyperram_cs_n => hbus_cs2n,
-		 hyperram_rst_n => hbus_rstn,
+		 hyperram_clk => hram_clk,
+		 hyperram_cs_n => hram_cs,
+		 hyperram_rst_n => hram_rstn,
 		 rx_stream_cfg_wr_en => rx_conf_wr_en,
-		 serial1_tx => gpio29,
-		 serial_tx => arduino_io2,
-		 spiflash_clk => gpio34,
-		 spiflash_cs_n => gpio32,
-		 spiflash_mosi => gpio35,
+		 serial1_tx => uart1_tx,
+		 serial_tx => uart0_tx,
+		 spiflash_clk => spiflash_clk,
+		 spiflash_cs_n => spiflash_cs,
+		 spiflash_mosi => spiflash_mosi,
 		 sys_clk_out => mcu_clk,
 		 tx_stream_cfg_wr_en => tx_wr_en,
 		 aes67_ctrl_ip_addr => ip_address,
@@ -1033,108 +952,70 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 tx_stream_cfg_wr_data => tx_wr_data);
 
 
-b2v_inst20 : rx_ringbuffer
-GENERIC MAP(audio_buffer_sample_depth => 256,
-			bytes_per_sample => 3,
-			global_channel_count => 16,
-			max_streams => 8
-			)
+b2v_litex_eth : litex_eth_buffer_bridge
+PORT MAP(buf_rx_ack_i => buf_rx_ack,
+		 eth_tx_request_i => mcu_tx_req_i,
+		 mac_tx_clock_i => mac_tx_clock,
+		 mac_tx_reset_i => mac_reset,
+		 mac_tx_byte_sent_i => mac_tx_byte_sent,
+		 mac_tx_busy_i => mac_tx_busy,
+		 tx_allow_i => mcu_allow,
+		 mac_rx_clock_i => mac_rx_clock,
+		 mac_rx_reset_i => mac_rx_reset,
+		 parse_mcu_packet_i => parse_mcu_packet,
+		 mcu_clk_i => mcu_clk,
+		 buf_tx_dat_i => buf_tx_dat,
+		 buf_tx_len_i => buf_tx_len,
+		 eth_ram_data_i => mcu_ram_data,
+		 pkt_len_i => eth_byte_cnt,
+		 buf_rx_we_o => buf_rx_we,
+		 buf_rx_valid_o => buf_rx_valid,
+		 eth_tx_done_o => mcu_tx_done,
+		 eth_rx_overflow_o => mcu_rx_overflow,
+		 mac_tx_enable_o => mcu_tx_enable,
+		 tx_allow_req_o => mcu_allow_req,
+		 buf_rx_addr_o => buf_rx_a,
+		 buf_rx_data_o => buf_rx_d,
+		 buf_rx_len_o => buf_rx_len,
+		 buf_tx_addr_o => buf_tx_a,
+		 eth_ram_addr_o => mcu_read_addr,
+		 mac_tx_dat_o => mcu_tx_data);
+
+
+b2v_packetaggregator : ethernet_packet_aggregator
+PORT MAP(tx_en0_i => mcu_tx_enable,
+		 tx_en1_i => tx_en_audiotx,
+		 tx_en2_i => tx_en_ptpfu,
+		 data0_i => mcu_tx_data,
+		 data1_i => tx_data_audiotx,
+		 data2_i => tx_data_ptpfu,
+		 tx_en_o => mac_tx_enable,
+		 data_o => mac_tx_data);
+
+
+b2v_packetarbiter : eth_tx_arbiter
+PORT MAP(clk_i => mac_tx_clock,
+		 rst_n_i => powerGood,
+		 ptp_req_i => ptp_allow_req,
+		 audio_req_i => audio_allow_req,
+		 mcu_req_i => mcu_allow_req,
+		 ptp_allow_o => ptp_allow,
+		 mcu_allow_o => mcu_allow);
+
+
+b2v_ppb_meter : clock_ppb_meter
 PORT MAP(sys_clk => clk_125MHz,
 		 reset_n => powerGood,
-		 fs_clk_i => fs,
-		 packet_ready_i => parse_rtp_packet,
-		 stream_config_wr_clk_i => mcu_clk,
-		 stream_config_wr_en_i => rx_conf_wr_en,
-		 metering_clear_i => audio_meter_clear,
-		 eth_read_data_i => rtp_ram_data,
-		 media_clock_i => media_clock,
-		 stream_config_addr_i => rx_conf_wr_addr,
-		 stream_config_data_i => rx_conf_wr_data,
-		 audio_ch0_out => SYNTHESIZED_WIRE_12,
-		 audio_ch10_out => SYNTHESIZED_WIRE_23,
-		 audio_ch11_out => SYNTHESIZED_WIRE_24,
-		 audio_ch12_out => SYNTHESIZED_WIRE_25,
-		 audio_ch13_out => SYNTHESIZED_WIRE_26,
-		 audio_ch14_out => SYNTHESIZED_WIRE_27,
-		 audio_ch15_out => SYNTHESIZED_WIRE_28,
-		 audio_ch1_out => SYNTHESIZED_WIRE_13,
-		 audio_ch2_out => SYNTHESIZED_WIRE_14,
-		 audio_ch3_out => SYNTHESIZED_WIRE_15,
-		 audio_ch4_out => SYNTHESIZED_WIRE_16,
-		 audio_ch5_out => SYNTHESIZED_WIRE_17,
-		 audio_ch6_out => SYNTHESIZED_WIRE_18,
-		 audio_ch7_out => SYNTHESIZED_WIRE_19,
-		 audio_ch8_out => SYNTHESIZED_WIRE_21,
-		 audio_ch9_out => SYNTHESIZED_WIRE_22,
-		 eth_read_addr_o => rtp_ram_addr,
-		 metering_clip_o => audio_meter_rx_clip,
-		 metering_signal_o => audio_meter_rx_signal);
+		 wallclock_64fs_in => wc_64fs,
+		 pll_64fs_in => pll_fs64,
+		 wallclock_second_pulse_i => second_pulse_sys,
+		 start_i => ppb_meter_start,
+		 valid_o => pll_meas_valid,
+		 count_pll_o => pll_counter,
+		 count_wc_o => wc_counter);
 
 
-b2v_inst21 : tdm8_out
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => fs_tdm,
-		 BIT_CLK => bclk_r,
-		 RESET => powerGood,
-		 DATA_CH0 => SYNTHESIZED_WIRE_21,
-		 DATA_CH1 => SYNTHESIZED_WIRE_22,
-		 DATA_CH2 => SYNTHESIZED_WIRE_23,
-		 DATA_CH3 => SYNTHESIZED_WIRE_24,
-		 DATA_CH4 => SYNTHESIZED_WIRE_25,
-		 DATA_CH5 => SYNTHESIZED_WIRE_26,
-		 DATA_CH6 => SYNTHESIZED_WIRE_27,
-		 DATA_CH7 => SYNTHESIZED_WIRE_28,
-		 DOUT => gpio6);
-
-
-b2v_inst22 : eth_ram
-GENERIC MAP(lastAddress => 1500
-			)
-PORT MAP(rx_clk => mac_rx_clock,
-		 sync_in => eth_frame_rdy,
-		 data_in => SYNTHESIZED_WIRE_29,
-		 read0Addr => SYNTHESIZED_WIRE_30,
-		 read1Addr => ptp_ram_addr,
-		 read2Addr => rtp_ram_addr,
-		 read3Addr => mcu_read_addr,
-		 writeAddr => SYNTHESIZED_WIRE_31,
-		 sync_out => ethernet_parser_sync,
-		 arp_dst_ip => SYNTHESIZED_WIRE_0,
-		 arp_src_ip => SYNTHESIZED_WIRE_1,
-		 arp_type => SYNTHESIZED_WIRE_2,
-		 data0_out => SYNTHESIZED_WIRE_7,
-		 data1_out => ptp_ram_data,
-		 data2_out => rtp_ram_data,
-		 data3_out => mcu_ram_data,
-		 ip_type => SYNTHESIZED_WIRE_3,
-		 pkt_dst_mac => SYNTHESIZED_WIRE_4,
-		 pkt_src_mac => SYNTHESIZED_WIRE_5,
-		 pkt_type => SYNTHESIZED_WIRE_6,
-		 udp_dst_port => SYNTHESIZED_WIRE_8,
-		 udp_length => SYNTHESIZED_WIRE_9,
-		 udp_src_port => SYNTHESIZED_WIRE_10);
-
-
-b2v_inst23 : tdm8_in
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => fs_tdm,
-		 BIT_CLK => bclk_f,
-		 DIN => gpio2,
-		 RESET => powerGood,
-		 SYS_CLK => clk_125MHz,
-		 DATA_CH0 => ch8i,
-		 DATA_CH1 => ch9i,
-		 DATA_CH2 => ch10i,
-		 DATA_CH3 => ch11i,
-		 DATA_CH4 => ch12i,
-		 DATA_CH5 => ch13i,
-		 DATA_CH6 => ch14i,
-		 DATA_CH7 => ch15i);
-
-
-b2v_inst24 : ptp_module
+b2v_ptp : ptp_module
 PORT MAP(sys_clk => clk_125MHz,
 		 rst_n => powerGood,
 		 mac_tx_clock => mac_tx_clock,
@@ -1173,15 +1054,16 @@ PORT MAP(sys_clk => clk_125MHz,
 		 tx_data_ptpfu => tx_data_ptpfu);
 
 
-mac_tx_byte_sent_n <= NOT(mac_tx_byte_sent);
+b2v_revmac : reverse_mac
+PORT MAP(mac_address_i => mac_address,
+		 mac_address_o => rev_mac_address);
 
 
-
-b2v_inst3 : rgmii_phy_if
+b2v_rgmii_if : rgmii_phy_if
 GENERIC MAP(CLOCK_INPUT_STYLE => "BUFG",
 			IODDR_STYLE => "IODDR2",
 			TARGET => "ALTERA",
-			USE_CLK90 => TRUE
+			USE_CLK90 => "TRUE"
 			)
 PORT MAP(clk => enet_clk,
 		 clk90 => enet_clk_90,
@@ -1203,33 +1085,126 @@ PORT MAP(clk => enet_clk,
 		 phy_rgmii_txd => enet_tx_d);
 
 
-b2v_inst31 : clock_ppb_meter
+b2v_rgmiiclks : ethernet_clks
+PORT MAP(inclk0 => enet_clk_125m,
+		 c0 => enet_clk,
+		 c1 => enet_clk_90);
+
+
+b2v_rx_ringbuffer : rx_ringbuffer
+GENERIC MAP(audio_buffer_sample_depth => 256,
+			bytes_per_sample => 3,
+			global_channel_count => 16,
+			max_streams => 8
+			)
 PORT MAP(sys_clk => clk_125MHz,
 		 reset_n => powerGood,
-		 wallclock_64fs_in => wc_64fs,
-		 pll_64fs_in => pll_fs64,
-		 wallclock_second_pulse_i => second_pulse_sys,
-		 start_i => ppb_meter_start,
-		 valid_o => pll_meas_valid,
-		 count_pll_o => pll_counter,
-		 count_wc_o => wc_counter);
+		 fs_clk_i => fs,
+		 packet_ready_i => parse_rtp_packet,
+		 stream_config_wr_clk_i => mcu_clk,
+		 stream_config_wr_en_i => rx_conf_wr_en,
+		 metering_clear_i => audio_meter_clear,
+		 eth_read_data_i => rtp_ram_data,
+		 media_clock_i => media_clock,
+		 stream_config_addr_i => rx_conf_wr_addr,
+		 stream_config_data_i => rx_conf_wr_data,
+		 audio_ch0_out => SYNTHESIZED_WIRE_0,
+		 audio_ch10_out => SYNTHESIZED_WIRE_10,
+		 audio_ch11_out => SYNTHESIZED_WIRE_11,
+		 audio_ch12_out => SYNTHESIZED_WIRE_12,
+		 audio_ch13_out => SYNTHESIZED_WIRE_13,
+		 audio_ch14_out => SYNTHESIZED_WIRE_14,
+		 audio_ch15_out => SYNTHESIZED_WIRE_15,
+		 audio_ch1_out => SYNTHESIZED_WIRE_1,
+		 audio_ch2_out => SYNTHESIZED_WIRE_2,
+		 audio_ch3_out => SYNTHESIZED_WIRE_3,
+		 audio_ch4_out => SYNTHESIZED_WIRE_4,
+		 audio_ch5_out => SYNTHESIZED_WIRE_5,
+		 audio_ch6_out => SYNTHESIZED_WIRE_6,
+		 audio_ch7_out => SYNTHESIZED_WIRE_7,
+		 audio_ch8_out => SYNTHESIZED_WIRE_8,
+		 audio_ch9_out => SYNTHESIZED_WIRE_9,
+		 eth_read_addr_o => rtp_ram_addr,
+		 metering_clip_o => audio_meter_rx_clip,
+		 metering_signal_o => audio_meter_rx_signal);
 
 
-b2v_inst32 : ethernet_receive
-GENERIC MAP(lastRamAddress => 1500
+b2v_sysclocks : pll_systemclocks
+PORT MAP(inclk0 => clk50m,
+		 c0 => clk_125MHz);
+
+
+b2v_tdm8_mux1 : tdm8_out
+GENERIC MAP(width => 24
 			)
-PORT MAP(rx_clk => mac_rx_clock,
-		 rx_frame => mac_rx_frame,
-		 rx_byte_received => mac_rx_byte_received,
-		 rx_error => mac_rx_error,
-		 rx_data => mac_rx_data,
-		 frame_rdy => eth_frame_rdy,
-		 ram_addr => SYNTHESIZED_WIRE_31,
-		 ram_data => SYNTHESIZED_WIRE_29,
-		 rx_byte_count => eth_byte_cnt);
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_r,
+		 RESET => powerGood,
+		 DATA_CH0 => SYNTHESIZED_WIRE_0,
+		 DATA_CH1 => SYNTHESIZED_WIRE_1,
+		 DATA_CH2 => SYNTHESIZED_WIRE_2,
+		 DATA_CH3 => SYNTHESIZED_WIRE_3,
+		 DATA_CH4 => SYNTHESIZED_WIRE_4,
+		 DATA_CH5 => SYNTHESIZED_WIRE_5,
+		 DATA_CH6 => SYNTHESIZED_WIRE_6,
+		 DATA_CH7 => SYNTHESIZED_WIRE_7,
+		 DOUT => gpio5);
 
 
-b2v_inst4 : ethernet
+b2v_tdm8_mux2 : tdm8_out
+GENERIC MAP(width => 24
+			)
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_r,
+		 RESET => powerGood,
+		 DATA_CH0 => SYNTHESIZED_WIRE_8,
+		 DATA_CH1 => SYNTHESIZED_WIRE_9,
+		 DATA_CH2 => SYNTHESIZED_WIRE_10,
+		 DATA_CH3 => SYNTHESIZED_WIRE_11,
+		 DATA_CH4 => SYNTHESIZED_WIRE_12,
+		 DATA_CH5 => SYNTHESIZED_WIRE_13,
+		 DATA_CH6 => SYNTHESIZED_WIRE_14,
+		 DATA_CH7 => SYNTHESIZED_WIRE_15,
+		 DOUT => gpio6);
+
+
+b2v_tdm8demux1 : tdm8_in
+GENERIC MAP(width => 24
+			)
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_f,
+		 DIN => gpio0,
+		 RESET => powerGood,
+		 SYS_CLK => clk_125MHz,
+		 DATA_CH0 => ch0i,
+		 DATA_CH1 => ch1i,
+		 DATA_CH2 => inch2i,
+		 DATA_CH3 => inch3i,
+		 DATA_CH4 => ch4i,
+		 DATA_CH5 => ch5i,
+		 DATA_CH6 => ch6i,
+		 DATA_CH7 => ch7i);
+
+
+b2v_tdm8demux2 : tdm8_in
+GENERIC MAP(width => 24
+			)
+PORT MAP(FSYNC => fs_tdm,
+		 BIT_CLK => bclk_f,
+		 DIN => gpio2,
+		 RESET => powerGood,
+		 SYS_CLK => clk_125MHz,
+		 DATA_CH0 => ch8i,
+		 DATA_CH1 => ch9i,
+		 DATA_CH2 => ch10i,
+		 DATA_CH3 => ch11i,
+		 DATA_CH4 => ch12i,
+		 DATA_CH5 => ch13i,
+		 DATA_CH6 => ch14i,
+		 DATA_CH7 => ch15i);
+
+
+b2v_yol_mac : ethernet
 GENERIC MAP(MIIM_CLOCK_DIVIDER => 50,
 			MIIM_DISABLE => false,
 			MIIM_PHY_ADDRESS => "00000",
@@ -1245,7 +1220,7 @@ PORT MAP(clock_125_i => enet_clk,
 		 miim_clock_i => enet_clk,
 		 tx_enable_i => mac_tx_enable,
 		 mdio_io => enet_mdio,
-		 mac_address_i => SYNTHESIZED_WIRE_32,
+		 mac_address_i => rev_mac_address,
 		 mii_rxd_i => gmii_rxd,
 		 tx_data_i => mac_tx_data,
 		 mii_tx_er_o => gmii_tx_err,
@@ -1266,41 +1241,33 @@ PORT MAP(clock_125_i => enet_clk,
 		 rx_data_o => mac_rx_data,
 		 speed_o => mac_speed);
 
-
-b2v_inst5 : clk_by_x
-GENERIC MAP(divider => 48
-			)
-PORT MAP(clk_in => fs,
-		 clk_out => clk_1kHz);
-
-
-b2v_inst6 : pll_systemclocks
-PORT MAP(inclk0 => clk50m,
-		 c0 => clk_125MHz);
-
-
-b2v_inst8 : reverse_mac
-PORT MAP(mac_address_i => mac_address,
-		 mac_address_o => SYNTHESIZED_WIRE_32);
-
-
-b2v_inst9 : ethernet_clks
-PORT MAP(inclk0 => enet_clk_125m,
-		 c0 => enet_clk,
-		 c1 => enet_clk_90);
-
-
 pll_fs512 <= gpio1;
 powerGood <= c10_resetn;
 clk50m <= c10_clk50m;
+uart1_rx <= gpio28;
+uart0_rx <= arduino_io1;
+spiflash_miso <= gpio33;
+hbus_rwds <= hram_rwds;
+hbus_dq <= hram_dq;
+hbus_rstn <= hram_rstn;
+hbus_cs2n <= hram_cs;
+arduino_io2 <= uart0_tx;
+hbus_clk0_p <= hram_clk;
+hbus_clk0_n <= nhram_clk;
 gpio9 <= bclk_r;
 gpio13 <= fs_tdm;
 gpio10 <= fs_tdm;
 gpio12 <= bclk_f;
 gpio11 <= pll_fs512;
+gpio34 <= spiflash_clk;
+gpio32 <= spiflash_cs;
+gpio35 <= spiflash_mosi;
+gpio25 <= adda_nRST;
+gpio29 <= uart1_tx;
 user_led(3) <= mac_tx_byte_sent_n;
 user_led(0) <= wallclock_locked;
 user_led(1) <= ptp_is_leader;
 user_led(2) <= ptp_is_follower;
 
+spi0_miso <= '0';
 END bdf_type;

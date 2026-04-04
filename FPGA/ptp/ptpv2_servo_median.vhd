@@ -416,7 +416,7 @@ begin
                     -- Slow sync (1 Hz or slower): shift left
                     if log_msg_interval_i > 3 then
                         -- Cap at 32s (4 * 8s) to prevent overflow
-                        timeout_limit <= to_unsigned(CLOCK_FREQ_HZ * 32, 32);
+                        timeout_limit <= shift_left(to_unsigned(CLOCK_FREQ_HZ, 32), 5);
                     else
                         timeout_limit <= shift_left(to_unsigned(CLOCK_FREQ_HZ * 4, 32), to_integer(log_msg_interval_i));
                     end if;

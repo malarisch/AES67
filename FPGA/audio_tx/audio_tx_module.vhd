@@ -15,10 +15,11 @@
 
 -- PROGRAM		"Quartus Prime"
 -- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Sat Apr  4 16:20:34 2026"
+-- CREATED		"Sat Apr  4 16:36:23 2026"
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
+USE ieee.numeric_std.all;
 
 LIBRARY work;
 
@@ -118,7 +119,7 @@ GENERIC (bytes_per_sample : INTEGER;
 		 audio_ch7_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
 		 audio_ch8_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
 		 audio_ch9_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 read0Addr : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 read0Addr : IN UNSIGNED(15 DOWNTO 0);
 		 wr_ready_o : OUT STD_LOGIC;
 		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
@@ -176,7 +177,7 @@ BEGIN
 
 
 
-b2v_inst37 : tx_router
+b2v_tx_router : tx_router
 GENERIC MAP(bytes_per_sample => 3,
 			global_channel_count => 16,
 			max_streams => 8,
@@ -202,7 +203,7 @@ PORT MAP(sys_clk_i => sys_clk,
 		 ssrc_o => ssrc);
 
 
-b2v_inst38 : tx_sample_buffer
+b2v_tx_sample_buffer : tx_sample_buffer
 GENERIC MAP(bytes_per_sample => 3,
 			global_channel_count => 16,
 			samples_per_channel_depth => 48
@@ -235,7 +236,7 @@ PORT MAP(sys_clk => sys_clk,
 		 wr_ptr_o => sample_buffer_rd_ptr);
 
 
-b2v_inst39 : tx_transmitter
+b2v_tx_transmitter : tx_transmitter
 GENERIC MAP(bytes_per_sample => 3,
 			global_channel_count => 16,
 			samples_per_channel_depth => 48

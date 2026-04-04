@@ -35,7 +35,6 @@ entity ptpv2_controller is
         t3_valid_o: out std_logic;
 		ptp_log_interval_o: out std_logic_vector(7 downto 0);
 
-        config_valid_i: in std_logic;
         sof_sent_i: in std_logic
 
 

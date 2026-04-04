@@ -597,9 +597,370 @@ on the Quartus Prime software download page.
 	)
 )
 (symbol
+	(rect 552 296 920 696)
+	(text "tx_sample_buffer" (rect 5 0 97 11)(font "Arial" ))
+	(text "tx_sample_buffer" (rect 8 384 100 395)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "sys_clk" (rect 0 0 38 11)(font "Arial" ))
+		(text "sys_clk" (rect 21 27 59 38)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "reset_n" (rect 0 0 40 11)(font "Arial" ))
+		(text "reset_n" (rect 21 43 61 54)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "audio_ch0_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch0_in[23..0]" (rect 21 59 126 70)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "audio_ch1_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch1_in[23..0]" (rect 21 75 126 86)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 3))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "audio_ch2_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch2_in[23..0]" (rect 21 91 126 102)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 3))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "audio_ch3_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch3_in[23..0]" (rect 21 107 126 118)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "audio_ch4_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch4_in[23..0]" (rect 21 123 126 134)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 3))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "audio_ch5_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch5_in[23..0]" (rect 21 139 126 150)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 3))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "audio_ch6_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch6_in[23..0]" (rect 21 155 126 166)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160)(line_width 3))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "audio_ch7_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch7_in[23..0]" (rect 21 171 126 182)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176)(line_width 3))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "audio_ch8_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch8_in[23..0]" (rect 21 187 126 198)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 3))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "audio_ch9_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
+		(text "audio_ch9_in[23..0]" (rect 21 203 126 214)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208)(line_width 3))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "audio_ch10_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch10_in[23..0]" (rect 21 219 133 230)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 3))
+	)
+	(port
+		(pt 0 240)
+		(input)
+		(text "audio_ch11_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch11_in[23..0]" (rect 21 235 133 246)(font "Arial" ))
+		(line (pt 0 240)(pt 16 240)(line_width 3))
+	)
+	(port
+		(pt 0 256)
+		(input)
+		(text "audio_ch12_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch12_in[23..0]" (rect 21 251 133 262)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 3))
+	)
+	(port
+		(pt 0 272)
+		(input)
+		(text "audio_ch13_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch13_in[23..0]" (rect 21 267 133 278)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 3))
+	)
+	(port
+		(pt 0 288)
+		(input)
+		(text "audio_ch14_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch14_in[23..0]" (rect 21 283 133 294)(font "Arial" ))
+		(line (pt 0 288)(pt 16 288)(line_width 3))
+	)
+	(port
+		(pt 0 304)
+		(input)
+		(text "audio_ch15_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
+		(text "audio_ch15_in[23..0]" (rect 21 299 133 310)(font "Arial" ))
+		(line (pt 0 304)(pt 16 304)(line_width 3))
+	)
+	(port
+		(pt 0 320)
+		(input)
+		(text "fs_clk_i" (rect 0 0 37 11)(font "Arial" ))
+		(text "fs_clk_i" (rect 21 315 58 326)(font "Arial" ))
+		(line (pt 0 320)(pt 16 320))
+	)
+	(port
+		(pt 0 336)
+		(input)
+		(text "read0Addr[15..0]" (rect 0 0 92 11)(font "Arial" ))
+		(text "read0Addr[15..0]" (rect 21 331 113 342)(font "Arial" ))
+		(line (pt 0 336)(pt 16 336)(line_width 3))
+	)
+	(port
+		(pt 0 352)
+		(input)
+		(text "metering_clear_i" (rect 0 0 88 11)(font "Arial" ))
+		(text "metering_clear_i" (rect 21 347 109 358)(font "Arial" ))
+		(line (pt 0 352)(pt 16 352))
+	)
+	(port
+		(pt 368 32)
+		(output)
+		(text "wr_ptr_o[15..0]" (rect 0 0 81 11)(font "Arial" ))
+		(text "wr_ptr_o[15..0]" (rect 279 27 360 38)(font "Arial" ))
+		(line (pt 368 32)(pt 352 32)(line_width 3))
+	)
+	(port
+		(pt 368 48)
+		(output)
+		(text "wr_ready_o" (rect 0 0 61 11)(font "Arial" ))
+		(text "wr_ready_o" (rect 296 43 357 54)(font "Arial" ))
+		(line (pt 368 48)(pt 352 48))
+	)
+	(port
+		(pt 368 64)
+		(output)
+		(text "data0_out[7..0]" (rect 0 0 82 11)(font "Arial" ))
+		(text "data0_out[7..0]" (rect 278 59 360 70)(font "Arial" ))
+		(line (pt 368 64)(pt 352 64)(line_width 3))
+	)
+	(port
+		(pt 368 80)
+		(output)
+		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 0 0 252 11)(font "Arial" ))
+		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 134 75 386 86)(font "Arial" ))
+		(line (pt 368 80)(pt 352 80)(line_width 3))
+	)
+	(port
+		(pt 368 96)
+		(output)
+		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 0 0 239 11)(font "Arial" ))
+		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 145 91 384 102)(font "Arial" ))
+		(line (pt 368 96)(pt 352 96)(line_width 3))
+	)
+	(parameter
+		"samples_per_channel_depth"
+		"48"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"global_channel_count"
+		"16"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"bytes_per_sample"
+		"3"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 352 384))
+	)
+	(annotation_block (parameter)(rect 520 200 808 256))
+)
+(symbol
+	(rect 1184 280 1576 488)
+	(text "tx_router" (rect 5 0 53 11)(font "Arial" ))
+	(text "tx_router" (rect 8 192 56 203)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "sys_clk_i" (rect 0 0 46 11)(font "Arial" ))
+		(text "sys_clk_i" (rect 21 27 67 38)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "reset_n" (rect 0 0 40 11)(font "Arial" ))
+		(text "reset_n" (rect 21 43 61 54)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "sample_buffer_wr_ptr_i[15..0]" (rect 0 0 158 11)(font "Arial" ))
+		(text "sample_buffer_wr_ptr_i[15..0]" (rect 21 59 179 70)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "packet_time_i[31..0]" (rect 0 0 109 11)(font "Arial" ))
+		(text "packet_time_i[31..0]" (rect 21 75 130 86)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 3))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "config_wr_addr_i[7..0]" (rect 0 0 118 11)(font "Arial" ))
+		(text "config_wr_addr_i[7..0]" (rect 21 91 139 102)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 3))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "config_wr_data_i[7..0]" (rect 0 0 116 11)(font "Arial" ))
+		(text "config_wr_data_i[7..0]" (rect 21 107 137 118)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "config_wr_en_i" (rect 0 0 77 11)(font "Arial" ))
+		(text "config_wr_en_i" (rect 21 123 98 134)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "sample_ready_i" (rect 0 0 82 11)(font "Arial" ))
+		(text "sample_ready_i" (rect 21 139 103 150)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "tx_en_i" (rect 0 0 37 11)(font "Arial" ))
+		(text "tx_en_i" (rect 21 155 58 166)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "config_wr_clk_i" (rect 0 0 80 11)(font "Arial" ))
+		(text "config_wr_clk_i" (rect 21 171 101 182)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176))
+	)
+	(port
+		(pt 392 32)
+		(output)
+		(text "ip_addr_o[31..0]" (rect 0 0 87 11)(font "Arial" ))
+		(text "ip_addr_o[31..0]" (rect 298 27 385 38)(font "Arial" ))
+		(line (pt 392 32)(pt 376 32)(line_width 3))
+	)
+	(port
+		(pt 392 48)
+		(output)
+		(text "channel_count_o[7..0]" (rect 0 0 118 11)(font "Arial" ))
+		(text "channel_count_o[7..0]" (rect 272 43 390 54)(font "Arial" ))
+		(line (pt 392 48)(pt 376 48)(line_width 3))
+	)
+	(port
+		(pt 392 64)
+		(output)
+		(text "samples_per_packet_per_channel_o[7..0]" (rect 0 0 219 11)(font "Arial" ))
+		(text "samples_per_packet_per_channel_o[7..0]" (rect 186 59 405 70)(font "Arial" ))
+		(line (pt 392 64)(pt 376 64)(line_width 3))
+	)
+	(port
+		(pt 392 80)
+		(output)
+		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 0 0 198 11)(font "Arial" ))
+		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 204 75 402 86)(font "Arial" ))
+		(line (pt 392 80)(pt 376 80)(line_width 3))
+	)
+	(port
+		(pt 392 96)
+		(output)
+		(text "packet_time_o[31..0]" (rect 0 0 113 11)(font "Arial" ))
+		(text "packet_time_o[31..0]" (rect 276 91 389 102)(font "Arial" ))
+		(line (pt 392 96)(pt 376 96)(line_width 3))
+	)
+	(port
+		(pt 392 112)
+		(output)
+		(text "ch_ids_o[63..0]" (rect 0 0 80 11)(font "Arial" ))
+		(text "ch_ids_o[63..0]" (rect 304 107 384 118)(font "Arial" ))
+		(line (pt 392 112)(pt 376 112)(line_width 3))
+	)
+	(port
+		(pt 392 128)
+		(output)
+		(text "ssrc_o[31..0]" (rect 0 0 68 11)(font "Arial" ))
+		(text "ssrc_o[31..0]" (rect 314 123 382 134)(font "Arial" ))
+		(line (pt 392 128)(pt 376 128)(line_width 3))
+	)
+	(port
+		(pt 392 144)
+		(output)
+		(text "audio_packet_tx_start_o" (rect 0 0 128 11)(font "Arial" ))
+		(text "audio_packet_tx_start_o" (rect 263 139 391 150)(font "Arial" ))
+		(line (pt 392 144)(pt 376 144))
+	)
+	(parameter
+		"samples_per_channel_depth"
+		"48"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"global_channel_count"
+		"16"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"bytes_per_sample"
+		"3"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"max_streams"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(drawing
+		(rectangle (rect 16 16 376 192))
+	)
+	(annotation_block (parameter)(rect 1224 160 1512 248))
+)
+(symbol
 	(rect 1808 224 2208 528)
 	(text "tx_transmitter" (rect 5 0 80 11)(font "Arial" ))
-	(text "inst39" (rect 8 288 41 299)(font "Arial" ))
+	(text "tx_transmitter" (rect 8 288 83 299)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -759,367 +1120,6 @@ on the Quartus Prime software download page.
 		(rectangle (rect 16 16 384 288))
 	)
 	(annotation_block (parameter)(rect 1848 152 2136 208))
-)
-(symbol
-	(rect 1184 280 1576 488)
-	(text "tx_router" (rect 5 0 53 11)(font "Arial" ))
-	(text "inst37" (rect 8 192 41 203)(font "Arial" ))
-	(port
-		(pt 0 32)
-		(input)
-		(text "sys_clk_i" (rect 0 0 46 11)(font "Arial" ))
-		(text "sys_clk_i" (rect 21 27 67 38)(font "Arial" ))
-		(line (pt 0 32)(pt 16 32))
-	)
-	(port
-		(pt 0 48)
-		(input)
-		(text "reset_n" (rect 0 0 40 11)(font "Arial" ))
-		(text "reset_n" (rect 21 43 61 54)(font "Arial" ))
-		(line (pt 0 48)(pt 16 48))
-	)
-	(port
-		(pt 0 64)
-		(input)
-		(text "sample_buffer_wr_ptr_i[15..0]" (rect 0 0 158 11)(font "Arial" ))
-		(text "sample_buffer_wr_ptr_i[15..0]" (rect 21 59 179 70)(font "Arial" ))
-		(line (pt 0 64)(pt 16 64)(line_width 3))
-	)
-	(port
-		(pt 0 80)
-		(input)
-		(text "packet_time_i[31..0]" (rect 0 0 109 11)(font "Arial" ))
-		(text "packet_time_i[31..0]" (rect 21 75 130 86)(font "Arial" ))
-		(line (pt 0 80)(pt 16 80)(line_width 3))
-	)
-	(port
-		(pt 0 96)
-		(input)
-		(text "config_wr_addr_i[7..0]" (rect 0 0 118 11)(font "Arial" ))
-		(text "config_wr_addr_i[7..0]" (rect 21 91 139 102)(font "Arial" ))
-		(line (pt 0 96)(pt 16 96)(line_width 3))
-	)
-	(port
-		(pt 0 112)
-		(input)
-		(text "config_wr_data_i[7..0]" (rect 0 0 116 11)(font "Arial" ))
-		(text "config_wr_data_i[7..0]" (rect 21 107 137 118)(font "Arial" ))
-		(line (pt 0 112)(pt 16 112)(line_width 3))
-	)
-	(port
-		(pt 0 128)
-		(input)
-		(text "config_wr_en_i" (rect 0 0 77 11)(font "Arial" ))
-		(text "config_wr_en_i" (rect 21 123 98 134)(font "Arial" ))
-		(line (pt 0 128)(pt 16 128))
-	)
-	(port
-		(pt 0 144)
-		(input)
-		(text "sample_ready_i" (rect 0 0 82 11)(font "Arial" ))
-		(text "sample_ready_i" (rect 21 139 103 150)(font "Arial" ))
-		(line (pt 0 144)(pt 16 144))
-	)
-	(port
-		(pt 0 160)
-		(input)
-		(text "tx_en_i" (rect 0 0 37 11)(font "Arial" ))
-		(text "tx_en_i" (rect 21 155 58 166)(font "Arial" ))
-		(line (pt 0 160)(pt 16 160))
-	)
-	(port
-		(pt 0 176)
-		(input)
-		(text "config_wr_clk_i" (rect 0 0 80 11)(font "Arial" ))
-		(text "config_wr_clk_i" (rect 21 171 101 182)(font "Arial" ))
-		(line (pt 0 176)(pt 16 176))
-	)
-	(port
-		(pt 392 32)
-		(output)
-		(text "ip_addr_o[31..0]" (rect 0 0 87 11)(font "Arial" ))
-		(text "ip_addr_o[31..0]" (rect 298 27 385 38)(font "Arial" ))
-		(line (pt 392 32)(pt 376 32)(line_width 3))
-	)
-	(port
-		(pt 392 48)
-		(output)
-		(text "channel_count_o[7..0]" (rect 0 0 118 11)(font "Arial" ))
-		(text "channel_count_o[7..0]" (rect 272 43 390 54)(font "Arial" ))
-		(line (pt 392 48)(pt 376 48)(line_width 3))
-	)
-	(port
-		(pt 392 64)
-		(output)
-		(text "samples_per_packet_per_channel_o[7..0]" (rect 0 0 219 11)(font "Arial" ))
-		(text "samples_per_packet_per_channel_o[7..0]" (rect 186 59 405 70)(font "Arial" ))
-		(line (pt 392 64)(pt 376 64)(line_width 3))
-	)
-	(port
-		(pt 392 80)
-		(output)
-		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 0 0 198 11)(font "Arial" ))
-		(text "sample_buffer_tx_start_addr_o[15..0]" (rect 204 75 402 86)(font "Arial" ))
-		(line (pt 392 80)(pt 376 80)(line_width 3))
-	)
-	(port
-		(pt 392 96)
-		(output)
-		(text "packet_time_o[31..0]" (rect 0 0 113 11)(font "Arial" ))
-		(text "packet_time_o[31..0]" (rect 276 91 389 102)(font "Arial" ))
-		(line (pt 392 96)(pt 376 96)(line_width 3))
-	)
-	(port
-		(pt 392 112)
-		(output)
-		(text "ch_ids_o[63..0]" (rect 0 0 80 11)(font "Arial" ))
-		(text "ch_ids_o[63..0]" (rect 304 107 384 118)(font "Arial" ))
-		(line (pt 392 112)(pt 376 112)(line_width 3))
-	)
-	(port
-		(pt 392 128)
-		(output)
-		(text "ssrc_o[31..0]" (rect 0 0 68 11)(font "Arial" ))
-		(text "ssrc_o[31..0]" (rect 314 123 382 134)(font "Arial" ))
-		(line (pt 392 128)(pt 376 128)(line_width 3))
-	)
-	(port
-		(pt 392 144)
-		(output)
-		(text "audio_packet_tx_start_o" (rect 0 0 128 11)(font "Arial" ))
-		(text "audio_packet_tx_start_o" (rect 263 139 391 150)(font "Arial" ))
-		(line (pt 392 144)(pt 376 144))
-	)
-	(parameter
-		"samples_per_channel_depth"
-		"48"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"global_channel_count"
-		"16"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"bytes_per_sample"
-		"3"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"max_streams"
-		"8"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(drawing
-		(rectangle (rect 16 16 376 192))
-	)
-	(annotation_block (parameter)(rect 1224 160 1512 248))
-)
-(symbol
-	(rect 552 296 920 696)
-	(text "tx_sample_buffer" (rect 5 0 97 11)(font "Arial" ))
-	(text "inst38" (rect 8 384 41 395)(font "Arial" ))
-	(port
-		(pt 0 32)
-		(input)
-		(text "sys_clk" (rect 0 0 38 11)(font "Arial" ))
-		(text "sys_clk" (rect 21 27 59 38)(font "Arial" ))
-		(line (pt 0 32)(pt 16 32))
-	)
-	(port
-		(pt 0 48)
-		(input)
-		(text "reset_n" (rect 0 0 40 11)(font "Arial" ))
-		(text "reset_n" (rect 21 43 61 54)(font "Arial" ))
-		(line (pt 0 48)(pt 16 48))
-	)
-	(port
-		(pt 0 64)
-		(input)
-		(text "audio_ch0_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch0_in[23..0]" (rect 21 59 126 70)(font "Arial" ))
-		(line (pt 0 64)(pt 16 64)(line_width 3))
-	)
-	(port
-		(pt 0 80)
-		(input)
-		(text "audio_ch1_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch1_in[23..0]" (rect 21 75 126 86)(font "Arial" ))
-		(line (pt 0 80)(pt 16 80)(line_width 3))
-	)
-	(port
-		(pt 0 96)
-		(input)
-		(text "audio_ch2_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch2_in[23..0]" (rect 21 91 126 102)(font "Arial" ))
-		(line (pt 0 96)(pt 16 96)(line_width 3))
-	)
-	(port
-		(pt 0 112)
-		(input)
-		(text "audio_ch3_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch3_in[23..0]" (rect 21 107 126 118)(font "Arial" ))
-		(line (pt 0 112)(pt 16 112)(line_width 3))
-	)
-	(port
-		(pt 0 128)
-		(input)
-		(text "audio_ch4_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch4_in[23..0]" (rect 21 123 126 134)(font "Arial" ))
-		(line (pt 0 128)(pt 16 128)(line_width 3))
-	)
-	(port
-		(pt 0 144)
-		(input)
-		(text "audio_ch5_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch5_in[23..0]" (rect 21 139 126 150)(font "Arial" ))
-		(line (pt 0 144)(pt 16 144)(line_width 3))
-	)
-	(port
-		(pt 0 160)
-		(input)
-		(text "audio_ch6_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch6_in[23..0]" (rect 21 155 126 166)(font "Arial" ))
-		(line (pt 0 160)(pt 16 160)(line_width 3))
-	)
-	(port
-		(pt 0 176)
-		(input)
-		(text "audio_ch7_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch7_in[23..0]" (rect 21 171 126 182)(font "Arial" ))
-		(line (pt 0 176)(pt 16 176)(line_width 3))
-	)
-	(port
-		(pt 0 192)
-		(input)
-		(text "audio_ch8_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch8_in[23..0]" (rect 21 187 126 198)(font "Arial" ))
-		(line (pt 0 192)(pt 16 192)(line_width 3))
-	)
-	(port
-		(pt 0 208)
-		(input)
-		(text "audio_ch9_in[23..0]" (rect 0 0 105 11)(font "Arial" ))
-		(text "audio_ch9_in[23..0]" (rect 21 203 126 214)(font "Arial" ))
-		(line (pt 0 208)(pt 16 208)(line_width 3))
-	)
-	(port
-		(pt 0 224)
-		(input)
-		(text "audio_ch10_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch10_in[23..0]" (rect 21 219 133 230)(font "Arial" ))
-		(line (pt 0 224)(pt 16 224)(line_width 3))
-	)
-	(port
-		(pt 0 240)
-		(input)
-		(text "audio_ch11_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch11_in[23..0]" (rect 21 235 133 246)(font "Arial" ))
-		(line (pt 0 240)(pt 16 240)(line_width 3))
-	)
-	(port
-		(pt 0 256)
-		(input)
-		(text "audio_ch12_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch12_in[23..0]" (rect 21 251 133 262)(font "Arial" ))
-		(line (pt 0 256)(pt 16 256)(line_width 3))
-	)
-	(port
-		(pt 0 272)
-		(input)
-		(text "audio_ch13_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch13_in[23..0]" (rect 21 267 133 278)(font "Arial" ))
-		(line (pt 0 272)(pt 16 272)(line_width 3))
-	)
-	(port
-		(pt 0 288)
-		(input)
-		(text "audio_ch14_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch14_in[23..0]" (rect 21 283 133 294)(font "Arial" ))
-		(line (pt 0 288)(pt 16 288)(line_width 3))
-	)
-	(port
-		(pt 0 304)
-		(input)
-		(text "audio_ch15_in[23..0]" (rect 0 0 112 11)(font "Arial" ))
-		(text "audio_ch15_in[23..0]" (rect 21 299 133 310)(font "Arial" ))
-		(line (pt 0 304)(pt 16 304)(line_width 3))
-	)
-	(port
-		(pt 0 320)
-		(input)
-		(text "fs_clk_i" (rect 0 0 37 11)(font "Arial" ))
-		(text "fs_clk_i" (rect 21 315 58 326)(font "Arial" ))
-		(line (pt 0 320)(pt 16 320))
-	)
-	(port
-		(pt 0 336)
-		(input)
-		(text "read0Addr[15..0]" (rect 0 0 92 11)(font "Arial" ))
-		(text "read0Addr[15..0]" (rect 21 331 113 342)(font "Arial" ))
-		(line (pt 0 336)(pt 16 336)(line_width 3))
-	)
-	(port
-		(pt 0 352)
-		(input)
-		(text "metering_clear_i" (rect 0 0 88 11)(font "Arial" ))
-		(text "metering_clear_i" (rect 21 347 109 358)(font "Arial" ))
-		(line (pt 0 352)(pt 16 352))
-	)
-	(port
-		(pt 368 32)
-		(output)
-		(text "wr_ptr_o[15..0]" (rect 0 0 81 11)(font "Arial" ))
-		(text "wr_ptr_o[15..0]" (rect 279 27 347 38)(font "Arial" ))
-		(line (pt 368 32)(pt 352 32)(line_width 3))
-	)
-	(port
-		(pt 368 48)
-		(output)
-		(text "wr_ready_o" (rect 0 0 61 11)(font "Arial" ))
-		(text "wr_ready_o" (rect 296 43 347 54)(font "Arial" ))
-		(line (pt 368 48)(pt 352 48))
-	)
-	(port
-		(pt 368 64)
-		(output)
-		(text "data0_out[7..0]" (rect 0 0 82 11)(font "Arial" ))
-		(text "data0_out[7..0]" (rect 278 59 347 70)(font "Arial" ))
-		(line (pt 368 64)(pt 352 64)(line_width 3))
-	)
-	(port
-		(pt 368 80)
-		(output)
-		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 0 0 252 11)(font "Arial" ))
-		(text "metering_signal_o[(global_channel_count-1)..0]" (rect 134 75 347 86)(font "Arial" ))
-		(line (pt 368 80)(pt 352 80)(line_width 3))
-	)
-	(port
-		(pt 368 96)
-		(output)
-		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 0 0 239 11)(font "Arial" ))
-		(text "metering_clip_o[(global_channel_count-1)..0]" (rect 145 91 347 102)(font "Arial" ))
-		(line (pt 368 96)(pt 352 96)(line_width 3))
-	)
-	(parameter
-		"samples_per_channel_depth"
-		"48"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"global_channel_count"
-		"16"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(parameter
-		"bytes_per_sample"
-		"3"
-		""
-		(type "PARAMETER_SIGNED_DEC")	)
-	(drawing
-		(rectangle (rect 16 16 352 384))
-	)
-	(annotation_block (parameter)(rect 520 200 808 256))
 )
 (connector
 	(pt 1104 344)

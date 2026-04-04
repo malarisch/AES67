@@ -1,0 +1,163 @@
+GowinSynthesis start
+Running parser ...
+Analyzing Verilog file '/home/wolff/AES67/FPGA/gowin/fpga_project/src/gowin_rpll/gowin_rpll.v'
+Analyzing Verilog file '/home/wolff/AES67/FPGA/mii_rmii/RTL/rmii_phy_if.v'
+Analyzing Verilog file '/home/wolff/AES67/litex_soc/build/gowin/gateware/litex_soc.v'
+Analyzing Verilog file '/home/wolff/AES67/litex_soc/build/gowin/gateware/VexRiscv.v'
+Analyzing VHDL file '/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd'
+Analyzing entity 'fpga'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":9)
+Analyzing architecture 'bdf_type'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":72)
+ERROR (EX4728) : Type error near 'parser_ram_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":799)
+ERROR (EX4728) : Type error near 'ptp_ram_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":800)
+ERROR (EX4728) : Type error near 'rtp_ram_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":801)
+ERROR (EX4728) : Type error near 'mcu_read_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":802)
+ERROR (EX4728) : Type error near 'eth_ram_wr_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":803)
+ERROR (EX4716) : Unit 'bdf_type' is ignored due to previous errors("/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd":1247)
+VHDL file '/home/wolff/AES67/FPGA/gowin/top_tang_primer.vhd' is ignored due to errors
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ethernet_packet_aggregator.vhd'
+Analyzing entity 'ethernet_packet_aggregator'("/home/wolff/AES67/FPGA/ethernet_packet_aggregator.vhd":4)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ethernet_packet_aggregator.vhd":20)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audioclock_generator.vhd'
+Analyzing entity 'audioclock_generator'("/home/wolff/AES67/FPGA/audioclock_generator.vhd":5)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/audioclock_generator.vhd":23)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/wallclock.vhd'
+Analyzing entity 'wallclock'("/home/wolff/AES67/FPGA/wallclock.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/wallclock.vhd":54)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd'
+Analyzing package 'ethernet_types'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd":9)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/litex_eth_buffer_bridge.vhd'
+Analyzing entity 'litex_eth_buffer_bridge'("/home/wolff/AES67/FPGA/litex_eth_buffer_bridge.vhd":19)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/litex_eth_buffer_bridge.vhd":78)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/clock_ppb_meter.vhd'
+Analyzing entity 'clock_ppb_meter'("/home/wolff/AES67/FPGA/clock_ppb_meter.vhd":23)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/clock_ppb_meter.vhd":40)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/system_config_reg.vhd'
+Analyzing entity 'system_config_reg'("/home/wolff/AES67/FPGA/system_config_reg.vhd":6)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/system_config_reg.vhd":41)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/eth_tx_arbiter.vhd'
+Analyzing entity 'eth_tx_arbiter'("/home/wolff/AES67/FPGA/eth_tx_arbiter.vhd":4)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/eth_tx_arbiter.vhd":22)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/I2S_IN.vhd'
+Analyzing entity 'i2s_in'("/home/wolff/AES67/FPGA/I2S_IN.vhd":31)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/I2S_IN.vhd":54)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/pulse_cdc_mac_sys.vhd'
+Analyzing entity 'cdc_mac_sys'("/home/wolff/AES67/FPGA/pulse_cdc_mac_sys.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/pulse_cdc_mac_sys.vhd":16)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/clk_by_x.vhd'
+Analyzing entity 'clk_by_x'("/home/wolff/AES67/FPGA/clk_by_x.vhd":4)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/clk_by_x.vhd":14)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd'
+Analyzing entity 'audio_tx_module'("/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd":26)
+Analyzing architecture 'bdf_type'("/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd":68)
+ERROR (EX4728) : Type error near 'sample_ram_read_addr', expected type 'unsigned'("/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd":231)
+ERROR (EX4716) : Unit 'bdf_type' is ignored due to previous errors("/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd":269)
+VHDL file '/home/wolff/AES67/FPGA/audio_tx/audio_tx_module.vhd' is ignored due to errors
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_tx/tx_sample_buffer.vhd'
+Analyzing entity 'tx_sample_buffer'("/home/wolff/AES67/FPGA/audio_tx/tx_sample_buffer.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/audio_tx/tx_sample_buffer.vhd":46)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_tx/tdm8_in.vhd'
+Analyzing entity 'tdm8_in'("/home/wolff/AES67/FPGA/audio_tx/tdm8_in.vhd":34)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/audio_tx/tdm8_in.vhd":62)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_tx/tx_router.vhd'
+Analyzing entity 'tx_router'("/home/wolff/AES67/FPGA/audio_tx/tx_router.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/audio_tx/tx_router.vhd":47)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_tx/tx_transmitter.vhd'
+Analyzing entity 'tx_transmitter'("/home/wolff/AES67/FPGA/audio_tx/tx_transmitter.vhd":13)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/audio_tx/tx_transmitter.vhd":56)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptp_module.vhd'
+Analyzing entity 'ptp_module'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":26)
+Analyzing architecture 'bdf_type'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":70)
+ERROR (EX4728) : Type error near 'rx_ts_ns', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":273)
+ERROR (EX4728) : Type error near 'rx_ts_s', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":274)
+ERROR (EX4728) : Type error near 'rx_sequence_id', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":275)
+ERROR (EX4728) : Type error near 'wallclock_nanoseconds', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":276)
+ERROR (EX4728) : Type error near 'wallclock_seconds', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":277)
+ERROR (EX4728) : Type error near 'tx_seq_id', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":282)
+ERROR (EX4728) : Type error near 'tx_timesstamp_ns', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":283)
+ERROR (EX4728) : Type error near 'tx_timestamp_s', expected type 'unsigned'("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":284)
+ERROR (EX4716) : Unit 'bdf_type' is ignored due to previous errors("/home/wolff/AES67/FPGA/ptp/ptp_module.vhd":410)
+VHDL file '/home/wolff/AES67/FPGA/ptp/ptp_module.vhd' is ignored due to errors
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_controller.vhd'
+Analyzing entity 'ptpv2_controller'("/home/wolff/AES67/FPGA/ptp/ptpv2_controller.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_controller.vhd":165)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_sender.vhd'
+Analyzing entity 'ptpv2_sender'("/home/wolff/AES67/FPGA/ptp/ptpv2_sender.vhd":16)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_sender.vhd":50)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_servo.vhd'
+Analyzing entity 'ptpv2_servo'("/home/wolff/AES67/FPGA/ptp/ptpv2_servo.vhd":26)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_servo.vhd":73)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_parser.vhd'
+Analyzing entity 'ptpv2_parser'("/home/wolff/AES67/FPGA/ptp/ptpv2_parser.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_parser.vhd":57)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_parser_no_min_filter.vhd'
+Analyzing entity 'ptpv2_parser_no_min'("/home/wolff/AES67/FPGA/ptp/ptpv2_parser_no_min_filter.vhd":4)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_parser_no_min_filter.vhd":50)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/ptp/ptpv2_servo_median.vhd'
+Analyzing entity 'ptpv2_servo_with_median'("/home/wolff/AES67/FPGA/ptp/ptpv2_servo_median.vhd":28)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/ptp/ptpv2_servo_median.vhd":79)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_rx/rx_ringbuffer.vhd'
+Analyzing entity 'rx_ringbuffer'("/home/wolff/AES67/FPGA/audio_rx/rx_ringbuffer.vhd":5)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/audio_rx/rx_ringbuffer.vhd":52)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_rx/tdm8_out.vhd'
+Analyzing entity 'tdm8_out'("/home/wolff/AES67/FPGA/audio_rx/tdm8_out.vhd":47)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/audio_rx/tdm8_out.vhd":72)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/audio_rx/i2s_out.vhd'
+Analyzing entity 'i2s_out'("/home/wolff/AES67/FPGA/audio_rx/i2s_out.vhd":29)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/audio_rx/i2s_out.vhd":48)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/eth_ram.vhd'
+Analyzing entity 'eth_ram'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/eth_ram.vhd":14)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/eth_ram.vhd":49)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd'
+Analyzing entity 'ethernet_packet_parser'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd":13)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd":43)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_reset.vhd'
+Analyzing entity 'ethernet_reset'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_reset.vhd":14)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_reset.vhd":28)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_receive.vhd'
+Analyzing entity 'ethernet_receive'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_receive.vhd":13)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_receive.vhd":32)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/utility.vhd'
+Analyzing package 'utility'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/utility.vhd":11)
+Analyzing package body 'utility'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/utility.vhd":22)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/reverse_mac.vhd'
+Analyzing entity 'reverse_mac'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/reverse_mac.vhd":8)
+Analyzing architecture 'behavioral'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/reverse_mac.vhd":16)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd'
+Analyzing package 'crc'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd":15)
+Analyzing package body 'crc'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd":22)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd'
+Analyzing package 'crc32'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd":13)
+Analyzing package body 'crc32'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd":37)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd'
+Analyzing package 'framing_common'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd":16)
+Analyzing package body 'framing_common'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd":39)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd'
+Analyzing entity 'framing'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd":17)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd":64)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd'
+Analyzing package 'miim_types'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd":12)
+Analyzing package body 'miim_types'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd":22)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd'
+Analyzing entity 'reset_generator'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd":13)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd":32)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/single_signal_synchronizer.vhd'
+Analyzing entity 'single_signal_synchronizer'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/single_signal_synchronizer.vhd":12)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd'
+Analyzing entity 'mii_gmii'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd":15)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd":63)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd'
+Analyzing entity 'miim'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd":15)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd":50)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd'
+Analyzing package 'miim_registers'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd":15)
+Analyzing package body 'miim_registers'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd":131)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd'
+Analyzing entity 'miim_control'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd":14)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd":48)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd'
+Analyzing entity 'ethernet'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd":14)
+Analyzing architecture 'rtl'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd":86)
+WARN  (EX4760) : 'mii_gmii_io' is not compiled in library 'work'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd":198)
+Analyzing VHDL file '/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/generic/single_signal_synchronizer_simple.vhd'
+Analyzing architecture 'simple'("/home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/generic/single_signal_synchronizer_simple.vhd":11)
+GowinSynthesis finish

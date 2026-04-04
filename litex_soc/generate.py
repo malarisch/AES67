@@ -18,6 +18,7 @@ from migen import *
 from litex.gen import *
 
 from litex.soc.cores.clock import Cyclone10LPPLL
+from litex.soc.cores.clock.gowin_gw2a import GW2APLL
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.soc import SoCRegion
 from litex.soc.integration.builder import Builder
@@ -29,6 +30,7 @@ from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRStatus, CSRField
 from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr_eventmanager import EventManager, EventSourceProcess
 from migen.genlib.fifo import SyncFIFOBuffered
+from migen.genlib.resetsync import AsyncResetSynchronizer
 
 
 # -- HyperRAM subclass with warm-reset recovery -------------------------------
@@ -155,35 +157,25 @@ class AES67HyperRAM(HyperRAM):
         )
 from migen.genlib.fifo import SyncFIFOBuffered
 
-# -- Minimal platform stub (no toolchain, just pin definitions) ---------------
+# -- Minimal platform stubs (no toolchain, just pin definitions) ---------------
 
 from litex.build.generic_platform import Pins, Subsignal, IOStandard
 from litex.build.altera import AlteraPlatform
+from litex.build.gowin.platform import GowinPlatform
 
-_io = [
-    # Clock (50 MHz input)
-    ("clk50", 0, Pins(1)),
-
+# Shared I/O: everything except clock and main RAM (identical across targets)
+_io_common = [
     # MAC clock inputs (directly from FPGA Ethernet MAC)
     ("clk_mac_rx", 0, Pins(1)),
     ("clk_mac_tx", 0, Pins(1)),
 
-    # SoC sys_clk output (80 MHz PLL output, directly active to FPGA for config RAM write clocks)
+    # SoC sys_clk output (for FPGA-side config RAM write clocks)
     ("sys_clk_out", 0, Pins(1)),
 
     # Serial / UART
     ("serial", 0,
         Subsignal("tx", Pins(1)),
         Subsignal("rx", Pins(1)),
-    ),
-
-    # HyperRAM (directly connected to top-level ports)
-    ("hyperram", 0,
-        Subsignal("clk",   Pins(1)),
-        Subsignal("rst_n", Pins(1)),
-        Subsignal("dq",    Pins(8)),
-        Subsignal("cs_n",  Pins(1)),
-        Subsignal("rwds",  Pins(1)),
     ),
 
     # I2C 0: Display + PLL (SSD1306 + Si5351A)
@@ -290,45 +282,99 @@ _io = [
     ),
 ]
 
+# Target-specific I/O: clock + main RAM
+_io_cyclone10 = [
+    ("clk50", 0, Pins(1)),
+    ("hyperram", 0,
+        Subsignal("clk",   Pins(1)),
+        Subsignal("rst_n", Pins(1)),
+        Subsignal("dq",    Pins(8)),
+        Subsignal("cs_n",  Pins(1)),
+        Subsignal("rwds",  Pins(1)),
+    ),
+] + _io_common
 
-class StubPlatform(AlteraPlatform):
+_io_gowin = [
+    ("clk27", 0, Pins(1)),
+    ("ddram", 0,
+        Subsignal("a",       Pins(14)),
+        Subsignal("ba",      Pins(3)),
+        Subsignal("ras_n",   Pins(1)),
+        Subsignal("cas_n",   Pins(1)),
+        Subsignal("we_n",    Pins(1)),
+        Subsignal("cs_n",    Pins(1)),
+        Subsignal("dm",      Pins(2)),
+        Subsignal("dq",      Pins(16)),
+        Subsignal("dqs_p",   Pins(2)),
+        Subsignal("dqs_n",   Pins(2)),
+        Subsignal("clk_p",   Pins(1)),
+        Subsignal("clk_n",   Pins(1)),
+        Subsignal("cke",     Pins(1)),
+        Subsignal("odt",     Pins(1)),
+        Subsignal("reset_n", Pins(1)),
+    ),
+] + _io_common
+
+
+# -- Shared build helper (HDL-only, no synthesis) -----------------------------
+
+def _stub_build(platform, fragment, build_dir="build", build_name="litex_soc", run=True, **kwargs):
+    os.makedirs(build_dir, exist_ok=True)
+    cwd = os.getcwd()
+    os.chdir(build_dir)
+
+    from migen.fhdl.structure import _Fragment
+    if not isinstance(fragment, _Fragment):
+        fragment = fragment.get_fragment()
+    platform.finalize(fragment)
+
+    v_output = platform.get_verilog(fragment, name=build_name)
+    v_output.write(f"{build_name}.v")
+
+    # Copy all registered source files (e.g. VexRiscv CPU) into build dir
+    for src_path, language, library, *_ in platform.sources:
+        dst = os.path.join(build_dir, os.path.basename(src_path))
+        if os.path.abspath(src_path) != os.path.abspath(dst):
+            shutil.copy2(src_path, dst)
+
+    os.chdir(cwd)
+    return v_output.ns
+
+
+class Cyclone10StubPlatform(AlteraPlatform):
     """Altera-based platform stub for HDL-only generation (no synthesis)."""
     default_clk_name   = "clk50"
     default_clk_period = 1e9 / 50e6
 
     def __init__(self):
-        # 10CL025YU256I7G = project's Cyclone 10LP device
-        AlteraPlatform.__init__(self, "10CL025YU256I7G", _io, toolchain="quartus")
+        AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_cyclone10, toolchain="quartus")
 
     def create_programmer(self):
         raise NotImplementedError
 
-    def build(self, fragment, build_dir="build", build_name="litex_soc", run=True, **kwargs):
-        os.makedirs(build_dir, exist_ok=True)
-        cwd = os.getcwd()
-        os.chdir(build_dir)
-
-        from migen.fhdl.structure import _Fragment
-        if not isinstance(fragment, _Fragment):
-            fragment = fragment.get_fragment()
-        self.finalize(fragment)
-
-        v_output = self.get_verilog(fragment, name=build_name)
-        v_output.write(f"{build_name}.v")
-
-        # Copy all registered source files (e.g. VexRiscv CPU) into build dir
-        for src_path, language, library, *_ in self.sources:
-            dst = os.path.join(build_dir, os.path.basename(src_path))
-            if os.path.abspath(src_path) != os.path.abspath(dst):
-                shutil.copy2(src_path, dst)
-
-        os.chdir(cwd)
-        return v_output.ns
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
 
 
-# -- CRG (Clock Reset Generator) ----------------------------------------------
+class GowinStubPlatform(GowinPlatform):
+    """Gowin-based platform stub for HDL-only generation (no synthesis)."""
+    default_clk_name   = "clk27"
+    default_clk_period = 1e9 / 27e6
 
-class _CRG(LiteXModule):
+    def __init__(self):
+        GowinPlatform.__init__(self, "GW2A-LV18PG256C8/I7", _io_gowin,
+                               toolchain="gowin", devicename="GW2A-18C")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+# -- CRG (Clock Reset Generator) — Cyclone 10LP --------------------------------
+
+class _CRG_Cyclone10(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_sys2x=False):
         self.rst    = Signal()
         self.cd_sys = ClockDomain()
@@ -367,6 +413,70 @@ class _CRG(LiteXModule):
         if with_sys2x:
             self.cd_sys2x = ClockDomain()
             pll.create_clkout(self.cd_sys2x, 2 * sys_clk_freq)
+
+        # MAC clock domains (directly fed from external FPGA Ethernet MAC).
+        # Used for the FPGA-side ports of dual-port RAMs in eth_buf.
+        self.cd_mac_rx = ClockDomain(reset_less=True)
+        self.cd_mac_tx = ClockDomain(reset_less=True)
+        self.comb += [
+            self.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
+            self.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
+        ]
+
+
+# -- CRG (Clock Reset Generator) — Gowin GW2A (Tang Primer 20k) ---------------
+
+class _CRG_Gowin(LiteXModule):
+    def __init__(self, platform, sys_clk_freq):
+        self.rst    = Signal()
+        self.cd_sys = ClockDomain()
+        self.cd_por = ClockDomain()
+
+        # DDR3 requires 2:1 clock ratio
+        self.cd_init    = ClockDomain()
+        self.cd_sys2x   = ClockDomain()
+        self.cd_sys2x_i = ClockDomain()
+
+        # # #
+
+        self.stop  = Signal()
+        self.reset = Signal()
+
+        # Clk
+        clk27 = platform.request("clk27")
+
+        # Power on reset (the onboard POR is not aware of reprogramming)
+        por_count = Signal(16, reset=2**16-1)
+        por_done  = Signal()
+        self.comb += self.cd_por.clk.eq(clk27)
+        self.comb += por_done.eq(por_count == 0)
+        self.sync.por += If(~por_done, por_count.eq(por_count - 1))
+
+        # PLL
+        self.pll = pll = GW2APLL(devicename=platform.devicename, device=platform.device)
+        self.comb += pll.reset.eq(~por_done)
+        pll.register_clkin(clk27, 27e6)
+
+        # 2:1 clock for DDR3: PLL → sys2x_i → DHCEN (gated) → sys2x → CLKDIV/2 → sys
+        pll.create_clkout(self.cd_sys2x_i, 2*sys_clk_freq)
+        self.specials += [
+            Instance("DHCEN",
+                i_CLKIN  = self.cd_sys2x_i.clk,
+                i_CE     = self.stop,
+                o_CLKOUT = self.cd_sys2x.clk),
+            Instance("CLKDIV",
+                p_DIV_MODE = "2",
+                i_CALIB    = 0,
+                i_HCLKIN   = self.cd_sys2x.clk,
+                i_RESETN   = ~self.reset,
+                o_CLKOUT   = self.cd_sys.clk),
+        ]
+
+        # Init clock domain (raw 27 MHz, used by DDR3 init FSM)
+        self.comb += self.cd_init.clk.eq(clk27)
+        self.comb += self.cd_init.rst.eq(pll.reset)
+
+        self.specials += AsyncResetSynchronizer(self.cd_sys, ~pll.locked | self.rst | self.reset)
 
         # MAC clock domains (directly fed from external FPGA Ethernet MAC).
         # Used for the FPGA-side ports of dual-port RAMs in eth_buf.
@@ -755,23 +865,31 @@ class AES67SoC(SoCCore):
         "rx_stream_cfg":  0x90005000,
     })
 
-    def __init__(self, platform, sys_clk_freq, with_hyperram=False, hyperram_clk_ratio="4:1", integrated_sram_size=4*1024, **kwargs):
+    def __init__(self, platform, sys_clk_freq, target="cyclone10",
+                 with_hyperram=False, hyperram_clk_ratio="4:1",
+                 integrated_sram_size=4*1024, **kwargs):
 
         # Boot flow: CPU resets to SPI flash where a tiny boot stub copies
-        # the BIOS into HyperRAM and jumps there.  The BIOS therefore runs
+        # the BIOS into main RAM and jumps there.  The BIOS therefore runs
         # at full RAM speed instead of slow SPI read speed (~1.5 MiB/s).
         #
         # SPI Flash layout (see boot_stub/):
-        #   0x30000000: boot_stub  (512 bytes, copies BIOS → HyperRAM)
+        #   0x30000000: boot_stub  (512 bytes, copies BIOS → main RAM)
         #   0x30000200: bios.bin   (up to ~63.5 KB)
         #   0x30010000: firmware   (Zephyr app, optional)
         #
-        # CPU reset → 0x30000000 (flash), BIOS linked at top of HyperRAM.
-        # Boot stub copies BIOS from flash to top of HyperRAM so it doesn't
-        # collide with memtest (2 MB from base) or serialboot firmware upload.
+        # Main RAM size differs per target:
+        #   Cyclone10: 8 MB HyperRAM  → BIOS at 0x207F0000
+        #   Gowin:     128 MB DDR3    → BIOS at 0x27FF0000
         cpu_reset_address = self.mem_map["spiflash"]  # 0x30000000
         bios_size         = 0x10000                    # 64 KB
-        bios_run_address  = 0x20000000 + 8*1024*1024 - bios_size  # 0x207F0000
+
+        if target == "gowin":
+            main_ram_size    = 128*1024*1024  # 128 MB DDR3
+        else:
+            main_ram_size    = 8*1024*1024    # 8 MB HyperRAM (only used when with_hyperram)
+
+        bios_run_address = 0x20000000 + main_ram_size - bios_size
 
         # SoCCore - must be initialized before CRG
         SoCCore.__init__(self, platform, sys_clk_freq,
@@ -793,11 +911,9 @@ class AES67SoC(SoCCore):
         )
 
         # ROM_DISABLE: no block-RAM ROM, BIOS is external.
-        # Linker region "rom" points to top of HyperRAM so BIOS gets linked
+        # Linker region "rom" points to top of main RAM so BIOS gets linked
         # at the address where it will actually execute (after boot stub
-        # copies it there).  Since cpu_reset_address (flash) != rom origin
-        # (RAM), LiteX won't auto-set cpu.use_rom — force it so the builder
-        # still compiles the BIOS.
+        # copies it there).
         self.add_constant("ROM_DISABLE", 1)
         self.cpu.use_rom = True
         self.bus.add_region("rom", SoCRegion(
@@ -807,22 +923,38 @@ class AES67SoC(SoCCore):
             cached = True,
             linker = True))
 
-        # Determine if sys2x clock is needed (HyperRAM 2:1 mode)
-        need_sys2x = with_hyperram and (hyperram_clk_ratio == "2:1")
+        # -- CRG and main RAM (target-specific) --------------------------------
+        if target == "gowin":
+            # Gowin GW2A: GW2APLL (27 MHz) + DDR3
+            self.crg = _CRG_Gowin(platform, sys_clk_freq)
 
-        # CRG - Clock and Reset Generator (must be after SoCCore.__init__)
-        self.crg = _CRG(platform, sys_clk_freq, with_sys2x=need_sys2x)
-
-        # HyperRAM (16 MB IS66WVH16M8ALL-166B1LI on C10LP board, 1.8V, 166 MHz max)
-        # Uses AES67HyperRAM subclass for automatic startup reset on warm reboot.
-        if with_hyperram:
-            self.hyperram = AES67HyperRAM(
-                pads         = platform.request("hyperram"),
+            from litedram.phy import GW2DDRPHY
+            from litedram.modules import MT41K64M16
+            self.ddrphy = GW2DDRPHY(
+                pads         = platform.request("ddram"),
                 sys_clk_freq = sys_clk_freq,
-                clk_ratio    = hyperram_clk_ratio,  # "4:1" = safe, "2:1" = 2x faster
             )
-            self.bus.add_slave("main_ram", slave=self.hyperram.bus,
-                region=SoCRegion(origin=0x20000000, size=16*1024*1024, mode="rwx"))
+            self.ddrphy.settings.rtt_nom = "disabled"
+            self.comb += self.crg.stop.eq(self.ddrphy.init.stop)
+            self.comb += self.crg.reset.eq(self.ddrphy.init.reset)
+            self.add_sdram("sdram",
+                phy           = self.ddrphy,
+                module        = MT41K64M16(sys_clk_freq, "1:2"),
+                l2_cache_size = 8192,
+            )
+        else:
+            # Cyclone 10LP: Cyclone10LPPLL (50 MHz) + HyperRAM
+            need_sys2x = with_hyperram and (hyperram_clk_ratio == "2:1")
+            self.crg = _CRG_Cyclone10(platform, sys_clk_freq, with_sys2x=need_sys2x)
+
+            if with_hyperram:
+                self.hyperram = AES67HyperRAM(
+                    pads         = platform.request("hyperram"),
+                    sys_clk_freq = sys_clk_freq,
+                    clk_ratio    = hyperram_clk_ratio,
+                )
+                self.bus.add_slave("main_ram", slave=self.hyperram.bus,
+                    region=SoCRegion(origin=0x20000000, size=main_ram_size, mode="rwx"))
 
         # -- I2C 0: Display (SSD1306) + PLL (Si5351A) -------------------------
         self.i2c0 = I2CMaster(platform.request("i2c", 0))
@@ -981,24 +1113,39 @@ class AES67SoC(SoCCore):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
-    parser.add_argument("--sys-clk-freq",       default=80e6,  type=float, help="System clock frequency (Hz)")
-    parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support")
-    parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (2:1 = 2x faster)")
+    parser.add_argument("--target",             default="cyclone10", choices=["cyclone10", "gowin"], help="Target FPGA platform")
+    parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 80 MHz (cyclone10), 50 MHz (gowin)")
+    parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
+    parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (cyclone10 only)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
     parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "build")
+    # Per-target defaults
+    if args.sys_clk_freq is None:
+        args.sys_clk_freq = {"cyclone10": 80e6, "gowin": 50e6}[args.target]
 
-    platform = StubPlatform()
-    soc = AES67SoC(
-        platform,
-        sys_clk_freq         = int(args.sys_clk_freq),
-        with_hyperram        = args.with_hyperram,
-        hyperram_clk_ratio   = args.hyperram_clk_ratio,
-        integrated_sram_size = args.sram_size * 1024,
-    )
+    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "build", args.target)
+
+    if args.target == "gowin":
+        platform = GowinStubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq         = int(args.sys_clk_freq),
+            target               = "gowin",
+            integrated_sram_size = args.sram_size * 1024,
+        )
+    else:
+        platform = Cyclone10StubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq         = int(args.sys_clk_freq),
+            target               = "cyclone10",
+            with_hyperram        = args.with_hyperram,
+            hyperram_clk_ratio   = args.hyperram_clk_ratio,
+            integrated_sram_size = args.sram_size * 1024,
+        )
 
     builder = Builder(soc,
         output_dir       = output_dir,
@@ -1010,7 +1157,8 @@ def main():
     )
     builder.build(build_name="litex_soc", run=False)
 
-    print(f"\nHDL generated in: {output_dir}/gateware/")
+    print(f"\nTarget:           {args.target}")
+    print(f"HDL generated in: {output_dir}/gateware/")
     print(f"CSR map:          {output_dir}/csr.json")
     print(f"CSR CSV:          {output_dir}/csr.csv")
     print(f"\nIntegrate the top-level Verilog into your FPGA design.")
