@@ -66,12 +66,13 @@ entity litex_eth_buffer_bridge is
     -- ================================================================
     mac_rx_clock_i      : in  std_ulogic;
     mac_rx_reset_i      : in  std_ulogic;
-    parse_mcu_packet_i  : in  std_ulogic;   -- 1-cycle pulse: non-RTP frame ready
+    parse_mcu_packet_tog_i  : in  std_ulogic;  -- toggles when packet ready
     pkt_len_i           : in  unsigned(10 downto 0);  -- frame length from ethernet_receive
     eth_ram_data_i      : in  std_ulogic_vector(7 downto 0);  -- read data from eth_ram read port
     eth_ram_addr_o      : out unsigned(10 downto 0);  -- read address to eth_ram
 
-    mcu_clk_i         : in STD_ULOGIC
+    mcu_clk_i         : in STD_ULOGIC;
+    sys_clk_i         : in STD_ULOGIC
   );
 end entity;
 
@@ -99,7 +100,7 @@ architecture rtl of litex_eth_buffer_bridge is
   -- RX signals (mac_rx_clock domain)
   -- ================================================================
 
-  type t_rx_sm is (RX_IDLE, RX_COPY, RX_DONE);
+  type t_rx_sm is (RX_IDLE, RX_WAIT, RX_COPY, RX_DONE);
   signal sm_rx : t_rx_sm := RX_IDLE;
 
   signal rx_copy_addr    : unsigned(10 downto 0) := (others => '0');
@@ -221,15 +222,14 @@ begin
   end process;
 
   -- ================================================================
-  -- RX process (mac_rx_clock domain)
+  -- RX process (sys_clk domain)
   --
   -- Copies frames from eth_ram into the LiteX RX buffer when
-  -- ethernet_packet_parser signals a non-RTP packet is ready.
+  -- packet parser signals a non-RTP packet is ready.
   --
-  -- eth_ram read ports are combinatorial (async), so the data for
-  -- a given address is available in the same cycle.  We set up
-  -- address 0 in the IDLE→COPY transition, then copy one byte
-  -- per clock cycle.
+  -- eth_ram read port is synchronous (1 clock latency):
+  -- address presented in cycle N, data available in cycle N+1.
+  -- We use RX_WAIT to absorb that latency before entering RX_COPY.
   -- ================================================================
   p_rx : process(mac_rx_clock_i, mac_rx_reset_i)
   begin
@@ -251,11 +251,10 @@ begin
     elsif rising_edge(mac_rx_clock_i) then
       buf_rx_we_o <= '0';
 
-      -- Edge detection for parse_mcu_packet (it stays high as a level
-      -- until the next packet arrives, so we must detect the rising edge)
-      parse_mcu_d <= parse_mcu_packet_i;
+      -- Edge detection for parse_mcu_packet toggle
+      parse_mcu_d <= parse_mcu_packet_tog_i;
 
-      -- CDC: sync buf_rx_ack into mac_rx domain
+      -- CDC: sync buf_rx_ack into this domain
       rx_ack_meta   <= buf_rx_ack_i;
       rx_ack_sync   <= rx_ack_meta;
       rx_ack_sync_d <= rx_ack_sync;
@@ -268,34 +267,40 @@ begin
 
       case sm_rx is
         when RX_IDLE =>
-          if parse_mcu_packet_i = '1' and parse_mcu_d = '0' then
+          if parse_mcu_packet_tog_i /= parse_mcu_d then
             if rx_valid_reg = '1' then
               -- Previous frame not yet consumed by SoC -> overflow
               rx_overflow_reg <= '1';
             else
-              -- Latch frame length, start copying
+              -- Latch frame length, present address 0 to RAM
               rx_copy_len    <= pkt_len_i;
               rx_copy_addr   <= (others => '0');
-              eth_ram_addr_o <= (others => '0');  -- present address 0 to async read port
-              sm_rx          <= RX_COPY;
+              eth_ram_addr_o <= (others => '0');
+              sm_rx          <= RX_WAIT;
             end if;
           end if;
 
+        when RX_WAIT =>
+          -- RAM latency cycle: data for addr 0 will be valid next cycle.
+          -- Pre-request address 1 so it's ready when we need it.
+          eth_ram_addr_o <= to_unsigned(1, eth_ram_addr_o'length);
+          rx_copy_addr   <= to_unsigned(1, rx_copy_addr'length);
+          sm_rx          <= RX_COPY;
+
         when RX_COPY =>
-          -- eth_ram read port is combinatorial (async):
-          -- eth_ram_data_i = ram[eth_ram_addr_o] in the SAME cycle.
-          -- So right now eth_ram_data_i holds data for rx_copy_addr.
+          -- eth_ram_data_i now holds data for the address presented
+          -- in the previous cycle (rx_copy_addr - 1).
           buf_rx_data_o  <= eth_ram_data_i;
-          buf_rx_addr_o  <= rx_copy_addr;
+          buf_rx_addr_o  <= rx_copy_addr - 1;
           buf_rx_we_o    <= '1';
 
-          if rx_copy_addr + 1 >= rx_copy_len then
-            -- This was the last byte
+          if rx_copy_addr >= rx_copy_len then
+            -- Last byte written this cycle
             sm_rx <= RX_DONE;
           else
-            -- Advance to next byte
-            rx_copy_addr   <= rx_copy_addr + 1;
+            -- Present next address, advance counter
             eth_ram_addr_o <= rx_copy_addr + 1;
+            rx_copy_addr   <= rx_copy_addr + 1;
           end if;
 
         when RX_DONE =>

@@ -139,44 +139,28 @@ GENERIC (lastAddress : INTEGER
 	PORT(rx_clk : IN STD_LOGIC;
 		 sync_in : IN STD_LOGIC;
 		 data_in : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 read0Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read1Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read2Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 read3Addr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 readAddrPTP : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 readAddrRTP : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 readAddrMCU : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 
 		 writeAddr : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 sync_out : OUT STD_LOGIC;
-		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data1_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data2_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 data3_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 ip_type : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 pkt_type : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_dst_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_length : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_src_port : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+		 dataOut_sysclk_rtp : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 dataOut_sysclk_ptp : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 dataOut_rxclk : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 
+		 is_mcu_pkt_o	: out std_logic;
+		is_ptp_pkt_o	: out std_logic;
+		is_rtp_pkt_o	: out std_logic;
+		is_mcu_pkt_tog_o	: out std_logic;
+		--is_ptp_pkt_tog_o	: out std_logic;
+		--is_rtp_pkt_tog_o	: out std_logic;
+
+		 sys_clk_i : IN STD_LOGIC
 	);
 END COMPONENT;
 
-COMPONENT ethernet_packet_parser
-GENERIC (
-			udp_port_ptpv2_event : INTEGER;
-			udp_port_ptpv2_general : INTEGER;
-			udp_port_rtp : INTEGER
-			);
-	PORT(clk : IN STD_LOGIC;
-		 sync_in : IN STD_LOGIC;
-		 ip_type : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 pkt_type : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 ram_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 udp_dst_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_length : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 udp_src_port : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 parse_ptp_packet : OUT STD_LOGIC;
-		 parse_rtp_packet : OUT STD_LOGIC;
-		 parse_mcu_packet : OUT STD_LOGIC;
-		 ram_read_address : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
-	);
-END COMPONENT;
+
 
 COMPONENT ethernet_receive
 GENERIC (lastRamAddress : INTEGER
@@ -189,7 +173,10 @@ GENERIC (lastRamAddress : INTEGER
 		 frame_rdy : OUT STD_LOGIC;
 		 ram_addr : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 ram_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 rx_byte_count : OUT STD_LOGIC_VECTOR(10 DOWNTO 0)
+		 rx_byte_count : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+
+		is_ptp_pkt_tog_o	: out std_logic;
+		is_rtp_pkt_tog_o	: out std_logic
 	);
 END COMPONENT;
 
@@ -291,7 +278,7 @@ COMPONENT litex_eth_buffer_bridge
 		 tx_allow_i : IN STD_LOGIC;
 		 mac_rx_clock_i : IN STD_LOGIC;
 		 mac_rx_reset_i : IN STD_LOGIC;
-		 parse_mcu_packet_i : IN STD_LOGIC;
+		 parse_mcu_packet_tog_i : IN STD_LOGIC;
 		 mcu_clk_i : IN STD_LOGIC;
 		 buf_tx_dat_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 buf_tx_len_i : IN STD_LOGIC_VECTOR(10 DOWNTO 0);
@@ -308,7 +295,8 @@ COMPONENT litex_eth_buffer_bridge
 		 buf_rx_len_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 buf_tx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 eth_ram_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 sys_clk_i : IN STD_LOGIC
 	);
 END COMPONENT;
 
@@ -356,7 +344,7 @@ COMPONENT ptp_module
 		 mac_tx_busy : IN STD_LOGIC;
 		 mac_tx_byte_sent : IN STD_LOGIC;
 		 mac_tx_allow_i : IN STD_LOGIC;
-		 parse_ptp_packet : IN STD_LOGIC;
+		 parse_ptp_packet_tog : IN STD_LOGIC;
 		 ptp_is_follower : IN STD_LOGIC;
 		 ptp_is_leader : IN STD_LOGIC;
 		 eth_frame_i : IN STD_LOGIC; -- sof rx delim
@@ -629,10 +617,6 @@ SIGNAL	gmii_tx_err :  STD_LOGIC;
 SIGNAL	gmii_tx_rst :  STD_LOGIC;
 SIGNAL	gmii_txd :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	hram_clk :  STD_LOGIC;
-SIGNAL	hram_cs :  STD_LOGIC;
-SIGNAL	hram_dq :  STD_LOGIC_VECTOR(7 DOWNTO 0);
-SIGNAL	hram_rstn :  STD_LOGIC;
-SIGNAL	hram_rwds :  STD_LOGIC;
 SIGNAL	inch2i :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	inch3i :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	ip_address :  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -664,9 +648,9 @@ SIGNAL	mcu_tx_done :  STD_LOGIC;
 SIGNAL	mcu_tx_enable :  STD_LOGIC;
 SIGNAL	mcu_tx_req_i :  STD_LOGIC;
 SIGNAL	media_clock :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	nhram_clk :  STD_LOGIC;
-SIGNAL	parse_mcu_packet :  STD_LOGIC;
-SIGNAL	parse_ptp_packet :  STD_LOGIC;
+SIGNAL	nhram_clk :  STD_LOGIC;  -- inverted hyperram clock for differential pair
+SIGNAL	parse_mcu_packet_tog :  STD_LOGIC;
+SIGNAL	parse_ptp_packet_tog :  STD_LOGIC;
 SIGNAL	parse_rtp_packet :  STD_LOGIC;
 SIGNAL	parser_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
 SIGNAL	parser_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -693,7 +677,10 @@ SIGNAL	ptp_log_message_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	ptp_mean_path_delay :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	ptp_offset_from_master :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	ptp_ram_addr :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	ptp_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+
+SIGNAL	eth_ram_data_sys_rtp :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	eth_ram_data_sys_ptp :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	eth_ram_data_rx :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	ptp_sync_lost :  STD_LOGIC;
 SIGNAL	ptp_time_source :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	rev_mac_address :  STD_LOGIC_VECTOR(47 DOWNTO 0);
@@ -813,41 +800,24 @@ GENERIC MAP(lastAddress => 1500
 PORT MAP(rx_clk => mac_rx_clock,
 		 sync_in => eth_frame_rdy,
 		 data_in => eth_ram_wr_data,
-		 read0Addr => parser_ram_addr,
-		 read1Addr => ptp_ram_addr,
-		 read2Addr => rtp_ram_addr,
-		 read3Addr => mcu_read_addr,
+		 readAddrPTP => ptp_ram_addr,
+		 readAddrRTP => rtp_ram_addr,
+		 readAddrMCU => mcu_read_addr,
 		 writeAddr => eth_ram_wr_addr,
 		 sync_out => ethernet_parser_sync,
-		 data0_out => parser_ram_data,
-		 data1_out => ptp_ram_data,
-		 data2_out => rtp_ram_data,
-		 data3_out => mcu_ram_data,
-		 ip_type => eth_ip_type,
-		 pkt_type => eth_pkt_type,
-		 udp_dst_port => eth_udp_dst_prt,
-		 udp_length => eth_udp_length,
-		 udp_src_port => eth_udp_src_prt);
+		 dataOut_sysclk_rtp => eth_ram_data_sys_rtp,
+		 dataOut_sysclk_ptp => eth_ram_data_sys_ptp,
+		 
+		 dataOut_rxclk => eth_ram_data_rx,
+		 
+		is_mcu_pkt_tog_o => parse_mcu_packet_tog,
+		--is_ptp_pkt_tog_o => parse_ptp_packet_tog,
+		--is_rtp_pkt_tog_o => parse_rtp_packet,
+				 sys_clk_i => clk_125MHz
+);
 
 
-b2v_eth_parser : ethernet_packet_parser
-GENERIC MAP(
-			udp_port_ptpv2_event => 319,
-			udp_port_ptpv2_general => 320,
-			udp_port_rtp => 5004
-			)
-PORT MAP(clk => mac_rx_clock,
-		 sync_in => ethernet_parser_sync,
-		 ip_type => eth_ip_type,
-		 pkt_type => eth_pkt_type,
-		 ram_data => parser_ram_data,
-		 udp_dst_port => eth_udp_dst_prt,
-		 udp_length => eth_udp_length,
-		 udp_src_port => eth_udp_src_prt,
-		 parse_ptp_packet => parse_ptp_packet,
-		 parse_rtp_packet => parse_rtp_packet,
-		 parse_mcu_packet => parse_mcu_packet,
-		 ram_read_address => parser_ram_addr);
+
 
 
 b2v_eth_rx : ethernet_receive
@@ -861,7 +831,10 @@ PORT MAP(rx_clk => mac_rx_clock,
 		 frame_rdy => eth_frame_rdy,
 		 ram_addr => eth_ram_wr_addr,
 		 ram_data => eth_ram_wr_data,
-		 rx_byte_count => eth_byte_cnt);
+		 rx_byte_count => eth_byte_cnt,
+		--is_mcu_pkt_tog_o => parse_mcu_packet_tog,
+		is_ptp_pkt_tog_o => parse_ptp_packet_tog,
+		is_rtp_pkt_tog_o => parse_rtp_packet);
 
 
 b2v_ethrst : ethernet_reset
@@ -898,7 +871,7 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 serial_rx => uart0_rx,
 		 spi_miso => spi0_miso,
 		 spiflash_miso => spiflash_miso,
-		 hyperram_rwds => hram_rwds,
+		 hyperram_rwds => hbus_rwds,
 		 i2c0_scl => gpio26,
 		 i2c0_sda => gpio27,
 		 i2c1_scl => gpio23,
@@ -916,7 +889,7 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 eth_buf_rx_data => buf_rx_d,
 		 eth_buf_rx_len => buf_rx_len,
 		 eth_buf_tx_addr => buf_tx_a,
-		 hyperram_dq => hram_dq,
+		 hyperram_dq => hbus_dq,
 		 aes67_ctrl_adda_nrst => adda_nRST,
 		 aes67_ctrl_eth_tx_request => mcu_tx_req_i,
 		 aes67_ctrl_meter_clear => audio_meter_clear,
@@ -925,8 +898,8 @@ PORT MAP(aes67_ctrl_eth_link_up => mac_linkup,
 		 aes67_ctrl_ptp_is_leader => ptp_is_leader,
 		 eth_buf_rx_ack => buf_rx_ack,
 		 hyperram_clk => hram_clk,
-		 hyperram_cs_n => hram_cs,
-		 hyperram_rst_n => hram_rstn,
+		 hyperram_cs_n => hbus_cs2n,
+		 hyperram_rst_n => hbus_rstn,
 		 rx_stream_cfg_wr_en => rx_conf_wr_en,
 		 serial1_tx => uart1_tx,
 		 serial_tx => uart0_tx,
@@ -963,11 +936,11 @@ PORT MAP(buf_rx_ack_i => buf_rx_ack,
 		 tx_allow_i => mcu_allow,
 		 mac_rx_clock_i => mac_rx_clock,
 		 mac_rx_reset_i => mac_rx_reset,
-		 parse_mcu_packet_i => parse_mcu_packet,
+		 parse_mcu_packet_tog_i => parse_mcu_packet_tog,
 		 mcu_clk_i => mcu_clk,
 		 buf_tx_dat_i => buf_tx_dat,
 		 buf_tx_len_i => buf_tx_len,
-		 eth_ram_data_i => mcu_ram_data,
+		 eth_ram_data_i => eth_ram_data_rx,
 		 pkt_len_i => eth_byte_cnt,
 		 buf_rx_we_o => buf_rx_we,
 		 buf_rx_valid_o => buf_rx_valid,
@@ -980,7 +953,8 @@ PORT MAP(buf_rx_ack_i => buf_rx_ack,
 		 buf_rx_len_o => buf_rx_len,
 		 buf_tx_addr_o => buf_tx_a,
 		 eth_ram_addr_o => mcu_read_addr,
-		 mac_tx_dat_o => mcu_tx_data);
+		 mac_tx_dat_o => mcu_tx_data,
+		 sys_clk_i => clk_125MHz);
 
 
 b2v_packetaggregator : ethernet_packet_aggregator
@@ -1023,7 +997,7 @@ PORT MAP(sys_clk => clk_125MHz,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
 		 mac_tx_allow_i => ptp_allow,
-		 parse_ptp_packet => parse_ptp_packet,
+		 parse_ptp_packet_tog => parse_ptp_packet_tog,
 		 ptp_is_follower => ptp_is_follower,
 		 ptp_is_leader => ptp_is_leader,
 		 eth_frame_i => eth_sof_recv,
@@ -1031,7 +1005,7 @@ PORT MAP(sys_clk => clk_125MHz,
 		 sof_sent_i => eth_sof_sent,
 		 ip_address => ip_address,
 		 mac_address => mac_address,
-		 mac_ram_data => ptp_ram_data,
+		 mac_ram_data => eth_ram_data_sys_ptp,
 		 ptp_announce_interval => ptp_announce_interval,
 		 ptp_clock_accuracy => ptp_clock_accuracy,
 		 ptp_clock_class => ptp_clock_class,
@@ -1105,7 +1079,7 @@ PORT MAP(sys_clk => clk_125MHz,
 		 stream_config_wr_clk_i => mcu_clk,
 		 stream_config_wr_en_i => rx_conf_wr_en,
 		 metering_clear_i => audio_meter_clear,
-		 eth_read_data_i => rtp_ram_data,
+		 eth_read_data_i => eth_ram_data_sys_rtp,
 		 media_clock_i => media_clock,
 		 stream_config_addr_i => rx_conf_wr_addr,
 		 stream_config_data_i => rx_conf_wr_data,
@@ -1248,10 +1222,6 @@ clk50m <= c10_clk50m;
 uart1_rx <= gpio28;
 uart0_rx <= arduino_io1;
 spiflash_miso <= gpio33;
-hbus_rwds <= hram_rwds;
-hbus_dq <= hram_dq;
-hbus_rstn <= hram_rstn;
-hbus_cs2n <= hram_cs;
 arduino_io2 <= uart0_tx;
 hbus_clk0_p <= hram_clk;
 hbus_clk0_n <= nhram_clk;

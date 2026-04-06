@@ -12,7 +12,7 @@ entity ptpv2_parser is
         clk                 : in std_logic;
         ram_data            : in std_logic_vector(7 downto 0);
         ram_read_address    : out unsigned(10 downto 0);
-        parse_ptp_packet    : in std_logic;
+        parse_ptp_packet_tog    : in std_logic;
         is_leader           : in std_logic; -- '1' if this node is PTP leader; will answer to delay_req
 
         rx_timestamp_seconds_i     : in std_logic_vector(47 downto 0);
@@ -244,7 +244,7 @@ begin
             parse_ptp_packet_sync <= '0';
             parse_ptp_packet_prev <= '0';
         elsif rising_edge(clk) then
-            parse_ptp_packet_meta <= parse_ptp_packet;
+            parse_ptp_packet_meta <= parse_ptp_packet_tog;
             parse_ptp_packet_sync <= parse_ptp_packet_meta;
             parse_ptp_packet_prev <= parse_ptp_packet_sync;
         end if;
@@ -317,7 +317,7 @@ begin
             end if;
 
             if (s_SM_PtpParser = s_Idle) then
-                if (parse_ptp_packet_prev = '0' and parse_ptp_packet_sync = '1') then
+                if (parse_ptp_packet_prev /= parse_ptp_packet_sync) then
                     byte_counter <= 0;
                     ram_read_address <= to_unsigned(0, 11);
                     s_SM_PtpParser <= s_ReadHeader;

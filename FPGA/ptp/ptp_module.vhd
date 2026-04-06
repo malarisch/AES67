@@ -31,7 +31,7 @@ ENTITY ptp_module IS
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
 		mac_tx_byte_sent :  IN  STD_LOGIC;
-		parse_ptp_packet :  IN  STD_LOGIC;
+		parse_ptp_packet_tog :  IN  STD_LOGIC;
 		ptp_is_leader :  IN  STD_LOGIC;
 		ptp_is_follower :  IN  STD_LOGIC;
 		ethernet_parser_sync :  IN  STD_LOGIC;
@@ -129,7 +129,7 @@ COMPONENT ptpv2_parser
 GENERIC (MIN_FILTER_DEPTH : INTEGER
 			);
 	PORT(clk : IN STD_LOGIC;
-		 parse_ptp_packet : IN STD_LOGIC;
+		 parse_ptp_packet_tog : IN STD_LOGIC;
 		 is_leader : IN STD_LOGIC;
 		 reset_n : IN STD_LOGIC;
 		 t3_valid_i : IN STD_LOGIC;
@@ -319,7 +319,7 @@ b2v_ptpparser : ptpv2_parser
 GENERIC MAP(MIN_FILTER_DEPTH => 3
 			)
 PORT MAP(clk => sys_clk,
-		 parse_ptp_packet => parse_ptp_packet,
+		 parse_ptp_packet_tog => parse_ptp_packet_tog,
 		 is_leader => ptp_is_leader,
 		 reset_n => powerGood,
 		 t3_valid_i => tx_t3_valid,
@@ -355,7 +355,7 @@ PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 mac_rx_frame_i => eth_frame_i,
 		 ethernet_parser_sync_in_i => ethernet_parser_sync,
-		 is_ptp_packet_i => parse_ptp_packet,
+		 is_ptp_packet_i => parse_ptp_packet_tog,
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
 		 wallclock_seconds_i => wallclock_seconds,
 		 timestamp_nanoseconds_o => rx_timestamp_ns,
