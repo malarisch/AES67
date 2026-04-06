@@ -113,11 +113,11 @@ COMPONENT ptpv2_sender
 		 ptp_priotwo : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 ptp_time_source_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 request_port_identity : IN STD_LOGIC_VECTOR(79 DOWNTO 0);
-		 sequence_id : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 sequence_id : IN UNSIGNED(15 DOWNTO 0);
 		 src_ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 src_mac_address : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 timestamp_nanoseconds_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 timestamp_seconds_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
+		 timestamp_nanoseconds_i : IN UNSIGNED(31 DOWNTO 0);
+		 timestamp_seconds_i : IN UNSIGNED(47 DOWNTO 0);
 		 tx_enable : OUT STD_LOGIC;
 		 tx_ready_o : OUT STD_LOGIC;
 		 tx_allow_req_o : OUT STD_LOGIC;
@@ -150,10 +150,10 @@ GENERIC (MIN_FILTER_DEPTH : INTEGER
 		 clock_configured_o : OUT STD_LOGIC;
 		 clock_configure_timestamp_nanoseconds_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 clock_configure_timestamp_seconds_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 log_msg_interval_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 mean_path_delay_ns_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 offset_from_master_ns_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 ram_read_address : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		 log_msg_interval_o : OUT SIGNED(7 DOWNTO 0);
+		 mean_path_delay_ns_o : OUT SIGNED(31 DOWNTO 0);
+		 offset_from_master_ns_o : OUT SIGNED(31 DOWNTO 0);
+		 ram_read_address : OUT UNSIGNED(10 DOWNTO 0);
 		 rx_follower_identity_o : OUT STD_LOGIC_VECTOR(79 DOWNTO 0);
 		 rx_timestamp_nanoseconds_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 rx_timestamp_seconds_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
@@ -167,10 +167,10 @@ COMPONENT ethernet_timestamp
 		 mac_rx_frame_i : IN STD_LOGIC;
 		 ethernet_parser_sync_in_i : IN STD_LOGIC;
 		 is_ptp_packet_i : IN STD_LOGIC;
-		 wallclock_nanoseconds_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 wallclock_seconds_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 timestamp_nanoseconds_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 timestamp_seconds_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
+		 wallclock_nanoseconds_i : IN UNSIGNED(31 DOWNTO 0);
+		 wallclock_seconds_i : IN UNSIGNED(47 DOWNTO 0);
+		 timestamp_nanoseconds_o : OUT UNSIGNED(31 DOWNTO 0);
+		 timestamp_seconds_o : OUT UNSIGNED(47 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -179,14 +179,14 @@ COMPONENT ptpv2_servo
 		 reset_n : IN STD_LOGIC;
 		 calc_valid_i : IN STD_LOGIC;
 		 log_msg_interval_valid_i : IN STD_LOGIC;
-		 log_msg_interval_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 mean_path_delay_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 offset_from_master_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 log_msg_interval_i : IN SIGNED(7 DOWNTO 0);
+		 mean_path_delay_i : IN SIGNED(31 DOWNTO 0);
+		 offset_from_master_i : IN SIGNED(31 DOWNTO 0);
 		 phase_jump_valid_o : OUT STD_LOGIC;
 		 locked_o : OUT STD_LOGIC;
 		 sync_timeout_o : OUT STD_LOGIC;
-		 freq_correction_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 phase_jump_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+		 freq_correction_o : OUT SIGNED(31 DOWNTO 0);
+		 phase_jump_o : OUT SIGNED(31 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -199,38 +199,38 @@ GENERIC (audio_fs : INTEGER;
 		 reset_n : IN STD_LOGIC;
 		 wallclock_set_i : IN STD_LOGIC;
 		 phase_jump_valid_i : IN STD_LOGIC;
-		 freq_correction_ppb_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 phase_jump_ns_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 wallclock_nanoseconds_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 wallclock_seconds_i : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
+		 freq_correction_ppb_i : IN SIGNED(31 DOWNTO 0);
+		 phase_jump_ns_i : IN SIGNED(31 DOWNTO 0);
+		 wallclock_nanoseconds_i : IN UNSIGNED(31 DOWNTO 0);
+		 wallclock_seconds_i : IN UNSIGNED(47 DOWNTO 0);
 		 second_pulse_o : OUT STD_LOGIC;
 		 audio_bclk_o : OUT STD_LOGIC;
 		 audio_lrck_o : OUT STD_LOGIC;
 		 sample_pulse_o : OUT STD_LOGIC;
-		 media_clock_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 wallclock_nanoseconds_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 wallclock_seconds_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
+		 media_clock_o : OUT UNSIGNED(31 DOWNTO 0);
+		 wallclock_nanoseconds_o : OUT UNSIGNED(31 DOWNTO 0);
+		 wallclock_seconds_o : OUT UNSIGNED(47 DOWNTO 0)
 	);
 END COMPONENT;
 
 SIGNAL	eth_frame_o :  STD_LOGIC;
-SIGNAL	freq_correction :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	log_msg_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL	freq_correction :  SIGNED(31 DOWNTO 0);
+SIGNAL	log_msg_interval :  SIGNED(7 DOWNTO 0);
 SIGNAL	log_msg_interval_valid :  STD_LOGIC;
-SIGNAL	phase_jump :  STD_LOGIC_VECTOR(31 DOWNTO 0);
+SIGNAL	phase_jump :  SIGNED(31 DOWNTO 0);
 SIGNAL	powerGood :  STD_LOGIC;
 SIGNAL	ptp_allow :  STD_LOGIC;
 SIGNAL	ptp_calc_valid :  STD_LOGIC;
 SIGNAL	ptp_locked_ALTERA_SYNTHESIZED :  STD_LOGIC;
-SIGNAL	ptp_mean_path_delay_ALTERA_SYNTHESIZED :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	ptp_offset_from_master_ALTERA_SYNTHESIZED :  STD_LOGIC_VECTOR(31 DOWNTO 0);
+SIGNAL	ptp_mean_path_delay_ALTERA_SYNTHESIZED :  SIGNED(31 DOWNTO 0);
+SIGNAL	ptp_offset_from_master_ALTERA_SYNTHESIZED :  SIGNED(31 DOWNTO 0);
 SIGNAL	ptp_txready :  STD_LOGIC;
 SIGNAL	rx_follower_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	rx_send_delay_req :  STD_LOGIC;
 SIGNAL	rx_send_delay_resp :  STD_LOGIC;
 SIGNAL	rx_sequence_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	rx_timestamp_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	rx_timestamp_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	rx_timestamp_ns :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	rx_timestamp_s :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	rx_ts_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	rx_ts_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	second_pulse_sys_ALTERA_SYNTHESIZED :  STD_LOGIC;
@@ -240,13 +240,15 @@ SIGNAL	tx_frame_start :  STD_LOGIC;
 SIGNAL	tx_msg_type :  STD_LOGIC_VECTOR(3 DOWNTO 0);
 SIGNAL	tx_ptp_log_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_req_port_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
-SIGNAL	tx_seq_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL	tx_seq_id :  UNSIGNED(15 DOWNTO 0);
 SIGNAL	tx_t3_valid :  STD_LOGIC;
-SIGNAL	tx_timesstamp_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	tx_timestamp_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	wallclock_nanoseconds :  STD_LOGIC_VECTOR(31 DOWNTO 0);
+SIGNAL	tx_timesstamp_ns :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	tx_timestamp_s :  UNSIGNED(47 DOWNTO 0);
+SIGNAL	wallclock_nanoseconds :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	ptp_ram_addr_u :  UNSIGNED(10 DOWNTO 0);
+SIGNAL	media_clock_u :  UNSIGNED(31 DOWNTO 0);
 SIGNAL	wallclock_phasejump_ALTERA_SYNTHESIZED :  STD_LOGIC;
-SIGNAL	wallclock_seconds :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	wallclock_seconds :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_set :  STD_LOGIC;
 SIGNAL	wallclock_set_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	wallclock_set_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
@@ -270,9 +272,9 @@ PORT MAP(clk => sys_clk,
 		 ptp_announce_log_message_interval_i => ptp_announce_interval,
 		 ptp_log_message_interval_i => ptp_log_message_interval,
 		 request_port_identity_i => rx_follower_identity,
-		 rx_timestamp_nanoseconds_i => rx_ts_ns,
-		 rx_timestamp_seconds_i => rx_ts_s,
-		 sequence_id_i => rx_sequence_id,
+		 rx_timestamp_nanoseconds_i => unsigned(rx_ts_ns),
+		 rx_timestamp_seconds_i => unsigned(rx_ts_s),
+		 sequence_id_i => unsigned(rx_sequence_id),
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
 		 wallclock_seconds_i => wallclock_seconds,
 		 frame_start_o => tx_frame_start,
@@ -325,11 +327,11 @@ PORT MAP(clk => sys_clk,
 		 ptp_locked_i => ptp_locked_ALTERA_SYNTHESIZED,
 		 ptp_current_leader_id_i => ptp_current_leader_id,
 		 ram_data => mac_ram_data,
-		 rx_timestamp_nanoseconds_i => rx_timestamp_ns,
-		 rx_timestamp_seconds_i => rx_timestamp_s,
+		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
+		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
 		 src_mac_address => mac_address,
-		 tx_timestamp_nanoseconds_i => tx_timesstamp_ns,
-		 tx_timestamp_seconds_i => tx_timestamp_s,
+		 tx_timestamp_nanoseconds_i => std_logic_vector(tx_timesstamp_ns),
+		 tx_timestamp_seconds_i => std_logic_vector(tx_timestamp_s),
 		 send_delay_resp_o => rx_send_delay_resp,
 		 send_delay_req_o => rx_send_delay_req,
 		 ptp_calc_valid_o => ptp_calc_valid,
@@ -341,7 +343,7 @@ PORT MAP(clk => sys_clk,
 		 log_msg_interval_o => log_msg_interval,
 		 mean_path_delay_ns_o => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
 		 offset_from_master_ns_o => ptp_offset_from_master_ALTERA_SYNTHESIZED,
-		 ram_read_address => ptp_ram_addr,
+		 ram_read_address => ptp_ram_addr_u,
 		 rx_follower_identity_o => rx_follower_identity,
 		 rx_timestamp_nanoseconds_o => rx_ts_ns,
 		 rx_timestamp_seconds_o => rx_ts_s,
@@ -386,12 +388,12 @@ PORT MAP(clk => sys_clk,
 		 phase_jump_valid_i => wallclock_phasejump_ALTERA_SYNTHESIZED,
 		 freq_correction_ppb_i => freq_correction,
 		 phase_jump_ns_i => phase_jump,
-		 wallclock_nanoseconds_i => wallclock_set_ns,
-		 wallclock_seconds_i => wallclock_set_s,
+		 wallclock_nanoseconds_i => unsigned(wallclock_set_ns),
+		 wallclock_seconds_i => unsigned(wallclock_set_s),
 		 second_pulse_o => second_pulse_sys_ALTERA_SYNTHESIZED,
 		 audio_bclk_o => wc_64fs,
 		 audio_lrck_o => wc_fs,
-		 media_clock_o => media_clock,
+		 media_clock_o => media_clock_u,
 		 wallclock_nanoseconds_o => wallclock_nanoseconds,
 		 wallclock_seconds_o => wallclock_seconds);
 
@@ -404,7 +406,9 @@ ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
 second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 wallclock_phasejump <= wallclock_phasejump_ALTERA_SYNTHESIZED;
 pin_name1 <= wc_fs;
-ptp_mean_path_delay <= ptp_mean_path_delay_ALTERA_SYNTHESIZED;
-ptp_offset_from_master <= ptp_offset_from_master_ALTERA_SYNTHESIZED;
+media_clock <= std_logic_vector(media_clock_u);
+ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
+ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);
+ptp_ram_addr <= std_logic_vector(ptp_ram_addr_u);
 
 END bdf_type;

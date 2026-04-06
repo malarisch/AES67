@@ -62,3 +62,5 @@ dev_scripts/spi_flash_flasher/wifi_credentials.h
 *.elf
 *.o
 *.kvdat
+*/FPGA/gowin/fpga_project/impl/**
+FPGA/gowin/fpga_project/impl/
