@@ -359,9 +359,9 @@ COMPONENT ptp_module
 		 parse_ptp_packet : IN STD_LOGIC;
 		 ptp_is_follower : IN STD_LOGIC;
 		 ptp_is_leader : IN STD_LOGIC;
-		 eth_frame_i : IN STD_LOGIC;
+		 eth_frame_i : IN STD_LOGIC; -- sof rx delim
 		 ethernet_parser_sync : IN STD_LOGIC;
-		 sof_sent_i : IN STD_LOGIC;
+		 sof_sent_i : IN STD_LOGIC; -- sof tx delim
 		 ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 mac_address : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
 		 mac_ram_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -555,8 +555,8 @@ GENERIC (MIIM_CLOCK_DIVIDER : INTEGER;
 		 rx_frame_o : OUT STD_LOGIC;
 		 rx_byte_received_o : OUT STD_LOGIC;
 		 rx_error_o : OUT STD_LOGIC;
-		 frame_o : OUT STD_LOGIC;
-		 sof_sent_o : OUT STD_LOGIC;
+	     tx_sof_delim_o		   : out std_ulogic;
+		 rx_sof_delim_o		   : out std_ulogic;
 		 mii_txd_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 speed_o : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
@@ -604,7 +604,8 @@ SIGNAL	clk_250MHz :  STD_LOGIC;
 SIGNAL	enet_clk :  STD_LOGIC;
 SIGNAL	enet_clk_90 :  STD_LOGIC;
 SIGNAL	eth_byte_cnt :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	eth_frame_o :  STD_LOGIC;
+SIGNAL	eth_sof_sent :  STD_LOGIC;
+SIGNAL	eth_sof_recv :  STD_LOGIC;
 SIGNAL	eth_frame_rdy :  STD_LOGIC;
 SIGNAL	eth_ip_type :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	eth_pkt_type :  STD_LOGIC_VECTOR(15 DOWNTO 0);
@@ -1025,9 +1026,9 @@ PORT MAP(sys_clk => clk_125MHz,
 		 parse_ptp_packet => parse_ptp_packet,
 		 ptp_is_follower => ptp_is_follower,
 		 ptp_is_leader => ptp_is_leader,
-		 eth_frame_i => eth_frame_o,
+		 eth_frame_i => eth_sof_recv,
 		 ethernet_parser_sync => ethernet_parser_sync,
-		 sof_sent_i => sof_sent,
+		 sof_sent_i => eth_sof_sent,
 		 ip_address => ip_address,
 		 mac_address => mac_address,
 		 mac_ram_data => ptp_ram_data,
@@ -1235,8 +1236,8 @@ PORT MAP(clock_125_i => enet_clk,
 		 rx_frame_o => mac_rx_frame,
 		 rx_byte_received_o => mac_rx_byte_received,
 		 rx_error_o => mac_rx_error,
-		 frame_o => eth_frame_o,
-		 sof_sent_o => sof_sent,
+		 tx_sof_delim_o => eth_sof_sent,
+		 rx_sof_delim_o => eth_sof_recv,
 		 mii_txd_o => gmii_txd,
 		 rx_data_o => mac_rx_data,
 		 speed_o => mac_speed);

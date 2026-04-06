@@ -35,9 +35,9 @@ ENTITY ptp_module IS
 		ptp_is_leader :  IN  STD_LOGIC;
 		ptp_is_follower :  IN  STD_LOGIC;
 		ethernet_parser_sync :  IN  STD_LOGIC;
-		eth_frame_i :  IN  STD_LOGIC;
+		eth_frame_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
 		mac_tx_allow_i :  IN  STD_LOGIC;
-		sof_sent_i :  IN  STD_LOGIC;
+		sof_sent_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
 		ip_address :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_address :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
 		mac_ram_data :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -213,7 +213,7 @@ GENERIC (audio_fs : INTEGER;
 	);
 END COMPONENT;
 
-SIGNAL	eth_frame_o :  STD_LOGIC;
+
 SIGNAL	freq_correction :  SIGNED(31 DOWNTO 0);
 SIGNAL	log_msg_interval :  SIGNED(7 DOWNTO 0);
 SIGNAL	log_msg_interval_valid :  STD_LOGIC;
@@ -353,7 +353,7 @@ PORT MAP(clk => sys_clk,
 b2v_rx_tsu : ethernet_timestamp
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
-		 mac_rx_frame_i => eth_frame_o,
+		 mac_rx_frame_i => eth_frame_i,
 		 ethernet_parser_sync_in_i => ethernet_parser_sync,
 		 is_ptp_packet_i => parse_ptp_packet,
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
@@ -399,7 +399,7 @@ PORT MAP(clk => sys_clk,
 
 tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 powerGood <= rst_n;
-eth_frame_o <= eth_frame_i;
+
 sof_sent <= sof_sent_i;
 ptp_allow <= mac_tx_allow_i;
 ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
