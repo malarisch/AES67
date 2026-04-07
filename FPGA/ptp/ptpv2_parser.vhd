@@ -674,9 +674,9 @@ begin
                 end case;
 
             elsif (s_SM_PtpParser = s_Done) then
-                if (parse_ptp_packet_sync = '0') then
+                
                     s_SM_PtpParser <= s_Idle;
-                end if;
+                
             else
                 s_SM_PtpParser <= s_Idle;
                 byte_counter <= 0;

@@ -35,7 +35,7 @@ entity ptpv2_controller is
         t3_valid_o: out std_logic;
 		ptp_log_interval_o: out std_logic_vector(7 downto 0);
 
-        sof_sent_i: in std_logic
+        sof_sent_tog_i: in std_logic
 
 
     );
@@ -167,7 +167,7 @@ architecture Behavioral of ptpv2_controller is
 begin
 
     -- SOF toggle detection: any change in synchronized toggle means SOF occurred
-    sof_detected <= sof_toggle_sync xor sof_toggle_prev;
+    
 
     -- ============================================================
     -- Decode ptp_log_message_interval_i to seconds + nanoseconds
@@ -393,7 +393,7 @@ begin
             second_pulse_i_reg <= second_pulse_i;
             send_delay_resp_in_reg <= send_delay_resp_in;
             -- CDC synchronizer for SOF toggle from TX clock domain
-            sof_toggle_meta <= sof_sent_i;
+            sof_toggle_meta <= sof_sent_tog_i;
             sof_toggle_sync <= sof_toggle_meta;
             sof_toggle_prev <= sof_toggle_sync;
             -- NOTE: frame_start_o is managed by the state machine only
@@ -496,7 +496,7 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';  -- Can deassert now
                         end if;
-                        if (tx_started = '1' and sof_detected = '1') then
+                        if (tx_started = '1' and sof_toggle_sync /= sof_toggle_prev) then
                             -- latch tx timestamp into dedicated sync registers
                             sync_tx_ts_nanoseconds <= wallclock_nanoseconds_i;
                             sync_tx_ts_seconds <= wallclock_seconds_i;
@@ -644,7 +644,7 @@ begin
                             frame_start_o <= '0';
                         end if;
                         -- Latch T3 at SOF (same measurement point as RX timestamps)
-                        if (tx_started = '1' and sof_detected = '1') then
+                        if (tx_started = '1' and sof_toggle_sync /= sof_toggle_prev) then
                             timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
                             timestamp_seconds_o <= wallclock_seconds_i;
                         end if;

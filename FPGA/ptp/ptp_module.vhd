@@ -35,9 +35,9 @@ ENTITY ptp_module IS
 		ptp_is_leader :  IN  STD_LOGIC;
 		ptp_is_follower :  IN  STD_LOGIC;
 		ethernet_parser_sync :  IN  STD_LOGIC;
-		eth_frame_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
+		sof_recv_tog_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
 		mac_tx_allow_i :  IN  STD_LOGIC;
-		sof_sent_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
+		sof_sent_tog_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
 		ip_address :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_address :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
 		mac_ram_data :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -78,7 +78,7 @@ COMPONENT ptpv2_controller
 		 is_follower_i : IN STD_LOGIC;
 		 tx_en_i : IN STD_LOGIC;
 		 send_delay_req_i : IN STD_LOGIC;
-		 sof_sent_i : IN STD_LOGIC;
+		 sof_sent_tog_i : IN STD_LOGIC;
 		 ptp_announce_log_message_interval_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 ptp_log_message_interval_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 request_port_identity_i : IN STD_LOGIC_VECTOR(79 DOWNTO 0);
@@ -162,15 +162,18 @@ GENERIC (MIN_FILTER_DEPTH : INTEGER
 END COMPONENT;
 
 COMPONENT ethernet_timestamp
-	PORT(clk : IN STD_LOGIC;
-		 reset_n : IN STD_LOGIC;
-		 mac_rx_frame_i : IN STD_LOGIC;
-		 ethernet_parser_sync_in_i : IN STD_LOGIC;
-		 is_ptp_packet_i : IN STD_LOGIC;
-		 wallclock_nanoseconds_i : IN UNSIGNED(31 DOWNTO 0);
-		 wallclock_seconds_i : IN UNSIGNED(47 DOWNTO 0);
-		 timestamp_nanoseconds_o : OUT UNSIGNED(31 DOWNTO 0);
-		 timestamp_seconds_o : OUT UNSIGNED(47 DOWNTO 0)
+	PORT(        
+		clk			: in std_logic; -- sys clock domain
+        reset_n			: in std_logic;
+        
+        wallclock_seconds_i : in unsigned(47 downto 0);
+        wallclock_nanoseconds_i : in unsigned(31 downto 0);
+        timestamp_seconds_o	: out unsigned(47 downto 0);
+        timestamp_nanoseconds_o : out unsigned(31 downto 0);
+        
+
+        -- signals from ethernet clock domain
+        sof_tog_i : in std_logic
 	);
 END COMPONENT;
 
@@ -234,7 +237,6 @@ SIGNAL	rx_timestamp_s :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	rx_ts_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	rx_ts_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	second_pulse_sys_ALTERA_SYNTHESIZED :  STD_LOGIC;
-SIGNAL	sof_sent :  STD_LOGIC;
 SIGNAL	tx_en_ptpfu_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	tx_frame_start :  STD_LOGIC;
 SIGNAL	tx_msg_type :  STD_LOGIC_VECTOR(3 DOWNTO 0);
@@ -268,7 +270,7 @@ PORT MAP(clk => sys_clk,
 		 is_follower_i => ptp_is_follower,
 		 tx_en_i => tx_en_ptpfu_ALTERA_SYNTHESIZED,
 		 send_delay_req_i => rx_send_delay_req,
-		 sof_sent_i => sof_sent,
+		 sof_sent_tog_i => sof_sent_tog_i,
 		 ptp_announce_log_message_interval_i => ptp_announce_interval,
 		 ptp_log_message_interval_i => ptp_log_message_interval,
 		 request_port_identity_i => rx_follower_identity,
@@ -353,9 +355,7 @@ PORT MAP(clk => sys_clk,
 b2v_rx_tsu : ethernet_timestamp
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
-		 mac_rx_frame_i => eth_frame_i,
-		 ethernet_parser_sync_in_i => ethernet_parser_sync,
-		 is_ptp_packet_i => parse_ptp_packet_tog,
+		 sof_tog_i => sof_recv_tog_i,
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
 		 wallclock_seconds_i => wallclock_seconds,
 		 timestamp_nanoseconds_o => rx_timestamp_ns,
@@ -400,7 +400,6 @@ PORT MAP(clk => sys_clk,
 tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 powerGood <= rst_n;
 
-sof_sent <= sof_sent_i;
 ptp_allow <= mac_tx_allow_i;
 ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
 second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;

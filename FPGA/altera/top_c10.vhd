@@ -176,7 +176,8 @@ GENERIC (lastRamAddress : INTEGER
 		 rx_byte_count : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 
 		is_ptp_pkt_tog_o	: out std_logic;
-		is_rtp_pkt_tog_o	: out std_logic
+		is_rtp_pkt_tog_o	: out std_logic;
+		is_mcu_pkt_tog_o	: out std_logic
 	);
 END COMPONENT;
 
@@ -296,7 +297,9 @@ COMPONENT litex_eth_buffer_bridge
 		 buf_tx_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 eth_ram_addr_o : OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
 		 mac_tx_dat_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 sys_clk_i : IN STD_LOGIC
+		 sys_clk_i : IN STD_LOGIC;
+        packet_length_valid_i : in STD_ULOGIC
+
 	);
 END COMPONENT;
 
@@ -347,9 +350,9 @@ COMPONENT ptp_module
 		 parse_ptp_packet_tog : IN STD_LOGIC;
 		 ptp_is_follower : IN STD_LOGIC;
 		 ptp_is_leader : IN STD_LOGIC;
-		 eth_frame_i : IN STD_LOGIC; -- sof rx delim
+		 sof_recv_tog_i : IN STD_LOGIC; -- sof rx delim
 		 ethernet_parser_sync : IN STD_LOGIC;
-		 sof_sent_i : IN STD_LOGIC; -- sof tx delim
+		 sof_sent_tog_i : IN STD_LOGIC; -- sof tx delim
 		 ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 mac_address : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
 		 mac_ram_data : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -545,6 +548,8 @@ GENERIC (MIIM_CLOCK_DIVIDER : INTEGER;
 		 rx_error_o : OUT STD_LOGIC;
 	     tx_sof_delim_o		   : out std_ulogic;
 		 rx_sof_delim_o		   : out std_ulogic;
+		 tx_sof_delim_tog_o		   : out std_ulogic;
+		 rx_sof_delim_tog_o		   : out std_ulogic;
 		 mii_txd_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 rx_data_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 speed_o : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
@@ -592,8 +597,8 @@ SIGNAL	clk_250MHz :  STD_LOGIC;
 SIGNAL	enet_clk :  STD_LOGIC;
 SIGNAL	enet_clk_90 :  STD_LOGIC;
 SIGNAL	eth_byte_cnt :  STD_LOGIC_VECTOR(10 DOWNTO 0);
-SIGNAL	eth_sof_sent :  STD_LOGIC;
-SIGNAL	eth_sof_recv :  STD_LOGIC;
+SIGNAL	eth_sof_sent_tog :  STD_LOGIC;
+SIGNAL	eth_sof_recv_tog :  STD_LOGIC;
 SIGNAL	eth_frame_rdy :  STD_LOGIC;
 SIGNAL	eth_ip_type :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	eth_pkt_type :  STD_LOGIC_VECTOR(15 DOWNTO 0);
@@ -810,7 +815,7 @@ PORT MAP(rx_clk => mac_rx_clock,
 		 
 		 dataOut_rxclk => eth_ram_data_rx,
 		 
-		is_mcu_pkt_tog_o => parse_mcu_packet_tog,
+		--is_mcu_pkt_tog_o => parse_mcu_packet_tog,
 		--is_ptp_pkt_tog_o => parse_ptp_packet_tog,
 		--is_rtp_pkt_tog_o => parse_rtp_packet,
 				 sys_clk_i => clk_125MHz
@@ -832,7 +837,7 @@ PORT MAP(rx_clk => mac_rx_clock,
 		 ram_addr => eth_ram_wr_addr,
 		 ram_data => eth_ram_wr_data,
 		 rx_byte_count => eth_byte_cnt,
-		--is_mcu_pkt_tog_o => parse_mcu_packet_tog,
+		is_mcu_pkt_tog_o => parse_mcu_packet_tog,
 		is_ptp_pkt_tog_o => parse_ptp_packet_tog,
 		is_rtp_pkt_tog_o => parse_rtp_packet);
 
@@ -954,7 +959,8 @@ PORT MAP(buf_rx_ack_i => buf_rx_ack,
 		 buf_tx_addr_o => buf_tx_a,
 		 eth_ram_addr_o => mcu_read_addr,
 		 mac_tx_dat_o => mcu_tx_data,
-		 sys_clk_i => clk_125MHz);
+		 sys_clk_i => clk_125MHz,
+		 packet_length_valid_i => ethernet_parser_sync);
 
 
 b2v_packetaggregator : ethernet_packet_aggregator
@@ -1000,9 +1006,9 @@ PORT MAP(sys_clk => clk_125MHz,
 		 parse_ptp_packet_tog => parse_ptp_packet_tog,
 		 ptp_is_follower => ptp_is_follower,
 		 ptp_is_leader => ptp_is_leader,
-		 eth_frame_i => eth_sof_recv,
 		 ethernet_parser_sync => ethernet_parser_sync,
-		 sof_sent_i => eth_sof_sent,
+		 sof_recv_tog_i => eth_sof_recv_tog,
+		 sof_sent_tog_i => eth_sof_sent_tog,
 		 ip_address => ip_address,
 		 mac_address => mac_address,
 		 mac_ram_data => eth_ram_data_sys_ptp,
@@ -1210,8 +1216,8 @@ PORT MAP(clock_125_i => enet_clk,
 		 rx_frame_o => mac_rx_frame,
 		 rx_byte_received_o => mac_rx_byte_received,
 		 rx_error_o => mac_rx_error,
-		 tx_sof_delim_o => eth_sof_sent,
-		 rx_sof_delim_o => eth_sof_recv,
+		 tx_sof_delim_tog_o => eth_sof_sent_tog,
+		 rx_sof_delim_tog_o => eth_sof_recv_tog,
 		 mii_txd_o => gmii_txd,
 		 rx_data_o => mac_rx_data,
 		 speed_o => mac_speed);

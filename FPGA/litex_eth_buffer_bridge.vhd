@@ -14,7 +14,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ethernet_types.all;
 
 entity litex_eth_buffer_bridge is
   port (
@@ -72,7 +71,8 @@ entity litex_eth_buffer_bridge is
     eth_ram_addr_o      : out unsigned(10 downto 0);  -- read address to eth_ram
 
     mcu_clk_i         : in STD_ULOGIC;
-    sys_clk_i         : in STD_ULOGIC
+    sys_clk_i         : in STD_ULOGIC;
+    packet_length_valid_i : in STD_ULOGIC
   );
 end entity;
 
@@ -104,7 +104,6 @@ architecture rtl of litex_eth_buffer_bridge is
   signal sm_rx : t_rx_sm := RX_IDLE;
 
   signal rx_copy_addr    : unsigned(10 downto 0) := (others => '0');
-  signal rx_copy_len     : unsigned(10 downto 0) := (others => '0');
   signal rx_valid_reg    : std_ulogic := '0';
   signal rx_valid_reg_1cdc  : std_ulogic := '0';
   signal rx_valid_reg_2cdc  : std_ulogic := '0';
@@ -118,13 +117,15 @@ architecture rtl of litex_eth_buffer_bridge is
   signal rx_ack_meta : std_ulogic := '0';
   signal rx_ack_sync : std_ulogic := '0';
   signal rx_ack_sync_d : std_ulogic := '0';
-
+  signal buf_tx_addr   : unsigned(10 downto 0);
+  signal packet_length_latch : UNSIGNED(10 downto 0);
+  signal packet_lenght_valid_latch : std_ulogic;
 begin
 
   -- ================================================================
   -- Output assignments & cdc
   -- ================================================================
-
+  buf_tx_addr_o <= buf_tx_addr;
   mcu_cdc : process (mcu_clk_i)
   begin
     if (rising_edge(mcu_clk_i)) then
@@ -154,7 +155,7 @@ begin
       tx_req_sync_d     <= '0';
       tx_done_reg       <= '0';
 
-      buf_tx_addr_o     <= (others => '0');
+      buf_tx_addr     <= (others => '0');
       mac_tx_enable_o   <= '0';
       tx_allow_req_o    <= '0';
       sm_tx             <= TX_IDLE;
@@ -177,7 +178,7 @@ begin
             tx_done_reg    <= '0';
             tx_allow_req_o <= '1';
             sm_tx          <= TX_WAIT_ALLOW;
-            buf_tx_addr_o      <= (others => '0');
+            buf_tx_addr      <= (others => '0');
           end if;
 
         when TX_WAIT_ALLOW =>
@@ -191,7 +192,7 @@ begin
               if (mac_tx_busy_i = '1') then
                 tx_preamble_bytes := tx_preamble_bytes + 1;
                 if (tx_preamble_bytes >= 6) then
-                  buf_tx_addr_o <= buf_tx_addr_o + 1;
+                  buf_tx_addr <= buf_tx_addr + 1;
 
                   if (tx_preamble_bytes = 7) then
                   sm_tx              <= TX_TRANSMIT;
@@ -204,10 +205,10 @@ begin
           mac_tx_dat_o <= buf_tx_dat_i;
           mac_tx_enable_o <= '1';
           if mac_tx_byte_sent_i = '1' then
-            if buf_tx_addr_o = buf_tx_len_i then
+            if buf_tx_addr = buf_tx_len_i then
               sm_tx <= TX_END;
             else
-              buf_tx_addr_o <= buf_tx_addr_o + 1;
+              buf_tx_addr <= buf_tx_addr + 1;
             end if;
           end if;
 
@@ -244,10 +245,11 @@ begin
       rx_valid_reg     <= '0';
       rx_overflow_reg  <= '0';
       rx_copy_addr     <= (others => '0');
-      rx_copy_len      <= (others => '0');
       eth_ram_addr_o   <= (others => '0');
       parse_mcu_d      <= '0';
       sm_rx            <= RX_IDLE;
+      packet_lenght_valid_latch <= '0';
+      packet_length_latch <= (others => '0');
     elsif rising_edge(mac_rx_clock_i) then
       buf_rx_we_o <= '0';
 
@@ -264,16 +266,20 @@ begin
         rx_valid_reg    <= '0';
         rx_overflow_reg <= '0';
       end if;
-
+      if (packet_length_valid_i = '1') then
+        packet_length_latch <= pkt_len_i;
+        packet_lenght_valid_latch <= '1';
+      end if;
       case sm_rx is
         when RX_IDLE =>
+
           if parse_mcu_packet_tog_i /= parse_mcu_d then
             if rx_valid_reg = '1' then
               -- Previous frame not yet consumed by SoC -> overflow
               rx_overflow_reg <= '1';
             else
               -- Latch frame length, present address 0 to RAM
-              rx_copy_len    <= pkt_len_i;
+
               rx_copy_addr   <= (others => '0');
               eth_ram_addr_o <= (others => '0');
               sm_rx          <= RX_WAIT;
@@ -294,7 +300,7 @@ begin
           buf_rx_addr_o  <= rx_copy_addr - 1;
           buf_rx_we_o    <= '1';
 
-          if rx_copy_addr >= rx_copy_len then
+          if rx_copy_addr >= packet_length_latch and packet_lenght_valid_latch = '1' then
             -- Last byte written this cycle
             sm_rx <= RX_DONE;
           else
@@ -304,9 +310,11 @@ begin
           end if;
 
         when RX_DONE =>
-          buf_rx_len_o <= rx_copy_len;
+          buf_rx_len_o <= packet_length_latch;
           rx_valid_reg <= '1';
           sm_rx        <= RX_IDLE;
+          packet_lenght_valid_latch <= '0';
+
 
       end case;
     end if;
