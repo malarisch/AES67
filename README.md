@@ -63,6 +63,7 @@ The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
 | Controller | `ptp/ptpv2_controller.vhd` | State machine for Sync, Follow_Up, Announce, Delay_Resp |
 | Parser | `ptp/ptpv2_parser.vhd` | Extracts timestamps & computes offset/path delay |
 | Servo | `ptp/ptpv2_servo.vhd` | PI controller for clock discipline (PPB correction) |
+| Servo (Median) | `ptp/ptpv2_servo_median.vhd` | Variant with median filtering |
 | Sender | `ptp/ptpv2_sender.vhd` | Constructs PTP packets |
 
 ### Clock & Timing
@@ -79,9 +80,11 @@ The FPGA handles all time-critical audio processing. Key modules in `FPGA/`:
 | TX Router | `audio_tx/tx_router.vhd` | Multi-stream config RAM, sample aggregation |
 | TX Transmitter | `audio_tx/tx_transmitter.vhd` | RTP packet construction with SSRC |
 | TX Sample Buffer | `audio_tx/tx_sample_buffer.vhd` | Ring buffer for outgoing samples |
+| TDM8 Input | `audio_tx/tdm8_in.vhd` | 8-channel TDM input mux |
 | RX Ringbuffer | `audio_rx/rx_ringbuffer.vhd` | Stream demux, playout buffer |
 | I2S Input | `I2S_IN.vhd` | 48kHz/24bit I2S deserializer |
 | I2S Output | `audio_rx/i2s_out.vhd` | I2S serializer to DAC |
+| TDM8 Output | `audio_rx/tdm8_out.vhd` | 8-channel TDM output mux |
 
 ### Data Flow
 ```
@@ -131,9 +134,19 @@ Zephyr RTOS runs on the LiteX VexRiscv SoC and handles all non-realtime tasks. S
 | Module | File | Description |
 |--------|------|-------------|
 | Main | `src/main.c` | Init, DHCP, network setup |
-| PTP BMC | `src/ptp_bmc.c` | IEEE 1588 Best Master Clock algorithm on 224.0.1.129:320 |
-| SAP/SDP | `src/sap_sdp.c` | Session announcement (239.255.255.255:9875), stream config |
-| Webserver | `src/webserver.c` | HTTP config UI |
+| PTP BMC | `src/ptp_bmc.c` | IEEE 1588 Best Leader Clock algorithm on 224.0.1.129:320 |
+| SAP/SDP | `src/sap_sdp.c` | Session announcement (239.255.255.255:9875), foreign stream discovery |
+| SDP Utils | `src/aes67_sdp_utils.c` | SDP parsing/formatting, PTP clock ID formatting |
+| RTSP | `src/rtsp.c` | RAVENNA RTSP server/client (stream subscription, session control) |
+| mDNS/DNS-SD | `src/mdns_sd.c` | mDNS responder + DNS-SD service advertisement (RFC 6762/6763) |
+| Webserver | `src/webserver.c` | REST API + gzipped static web UI |
+| Config | `src/aes67_config.c` | Centralized runtime configuration with defaults |
+| Config JSON | `src/config_json.c` | JSON serialization/parsing (shared by SD & flash storage) |
+| SD Config | `src/sd_config.c` | SD card config persistence (FAT, crash-safe A/B slots) |
+| Flash Config | `src/flash_config.c` | SPI flash config storage (8KB slots, CRC-32 header) |
+| FW Update | `src/fw_update.c` | HTTP + shell firmware update, FBI format verification |
+| Card Manager | `src/card_manager.c` | I2C board detection & runtime I/O card selection |
+| UI Display | `src/ui_display.c` | SSD1306 OLED status rendering |
 | FPGA Regs | `src/fpga_regs.c` | High-level register write helpers (via FPGA HAL) |
 | FPGA Poll | `src/fpga_poll.c` | Status polling (PTP lock, link state) |
 | PLL Control | `src/pll_ctrl.c` | Si5351A PPB correction from FPGA measurements |
@@ -144,8 +157,11 @@ Zephyr RTOS runs on the LiteX VexRiscv SoC and handles all non-realtime tasks. S
 | FPGA HAL | `drivers/fpga_hal/` | Backend-agnostic hardware abstraction (LiteX CSR or FMC) |
 | LiteX Ethernet | `drivers/eth_litex/` | Zephyr network interface via LiteX CSR + Wishbone packet buffers |
 | Si5351A | `drivers/si5351a/` | I2C clock generator with PPB correction |
-| Display | `drivers/display_ctrl/` | SSD1306 OLED status display |
-| MI Card | `drivers/mi_card/` | 8-channel ADC preamp control |
+| SPI Flash | `drivers/spi_flash/` | LiteSPI master for firmware updates & config storage |
+| Display | `drivers/display_ctrl/` | LED/button/7-segment UART control |
+| MI Card | `drivers/mi_card/` | 8-channel ADC preamp control (I2C) |
+| LO Card | `drivers/lo_card/` | Line output DA/ADC control (I2C) |
+| IO Card | `drivers/io_card/` | Flexible I/O card control (I2C) |
 
 ### FPGA HAL
 
@@ -203,18 +219,24 @@ Open `FPGA/FPGA.qpf` in Intel Quartus Prime 25.1. Target device: 10CL025YU256I7G
 - PTPv2 Leader and Follower mode with BMC
 - Wallclock discipline and media clock derivation
 - Si5351A driver with PPB correction
-- Audio TX/RX paths (48kHz/24bit I2S)
+- Audio TX/RX paths (48kHz/24bit I2S, TDM8)
 - RTP packet generation and parsing
-- SAP/SDP announcements
-- Webserver configuration UI
+- SAP/SDP announcements with foreign stream discovery
+
+- Webserver with REST API + gzipped web UI
+- Persistent configuration (SD card FAT filesystem with crash-safe A/B slots, SPI flash fallback)
+- HTTP + shell-based firmware updates (FBI format with CRC-32 verification)
 - Internal audio routing matrix
 - LiteX SoC boot from SPI flash via HyperRAM
+- Runtime detection of multiple I/O card types (MI, LO, IO)
+- SSD1306 OLED status display
 
 ### Todo
 - Further tune PI controller (currently ±30ns jitter when locked)
 - FPGA resource optimization (PTP servo uses ~1600 LUTs)
 - Phase jump handling
-
+ - Fix RAVENNA RTSP server/client for stream subscription
+ - Fix mDNS responder + DNS-SD service advertisement
 ## Technical Details
 
 ### PTP Clock Discipline
