@@ -805,7 +805,7 @@ static void metering_thread_fn(void *p1, void *p2, void *p3)
 
 		/* Log raw CSR values every ~1s (every 10th poll) */
 		if ((poll_count % 10) == 0) {
-			LOG_INF("meter: rx_sig=0x%04x rx_clip=0x%04x "
+			LOG_DBG("meter: rx_sig=0x%04x rx_clip=0x%04x "
 				"tx_sig=0x%04x tx_clip=0x%04x",
 				rx_signal, rx_clip, tx_signal, tx_clip);
 		}

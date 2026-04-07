@@ -26,7 +26,7 @@
 #include "ieee1588_utils.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 
-LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_INF);
 
 /* ---- Thread resources ---- */
 #define BMC_STACK_SIZE   4096

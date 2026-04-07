@@ -539,6 +539,43 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		/* Read packet data from RX buffer */
 		eth_buf_read_packet(data->rx_buf, pkt_len);
 
+		/* Debug: log ethertype and dst port for TCP packets */
+		{
+			uint16_t ethertype = ((uint16_t)data->rx_buf[12] << 8) |
+					     data->rx_buf[13];
+			if (ethertype == 0x0800 && pkt_len >= 34) {
+				uint8_t proto = data->rx_buf[23];
+				if (proto == 6) { /* TCP */
+					uint16_t dst_port =
+						((uint16_t)data->rx_buf[36] << 8) |
+						data->rx_buf[37];
+					if (dst_port == 80) {
+						uint16_t ip_total_len =
+							((uint16_t)data->rx_buf[16] << 8) |
+							data->rx_buf[17];
+						uint8_t ip_ihl =
+							(data->rx_buf[14] & 0x0F) * 4;
+						uint8_t tcp_doff =
+							((data->rx_buf[14 + ip_ihl + 12] >> 4) & 0xF) * 4;
+						uint16_t tcp_payload =
+							ip_total_len - ip_ihl - tcp_doff;
+						uint8_t tcp_flags =
+							data->rx_buf[14 + ip_ihl + 13];
+						LOG_DBG("RX TCP:80 eth=%u ip=%u ihl=%u "
+							"doff=%u payload=%u flags=0x%02x "
+							"seq=%02x%02x%02x%02x",
+							pkt_len, ip_total_len,
+							ip_ihl, tcp_doff,
+							tcp_payload, tcp_flags,
+							data->rx_buf[38],
+							data->rx_buf[39],
+							data->rx_buf[40],
+							data->rx_buf[41]);
+					}
+				}
+			}
+		}
+
 		/* ACK: release the RX buffer for the next packet */
 		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
 		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
@@ -551,7 +588,7 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(
 			data->iface, pkt_len, AF_UNSPEC, 0, K_NO_WAIT);
 		if (!pkt) {
-			LOG_ERR("RX alloc failed");
+			LOG_ERR("RX alloc failed (len=%u)", pkt_len);
 			continue;
 		}
 

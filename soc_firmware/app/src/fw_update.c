@@ -91,6 +91,7 @@ static struct fw_writer fw_state;
 
 static void fw_writer_reset(void)
 {
+	LOG_DBG("Reset fw writer");
 	memset(&fw_state, 0, sizeof(fw_state));
 	fw_state.flash_addr = FW_FLASH_ADDR;
 	fw_state.erased_up_to = FW_FLASH_ADDR;
@@ -104,10 +105,12 @@ static void fw_writer_reset(void)
  */
 static void fw_ensure_erased(uint32_t end_addr)
 {
+	LOG_DBG("Started Erase");
 	while (fw_state.erased_up_to < end_addr) {
 		spi_flash_sector_erase(fw_state.erased_up_to);
 		fw_state.erased_up_to += SPI_FLASH_SECTOR_SIZE;
 	}
+	LOG_DBG("Erase don");
 }
 
 /**
@@ -115,22 +118,27 @@ static void fw_ensure_erased(uint32_t end_addr)
  */
 static int fw_flush_page(void)
 {
+	LOG_DBG("Started flush page");
 	if (fw_state.page_buf_len == 0) {
+		LOG_WRN("Page buf leng not 0");
 		return 0;
 	}
 
 	fw_ensure_erased(fw_state.flash_addr + fw_state.page_buf_len);
+	LOG_DBG("Ensure Erase Done");
 	spi_flash_page_program(fw_state.flash_addr, fw_state.page_buf,
 			       fw_state.page_buf_len);
-
+	LOG_DBG("Flash Page Program done");
 	/* Verify */
 	uint8_t verify[SPI_FLASH_PAGE_SIZE];
 
 	spi_flash_read(fw_state.flash_addr, verify, fw_state.page_buf_len);
+	LOG_DBG("Started Verify Read");
 	if (memcmp(verify, fw_state.page_buf, fw_state.page_buf_len) != 0) {
 		LOG_ERR("FW: verify failed at 0x%08x", fw_state.flash_addr);
 		return -EIO;
 	}
+	LOG_DBG("Verify Read Done");
 
 	fw_state.flash_addr += fw_state.page_buf_len;
 	fw_state.total_written += fw_state.page_buf_len;
@@ -160,6 +168,7 @@ static inline uint32_t fw_ring_free(void)
  */
 static int fw_ring_push(const uint8_t *data, size_t len)
 {
+	LOG_DBG("FW ring push, length: %d", len);
 	if (len > fw_ring_free()) {
 		return -ENOMEM;
 	}
@@ -393,8 +402,12 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	enum http_method method = client->method;
 
+	LOG_DBG("cb enter: method=%d status=%d data_len=%zu phase=%d",
+		method, status, request_ctx->data_len, fw_state.phase);
+
 	/* ── OPTIONS (CORS preflight) ── */
 	if (method == HTTP_OPTIONS) {
+		LOG_DBG("OPTIONS preflight");
 		response_ctx->headers = cors_hdrs;
 		response_ctx->header_count = ARRAY_SIZE(cors_hdrs);
 		response_ctx->status = HTTP_204_NO_CONTENT;
@@ -458,13 +471,20 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	/* ── POST /api/fw_update → stream firmware to flash ── */
 	if (method != HTTP_POST) {
+		LOG_DBG("not POST, method=%d -> 405", method);
 		response_ctx->status = HTTP_405_METHOD_NOT_ALLOWED;
 		response_ctx->final_chunk = true;
 		return 0;
 	}
 
+	LOG_DBG("POST: status=%d data_len=%zu data_ptr=%p phase=%d total_rx=%u",
+		status, request_ctx->data_len, (void *)request_ctx->data,
+		fw_state.phase, fw_state.total_received);
+
 	/* Aborted? */
 	if (status == HTTP_SERVER_DATA_ABORTED) {
+		LOG_WRN("FW: ABORTED status=%d phase=%d total_rx=%u",
+			status, fw_state.phase, fw_state.total_received);
 		if (fw_state.phase == FW_RECEIVING ||
 		    fw_state.phase == FW_RX_COMPLETE) {
 			LOG_WRN("FW: upload aborted after %u bytes",
@@ -477,6 +497,7 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	/* First chunk — initialise writer */
 	if (fw_state.phase == FW_IDLE || fw_state.phase == FW_DONE) {
+		LOG_DBG("init writer: phase was %d", fw_state.phase);
 		fw_writer_reset();
 		fw_state.phase = FW_RECEIVING;
 		LOG_INF("FW: upload started");
@@ -484,6 +505,9 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	/* Push incoming data into ring buffer (non-blocking) */
 	if (request_ctx->data_len > 0 && fw_state.error == 0) {
+		LOG_DBG("push %zu bytes, total_rx_before=%u, ring_free=%u",
+			request_ctx->data_len, fw_state.total_received,
+			fw_ring_free());
 		/* Bounds check */
 		if (fw_state.total_received + request_ctx->data_len > FW_MAX_SIZE) {
 			LOG_ERR("FW: image too large (>%u bytes)", FW_MAX_SIZE);
@@ -495,25 +519,38 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 			while (fw_ring_free() < request_ctx->data_len &&
 			       --retries > 0) {
+				LOG_DBG("ring full, retry %d, free=%u need=%zu",
+					200 - retries, fw_ring_free(),
+					request_ctx->data_len);
 				k_msleep(5);
 			}
 
 			int ret = fw_ring_push(request_ctx->data,
 					       request_ctx->data_len);
 			if (ret < 0) {
-				LOG_ERR("FW: ring buffer overflow");
+				LOG_ERR("FW: ring buffer overflow (free=%u need=%zu)",
+					fw_ring_free(), request_ctx->data_len);
 				fw_state.error = ret;
 			} else {
 				fw_state.total_received += request_ctx->data_len;
+				LOG_DBG("pushed OK, total_rx=%u",
+					fw_state.total_received);
 			}
 		}
+	} else {
+		LOG_DBG("no data to push: data_len=%zu error=%d",
+			request_ctx->data_len, fw_state.error);
 	}
 
 	/* Not final yet — keep receiving */
 	if (status != HTTP_SERVER_DATA_FINAL) {
+		LOG_DBG("not final, returning final_chunk=false");
 		response_ctx->final_chunk = false;
 		return 0;
 	}
+
+	LOG_DBG("FINAL chunk, total_rx=%u, signalling writer",
+		fw_state.total_received);
 
 	/* ── Final chunk received — signal writer, respond immediately ── */
 	fw_state.phase = FW_RX_COMPLETE;

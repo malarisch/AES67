@@ -800,7 +800,7 @@ PORT MAP(sys_clk => clk_125MHz,
 
 
 b2v_eth_buf : eth_ram
-GENERIC MAP(lastAddress => 1500
+GENERIC MAP(lastAddress => 1532
 			)
 PORT MAP(rx_clk => mac_rx_clock,
 		 sync_in => eth_frame_rdy,
@@ -826,7 +826,7 @@ PORT MAP(rx_clk => mac_rx_clock,
 
 
 b2v_eth_rx : ethernet_receive
-GENERIC MAP(lastRamAddress => 1500
+GENERIC MAP(lastRamAddress => 1532
 			)
 PORT MAP(rx_clk => mac_rx_clock,
 		 rx_frame => mac_rx_frame,
