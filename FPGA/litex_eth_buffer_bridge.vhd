@@ -270,17 +270,10 @@ begin
       end if;
       if (packet_length_valid_i = '1') then
         packet_lenght_valid_latch <= '1';
+                packet_length_latch <= pkt_len_i;
+
       end if;
-      if (packet_lenght_valid_latch = '1') then
-        if (packet_length_valid_counter = 15) then
-        packet_length_latch <= pkt_len_i;
-        else
-          packet_length_valid_counter <= packet_length_valid_counter + 1;
-        end if;
-        
-        else
-        packet_length_valid_counter <= (others => '0');
-        end if;
+
       
       case sm_rx is
         when RX_IDLE =>

@@ -101,13 +101,14 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 	fpga_write_ip_address(&dhcpv4->requested_ip);
 	ui_display_set_ip(&dhcpv4->requested_ip);
-	fpga_poll_notify_ip_valid();
+	fpga_poll_notify_ip_valid(&dhcpv4->requested_ip);
 
 	ptp_bmc_notify_ip_ready();
 
 #ifdef CONFIG_DISPLAY_CTRL
 	if (display_ctrl_ready()) {
 		display_ctrl_show_status("L  PTP");
+		display_ctrl_update_status_cycle_ip(&dhcpv4->requested_ip);
 	}
 #endif
 
@@ -152,13 +153,31 @@ static void on_bmc_change(enum ptp_bmc_role new_role)
 		case PTP_ROLE_LEADER:
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_ON);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
-			display_ctrl_show_status("LEADDR");
+			display_ctrl_stop_status_cycle();
+			/* If wallclock already locked, go online immediately;
+			 * otherwise let fpga_poll handle when wc_locked fires */
+			if (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) {
+				display_ctrl_loading_animation_stop();
+				display_ctrl_start_metering();
+				display_ctrl_start_status_cycle("LEADER",
+					g_ip_valid ? &g_my_ip : NULL);
+			}
 			LOG_INF("LED: Master ON, Ext OFF");
 			break;
 		case PTP_ROLE_FOLLOWER:
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_OFF);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_ON);
-			display_ctrl_show_status("SYNCNG");
+			display_ctrl_stop_status_cycle();
+			/* If wallclock already locked, go online;
+			 * otherwise show SYNCNG and let fpga_poll handle transition */
+			if (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) {
+				display_ctrl_loading_animation_stop();
+				display_ctrl_start_metering();
+				display_ctrl_start_status_cycle("FOLLOW",
+					g_ip_valid ? &g_my_ip : NULL);
+			} else {
+				display_ctrl_show_status("SYNCNG");
+			}
 			LOG_INF("LED: Master OFF, Ext ON");
 			break;
 		case PTP_ROLE_LISTENING:
@@ -166,6 +185,7 @@ static void on_bmc_change(enum ptp_bmc_role new_role)
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_BLINK1);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
 			display_ctrl_show_status("L  PTP");
+			display_ctrl_stop_status_cycle();
 			LOG_INF("LED: Master BLINK, Ext OFF (listening)");
 			break;
 		}
@@ -225,8 +245,8 @@ int main(void)
 		/* CS5368 ADCs require a stable MCLK before their reset is
 		 * released — otherwise the I2C interface won't initialise.
 		 * Give the Si5351A PLL time to lock and the clock to settle. */
-		LOG_INF("Waiting 2 s for MCLK to stabilise...");
-		k_msleep(2000);
+		LOG_INF("Waiting 200 ms for MCLK to stabilise...");
+		k_msleep(200);
 	}
 
 	/* ---- Shared nRST: reset display controller + IO card hardware ---- */
@@ -274,8 +294,9 @@ int main(void)
 		} else {
 			LOG_INF("Display controller initialized");
 			display_ctrl_all_off();
+			display_ctrl_boot_animation();
+			display_ctrl_loading_animation_start();
 			display_ctrl_show_status("  FPGA");
-			display_ctrl_start_metering();
 		}
 	}
 #endif

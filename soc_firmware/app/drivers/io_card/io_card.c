@@ -629,9 +629,12 @@ int io_card_init(const struct device *i2c_dev)
 		}
 	}
 
-	/* ---- Default output enable: all channels on ---- */
+	/* ---- Default output enable: per-channel all on, global off ---- */
+	/* Hardware OE register was cleared above.  Keep global_out_enable
+	 * false so the software state matches the hardware.  Outputs will
+	 * be enabled later (e.g. once PTP is locked). */
 	io_data.out_enable[0] = 0xFF;
-	io_data.global_out_enable = true;
+	io_data.global_out_enable = false;
 
 	io_data.initialized = true;
 	k_mutex_unlock(&io_data.lock);

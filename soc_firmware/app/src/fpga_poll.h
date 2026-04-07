@@ -19,7 +19,9 @@ void fpga_poll_start(fpga_poll_dhcp_restart_fn dhcp_restart_cb);
 
 /**
  * @brief Notify the poll thread that IP is valid (for link recovery logic).
+ *
+ * @param ip  The assigned IP address (stored for status display)
  */
-void fpga_poll_notify_ip_valid(void);
+void fpga_poll_notify_ip_valid(const struct in_addr *ip);
 
 #endif /* FPGA_POLL_H */

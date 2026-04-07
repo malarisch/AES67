@@ -3,6 +3,12 @@
 #include <zephyr/logging/log.h>
 
 #include "../drivers/fpga_hal/fpga_hal.h"
+#ifdef CONFIG_IO_CARD
+#include "../drivers/io_card/io_card.h"
+#endif
+#ifdef CONFIG_LO_CARD
+#include "../drivers/lo_card/lo_card.h"
+#endif
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
@@ -27,14 +33,18 @@ static struct k_thread ppb_poll_thread_data;
 
 static fpga_poll_dhcp_restart_fn g_dhcp_restart_cb;
 static bool g_ip_valid;
+static struct in_addr g_poll_ip;
 
 static struct ui_fpga_metrics disp_metrics = {
 	.speed_code = 0xFF,
 };
 
-void fpga_poll_notify_ip_valid(void)
+void fpga_poll_notify_ip_valid(const struct in_addr *ip)
 {
 	g_ip_valid = true;
+	if (ip) {
+		g_poll_ip = *ip;
+	}
 }
 
 /**
@@ -116,6 +126,20 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					display_ctrl_set_sys_led(DC_SYSLED_48K,
 						disp_metrics.wc_locked ? DC_SYSLED_ON : DC_SYSLED_OFF);
 					prev_wc_locked = disp_metrics.wc_locked;
+
+					/* Clock locked: stop loading, start metering + status cycle */
+					if (disp_metrics.wc_locked) {
+						display_ctrl_loading_animation_stop();
+						display_ctrl_start_metering();
+						display_ctrl_stop_status_cycle();
+
+						enum ptp_bmc_role role = ptp_bmc_get_role();
+						const char *role_str =
+							(role == PTP_ROLE_LEADER) ? "LEADER" : "FOLLOW";
+						display_ctrl_start_status_cycle(
+							role_str,
+							g_ip_valid ? &g_poll_ip : NULL);
+					}
 				}
 
 				if (disp_metrics.link_up != prev_link_up) {
@@ -125,6 +149,22 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				}
 			}
 #endif
+
+			/* ---- Enable outputs on first wallclock lock ---- */
+			{
+				static bool outputs_enabled;
+
+				if (disp_metrics.wc_locked && !outputs_enabled) {
+					LOG_INF("Wallclock locked — enabling outputs");
+#ifdef CONFIG_IO_CARD
+					io_card_enable_outputs(true);
+#endif
+#ifdef CONFIG_LO_CARD
+					lo_card_enable_outputs(true);
+#endif
+					outputs_enabled = true;
+				}
+			}
 
 			/* Path delay */
 			disp_metrics.path_delay_ns = fpga_hal_read_path_delay();

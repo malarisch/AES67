@@ -15,6 +15,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/net/net_ip.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -458,6 +459,37 @@ bool display_ctrl_button_pressed(enum dc_scan_code code);
 int display_ctrl_show_status(const char *text);
 
 /**
+ * @brief Run a boot animation on all channel LEDs
+ *
+ * Lights up LEDs column-by-column (Ch1+Ch9+OutCh1, Ch2+Ch10+OutCh2, ...),
+ * each column stepping through Mute→Signal→Clip→48V (inputs) and
+ * Mute→[skip]→Signal→Clip (outputs). Then turns them off in the same order.
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int display_ctrl_boot_animation(void);
+
+/**
+ * @brief Start a loading animation on channel LEDs (background thread)
+ *
+ * Same traversal order as boot animation but only one LED per row is lit
+ * at a time (chase effect). Loops until stopped via
+ * display_ctrl_loading_animation_stop().
+ *
+ * @return 0 on success, -EALREADY if already running, negative errno on failure
+ */
+int display_ctrl_loading_animation_start(void);
+
+/**
+ * @brief Stop the loading animation
+ *
+ * Waits for the animation thread to finish and turns off any remaining LEDs.
+ *
+ * @return 0 on success
+ */
+int display_ctrl_loading_animation_stop(void);
+
+/**
  * @brief Perform full display test (all LEDs on)
  *
  * @return 0 on success, negative errno on failure
@@ -483,6 +515,30 @@ int display_ctrl_all_off(void);
  * the corresponding channel LEDs. Call after display_ctrl_init().
  */
 void display_ctrl_start_metering(void);
+
+/**
+ * @brief Start the status display cycling thread
+ *
+ * Cycles the 7-segment display every 2 s through:
+ *   "ONLINE" → role → IP octets 1-2 → IP octets 3-4
+ *
+ * @param role  Role string to display (e.g. "LEADER" or "FOLLOW")
+ * @param ip    Current IP address (octets formatted as 3 digits each)
+ */
+void display_ctrl_start_status_cycle(const char *role,
+				     const struct in_addr *ip);
+
+/**
+ * @brief Stop the status display cycling thread
+ */
+void display_ctrl_stop_status_cycle(void);
+
+/**
+ * @brief Update the IP address shown by the status cycle
+ *
+ * @param ip  New IP address
+ */
+void display_ctrl_update_status_cycle_ip(const struct in_addr *ip);
 #endif
 
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)

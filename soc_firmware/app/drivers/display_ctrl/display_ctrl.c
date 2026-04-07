@@ -11,6 +11,7 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
+#include <stdio.h>
 
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO)
 #include <zephyr/drivers/gpio.h>
@@ -692,6 +693,255 @@ bool display_ctrl_button_pressed(enum dc_scan_code code)
 }
 
 /*******************************************************************************
+ * Boot Animation
+ ******************************************************************************/
+
+#ifndef CONFIG_DISPLAY_CTRL_BOOT_ANIM_DELAY_MS
+#define CONFIG_DISPLAY_CTRL_BOOT_ANIM_DELAY_MS 30
+#endif
+
+int display_ctrl_boot_animation(void)
+{
+	if (!dc_data.initialized) {
+		return -ENODEV;
+	}
+
+	const int delay = CONFIG_DISPLAY_CTRL_BOOT_ANIM_DELAY_MS;
+	const int num_input = (DC_MAX_CHANNELS > 16) ? 16 : DC_MAX_CHANNELS;
+	const int num_columns = num_input / 2; /* Ch1-8 columns, each has Ch_n + Ch_{n+8} + Out_{n} */
+	const int out_base = 16; /* Output channels start at 16 */
+
+	/*
+	 * Per-column LED order (4 time steps):
+	 *   Step 0: Mute   (input ch_n, input ch_{n+8}, output ch_n)
+	 *   Step 1: Signal (input ch_n, input ch_{n+8}), [empty slot for output]
+	 *   Step 2: Clip   (input ch_n, input ch_{n+8}), Signal (output ch_n)
+	 *   Step 3: 48V    (input ch_n, input ch_{n+8}), Clip   (output ch_n)
+	 */
+
+	/* Phase 1: Turn on LEDs column-by-column, step-by-step */
+	for (int col = 0; col < num_columns; col++) {
+		int ch_lo = col;               /* Ch 1-8  (indices 0-7) */
+		int ch_hi = col + num_columns; /* Ch 9-16 (indices 8-15) */
+		int ch_out = out_base + col;   /* Out 1-8 (indices 16-23) */
+
+		/* Step 0: Mute (all three) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_MUTE, true);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_MUTE, true);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_MUTE, true);
+		}
+		k_msleep(delay);
+
+		/* Step 1: Signal (inputs only; output has empty slot) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_SIGNAL, true);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_SIGNAL, true);
+		k_msleep(delay);
+
+		/* Step 2: Clip (inputs), Signal (output) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_CLIP, true);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_CLIP, true);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_SIGNAL, true);
+		}
+		k_msleep(delay);
+
+		/* Step 3: 48V (inputs), Clip (output) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_PHANTOM, true);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_PHANTOM, true);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_CLIP, true);
+		}
+		k_msleep(delay);
+	}
+
+	///* Brief pause while all LEDs are on */
+	//k_msleep(delay * 3);
+
+	/* Phase 2: Turn off LEDs in the same order */
+	for (int col = 0; col < num_columns; col++) {
+		int ch_lo = col;
+		int ch_hi = col + num_columns;
+		int ch_out = out_base + col;
+
+		/* Step 0: Mute off */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_MUTE, false);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_MUTE, false);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_MUTE, false);
+		}
+		k_msleep(delay);
+
+		/* Step 1: Signal off (inputs only) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_SIGNAL, false);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_SIGNAL, false);
+		k_msleep(delay);
+
+		/* Step 2: Clip off (inputs), Signal off (output) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_CLIP, false);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_CLIP, false);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_SIGNAL, false);
+		}
+		k_msleep(delay);
+
+		/* Step 3: 48V off (inputs), Clip off (output) */
+		display_ctrl_set_channel_led(ch_lo, DC_CHNLED_PHANTOM, false);
+		display_ctrl_set_channel_led(ch_hi, DC_CHNLED_PHANTOM, false);
+		if (ch_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(ch_out, DC_CHNLED_CLIP, false);
+		}
+		k_msleep(delay);
+	}
+
+	return 0;
+}
+
+/*******************************************************************************
+ * Loading Animation (background thread, single-LED chase)
+ ******************************************************************************/
+#ifndef CONFIG_DISPLAY_CTRL_LOAD_ANIM_DELAY_MS
+#define CONFIG_DISPLAY_CTRL_LOAD_ANIM_DELAY_MS 15
+#endif
+#define LOADING_ANIM_STACK_SIZE 512
+
+static K_THREAD_STACK_DEFINE(loading_anim_stack, LOADING_ANIM_STACK_SIZE);
+static struct k_thread loading_anim_thread;
+static volatile bool loading_anim_running;
+
+static void loading_anim_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	const int delay = CONFIG_DISPLAY_CTRL_LOAD_ANIM_DELAY_MS;
+	const int num_input = (DC_MAX_CHANNELS > 16) ? 16 : DC_MAX_CHANNELS;
+	const int num_columns = num_input / 2;
+	const int out_base = 16;
+
+	/*
+	 * Same traversal order as boot animation but only one LED per row
+	 * is lit at a time (turn off previous before turning on next).
+	 *
+	 * Input rows:  Mute → Signal → Clip → 48V
+	 * Output rows: Mute → [skip] → Signal → Clip
+	 *
+	 * "Row" = one channel strip (ch_lo, ch_hi, ch_out move together).
+	 */
+
+	/* Previous-step tracking: which LEDs to turn off before next step */
+	int prev_col = -1;
+	enum dc_chn_led_type prev_in_type = 0;
+	enum dc_chn_led_type prev_out_type = 0;
+	bool prev_out_valid = false;
+	bool prev_in_only = false; /* step had no output LED */
+
+	while (loading_anim_running) {
+		for (int col = 0; col < num_columns && loading_anim_running; col++) {
+			int ch_lo = col;
+			int ch_hi = col + num_columns;
+			int ch_out = out_base + col;
+			bool has_out = (ch_out < DC_MAX_CHANNELS);
+
+			/*
+			 * 4 steps per column, matching boot animation order:
+			 *   Step 0: Mute (in+out)
+			 *   Step 1: Signal (in only)
+			 *   Step 2: Clip (in) + Signal (out)
+			 *   Step 3: 48V (in) + Clip (out)
+			 */
+			struct {
+				enum dc_chn_led_type in_type;
+				enum dc_chn_led_type out_type;
+				bool out_on;  /* whether output LED lights this step */
+			} steps[4] = {
+				{ DC_CHNLED_MUTE,    DC_CHNLED_MUTE,    true  },
+				{ DC_CHNLED_SIGNAL,  0,                  false },
+				{ DC_CHNLED_CLIP,    DC_CHNLED_SIGNAL,   true  },
+				{ DC_CHNLED_PHANTOM, DC_CHNLED_CLIP,     true  },
+			};
+
+			for (int s = 0; s < 4 && loading_anim_running; s++) {
+				/* Turn off previous step's LEDs */
+				if (prev_col >= 0) {
+					int p_lo = prev_col;
+					int p_hi = prev_col + num_columns;
+					int p_out = out_base + prev_col;
+
+					display_ctrl_set_channel_led(p_lo, prev_in_type, false);
+					display_ctrl_set_channel_led(p_hi, prev_in_type, false);
+					if (prev_out_valid && p_out < DC_MAX_CHANNELS) {
+						display_ctrl_set_channel_led(p_out, prev_out_type, false);
+					}
+				}
+
+				/* Turn on this step's LEDs */
+				display_ctrl_set_channel_led(ch_lo, steps[s].in_type, true);
+				display_ctrl_set_channel_led(ch_hi, steps[s].in_type, true);
+				if (has_out && steps[s].out_on) {
+					display_ctrl_set_channel_led(ch_out, steps[s].out_type, true);
+				}
+
+				/* Remember for next step */
+				prev_col = col;
+				prev_in_type = steps[s].in_type;
+				prev_out_type = steps[s].out_type;
+				prev_out_valid = steps[s].out_on;
+
+				k_msleep(delay);
+			}
+		}
+	}
+
+	/* Clean up: turn off last lit LEDs */
+	if (prev_col >= 0) {
+		int p_lo = prev_col;
+		int p_hi = prev_col + num_columns;
+		int p_out = out_base + prev_col;
+
+		display_ctrl_set_channel_led(p_lo, prev_in_type, false);
+		display_ctrl_set_channel_led(p_hi, prev_in_type, false);
+		if (prev_out_valid && p_out < DC_MAX_CHANNELS) {
+			display_ctrl_set_channel_led(p_out, prev_out_type, false);
+		}
+	}
+}
+
+int display_ctrl_loading_animation_start(void)
+{
+	if (!dc_data.initialized) {
+		return -ENODEV;
+	}
+
+	if (loading_anim_running) {
+		return -EALREADY;
+	}
+
+	loading_anim_running = true;
+
+	k_thread_create(&loading_anim_thread, loading_anim_stack,
+			LOADING_ANIM_STACK_SIZE,
+			loading_anim_entry, NULL, NULL, NULL,
+			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+	k_thread_name_set(&loading_anim_thread, "led_loading");
+
+	return 0;
+}
+
+int display_ctrl_loading_animation_stop(void)
+{
+	if (!loading_anim_running) {
+		return 0;
+	}
+
+	loading_anim_running = false;
+	k_thread_join(&loading_anim_thread, K_SECONDS(5));
+
+	return 0;
+}
+
+/*******************************************************************************
  * Utility Functions
  ******************************************************************************/
 
@@ -825,12 +1075,132 @@ static void metering_thread_fn(void *p1, void *p2, void *p3)
 
 void display_ctrl_start_metering(void)
 {
+	static bool started;
+
+	if (started) {
+		return;
+	}
+	started = true;
+
 	k_thread_create(&metering_thread, metering_stack,
 			METERING_STACK_SIZE, metering_thread_fn,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
 	k_thread_name_set(&metering_thread, "dc_meter");
 	LOG_INF("Metering polling thread started (%d ms interval)", METERING_POLL_MS);
+}
+
+/*******************************************************************************
+ * Status Display Cycling Thread
+ * Cycles every 2 s: "ONLINE" → "LEADER"/"FOLLOW" → IP part1 → IP part2
+ ******************************************************************************/
+
+#define STATUS_CYCLE_STACK_SIZE 512
+#define STATUS_CYCLE_INTERVAL_MS 2000
+
+static K_THREAD_STACK_DEFINE(status_cycle_stack, STATUS_CYCLE_STACK_SIZE);
+static struct k_thread status_cycle_thread;
+static volatile bool status_cycle_running;
+
+static struct {
+	char role_str[7];   /* "LEADER" or "FOLLOW" */
+	char ip_part1[7];   /* e.g. "192168" */
+	char ip_part2[7];   /* e.g. "001050" */
+} status_cycle_data;
+
+static void status_cycle_thread_fn(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	int phase = 0;
+
+	while (status_cycle_running) {
+		switch (phase) {
+		case 0:
+			display_ctrl_show_status("ONLINE");
+			break;
+		case 1:
+			display_ctrl_show_status(status_cycle_data.role_str);
+			break;
+		case 2:
+			display_ctrl_show_status(status_cycle_data.ip_part1);
+			break;
+		case 3:
+			display_ctrl_show_status(status_cycle_data.ip_part2);
+			break;
+		}
+
+		phase = (phase + 1) % 4;
+		k_msleep(STATUS_CYCLE_INTERVAL_MS);
+	}
+}
+
+void display_ctrl_start_status_cycle(const char *role, const struct in_addr *ip)
+{
+	if (!dc_data.initialized || status_cycle_running) {
+		return;
+	}
+
+	/* Store role string */
+	strncpy(status_cycle_data.role_str, role,
+		sizeof(status_cycle_data.role_str) - 1);
+	status_cycle_data.role_str[sizeof(status_cycle_data.role_str) - 1] = '\0';
+
+	/* Format IP address as two 6-char strings: "192168" + "001050" */
+	if (ip) {
+		const uint8_t *a = (const uint8_t *)&ip->s_addr;
+
+		snprintf(status_cycle_data.ip_part1,
+			 sizeof(status_cycle_data.ip_part1),
+			 "%03u%03u", a[0], a[1]);
+		snprintf(status_cycle_data.ip_part2,
+			 sizeof(status_cycle_data.ip_part2),
+			 "%03u%03u", a[2], a[3]);
+	} else {
+		strncpy(status_cycle_data.ip_part1, "000000", 7);
+		strncpy(status_cycle_data.ip_part2, "000000", 7);
+	}
+
+	status_cycle_running = true;
+
+	k_thread_create(&status_cycle_thread, status_cycle_stack,
+			STATUS_CYCLE_STACK_SIZE, status_cycle_thread_fn,
+			NULL, NULL, NULL,
+			K_PRIO_PREEMPT(12), 0, K_NO_WAIT);
+	k_thread_name_set(&status_cycle_thread, "dc_status");
+
+	LOG_INF("Status cycle started: %s, IP=%s.%s",
+		status_cycle_data.role_str,
+		status_cycle_data.ip_part1,
+		status_cycle_data.ip_part2);
+}
+
+void display_ctrl_stop_status_cycle(void)
+{
+	if (!status_cycle_running) {
+		return;
+	}
+
+	status_cycle_running = false;
+	k_thread_join(&status_cycle_thread, K_SECONDS(5));
+}
+
+void display_ctrl_update_status_cycle_ip(const struct in_addr *ip)
+{
+	if (!ip) {
+		return;
+	}
+
+	const uint8_t *a = (const uint8_t *)&ip->s_addr;
+
+	snprintf(status_cycle_data.ip_part1,
+		 sizeof(status_cycle_data.ip_part1),
+		 "%03u%03u", a[0], a[1]);
+	snprintf(status_cycle_data.ip_part2,
+		 sizeof(status_cycle_data.ip_part2),
+		 "%03u%03u", a[2], a[3]);
 }
 
 #endif /* CONFIG_DISPLAY_CTRL_NRST_HAL || CONFIG_FPGA_HAL_LITEX */
