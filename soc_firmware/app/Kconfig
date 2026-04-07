@@ -93,6 +93,28 @@ config SD_CONFIG
 
 endmenu
 
+menu "SPI Flash Configuration Storage"
+
+config FLASH_CONFIG
+	bool "Enable SPI flash configuration storage"
+	default y
+	depends on SPI_FLASH_LITESPI
+	help
+	  Store device configuration in the upper area of the SPI NOR flash
+	  using a crash-safe A/B slot scheme with CRC-32 verification.
+	  Provides a fallback when no SD card is present.
+
+config FLASH_CONFIG_OFFSET
+	hex "Flash offset for config storage (0-based)"
+	default 0x7F0000
+	depends on FLASH_CONFIG
+	help
+	  Byte offset within the SPI flash where config storage begins.
+	  Two 8 KB slots are placed here (16 KB total).
+	  Default 0x7F0000 = 8 MB - 64 KB, well above firmware area.
+
+endmenu
+
 menu "Zephyr"
 source "Kconfig.zephyr"
 endmenu

@@ -30,6 +30,9 @@
 #ifdef CONFIG_SD_CONFIG
 #include "sd_config.h"
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+#include "flash_config.h"
+#endif
 #include <zephyr/sys/reboot.h>
 #include "../drivers/fpga_hal/fpga_hal.h"
 #include "fw_update.h"
@@ -1702,6 +1705,12 @@ static int api_handler(struct http_client_ctx *client,
 			p = json_add_bool(json_buf, JSON_BUF_SIZE, p, "sd_mounted", false);
 			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "sd_config_status", "disabled");
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "flash_config_status",
+					  flash_config_status_str(flash_config_get_load_status()));
+#else
+			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "flash_config_status", "disabled");
+#endif
 			p = json_add_str(json_buf, JSON_BUF_SIZE, p, "version", "1.0.0");
 			p = json_end_object(json_buf, JSON_BUF_SIZE, p);
 			json_len = p;
@@ -1735,6 +1744,9 @@ static int api_handler(struct http_client_ctx *client,
 #ifdef CONFIG_SD_CONFIG
 				sd_config_save();
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+				flash_config_save();
+#endif
 			}
 		} else if (strcmp(url, "/api/streams/tx") == 0) {
 			ret = apply_tx_stream_json(post_body, post_body_len);
@@ -1744,6 +1756,9 @@ static int api_handler(struct http_client_ctx *client,
 #ifdef CONFIG_SD_CONFIG
 				sd_config_save();
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+				flash_config_save();
+#endif
 			}
 		} else if (strcmp(url, "/api/streams/rx") == 0) {
 			ret = apply_rx_stream_json(post_body, post_body_len);
@@ -1752,6 +1767,9 @@ static int api_handler(struct http_client_ctx *client,
 						    "{\"ok\":true}");
 #ifdef CONFIG_SD_CONFIG
 				sd_config_save();
+#endif
+#ifdef CONFIG_FLASH_CONFIG
+				flash_config_save();
 #endif
 			}
 #ifdef CONFIG_MI_CARD
@@ -1987,6 +2005,11 @@ static int api_handler(struct http_client_ctx *client,
 				sd_config_save();
 			}
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+			if (ret == 0) {
+				flash_config_save();
+			}
+#endif
 		} else if (strncmp(url, "/api/streams/rx/", 16) == 0) {
 			int sid = atoi(url + 16);
 
@@ -1994,6 +2017,11 @@ static int api_handler(struct http_client_ctx *client,
 #ifdef CONFIG_SD_CONFIG
 			if (ret == 0) {
 				sd_config_save();
+			}
+#endif
+#ifdef CONFIG_FLASH_CONFIG
+			if (ret == 0) {
+				flash_config_save();
 			}
 #endif
 		}

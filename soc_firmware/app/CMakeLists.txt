@@ -66,6 +66,7 @@ target_sources(app PRIVATE
   src/ptp_bmc.c
   src/sap_sdp.c
   src/aes67_config.c
+  src/config_json.c
   src/aes67_sdp_utils.c
   src/webserver.c
   src/fw_update.c
@@ -80,6 +81,9 @@ target_sources_ifdef(CONFIG_MDNS_SD app PRIVATE src/mdns_sd.c)
 
 # SD card configuration storage (optional)
 target_sources_ifdef(CONFIG_SD_CONFIG app PRIVATE src/sd_config.c)
+
+# SPI flash configuration storage (optional)
+target_sources_ifdef(CONFIG_FLASH_CONFIG app PRIVATE src/flash_config.c)
 
 add_dependencies(app web_assets)
 

@@ -40,6 +40,9 @@
 #ifdef CONFIG_SD_CONFIG
 #include "sd_config.h"
 #endif
+#ifdef CONFIG_FLASH_CONFIG
+#include "flash_config.h"
+#endif
 #ifdef CONFIG_MDNS_SD
 #include "mdns_sd.h"
 #endif
@@ -226,6 +229,14 @@ int main(void)
 	}
 #endif
 
+#ifdef CONFIG_FLASH_CONFIG
+	/* ---- SPI Flash Config Initialization ---- */
+	int flash_cfg_ret = flash_config_init();
+	if (flash_cfg_ret < 0) {
+		LOG_WRN("Flash config not available: %d", flash_cfg_ret);
+	}
+#endif
+
 	/* ---- Si5351A Clock Generator Setup ---- */
 	const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
 
@@ -309,25 +320,47 @@ int main(void)
 
 #ifdef CONFIG_SD_CONFIG
 	/* ---- Load configuration from SD card (now that FPGA is ready) ---- */
+	bool config_loaded = false;
+
 	if (sd_config_is_ready()) {
 		int cfg_ret = sd_config_load();
 		if (cfg_ret == -ENOENT) {
 			LOG_INF("No config file on SD card, using defaults");
 			/* Save defaults to create the file */
 			sd_config_save();
+			config_loaded = true;
 		} else if (cfg_ret < 0) {
 			LOG_ERR("Failed to load config from SD: %d", cfg_ret);
 		} else {
 			LOG_INF("Configuration loaded from SD card");
+			config_loaded = true;
 		}
 	}
+#else
+	bool config_loaded = false;
+#endif
+
+#ifdef CONFIG_FLASH_CONFIG
+	/* ---- Fall back to flash config if SD didn't load ---- */
+	if (!config_loaded) {
+		int fcfg_ret = flash_config_load();
+		if (fcfg_ret == -ENOENT) {
+			LOG_INF("No config in flash, using defaults");
+			flash_config_save();
+		} else if (fcfg_ret < 0) {
+			LOG_ERR("Failed to load config from flash: %d",
+				fcfg_ret);
+		} else {
+			LOG_INF("Configuration loaded from SPI flash");
+		}
+	}
+#endif
 
 	/* Apply configured hostname to network stack */
 	char hostname_buf[AES67_NODE_ID_MAX];
 	aes67_config_build_hostname(hostname_buf, sizeof(hostname_buf));
 	net_hostname_set(hostname_buf, strlen(hostname_buf));
 	LOG_INF("Hostname set to: %s", hostname_buf);
-#endif
 
 	/* ---- Network Initialization (after FPGA ready) ---- */
 	struct net_if *iface = net_if_get_default();
