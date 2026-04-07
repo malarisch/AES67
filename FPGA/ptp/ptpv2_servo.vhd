@@ -31,19 +31,25 @@ entity ptpv2_servo is
         -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
         KP_GAIN : integer := 5;   -- Proportional gain numerator 
         KI_GAIN : integer := 6;    -- Integral gain numerator
-        GAIN_SHIFT : integer := 6; -- Divide gains (base shift for 1 Hz)
-        GAIN_SHIFT_LOCKED: integer := 4; -- Additional gain reduction when locked
+        GAIN_SHIFT : integer := 3; -- Base gain divisor (for 1 Hz sync rate)
+        GAIN_SHIFT_LOCKED: integer := 0; -- ADDITIONAL shift when locked (none = original behavior)
+        
+        -- Ki extra shift relative to Kp (Ki denominator = 2^(GAIN_SHIFT + KI_EXTRA_SHIFT))
+        -- Higher value = better damping but slower integral convergence
+        KI_EXTRA_SHIFT : integer := 2;
         
         -- Filter coefficient for offset (exponential moving average)
-        FILTER_SHIFT : integer := 0;  -- alpha
+        -- alpha = 1/2^FILTER_SHIFT. 0=no filter, 1=50%, 2=25%
+        FILTER_SHIFT : integer := 0;  -- 0 = no filter (direct input)
         
-        -- Warmup: ignore first N samples to let filter settle
+        -- Warmup: collect N samples for frequency estimation before closing loop
+        -- At 8 Hz sync, 8 samples = 1 second
         WARMUP_SAMPLES : integer := 8; 
         
         -- Lock thresholds
         LOCK_THRESHOLD_NS   : integer := 500;    -- Consider locked if offset < 500ns
         UNLOCK_THRESHOLD_NS : integer := 5000;   -- Unlock if offset > 5µs
-        LOCK_COUNT_THRESHOLD : integer := 30;     -- Need only 2 consecutive good measurements
+        LOCK_COUNT_THRESHOLD : integer := 16;     -- Consecutive good measurements for lock (~2s at 8 Hz)
         
         -- Sync timeout multiplier (timeout = 3 * sync_interval)
         CLOCK_FREQ_HZ : integer := 125_000_000
@@ -94,8 +100,18 @@ architecture Behavioral of ptpv2_servo is
     -- Message interval tracking
     signal current_log_interval : signed(7 downto 0) := (others => '0');
     
-    -- Gain shift is a compile-time constant
-    signal EFFECTIVE_GAIN_SHIFT : integer := GAIN_SHIFT;
+    -- Sync rate gain scaling: adds -log_msg_interval to base shift
+    -- For AES67 logMsgInterval=-3 (8 Hz), adds 3 to gain shift
+    signal interval_shift : natural range 0 to 7 := 0;
+    
+    -- Total effective gain shift (base + interval_shift + locked_extra)
+    -- Driven by concurrent assignment, not inside process
+    signal EFFECTIVE_GAIN_SHIFT : natural range 0 to 20 := GAIN_SHIFT;
+    
+    -- Frequency estimation: save first offset to compute drift rate during warmup
+    signal first_offset        : signed(31 downto 0) := (others => '0');
+    -- Once we've locked at least once, switch from acquisition to tracking gains
+    signal first_lock_achieved : std_logic := '0';
     
     -- Sanity check: reject obviously invalid measurements (> 1s)
     constant MAX_VALID_OFFSET : signed(31 downto 0) := to_signed(500_000_000, 32);
@@ -134,6 +150,15 @@ architecture Behavioral of ptpv2_servo is
     
 begin
 
+    -- Concurrent gain shift calculation: always reflects current state
+    -- ACQUISITION (before first lock): Use base GAIN_SHIFT only (no interval scaling)
+    --   → Higher gains for fast convergence, combined with freq estimation
+    -- TRACKING (after first lock):     Add interval_shift for rate-normalized gains
+    -- LOCKED:                          Add GAIN_SHIFT_LOCKED for extra stability
+    EFFECTIVE_GAIN_SHIFT <= GAIN_SHIFT + interval_shift + GAIN_SHIFT_LOCKED when locked = '1'
+                       else GAIN_SHIFT + interval_shift when first_lock_achieved = '1'
+                       else GAIN_SHIFT;  -- Acquisition: aggressive gains
+
     -- Output assignments
     freq_correction_o <= freq_correction;
     locked_o <= locked;
@@ -158,6 +183,9 @@ begin
             timeout_limit   <= to_unsigned(CLOCK_FREQ_HZ * 4, 32);
             sync_timeout    <= '0';
             current_log_interval <= (others => '0');
+            interval_shift  <= 0;
+            first_offset    <= (others => '0');
+            first_lock_achieved <= '0';
             -- PI pipeline reset
             pi_state <= PI_IDLE;
             pi_trigger <= '0';
@@ -204,7 +232,7 @@ begin
                     -- Shift and negate proportional term
                     pi_proportional <= -resize(shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT), 32);
                     -- Calculate integral update term
-                    pi_int_update <= integral_sum - resize(shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + 2), 32);
+                    pi_int_update <= integral_sum - resize(shift_right(pi_mult_i, EFFECTIVE_GAIN_SHIFT + KI_EXTRA_SHIFT), 32);
                     pi_state <= PI_SUM;
                 
                 when PI_SUM =>
@@ -237,41 +265,20 @@ begin
             end case;
             
             -- ============================================
-            -- UPDATE MESSAGE INTERVAL
+            -- UPDATE MESSAGE INTERVAL → GAIN SCALING
             -- ============================================
+            -- Scale PI gains by sync rate: faster sync → more shift → lower per-sample gains
+            -- For AES67 logMsgInterval=-3 (8 Hz), adds 3 to gain shift
             if log_msg_interval_valid_i = '1' then
                 current_log_interval <= log_msg_interval_i;
-                
-                -- Calculate timeout limit based on message interval
-                if log_msg_interval_i >= 0 then
-                    if log_msg_interval_i > 3 then
-                        timeout_limit <= shift_left(to_unsigned(CLOCK_FREQ_HZ, 32), 5);
+                if log_msg_interval_i < 0 then
+                    if log_msg_interval_i < -7 then
+                        interval_shift <= 7;  -- cap at 7
                     else
-                        timeout_limit <= shift_left(to_unsigned(CLOCK_FREQ_HZ * 4, 32), to_integer(log_msg_interval_i));
+                        interval_shift <= to_integer(-log_msg_interval_i);
                     end if;
                 else
-                    if log_msg_interval_i < -4 then
-                        timeout_limit <= to_unsigned(CLOCK_FREQ_HZ / 4, 32);
-                    else
-                        timeout_limit <= shift_right(to_unsigned(CLOCK_FREQ_HZ * 4, 32), to_integer(-log_msg_interval_i));
-                    end if;
-                end if;
-            end if;
-            
-            -- ============================================
-            -- SYNC TIMEOUT DETECTION
-            -- ============================================
-            if calc_valid_i = '1' then
-                timeout_counter <= (others => '0');
-            else
-                if timeout_counter < timeout_limit then
-                    timeout_counter <= timeout_counter + 1;
-                else
-                    sync_timeout <= '1';
-                    locked <= '0';
-                    lock_counter <= 0;
-                    integral_sum <= shift_right(integral_sum, 1);
-                    timeout_counter <= (others => '0');
+                    interval_shift <= 0;
                 end if;
             end if;
             
@@ -302,8 +309,12 @@ begin
                     if inp_offset_abs < MAX_VALID_OFFSET then
                         inp_valid_meas <= '1';
 
+                        -- Outlier rejection when locked: ignore spikes > UNLOCK_THRESHOLD
+                        -- These are likely measurement artifacts, not real offset changes
+                        if locked = '1' and inp_offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32) then
+                            inp_valid_meas <= '0';
                         -- Phase jump decision
-                        if inp_offset_abs > PHASE_JUMP_THRESHOLD and sample_count >= WARMUP_SAMPLES then
+                        elsif inp_offset_abs > PHASE_JUMP_THRESHOLD and sample_count >= WARMUP_SAMPLES then
                             inp_do_phase_jump <= '1';
                             -- Calculate phase jump value (negate offset)
                             if inp_offset > to_signed(2**30 - 1, 32) then
@@ -343,9 +354,19 @@ begin
                             -- Low-pass filter the offset
                             if sample_count = 0 then
                                 filtered_offset <= inp_offset;
+                                first_offset <= inp_offset;  -- Save for freq estimation
                             else
                                 filter_delta := shift_right(inp_offset - filtered_offset, FILTER_SHIFT);
                                 filtered_offset <= filtered_offset + filter_delta;
+                            end if;
+                            
+                            -- Frequency estimation: at end of warmup, pre-seed integral
+                            -- with estimated drift rate to avoid the initial frequency hunt.
+                            -- drift_ppb ≈ (offset_now - offset_start) / warmup_time_s
+                            -- At 8 Hz with 8 samples: warmup_time = 1s, so drift = delta_ns directly
+                            -- Negate because positive drift needs negative freq_correction
+                            if sample_count = WARMUP_SAMPLES - 1 then
+                                integral_sum <= first_offset - inp_offset;
                             end if;
                             
                             -- PI Controller (after warmup)
@@ -358,14 +379,16 @@ begin
                                         lock_counter <= lock_counter + 1;
                                     else
                                         locked <= '1';
-                                        EFFECTIVE_GAIN_SHIFT <= GAIN_SHIFT_LOCKED;
+                                        first_lock_achieved <= '1';
                                     end if;
                                 else
                                     if inp_offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32) then
                                         locked <= '0';
-                                        EFFECTIVE_GAIN_SHIFT <= GAIN_SHIFT;
+                                        lock_counter <= 0;
+                                    elsif lock_counter > 0 then
+                                        -- Gradual decay instead of hard reset
+                                        lock_counter <= lock_counter - 1;
                                     end if;
-                                    lock_counter <= 0;
                                 end if;
                             end if;
                         end if;

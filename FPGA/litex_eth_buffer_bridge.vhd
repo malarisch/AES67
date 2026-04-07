@@ -120,6 +120,7 @@ architecture rtl of litex_eth_buffer_bridge is
   signal buf_tx_addr   : unsigned(10 downto 0);
   signal packet_length_latch : UNSIGNED(10 downto 0);
   signal packet_lenght_valid_latch : std_ulogic;
+  signal packet_length_valid_counter : unsigned(3 downto 0);
 begin
 
   -- ================================================================
@@ -250,6 +251,7 @@ begin
       sm_rx            <= RX_IDLE;
       packet_lenght_valid_latch <= '0';
       packet_length_latch <= (others => '0');
+      packet_length_valid_counter <= (others =>  '0' );
     elsif rising_edge(mac_rx_clock_i) then
       buf_rx_we_o <= '0';
 
@@ -267,9 +269,19 @@ begin
         rx_overflow_reg <= '0';
       end if;
       if (packet_length_valid_i = '1') then
-        packet_length_latch <= pkt_len_i;
         packet_lenght_valid_latch <= '1';
       end if;
+      if (packet_lenght_valid_latch = '1') then
+        if (packet_length_valid_counter = 15) then
+        packet_length_latch <= pkt_len_i;
+        else
+          packet_length_valid_counter <= packet_length_valid_counter + 1;
+        end if;
+        
+        else
+        packet_length_valid_counter <= (others => '0');
+        end if;
+      
       case sm_rx is
         when RX_IDLE =>
 
