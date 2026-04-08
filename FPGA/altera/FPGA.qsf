@@ -487,3 +487,8 @@ set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/FPGA_Ethernet/FPGA/ethernet_mac/utility.vhd -library ethernet_lib
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/litex_soc_top.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/litex_eth_buffer_bridge.vhd -library test
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/litex_eth_buffer_bridge.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/aes67_top.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/ethernet_top.vhd

@@ -24,6 +24,11 @@ USE ieee.numeric_std.all;
 LIBRARY work;
 
 ENTITY audio_tx_module IS 
+	GENERIC (bytes_per_sample : INTEGER := 3;
+			global_channel_count : INTEGER := 16;
+			max_streams : INTEGER := 8;
+			samples_per_channel_depth : INTEGER := 48
+	);
 	PORT
 	(
 		sys_clk :  IN  STD_LOGIC;
@@ -178,10 +183,10 @@ BEGIN
 
 
 b2v_tx_router : tx_router
-GENERIC MAP(bytes_per_sample => 3,
-			global_channel_count => 16,
-			max_streams => 8,
-			samples_per_channel_depth => 48
+GENERIC MAP(bytes_per_sample => bytes_per_sample,
+			global_channel_count => global_channel_count,
+			samples_per_channel_depth => samples_per_channel_depth,
+			max_streams => max_streams
 			)
 PORT MAP(sys_clk_i => sys_clk,
 		 reset_n => rst_n,
@@ -204,9 +209,9 @@ PORT MAP(sys_clk_i => sys_clk,
 
 
 b2v_tx_sample_buffer : tx_sample_buffer
-GENERIC MAP(bytes_per_sample => 3,
-			global_channel_count => 16,
-			samples_per_channel_depth => 48
+GENERIC MAP(bytes_per_sample => bytes_per_sample,
+			global_channel_count => global_channel_count,
+			samples_per_channel_depth => samples_per_channel_depth
 			)
 PORT MAP(sys_clk => sys_clk,
 		 reset_n => rst_n,
@@ -237,9 +242,9 @@ PORT MAP(sys_clk => sys_clk,
 
 
 b2v_tx_transmitter : tx_transmitter
-GENERIC MAP(bytes_per_sample => 3,
-			global_channel_count => 16,
-			samples_per_channel_depth => 48
+GENERIC MAP(bytes_per_sample => bytes_per_sample,
+			global_channel_count => global_channel_count,
+			samples_per_channel_depth => samples_per_channel_depth
 			)
 PORT MAP(sys_clk => sys_clk,
 		 tx_clk => mac_tx_clock,

@@ -1,5 +1,6 @@
 LIBRARY IEEE;    
 USE IEEE.STD_LOGIC_1164.ALL;    
+LIBRARY work;
 
 entity clk_by_x is
 	generic(

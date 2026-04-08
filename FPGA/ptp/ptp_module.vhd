@@ -34,7 +34,6 @@ ENTITY ptp_module IS
 		parse_ptp_packet_tog :  IN  STD_LOGIC;
 		ptp_is_leader :  IN  STD_LOGIC;
 		ptp_is_follower :  IN  STD_LOGIC;
-		ethernet_parser_sync :  IN  STD_LOGIC;
 		sof_recv_tog_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
 		mac_tx_allow_i :  IN  STD_LOGIC;
 		sof_sent_tog_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
