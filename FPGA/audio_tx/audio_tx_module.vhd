@@ -21,7 +21,6 @@ LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 USE ieee.numeric_std.all;
 
-LIBRARY work;
 
 ENTITY audio_tx_module IS 
 	GENERIC (bytes_per_sample : INTEGER := 3;

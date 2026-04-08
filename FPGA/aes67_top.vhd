@@ -44,7 +44,7 @@ ENTITY aes67_top IS
 		mac_rx_clock_o : OUT STD_LOGIC;
 		mac_tx_clock_o : OUT STD_LOGIC;
 		is_mcu_pkt_tog_o : OUT STD_LOGIC;
-		mcu_ram_addr_i : OUT UNSIGNED(10 downto 0);
+		mcu_ram_addr_i : IN UNSIGNED(10 downto 0);
 		eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
 		eth_tx_en_mcu_i : IN STD_LOGIC;
 		eth_tx_data_mcu_i : IN STD_LOGIC_VECTOR(7 downto 0);
@@ -77,7 +77,7 @@ ENTITY aes67_top IS
 		ptp_clock_class_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_gm_prioone_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_gm_priotwo_i : IN STD_LOGIC_VECTOR(7 downto 0);
-		ptp_current_leader_id_i : IN STD_LOGIC_VECTOR(79 downto 0);
+		ptp_current_leader_id_i : IN STD_LOGIC_VECTOR(63 downto 0);
 		ptp_log_message_interval_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_time_source_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_is_follower_i : IN STD_LOGIC;
@@ -136,7 +136,7 @@ signal pll_256fs_falling : STD_LOGIC;
 signal pll_256fs_rising : STD_LOGIC;
 
 signal wc_64fs : STD_LOGIC; -- nco generated from wallclock
-signal media_clock : STD_ULOGIC_VECTOR(31 downto 0);
+signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal second_pulse_sys : STD_LOGIC;
 
 -- sample registers for in/output
@@ -152,7 +152,7 @@ signal mac_tx_clock : STD_LOGIC;
 signal received_packet_length : unsigned(10 downto 0);
 signal is_rtp_pkt_tog : STD_LOGIC;
 signal is_ptp_pkt_tog : STD_LOGIC;
-signal ptp_ram_addr : unsigned(10 downto 0);
+signal ptp_ram_addr : STD_LOGIC_VECTOR(10 downto 0);
 signal rtp_ram_addr : unsigned(10 downto 0);
 signal eth_ram_data_sys_rtp : STD_LOGIC_VECTOR(7 downto 0);
 signal eth_ram_data_sys_ptp : STD_LOGIC_VECTOR(7 downto 0);
@@ -286,12 +286,12 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		sof_recv_tog_i => mac_sof_recv_tog,
 		sof_sent_tog_i => mac_sof_sent_tog,
 		parse_ptp_packet_tog => is_ptp_pkt_tog,
-		tx_data_ptpfu => eth_ram_data_sys_ptp,
+		tx_data_ptpfu => eth_tx_data_ptp,
 		mac_ram_data => eth_ram_data_sys_ptp,
 		
 		tx_en_ptpfu => eth_tx_en_ptp,
 		 ptp_allow_req => eth_tx_req_ptp,
-		ptp_ram_addr => STD_LOGIC_VECTOR(ptp_ram_addr),
+		ptp_ram_addr => ptp_ram_addr,
 		
 		 
 		-- configuration registers 
@@ -467,7 +467,7 @@ ethernet_top_inst: entity work.ethernet_top
 	is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
 	is_rtp_pkt_tog_o => is_rtp_pkt_tog,
 	is_ptp_pkt_tog_o => is_ptp_pkt_tog,
-	ptp_ram_addr_i => ptp_ram_addr,
+	ptp_ram_addr_i => unsigned(ptp_ram_addr),
 	rtp_ram_addr_i => rtp_ram_addr,
 	mcu_ram_addr_i => mcu_ram_addr_i,
 	eth_ram_data_sys_rtp_o => eth_ram_data_sys_rtp,

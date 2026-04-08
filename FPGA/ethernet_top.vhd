@@ -82,12 +82,16 @@ architecture rtl of ethernet_top is
     SIGNAL eth_frame_rdy : STD_LOGIC;
     SIGNAL mac_rx_data : STD_LOGIC_VECTOR(7 downto 0);
     SIGNAL mac_tx_data : STD_LOGIC_VECTOR(7 downto 0);
+    SIGNAL mac_speed      : STD_ULOGIC_VECTOR(1 downto 0);
+    SIGNAL mii_txd_int    : STD_ULOGIC_VECTOR(7 downto 0);
+    SIGNAL mii_rxd_int    : STD_ULOGIC_VECTOR(7 downto 0);
+    SIGNAL mac_rx_data_su : STD_ULOGIC_VECTOR(7 downto 0);
     SIGNAL eth_ram_wr_data : STD_LOGIC_VECTOR (7 downto 0);
     SIGNAL eth_ram_wr_addr : UNSIGNED (10 downto 0);
     SIGNAL mac_rx_error : STD_LOGIC;
     SIGNAL mac_tx_enable : STD_LOGIC;
 
-    SIGNAL reverse_mac_addr : STD_LOGIC_VECTOR(47 downto 0);
+    SIGNAL reverse_mac_addr : STD_ULOGIC_VECTOR(47 downto 0);
 
     SIGNAL mac_rx_clock : STD_LOGIC;
     SIGNAL mac_tx_Clock : STD_LOGIC;
@@ -183,8 +187,8 @@ PORT MAP(clock_125_i => mii_rx_clock_i,
 		 mii_rx_clk_i => mii_rx_clock_i,
 		 mii_rx_er_i => mii_rx_err_i,
 		 mii_rx_dv_i => mii_rx_dv_i,
-        mii_txd_o => mii_txd_o,
-         mii_rxd_i => mii_rxd_i,
+        mii_txd_o => mii_txd_int,
+         mii_rxd_i => mii_rxd_int,
         mii_tx_er_o => mii_tx_err_o,
 		 mii_tx_en_o => mii_tx_en_o,
 
@@ -198,7 +202,7 @@ PORT MAP(clock_125_i => mii_rx_clock_i,
 		 
 		 mac_address_i => reverse_mac_addr,
 		
-		 tx_data_i => mac_tx_data,
+		 tx_data_i => std_ulogic_vector(mac_tx_data),
 		 
 		 
 		 link_up_o => mac_linkup_o,
@@ -213,10 +217,16 @@ PORT MAP(clock_125_i => mii_rx_clock_i,
 		 tx_sof_delim_tog_o => mac_sof_sent_tog_o,
 		 rx_sof_delim_tog_o => mac_sof_recv_tog_o,
 		 
-		 rx_data_o => mac_rx_data,
-		 speed_o => mac_speed_o
+		 rx_data_o => mac_rx_data_su,
+		 speed_o => mac_speed
          
          );
         mac_rx_clock_o <= mac_rx_clock;
         mac_tx_clock_o <= mac_tx_clock;
+
+        -- std_ulogic_vector <-> std_logic_vector conversions for YOL MAC
+        mii_txd_o    <= std_logic_vector(mii_txd_int);
+        mii_rxd_int  <= std_ulogic_vector(mii_rxd_i);
+        mac_speed_o  <= std_logic_vector(mac_speed);
+        mac_rx_data  <= std_logic_vector(mac_rx_data_su);
     end rtl;
