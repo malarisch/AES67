@@ -58,7 +58,16 @@ ENTITY aes67_top IS
 
 		-- signals for ethernet for the SOC
 		mac_rx_clock_o : OUT STD_LOGIC;
-
+		mac_tx_clock_o : OUT STD_LOGIC;
+		is_mcu_pkt_tog_o : OUT STD_LOGIC;
+		mcu_ram_addr_i : OUT UNSIGNED(10 downto 0);
+		eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
+		eth_tx_en_mcu_i : IN STD_LOGIC;
+		eth_tx_data_mcu_i : IN STD_LOGIC_VECTOR(7 downto 0);
+		eth_tx_allow_req_mcu_i : IN STD_LOGIC;
+		eth_tx_allow_mcu_o : OUT STD_LOGIC;
+		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
+		mac_linkup_o : OUT STD_LOGIC;
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
@@ -149,9 +158,31 @@ type t_rx_sample_register is array (0 to RX_CHANNELS) of std_logic_vector(RX_BYT
 type t_tx_sample_register is array (0 to TX_CHANNELS) of std_logic_vector(TX_BYTE_DEPTH*8-1 downto 0);
     signal tx_sample_register : t_tx_sample_register := (others => (others => '0'));
 
--- clocks
-signal mac_rx_clock : STD_LOGIC;
+
 signal mac_tx_clock : STD_LOGIC;
+
+-- ethernet_top signals
+signal received_packet_length : unsigned(10 downto 0);
+signal is_rtp_pkt_tog : STD_LOGIC;
+signal is_ptp_pkt_tog : STD_LOGIC;
+signal ptp_ram_addr : unsigned(10 downto 0);
+signal rtp_ram_addr : unsigned(10 downto 0);
+signal eth_ram_data_sys_rtp : STD_LOGIC_VECTOR(7 downto 0);
+signal eth_ram_data_sys_ptp : STD_LOGIC_VECTOR(7 downto 0);
+signal eth_tx_en_ptp : STD_LOGIC;
+signal eth_tx_en_rtp : STD_LOGIC;
+signal eth_tx_data_ptp : STD_LOGIC_VECTOR(7 downto 0);
+signal eth_tx_data_rtp : STD_LOGIC_VECTOR(7 downto 0);
+signal eth_tx_req_ptp : STD_LOGIC;
+signal eth_tx_req_rtp : STD_LOGIC;
+signal eth_tx_allow_ptp : STD_LOGIC;
+signal eth_tx_allow_rtp : STD_LOGIC;
+signal mac_reset : std_logic;
+signal mac_tx_byte_sent : STD_LOGIC;
+signal mac_tx_busy : STD_LOGIC;
+signal mac_rx_reset : STD_LOGIC;
+signal mac_sof_sent_tog : STD_LOGIC;
+signal mac_sof_recv_tog : STD_LOGIC;
 BEGIN 
 
 pll_512fs <= pll_512fs_i;
@@ -161,7 +192,7 @@ pll_48k_fs_tdm_o <= pll_48k_fs_tdm;
 pll_256fs_rising_o <= pll_256fs_rising;
 pll_256fs_falling_o <= pll_256fs_falling;
 
-
+mac_tx_clock_o <= mac_tx_clock;
 
 
 b2v_audioclocks : entity work.audioclock_generator
@@ -188,12 +219,18 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
-		 mac_audio_allow_i => audio_allow_req,
+		 mac_audio_allow_i => eth_tx_allow_rtp,
 
+		 tx_en_o => eth_tx_en_rtp,
+		 tx_req_o => eth_tx_req_rtp,
+		 ip_addr_i => ip_address_i,
+		 mac_addr_i => mac_address_i,
 
 		 cfg_wr_en_i => audio_tx_cfg_wr_en_i,
 		 cfg_wr_addr_i => audio_tx_cfg_wr_addr_i,
 		 cfg_wr_data_i => audio_tx_cfg_wr_data_i,
+
+
 		 ch0i => tx_sample_register(0),
 		 ch1i => tx_sample_register(1),
 		 ch2i => tx_sample_register(2),
@@ -210,17 +247,14 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ch13i => tx_sample_register(13),
 		 ch14i => tx_sample_register(14),
 		 ch15i => tx_sample_register(15),
-		 ip_addr_i => ip_address_i,
-		 mac_addr_i => mac_address_i,
+		 
 		 media_clock_i => media_clock,
-		 tx_en_o => tx_en_audiotx,
-		 tx_req_o => audio_allow_req,
 
 
  		 metering_clear_i => audio_meter_clear_i,
 		 metering_clip_o => audio_meter_tx_clip_o,
 		 metering_signal_o => audio_meter_tx_signal_o,
-		 tx_data_o => tx_data_audiotx);
+		 tx_data_o => eth_tx_data_rtp);
 
 
 
@@ -258,16 +292,16 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
-		 mac_tx_allow_i => ptp_allow,
-		sof_recv_tog_i => eth_sof_recv_tog,
-		sof_sent_tog_i => eth_sof_sent_tog,
-		parse_ptp_packet_tog => parse_ptp_packet_tog,
-		tx_data_ptpfu => mac_tx_data_ptp,
+		 mac_tx_allow_i => eth_tx_allow_ptp,
+		sof_recv_tog_i => mac_sof_recv_tog,
+		sof_sent_tog_i => mac_sof_sent_tog,
+		parse_ptp_packet_tog => is_ptp_pkt_tog,
+		tx_data_ptpfu => eth_ram_data_sys_ptp,
 		mac_ram_data => eth_ram_data_sys_ptp,
 		
-		tx_en_ptpfu => tx_en_ptpfu,
-		 ptp_allow_req => ptp_allow_req,
-		ptp_ram_addr => ptp_ram_addr,
+		tx_en_ptpfu => eth_tx_en_ptp,
+		 ptp_allow_req => eth_tx_req_ptp,
+		ptp_ram_addr => STD_LOGIC_VECTOR(ptp_ram_addr),
 		
 		 
 		-- configuration registers 
@@ -323,7 +357,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 -- network
  		 eth_read_addr_o => rtp_ram_addr,
-		 packet_ready_i => parse_rtp_packet,
+		 packet_ready_i => is_rtp_pkt_tog,
 		 eth_read_data_i => eth_ram_data_sys_rtp,
 
 		 -- clocking
@@ -439,37 +473,37 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_rx_clock_o => mac_rx_clock_o,
 	mac_tx_clock_o => mac_tx_clock,
 	rst_n => rst_n,
-	received_packet_length_o => received_packet_length_o,
+	received_packet_length_o => received_packet_length,
 	is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
-	is_rtp_pkt_tog_o => is_rtp_pkt_tog_o,
-	is_ptp_pkt_tog_o => is_ptp_pkt_tog_o,
-	ptp_ram_addr_i => ptp_ram_addr_i,
-	rtp_ram_addr_i => rtp_ram_addr_i,
+	is_rtp_pkt_tog_o => is_rtp_pkt_tog,
+	is_ptp_pkt_tog_o => is_ptp_pkt_tog,
+	ptp_ram_addr_i => ptp_ram_addr,
+	rtp_ram_addr_i => rtp_ram_addr,
 	mcu_ram_addr_i => mcu_ram_addr_i,
-	eth_ram_data_sys_rtp_o => eth_ram_data_sys_rtp_o,
-	eth_ram_data_sys_ptp_o => eth_ram_data_sys_ptp_o,
+	eth_ram_data_sys_rtp_o => eth_ram_data_sys_rtp,
+	eth_ram_data_sys_ptp_o => eth_ram_data_sys_ptp,
 	eth_ram_data_rx_mcu_o => eth_ram_data_rx_mcu_o,
 	eth_tx_en_mcu_i => eth_tx_en_mcu_i,
-	eth_tx_en_ptp_i => eth_tx_en_ptp_i,
-	eth_tx_en_rtp_i => eth_tx_en_rtp_i,
+	eth_tx_en_ptp_i => eth_tx_en_ptp,
+	eth_tx_en_rtp_i => eth_tx_en_rtp,
 	eth_tx_data_mcu_i => eth_tx_data_mcu_i,
-	eth_tx_data_ptp_i => eth_tx_data_ptp_i,
-	eth_tx_data_rtp_i => eth_tx_data_rtp_i,
-	eth_tx_req_mcu_i => eth_tx_req_mcu_i,
-	eth_tx_req_ptp_i => eth_tx_req_ptp_i,
-	eth_tx_req_rtp_i => eth_tx_req_rtp_i,
+	eth_tx_data_ptp_i => eth_tx_data_ptp,
+	eth_tx_data_rtp_i => eth_tx_data_rtp,
+	eth_tx_req_mcu_i => eth_tx_allow_req_mcu_i,
+	eth_tx_req_ptp_i => eth_tx_req_ptp,
+	eth_tx_req_rtp_i => eth_tx_req_rtp,
 	eth_tx_allow_mcu_o => eth_tx_allow_mcu_o,
-	eth_tx_allow_ptp_o => eth_tx_allow_ptp_o,
-	eth_tx_allow_rtp_o => eth_tx_allow_rtp_o,
-	mac_reset_i => mac_reset_i,
-	mac_addr_i => mac_addr_i,
+	eth_tx_allow_ptp_o => eth_tx_allow_ptp,
+	eth_tx_allow_rtp_o => eth_tx_allow_rtp,
+	mac_reset_i => mac_reset,
+	mac_addr_i => mac_address_i,
 	mac_speed_o => mac_speed_o,
 	mac_linkup_o => mac_linkup_o,
-	mac_tx_byte_sent_o => mac_tx_byte_sent_o,
-	mac_tx_busy_o => mac_tx_busy_o,
-	mac_rx_reset_o => mac_rx_reset_o,
-	mac_sof_sent_tog_o => mac_sof_sent_tog_o,
-	mac_sof_recv_tog_o => mac_sof_recv_tog_o,
+	mac_tx_byte_sent_o => mac_tx_byte_sent,
+	mac_tx_busy_o => mac_tx_busy,
+	mac_rx_reset_o => mac_rx_reset,
+	mac_sof_sent_tog_o => mac_sof_sent_tog,
+	mac_sof_recv_tog_o => mac_sof_recv_tog,
 	mii_rx_clock_i => mii_rx_clock_i,
 	mii_tx_clock_i => mii_tx_clock_i,
 	mii_rx_err_i => mii_rx_err_i,
