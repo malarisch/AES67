@@ -1,22 +1,5 @@
--- Copyright (C) 2025  Altera Corporation. All rights reserved.
--- Your use of Altera Corporation's design tools, logic functions 
--- and other software and tools, and any partner logic 
--- functions, and any output files from any of the foregoing 
--- (including device programming or simulation files), and any 
--- associated documentation or information are expressly subject 
--- to the terms and conditions of the Altera Program License 
--- Subscription Agreement, the Altera Quartus Prime License Agreement,
--- the Altera IP License Agreement, or other applicable license
--- agreement, including, without limitation, that your use is for
--- the sole purpose of programming logic devices manufactured by
--- Altera and sold by Altera or its authorized distributors.  Please
--- refer to the Altera Software License Subscription Agreements 
--- on the Quartus Prime software download page.
-
--- PROGRAM		"Quartus Prime"
--- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Sat Apr  4 17:24:55 2026"
-
+-- top level for the logic core. needs external RGMII / RMII to MII Converters and clocks.
+-- exposes an ethernet interface for mcu connectivity
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 use IEEE.NUMERIC_STD.all;
@@ -39,6 +22,7 @@ ENTITY aes67_top IS
 		sys_clk_125MHz_i :  IN  STD_LOGIC;
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
+		mac_reset_i : IN STD_LOGIC;
 
 		
 
@@ -66,6 +50,9 @@ ENTITY aes67_top IS
 		eth_tx_data_mcu_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		eth_tx_allow_req_mcu_i : IN STD_LOGIC;
 		eth_tx_allow_mcu_o : OUT STD_LOGIC;
+		
+		mac_tx_busy_o : OUT STD_LOGIC;
+		mac_tx_byte_sent_o : OUT STD_LOGIC;
 		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
 		mac_linkup_o : OUT STD_LOGIC;
 		-- audio clocks
@@ -193,9 +180,12 @@ pll_256fs_rising_o <= pll_256fs_rising;
 pll_256fs_falling_o <= pll_256fs_falling;
 
 mac_tx_clock_o <= mac_tx_clock;
+mac_reset <= mac_reset_i;
 
+mac_tx_busy_o <= mac_tx_busy;
+mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
-b2v_audioclocks : entity work.audioclock_generator
+audioclocks_inst: entity work.audioclock_generator
 PORT MAP(mclk => pll_512fs,
 		 rst_n => rst_n,
 		 clk_64fs => pll_64fs,
@@ -205,7 +195,7 @@ PORT MAP(mclk => pll_512fs,
 		 fs_pulse => pll_48k_fs_tdm);
 
 
-b2v_audiotx : entity work.audio_tx_module
+audiotx_inst: entity work.audio_tx_module
 GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			global_channel_count => TX_CHANNELS,
 			samples_per_channel_depth => TX_SAMPLE_BUFFER_DEPTH,
@@ -272,7 +262,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 
 
-b2v_ppb_meter : entity work.clock_ppb_meter
+ppb_meter_inst: entity work.clock_ppb_meter
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => rst_n,
 		 wallclock_64fs_in => wc_64fs,
@@ -284,7 +274,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 count_wc_o => wc_counter_o);
 
 
-b2v_ptp : entity work.ptp_module
+ptp_inst: entity work.ptp_module
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => rst_n,
 
@@ -344,7 +334,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 
 
-b2v_rx_ringbuffer : entity work.rx_ringbuffer
+rx_ringbuffer_inst: entity work.rx_ringbuffer
 GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			bytes_per_sample => RX_BYTE_DEPTH,
 			global_channel_count => RX_CHANNELS,
@@ -397,7 +387,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 
 
-b2v_tdm8_mux1 : entity work.tdm8_out
+tdm8_mux1_inst: entity work.tdm8_out
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
@@ -414,7 +404,7 @@ PORT MAP(FSYNC => pll_48k_fs_tdm,
 		 DOUT => tdm8out_0_o);
 
 
-b2v_tdm8_mux2 : entity work.tdm8_out
+tdm8_mux2_inst: entity work.tdm8_out
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
@@ -431,7 +421,7 @@ PORT MAP(FSYNC => pll_48k_fs_tdm,
 		 DOUT => tdm8out_1_o);
 
 
-b2v_tdm8demux1 : entity work.tdm8_in
+tdm8demux1_inst: entity work.tdm8_in
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
@@ -449,7 +439,7 @@ PORT MAP(FSYNC => pll_48k_fs_tdm,
 		 DATA_CH7 => tx_sample_register(7)
 );
 
-b2v_tdm8demux2 : entity work.tdm8_in
+tdm8demux2_inst: entity work.tdm8_in
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
