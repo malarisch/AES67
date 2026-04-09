@@ -48,6 +48,7 @@ entity ethernet_top is
 
     -- mac control signals
     mac_reset_i : IN std_logic;
+    mac_tx_reset_o : OUT std_logic;
     mac_addr_i : IN std_logic_vector(47 downto 0);
     mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
     mac_linkup_o : out STD_LOGIC;
@@ -204,7 +205,7 @@ PORT MAP(clock_125_i => mii_rx_clock_i,
 		
 		 tx_data_i => std_ulogic_vector(mac_tx_data),
 		 
-		 
+		 tx_reset_o => mac_tx_reset_o,
 		 link_up_o => mac_linkup_o,
 		 tx_clock_o => mac_tx_clock,
 		 tx_byte_sent_o => mac_tx_byte_sent_o,

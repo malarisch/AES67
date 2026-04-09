@@ -14,7 +14,7 @@ ENTITY top_c10 IS
 		enet_clk_125m :  IN  STD_LOGIC;
 		enet_rx_clk :  IN  STD_LOGIC;
 		enet_rx_dv :  IN  STD_LOGIC;
-		enet_resetn :  IN  STD_LOGIC;
+		enet_resetn :  OUT  STD_LOGIC;
 		arduino_io1 :  IN  STD_LOGIC;
 		enet_mdio :  INOUT  STD_LOGIC;
 		hbus_rwds :  INOUT  STD_LOGIC;
@@ -166,6 +166,7 @@ signal clk50m        : STD_LOGIC;
 signal clk_125MHz    : STD_LOGIC;
 signal enet_clk      : STD_LOGIC;
 signal enet_clk_90   : STD_LOGIC;
+signal reset_p 		 : STD_LOGIC;
 
 -- GMII between RGMII PHY IF and aes67_top
 signal gmii_rx_clk   : STD_LOGIC;
@@ -193,7 +194,8 @@ signal eth_tx_en_mcu      : STD_ULOGIC;
 signal eth_tx_data_mcu    : STD_ULOGIC_VECTOR(7 downto 0);
 signal eth_tx_allow_req_mcu : STD_ULOGIC;
 signal eth_tx_allow_mcu   : STD_LOGIC;
-
+signal received_packet_length : unsigned(10 downto 0);
+signal mac_tx_reset : std_logic;
 -- litex_eth_buffer_bridge internal signals
 signal mcu_tx_req_i    : STD_LOGIC;
 signal mcu_tx_done     : STD_ULOGIC;
@@ -271,18 +273,19 @@ signal spiflash_mosi : STD_LOGIC;
 signal hram_clk      : STD_LOGIC;
 
 
+
 BEGIN
 
 clk50m <= c10_clk50m;
-
-
+enet_resetn <= c10_resetn;
+reset_p <= not c10_resetn;
 
 aes67_top_inst: entity work.aes67_top
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,
 	clk_mcu_i              => mcu_clk,
 	rst_n                  => c10_resetn,
-	mac_reset_i            => enet_resetn,
+	mac_resetn_i            => c10_resetn,
 
 	-- GMII from RGMII converter
 	mii_rx_clock_i         => gmii_rx_clk,
@@ -306,7 +309,8 @@ aes67_top_inst: entity work.aes67_top
 	eth_tx_data_mcu_i      => std_logic_vector(eth_tx_data_mcu),
 	eth_tx_allow_req_mcu_i => std_logic(eth_tx_allow_req_mcu),
 	eth_tx_allow_mcu_o     => eth_tx_allow_mcu,
-
+	mac_received_packet_length_o => received_packet_length,
+	mac_tx_reset_o => mac_tx_reset,
 	mac_tx_busy_o          => mac_tx_busy,
 	mac_tx_byte_sent_o     => mac_tx_byte_sent,
 	mac_speed_o            => mac_speed,
@@ -489,7 +493,7 @@ PORT MAP(
 
 	-- MAC TX
 	mac_tx_clock_i         => mac_tx_clock,
-	mac_tx_reset_i         => enet_resetn,
+	mac_tx_reset_i         => mac_tx_reset,
 	mac_tx_enable_o        => eth_tx_en_mcu,
 	mac_tx_byte_sent_i     => mac_tx_byte_sent,
 	mac_tx_busy_i          => mac_tx_busy,
@@ -499,9 +503,9 @@ PORT MAP(
 
 	-- MAC RX
 	mac_rx_clock_i         => mac_rx_clock,
-	mac_rx_reset_i         => enet_resetn,
+	mac_rx_reset_i         => reset_p,
 	parse_mcu_packet_tog_i => is_mcu_pkt_tog,
-	pkt_len_i              => unsigned(std_logic_vector'("00000000000")), -- TODO: connect received_packet_length from aes67_top
+	pkt_len_i              => received_packet_length,
 	eth_ram_data_i         => std_ulogic_vector(eth_ram_data_rx_mcu),
 	eth_ram_addr_o         => mcu_ram_addr,
 	packet_length_valid_i  => '1'
@@ -518,7 +522,7 @@ GENERIC MAP(
 PORT MAP(
 	clk                => enet_clk,
 	clk90              => enet_clk_90,
-	rst                => enet_resetn,
+	rst                => reset_p,
 	mac_gmii_tx_en     => gmii_tx_en,
 	mac_gmii_tx_er     => gmii_tx_err,
 	phy_rgmii_rx_clk   => enet_rx_clk,

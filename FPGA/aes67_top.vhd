@@ -22,7 +22,7 @@ ENTITY aes67_top IS
 		sys_clk_125MHz_i :  IN  STD_LOGIC;
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
-		mac_reset_i : IN STD_LOGIC;
+		mac_resetn_i : IN STD_LOGIC;
 
 		
 
@@ -43,6 +43,7 @@ ENTITY aes67_top IS
 		-- signals for ethernet for the SOC
 		mac_rx_clock_o : OUT STD_LOGIC;
 		mac_tx_clock_o : OUT STD_LOGIC;
+		mac_tx_reset_o : OUT STD_LOGIC;
 		is_mcu_pkt_tog_o : OUT STD_LOGIC;
 		mcu_ram_addr_i : IN UNSIGNED(10 downto 0);
 		eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
@@ -55,6 +56,7 @@ ENTITY aes67_top IS
 		mac_tx_byte_sent_o : OUT STD_LOGIC;
 		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
 		mac_linkup_o : OUT STD_LOGIC;
+		mac_received_packet_length_o : OUT UNSIGNED(10 downto 0);
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
@@ -149,7 +151,7 @@ type t_tx_sample_register is array (0 to TX_CHANNELS) of std_logic_vector(TX_BYT
 signal mac_tx_clock : STD_LOGIC;
 
 -- ethernet_top signals
-signal received_packet_length : unsigned(10 downto 0);
+
 signal is_rtp_pkt_tog : STD_LOGIC;
 signal is_ptp_pkt_tog : STD_LOGIC;
 signal ptp_ram_addr : STD_LOGIC_VECTOR(10 downto 0);
@@ -180,7 +182,7 @@ pll_256fs_rising_o <= pll_256fs_rising;
 pll_256fs_falling_o <= pll_256fs_falling;
 
 mac_tx_clock_o <= mac_tx_clock;
-mac_reset <= mac_reset_i;
+mac_reset <= not mac_resetn_i;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
@@ -463,7 +465,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_rx_clock_o => mac_rx_clock_o,
 	mac_tx_clock_o => mac_tx_clock,
 	rst_n => rst_n,
-	received_packet_length_o => received_packet_length,
+	received_packet_length_o => mac_received_packet_length_o,
 	is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
 	is_rtp_pkt_tog_o => is_rtp_pkt_tog,
 	is_ptp_pkt_tog_o => is_ptp_pkt_tog,
@@ -490,6 +492,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_speed_o => mac_speed_o,
 	mac_linkup_o => mac_linkup_o,
 	mac_tx_byte_sent_o => mac_tx_byte_sent,
+	mac_tx_reset_o => mac_tx_reset_o,
 	mac_tx_busy_o => mac_tx_busy,
 	mac_rx_reset_o => mac_rx_reset,
 	mac_sof_sent_tog_o => mac_sof_sent_tog,

@@ -1,0 +1,13 @@
+
+
+/home/wolff/AES67/FPGA/altera/ethernet_clks.vhd
+
+Apr 09 12AM:12:23>: The following design file, which has identical name but a different extension 
+from the specified variation file, already exists in the working directory:
+
+ethernet_clks.v
+
+This may create a conflict of design files and/or lead to undesirable side
+effects.
+
+Is it OK to continue file generation?
