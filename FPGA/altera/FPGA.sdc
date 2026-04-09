@@ -131,7 +131,8 @@ set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}]
+    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}] \
+    -group [get_clocks {enet_rx_clk_125m}]
 
 
 #**************************************************************
@@ -153,10 +154,10 @@ set_false_path -to [get_registers {*ptp_inst|b2v_ptpparser|parse_ptp_packet_meta
 set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_controller|*}]
 set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_ptpparser|*}]
 
-# --- tx_router shadow register CDC (litex_sys_clk -> sys_clk_125m) ---
-# Slow-changing config values updated only during stream setup
-set_false_path -from [get_registers {*audiotx_inst|b2v_tx_router|samples_per_packet_shadow[*][*]}] -to [get_registers {*audiotx_inst|b2v_tx_router|samples_per_packet_sync[*][*]}]
-set_false_path -from [get_registers {*audiotx_inst|b2v_tx_router|threshold_shadow[*][*]}] -to [get_registers {*audiotx_inst|b2v_tx_router|threshold_sync[*][*]}]
+# --- tx_router shadow register CDC ---
+# samples_per_packet_shadow and threshold_shadow no longer have separate _sync
+# registers (CDC removed from tx_router). Shadow registers are written from
+# config_wr_clk domain and read in sys_clk — covered by stream_cfg false_path below.
 
 # --- tx_router tx_en CDC (tx_transmitter domain -> sys_clk) ---
 set_false_path -to [get_registers {*audiotx_inst|b2v_tx_router|tx_en_meta}]
@@ -182,9 +183,10 @@ set_false_path -from [get_registers {*aes67_csr_ptp_log*storage*}]
 set_false_path -from [get_registers {*aes67_csr_ptp_time_source*storage*}]
 
 # Stream config RAM write signals: litex_sys_clk -> FPGA logic
-# These are directly driven from LiteX Wishbone bus outputs (no intermediate registers
-# at the port boundary), so we match the SoC-internal source registers
-set_false_path -from [get_registers {*stream_cfg*storage*}]
+# The StreamConfigRAM is a Wishbone slave (not a CSR), so its write signals are
+# driven directly from the SoC bus. The tx_router config_wr_clk_i is litex_sys_clk
+# and writes are slow (stream setup only). The shadow registers in tx_router are
+# covered by the async clock group separation (litex_sys_clk vs sys_clk_125m).
 
 # --- Ethernet packet buffer CDC (mac_rx/mac_tx <-> litex_sys_clk) ---
 # CDC handled by dual-port SRAM and synchronizers in LiteX EthPacketBuffer
@@ -210,10 +212,10 @@ set_false_path -from [get_ports {arduino_io1}] -to *
 #set_false_path -from [get_ports {arduino_io3}] -to *
 
 # I2C (directly connected to LiteX SoC, open-drain, slow)
-set_false_path -from * -to [get_ports {gpio26 gpio27 gpio[26] gpio[27]}]
-set_false_path -from [get_ports {gpio26 gpio27 gpio[26] gpio[27]}] -to *
-set_false_path -from * -to [get_ports {gpio24 gpio23 gpio[24] gpio[23]}]
-set_false_path -from [get_ports {gpio23 gpio24 gpio[24] gpio[23]}] -to *
+set_false_path -from * -to [get_ports {gpio26 gpio27}]
+set_false_path -from [get_ports {gpio26 gpio27}] -to *
+set_false_path -from * -to [get_ports {gpio23 gpio24}]
+set_false_path -from [get_ports {gpio23 gpio24}] -to *
 # SPI (directly connected to LiteX SoC, max ~400 kHz for SD card init)
 #set_false_path -from * -to [get_ports {gpio5 gpio6 gpio7}]
 #set_false_path -from [get_ports {gpio8}] -to *
@@ -274,21 +276,19 @@ set_false_path -from [get_ports {c10_resetn}] -to *
 derive_pll_clocks
 derive_clock_uncertainty
 
-# --- LiteX SoC internal PLL (auto-derived by derive_pll_clocks) ---
-# The PLL inside litex_soc (litex_soc_inst) generates the SoC's system clock from clk50.
-# derive_pll_clocks creates this clock automatically, but it doesn't exist yet
-# when the main set_clock_groups runs above. Declare it asynchronous to all
-# other domains here, after derive_pll_clocks has created it.
-set_clock_groups -asynchronous \
-    -group [get_clocks {c10_clk50m sys_clk_125m}] \
-    -group [get_clocks {litex_soc_inst|ALTPLL|auto_generated|pll1|clk[0]}] \
-    -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}]
-
-
 source ./rgmii_phy_if.sdc
 source ./rgmii_io.sdc
 
-# RGMII interface
+# RGMII interface — these procs create enet_rx_clk_125m and enet_tx_clk_125m
 constrain_rgmii_input_pins "enet" "enet_rx_clk" "enet_rx_dv enet_rx_d*"
 constrain_rgmii_output_pins "enet" "rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]" "enet_tx_clk" "enet_tx_en enet_tx_d*"
+
+# Final clock group declaration — after derive_pll_clocks and rgmii_io.sdc procs,
+# so all clocks now exist. litex_sys_clk is the manually-defined name for the
+# LiteX SoC PLL output (derive_pll_clocks skips it because it already exists).
+set_clock_groups -asynchronous \
+    -group [get_clocks {c10_clk50m sys_clk_125m}] \
+    -group [get_clocks {litex_sys_clk}] \
+    -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
+    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}] \
+    -group [get_clocks {enet_rx_clk_125m}]

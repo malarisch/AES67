@@ -57,9 +57,12 @@ architecture Behavioral of tx_router is
     -- Block RAM for configuration storage (True Dual Port)
     -- Port A: Write from config_wr_clk_i domain
     -- Port B: Read from sys_clk_i domain (registered output for BRAM inference)
-    type t_config_ram is array (0 to max_streams * 32 -1) of std_logic_vector(7 downto 0);
+    type t_config_ram is array (0 to 255) of std_logic_vector(7 downto 0);
     signal config_ram : t_config_ram := (others => (others => '0'));
-
+    
+    -- Synthesis attributes for Block RAM inference (Intel/Altera)
+    attribute ramstyle : string;
+    attribute ramstyle of config_ram : signal is "M10K";
     
     -- Registered read address and data for Block RAM (Port B - sys_clk domain)
     signal ram_rd_addr   : unsigned(7 downto 0) := (others => '0');
@@ -68,18 +71,26 @@ architecture Behavioral of tx_router is
     -- Shadow registers for samples_per_packet (offset 0x06 in each stream config)
     -- These are updated on config write and used by sample counting logic
     -- Avoids multi-port RAM access from sample counting process
-    type t_samples_per_packet_shadow is array (0 to max_streams - 1) of unsigned(7 downto 0);
+    type t_samples_per_packet_shadow is array (0 to 7) of std_logic_vector(7 downto 0);
     signal samples_per_packet_shadow : t_samples_per_packet_shadow := (others => (others => '0'));
+    
+    -- Pre-computed threshold (samples_per_packet - 1) to reduce critical path
+    -- Computed in config_wr_clk domain and synchronized
+    type t_threshold_shadow is array (0 to 7) of unsigned(7 downto 0);
+    signal threshold_shadow : t_threshold_shadow := (others => (others => '0'));
+    signal threshold_sync   : t_threshold_shadow := (others => (others => '0'));
+    
+    -- CDC synchronizer for shadow registers (config_wr_clk -> sys_clk)
+    signal samples_per_packet_sync : t_samples_per_packet_shadow := (others => (others => '0'));
 
-
-    type t_sample_count is array (0 to max_streams - 1) of unsigned(7 downto 0);
+    type t_sample_count is array (0 to 7) of unsigned(7 downto 0);
     signal sample_count : t_sample_count := (others => (others => '0'));
 
     -- TX ready FIFOs: parallel FIFOs for stream index, write pointer, and packet time
-
-    type t_stream_fifo is array (0 to max_streams - 1) of unsigned(2 downto 0);
-    type t_wrptr_fifo is array (0 to max_streams - 1) of std_logic_vector(15 downto 0);
-    type t_time_fifo is array (0 to max_streams - 1) of std_logic_vector(31 downto 0);
+    constant FIFO_DEPTH : integer := 8;
+    type t_stream_fifo is array (0 to FIFO_DEPTH - 1) of unsigned(2 downto 0);
+    type t_wrptr_fifo is array (0 to FIFO_DEPTH - 1) of std_logic_vector(15 downto 0);
+    type t_time_fifo is array (0 to FIFO_DEPTH - 1) of std_logic_vector(31 downto 0);
     signal fifo_stream  : t_stream_fifo := (others => (others => '0'));
     signal fifo_wrptr   : t_wrptr_fifo := (others => (others => '0'));
     signal fifo_time    : t_time_fifo := (others => (others => '0'));
@@ -134,9 +145,11 @@ begin
                 -- Base address = stream_id * 32, so stream_idx = addr[7:5], offset = addr[4:0]
                 stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 5)));
                 offset := to_integer(unsigned(config_wr_addr_i(4 downto 0)));
-                if offset = 6 and stream_idx < max_streams then
-                    samples_per_packet_shadow(stream_idx) <= unsigned(config_wr_data_i);
-
+                if offset = 6 and stream_idx < 8 then
+                    samples_per_packet_shadow(stream_idx) <= config_wr_data_i;
+                    -- Pre-compute threshold (spp - 1) to reduce critical path in sample counting
+                    -- This subtraction is done at config time, not every sample
+                    threshold_shadow(stream_idx) <= unsigned(config_wr_data_i) - 1;
                 end if;
             end if;
         end if;
@@ -153,15 +166,28 @@ begin
         end if;
     end process;
     
-
+    -- ==========================================================================
+    -- CDC Synchronizer for shadow registers (config_wr_clk -> sys_clk)
+    -- Simple register stage - values change slowly (config writes)
+    -- ==========================================================================
+    process (sys_clk_i, reset_n)
+    begin
+        if reset_n = '0' then
+            samples_per_packet_sync <= (others => (others => '0'));
+            threshold_sync <= (others => (others => '0'));
+        elsif rising_edge(sys_clk_i) then
+            samples_per_packet_sync <= samples_per_packet_shadow;
+            threshold_sync <= threshold_shadow;
+        end if;
+    end process;
 
     -- ==========================================================================
     -- Sample counting + FIFO write process
     -- Uses shadow registers instead of direct RAM access
     -- ==========================================================================
     process(sys_clk_i, reset_n)
-        variable loop_active : std_logic := '0';
-        variable i : integer range 0 to max_streams;
+        variable num_streams : integer;
+        variable spp : unsigned(7 downto 0);
     begin
         if reset_n = '0' then
             sample_count <= (others => (others => '0'));
@@ -170,38 +196,32 @@ begin
             fifo_time <= (others => (others => '0'));
             fifo_wr_ptr <= (others => '0');
             sample_ready_sync <= '0';
-            i := 0;
-            loop_active := '0';
         elsif rising_edge(sys_clk_i) then
             sample_ready_sync <= sample_ready_i;
 
             -- Rising edge of sample_ready
             if sample_ready_i = '1' and sample_ready_sync = '0' then
-
-                loop_active := '1';
-            end if;
-            if (loop_active = '1') then
-                if i < max_streams then
-                
-                
-                    if samples_per_packet_shadow(i) /= 0 then
-                        if sample_count(i) = samples_per_packet_shadow(i) then
-                            sample_count(i) <= (others => '0');
-                            -- Enqueue into parallel FIFOs with snapshot of current state
-                            fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
-                            fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
-                            fifo_time(to_integer(fifo_wr_ptr)) <= packet_time_i;
-                            fifo_wr_ptr <= fifo_wr_ptr + 1;
-                        else
-                            sample_count(i) <= sample_count(i) + 1;
+                for i in 0 to 7 loop
+                    if i < max_streams then
+                        -- Use pre-computed threshold (spp-1) to reduce critical path
+                        -- The subtraction was done at config time, not here
+                        spp := unsigned(samples_per_packet_sync(i));
+                        if spp /= 0 then
+                            if sample_count(i) >= threshold_sync(i) then
+                                sample_count(i) <= (others => '0');
+                                -- Enqueue into parallel FIFOs with snapshot of current state
+                                fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
+                                fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
+                                fifo_time(to_integer(fifo_wr_ptr)) <= packet_time_i;
+                                fifo_wr_ptr <= fifo_wr_ptr + 1;
+                            else
+                                sample_count(i) <= sample_count(i) + 1;
+                            end if;
                         end if;
                     end if;
-                    i := i + 1;
-                else 
-                    i := 0;
-                    loop_active := '0';
-                end if;
+                end loop;
             end if;
+
         end if;
     end process;
 

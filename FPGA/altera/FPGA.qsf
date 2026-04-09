@@ -492,5 +492,23 @@ set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/aes67_top.vhd
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/ethernet_top.vhd
 set_global_assignment -name VERILOG_FILE /home/wolff/AES67/litex_soc/build/cyclone10/gateware/litex_soc.v
 set_global_assignment -name VERILOG_FILE /home/wolff/AES67/litex_soc/build/cyclone10/gateware/VexRiscv.v
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio0
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[0]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio2
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[2]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio5
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[5]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio6
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[6]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio9
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[9]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio10
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[10]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio11
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[11]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio12
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[12]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio[13]
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

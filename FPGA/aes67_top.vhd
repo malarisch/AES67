@@ -129,7 +129,6 @@ ARCHITECTURE rtl OF aes67_top IS
 
 
 -- audio clocks
-SIGNAL pll_512fs : STD_LOGIC;
 SIGNAL pll_64fs : STD_LOGIC;
 SIGNAL pll_48k_fs : STD_LOGIC;
 SIGNAL pll_48k_fs_tdm : STD_LOGIC;
@@ -174,7 +173,6 @@ signal mac_sof_sent_tog : STD_LOGIC;
 signal mac_sof_recv_tog : STD_LOGIC;
 BEGIN 
 
-pll_512fs <= pll_512fs_i;
 pll_64fs_o <= pll_64fs;
 pll_48k_fs_o <= pll_48k_fs;
 pll_48k_fs_tdm_o <= pll_48k_fs_tdm;
@@ -188,7 +186,7 @@ mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
 audioclocks_inst: entity work.audioclock_generator
-PORT MAP(mclk => pll_512fs,
+PORT MAP(mclk => pll_512fs_i,
 		 rst_n => rst_n,
 		 clk_64fs => pll_64fs,
 		 fs => pll_48k_fs,
