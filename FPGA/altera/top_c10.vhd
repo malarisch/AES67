@@ -283,6 +283,7 @@ reset_p <= not c10_resetn;
 aes67_top_inst: entity work.aes67_top
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,
+	enet_clk_i             => enet_clk,
 	clk_mcu_i              => mcu_clk,
 	rst_n                  => c10_resetn,
 	mac_resetn_i            => c10_resetn,
@@ -566,7 +567,7 @@ spiflash_miso <= gpio33;
 hbus_clk0_p   <= hram_clk;
 hbus_clk0_n   <= NOT hram_clk;
 
-gpio9         <= pll_256fs_rising;
+gpio9         <= pll_256fs_falling;
 gpio12        <= pll_256fs_falling;
 gpio13        <= pll_48k_fs_tdm;
 gpio10        <= pll_48k_fs_tdm;

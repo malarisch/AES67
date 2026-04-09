@@ -6,6 +6,7 @@ use IEEE.NUMERIC_STD.all;
 entity ethernet_top is
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
+    enet_clk_i      : IN STD_LOGIC;
     mac_rx_clock_o : OUT STD_LOGIC;
     mac_tx_clock_o : OUT STD_LOGIC;
     rst_n : IN STD_LOGIC;
@@ -182,7 +183,7 @@ GENERIC MAP(MIIM_CLOCK_DIVIDER => 50,
 			MIIM_POLL_WAIT_TICKS => 10000000,
 			MIIM_RESET_WAIT_TICKS => 0
 			)
-PORT MAP(clock_125_i => mii_rx_clock_i,
+PORT MAP(clock_125_i => enet_clk_i,
 		 reset_i => mac_reset_i,
 		 mii_tx_clk_i => mii_tx_clock_i,
 		 mii_rx_clk_i => mii_rx_clock_i,
@@ -195,7 +196,7 @@ PORT MAP(clock_125_i => mii_rx_clock_i,
 
 
 
-		 miim_clock_i => mii_rx_clock_i,
+		 miim_clock_i => enet_clk_i,
          mdio_io => enet_mdio,
          mdc_o => enet_mdc,
          

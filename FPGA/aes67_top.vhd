@@ -20,6 +20,7 @@ ENTITY aes67_top IS
 	(
 		-- system clocks
 		sys_clk_125MHz_i :  IN  STD_LOGIC;
+		enet_clk_i       :  IN  STD_LOGIC;
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
 		mac_resetn_i : IN STD_LOGIC;
@@ -391,7 +392,7 @@ tdm8_mux1_inst: entity work.tdm8_out
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_rising,
+		 BIT_CLK => pll_256fs_falling,
 		 RESET => rst_n,
 		 DATA_CH0 => rx_sample_register(0),
 		 DATA_CH1 => rx_sample_register(1),
@@ -408,7 +409,7 @@ tdm8_mux2_inst: entity work.tdm8_out
 GENERIC MAP(width => 24
 			)
 PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_rising,
+		 BIT_CLK => pll_256fs_falling,
 		 RESET => rst_n,
 		 DATA_CH0 => rx_sample_register(8),
 		 DATA_CH1 => rx_sample_register(9),
@@ -460,6 +461,7 @@ PORT MAP(FSYNC => pll_48k_fs_tdm,
 ethernet_top_inst: entity work.ethernet_top
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
+	enet_clk_i => enet_clk_i,
 	mac_rx_clock_o => mac_rx_clock_o,
 	mac_tx_clock_o => mac_tx_clock,
 	rst_n => rst_n,
