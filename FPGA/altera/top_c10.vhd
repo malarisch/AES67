@@ -15,41 +15,45 @@ ENTITY top_c10 IS
 		enet_rx_clk :  IN  STD_LOGIC;
 		enet_rx_dv :  IN  STD_LOGIC;
 		enet_resetn :  OUT  STD_LOGIC;
-		arduino_io1 :  IN  STD_LOGIC;
+		
 		enet_mdio :  INOUT  STD_LOGIC;
 		hbus_rwds :  INOUT  STD_LOGIC;
 		enet_rx_d :  IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
-		gpio1 :  IN  STD_LOGIC;
-		gpio0 :  IN  STD_LOGIC;
-		gpio2 :  IN  STD_LOGIC;
-		gpio33 :  IN  STD_LOGIC;
-		gpio28 :  IN  STD_LOGIC;
-		gpio26 :  INOUT  STD_LOGIC;
-		gpio27 :  INOUT  STD_LOGIC;
-		gpio23 :  INOUT  STD_LOGIC;
-		gpio24 :  INOUT  STD_LOGIC;
+
 		hbus_dq :  INOUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		enet_tx_clk :  OUT  STD_LOGIC;
 		enet_tx_en :  OUT  STD_LOGIC;
 		enet_mdc :  OUT  STD_LOGIC;
 		hbus_rstn :  OUT  STD_LOGIC;
 		hbus_cs2n :  OUT  STD_LOGIC;
-		arduino_io2 :  OUT  STD_LOGIC;
+		uart0_tx :  OUT  STD_LOGIC;
 		hbus_clk0_p :  OUT  STD_LOGIC;
 		hbus_clk0_n :  OUT  STD_LOGIC;
 		enet_tx_d :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
-		gpio9 :  OUT  STD_LOGIC;
-		gpio13 :  OUT  STD_LOGIC;
-		gpio10 :  OUT  STD_LOGIC;
-		gpio12 :  OUT  STD_LOGIC;
-		gpio11 :  OUT  STD_LOGIC;
-		gpio5 :  OUT  STD_LOGIC;
-		gpio6 :  OUT  STD_LOGIC;
-		gpio34 :  OUT  STD_LOGIC;
-		gpio32 :  OUT  STD_LOGIC;
-		gpio35 :  OUT  STD_LOGIC;
-		gpio25 :  OUT  STD_LOGIC;
-		gpio29 :  OUT  STD_LOGIC;
+
+
+		pll_256fs_rising : OUT STD_LOGIC;
+		uart0_rx :  IN  STD_LOGIC;
+		pll_512fs_i :  IN  STD_LOGIC; -- gpio 1
+		tdm8in_0_i :  IN  STD_LOGIC;
+		tdm8in_1_i :  IN  STD_LOGIC;
+		spiflash_miso :  IN  STD_LOGIC;
+		uart1_rx :  IN  STD_LOGIC;
+		i2c0_scl :  INOUT  STD_LOGIC;
+		i2c0_sda :  INOUT  STD_LOGIC;
+		i2c1_scl :  INOUT  STD_LOGIC;
+		i2c1_sda :  INOUT  STD_LOGIC;
+		lrclk1 :  OUT  STD_LOGIC;
+		lrclk0 :  OUT  STD_LOGIC;
+		pll_256fs_falling :  OUT  STD_LOGIC; -- gpio 12
+		pll_512fs_o :  OUT  STD_LOGIC;
+		tdm8out_0_o :  OUT  STD_LOGIC;
+		tdm8out_1_o :  OUT  STD_LOGIC;
+		spiflash_clk :  OUT  STD_LOGIC;
+		spiflash_cs :  OUT  STD_LOGIC;
+		spiflash_mosi :  OUT  STD_LOGIC;
+		adda_nRST :  OUT  STD_LOGIC;
+		uart1_tx :  OUT  STD_LOGIC;
 		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
 	);
 END top_c10;
@@ -228,7 +232,6 @@ signal ptp_is_follower     : STD_LOGIC;
 signal ptp_is_leader       : STD_LOGIC;
 signal ppb_meter_start     : STD_LOGIC;
 signal audio_meter_clear   : STD_LOGIC;
-signal adda_nRST           : STD_LOGIC;
 
 -- aes67_top status -> litex_soc
 signal ptp_sync_lost       : STD_LOGIC;
@@ -257,19 +260,9 @@ signal rx_conf_wr_addr : STD_LOGIC_VECTOR(7 downto 0);
 signal pll_64fs        : STD_LOGIC;
 signal pll_48k_fs      : STD_LOGIC;
 signal pll_48k_fs_tdm  : STD_LOGIC;
-signal pll_256fs_rising  : STD_LOGIC;
-signal pll_256fs_falling : STD_LOGIC;
 
 -- litex_soc misc
 signal mcu_clk       : STD_LOGIC;
-signal uart0_rx      : STD_LOGIC;
-signal uart0_tx      : STD_LOGIC;
-signal uart1_rx      : STD_LOGIC;
-signal uart1_tx      : STD_LOGIC;
-signal spiflash_miso : STD_LOGIC;
-signal spiflash_clk  : STD_LOGIC;
-signal spiflash_cs   : STD_LOGIC;
-signal spiflash_mosi : STD_LOGIC;
 signal hram_clk      : STD_LOGIC;
 
 
@@ -318,7 +311,7 @@ aes67_top_inst: entity work.aes67_top
 	mac_linkup_o           => mac_linkup,
 
 	-- audio clocks
-	pll_512fs_i            => gpio1,
+	pll_512fs_i            => pll_512fs_i,
 	pll_64fs_o             => pll_64fs,
 	pll_48k_fs_o           => pll_48k_fs,
 	pll_48k_fs_tdm_o       => pll_48k_fs_tdm,
@@ -369,10 +362,10 @@ aes67_top_inst: entity work.aes67_top
 	audio_rx_cfg_wr_addr_i      => rx_conf_wr_addr,
 
 	-- TDM audio I/O
-	tdm8out_0_o                 => gpio5,
-	tdm8out_1_o                 => gpio6,
-	tdm8in_0_i                  => gpio0,
-	tdm8in_1_i                  => gpio2
+	tdm8out_0_o                 => tdm8out_0_o,
+	tdm8out_1_o                 => tdm8out_1_o,
+	tdm8in_0_i                  => tdm8in_0_i,
+	tdm8in_1_i                  => tdm8in_1_i
 );
 
 
@@ -462,10 +455,10 @@ PORT MAP(
 	hyperram_rst_n                     => hbus_rstn,
 
 	-- I2C
-	i2c0_scl                           => gpio26,
-	i2c0_sda                           => gpio27,
-	i2c1_scl                           => gpio23,
-	i2c1_sda                           => gpio24
+	i2c0_scl                           => i2c0_scl, -- gpio26
+	i2c0_sda                           => i2c0_sda, -- gpio27
+	i2c1_scl                           => i2c1_scl, -- gpio23
+	i2c1_sda                           => i2c1_sda -- gpio24
 );
 
 
@@ -558,24 +551,13 @@ PORT MAP(
 
 
 -- GPIO / pin assignments
-uart0_rx      <= arduino_io1;
-arduino_io2   <= uart0_tx;
-uart1_rx      <= gpio28;
-gpio29        <= uart1_tx;
-spiflash_miso <= gpio33;
 
 hbus_clk0_p   <= hram_clk;
 hbus_clk0_n   <= NOT hram_clk;
 
-gpio9         <= pll_256fs_falling;
-gpio12        <= pll_256fs_falling;
-gpio13        <= pll_48k_fs_tdm;
-gpio10        <= pll_48k_fs_tdm;
-gpio11        <= gpio1; -- pll_512fs passthrough
-gpio34        <= spiflash_clk;
-gpio32        <= spiflash_cs;
-gpio35        <= spiflash_mosi;
-gpio25        <= adda_nRST;
+lrclk1        <= pll_48k_fs_tdm; -- gpio13
+lrclk0        <= pll_48k_fs_tdm; -- gpio11
+pll_512fs_o        <= pll_512fs_i;-- gpio 11 <= gpio 1 pll_512fs passthrough
 
 -- LEDs
 user_led(0)   <= wallclock_locked;
