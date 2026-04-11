@@ -71,6 +71,7 @@ architecture Behavioral of rx_ringbuffer is
     constant CHANNEL_STRIDE : integer := SLOT_BYTES; -- 4
     constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES;
     constant SAMPLE_SHIFT   : integer := clog2(SAMPLE_STRIDE); -- log2(SAMPLE_STRIDE) for address computation
+    constant SAMPLE_IDX_BITS : integer := ADDR_BITS - SAMPLE_SHIFT; -- bits of sample index within buffer (= clog2(audio_buffer_sample_depth))
 
     type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData, s_End);
     signal packetParserState : t_s_parsePacket := s_Idle;
@@ -163,7 +164,7 @@ begin
 
     process(sys_clk, reset_n)
         variable comp_byte : integer range 0 to 32 := 0;
-        variable wr_sample_pos : unsigned(7 downto 0);
+        variable wr_sample_pos : unsigned(SAMPLE_IDX_BITS - 1 downto 0);
         variable v_channel_addr : unsigned(ADDR_BITS - 1 downto 0);
         variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
         variable v_playout_sample : std_logic_vector(SAMPLE_BITS - 1 downto 0);
@@ -222,7 +223,7 @@ begin
                 output_next_sample <= '1';
                 -- Derive read pointer directly from media clock (same as write side, but without delay)
                 -- This keeps read-write distance constant at exactly the configured delay
-                sample_rd_ptr <= unsigned(media_clock_i(7 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+                sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
             end if;
 
             -- ======== Packet parser state machine ========
@@ -410,8 +411,8 @@ begin
                         when 10 =>
                             -- Latch samples_per_channel, compute write position
                             current_packet_samples_per_channel <= to_integer(unsigned(stream_rd_data_r));
-                            wr_sample_pos := unsigned(current_packet_media_clock(7 downto 0))
-                                           + cached_delay;
+                            wr_sample_pos := unsigned(current_packet_media_clock(SAMPLE_IDX_BITS - 1 downto 0))
+                                           + resize(cached_delay, SAMPLE_IDX_BITS);
                             wr_addr_sample_base <= wr_sample_pos & to_unsigned(0, SAMPLE_SHIFT);
                             prepare_step <= 11;
 

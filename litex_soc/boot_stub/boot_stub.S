@@ -1,19 +1,25 @@
 /*
- * SPI Flash -> HyperRAM boot stub for LiteX VexRiscv.
+ * SPI Flash boot stub for LiteX VexRiscv.
  *
- * This tiny stub is placed at the CPU reset address (start of SPI flash).
+ * Placed at the CPU reset address (start of SPI flash).
  *
- * It resets the HyperRAM chip via the CSR (pulse stretcher in the SoC
- * extends this to 32 sys_clk cycles = 400 ns), waits for the chip to
- * recover, sets the HyperRAM controller latency to match the chip's
- * power-on default (6 CK), copies the BIOS image from SPI flash into
- * HyperRAM, flushes caches, and jumps there.
+ * Target-specific behavior (selected by -DTARGET_xxx from the Makefile):
  *
- * Flash layout:
+ *  TARGET_CYCLONE10 (default)
+ *      Resets the HyperRAM chip via CSR (pulse stretcher extends to 400 ns),
+ *      waits for recovery, programs the controller latency to match the
+ *      chip's power-on default (6 CK), copies the BIOS from SPI flash into
+ *      HyperRAM at 0x207F0000 (top of 8 MB HyperRAM), and jumps there.
+ *
+ *  TARGET_CYC1000
+ *      SDR SDRAM needs a proper init sequence the stub can't provide in
+ *      512 bytes — so we skip the copy entirely and run the BIOS in place
+ *      (XIP) directly from SPI flash at 0x30000200.  The BIOS itself
+ *      initializes SDRAM and then loads the Zephyr firmware into it.
+ *
+ * Flash layout (both targets):
  *   0x30000000  boot_stub  (this file, <=512 bytes)
  *   0x30000200  bios.bin   (LiteX BIOS, up to 63.5 KB)
- *
- * BIOS linked at 0x207F0000 (top of 8 MB HyperRAM).
  */
 
 .section .text
@@ -23,13 +29,21 @@
 .equ STUB_SIZE,     0x200
 .equ BIOS_SRC,      FLASH_BASE + STUB_SIZE
 .equ BIOS_MAX_SIZE, 0x10000
-.equ BIOS_DST,      0x20000000 + 0x800000 - BIOS_MAX_SIZE
 
-.equ HYPERRAM_CFG,  0xF0001800
-.equ HR_LATENCY,    6           /* IS66WVH8M8ALL power-on default */
+.equ UART_RXTX,     0xF0005800
+.equ UART_TXFULL,   0xF0005804
 
-.equ UART_RXTX,    0xF0005800
-.equ UART_TXFULL,  0xF0005804
+#if defined(TARGET_CYC1000)
+    /* CYC1000: XIP from flash, no SDRAM copy (BIOS inits SDRAM itself). */
+    #define XIP_BOOT 1
+    .equ BIOS_DST,      FLASH_BASE + STUB_SIZE   /* = 0x30000200 */
+#else
+    /* Cyclone10 default: 8 MB HyperRAM, stub copies BIOS to top of RAM. */
+    #define USE_HYPERRAM 1
+    .equ BIOS_DST,      0x20000000 + 0x800000 - BIOS_MAX_SIZE
+    .equ HYPERRAM_CFG,  0xF0001800
+    .equ HR_LATENCY,    6           /* IS66WVH8M8ALL power-on default */
+#endif
 
 _start:
     li      sp, 0x10001000
@@ -39,6 +53,7 @@ _start:
     li      a0, 'B'
     jal     ra, uart_putc
 
+#ifdef USE_HYPERRAM
     /*
      * Reset the HyperRAM chip via CSR.
      */
@@ -66,8 +81,10 @@ _start:
     /* --- Debug: print "L" (Latency set) --- */
     li      a0, 'L'
     jal     ra, uart_putc
+#endif /* USE_HYPERRAM */
 
-    /* Copy BIOS from SPI flash to HyperRAM */
+#ifndef XIP_BOOT
+    /* Copy BIOS from SPI flash to main RAM */
     li      a0, BIOS_DST
     li      a1, BIOS_SRC
     li      a2, BIOS_MAX_SIZE
@@ -92,6 +109,7 @@ copy_loop:
     nop
     nop
     nop
+#endif /* !XIP_BOOT */
 
     /* --- Debug: print "J\n" (Jumping to BIOS) --- */
     li      s0, UART_RXTX
@@ -100,7 +118,7 @@ copy_loop:
     li      a0, '\n'
     jal     ra, uart_putc
 
-    /* Jump to BIOS in HyperRAM */
+    /* Jump to BIOS (HyperRAM copy, or XIP in flash) */
     li      t0, BIOS_DST
     jr      t0
 

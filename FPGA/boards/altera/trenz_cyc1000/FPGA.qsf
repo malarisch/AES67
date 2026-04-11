@@ -1,0 +1,491 @@
+# -------------------------------------------------------------------------- #
+#
+# Copyright (C) 2025  Altera Corporation. All rights reserved.
+# Your use of Altera Corporation's design tools, logic functions 
+# and other software and tools, and any partner logic 
+# functions, and any output files from any of the foregoing 
+# (including device programming or simulation files), and any 
+# associated documentation or information are expressly subject 
+# to the terms and conditions of the Altera Program License 
+# Subscription Agreement, the Altera Quartus Prime License Agreement,
+# the Altera IP License Agreement, or other applicable license
+# agreement, including, without limitation, that your use is for
+# the sole purpose of programming logic devices manufactured by
+# Altera and sold by Altera or its authorized distributors.  Please
+# refer to the Altera Software License Subscription Agreements 
+# on the Quartus Prime software download page.
+#
+# -------------------------------------------------------------------------- #
+#
+# Quartus Prime
+# Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition
+# Date created = 14:47:59  April 11, 2026
+#
+# -------------------------------------------------------------------------- #
+#
+# Notes:
+#
+# 1) The default values for assignments are stored in the file:
+#		FPGA_assignment_defaults.qdf
+#    If this file doesn't exist, see file:
+#		assignment_defaults.qdf
+#
+# 2) Intel recommends that you do not modify this file. This
+#    file is updated automatically by the Quartus Prime software
+#    and any changes you make may be lost or overwritten.
+#
+# -------------------------------------------------------------------------- #
+
+
+
+# Project-Wide Assignments
+# ========================
+set_global_assignment -name ORIGINAL_QUARTUS_VERSION 13.1
+set_global_assignment -name PROJECT_CREATION_TIME_DATE "17:32:23  DECEMBER 27, 2024"
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+set_global_assignment -name SMART_RECOMPILE ON
+set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
+set_global_assignment -name VHDL_FILE ../../../ethernet_top.vhd
+set_global_assignment -name VHDL_FILE ../../../aes67_top.vhd
+set_global_assignment -name VHDL_FILE ../../../wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/audio_tx_module.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptp_module.vhd
+set_global_assignment -name VHDL_FILE ../../../audioclock_generator.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tdm8_in.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/tdm8_out.vhd
+set_global_assignment -name VHDL_FILE ../../../litex_eth_buffer_bridge.vhd
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/VexRiscv.v
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_sram.init
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_rom.init
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_mem.init
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc.v
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/rgmii_phy_if.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/ssio_ddr_in.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/oddr.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/iddr.v"
+set_global_assignment -name VERILOG_FILE ../../../mii_rmii/RTL/rmii_phy_if.v
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser_no_min_filter.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_sender.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_servo.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_controller.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/i2s_out.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/rx_ringbuffer.vhd
+set_global_assignment -name VHDL_FILE ../../../eth_tx_arbiter.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/const_ch_output_debug.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_router.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_sample_buffer.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_transmitter.vhd
+set_global_assignment -name VHDL_FILE ../../../clock_ppb_meter.vhd
+set_global_assignment -name VHDL_FILE ../../../ethernet_timestamp.vhd
+set_global_assignment -name VHDL_FILE ../../../ethernet_packet_aggregator.vhd
+set_global_assignment -name BSF_FILE pll_systemclocks.bsf
+set_global_assignment -name VHDL_FILE ../../../I2S_IN.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/eth_ram.vhd
+set_global_assignment -name VHDL_FILE ../../../clk_by_x.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_speed.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/utility.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/single_signal_synchronizer.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/mii_gmii_io.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32_tb.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_control.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_receive.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_reset.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/detect_rising_edge.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_config.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/reverse_mac.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd
+set_global_assignment -name SDC_FILE c10evalkit.sdc
+set_global_assignment -name QIP_FILE pll_systemclocks.qip
+set_global_assignment -name QIP_FILE ethernet_clks.qip
+
+# Pin & Location Assignments
+# ==========================
+set_location_assignment PIN_M2 -to c10_clk12m
+# set_location_assignment PIN_E15 -to CLK_X
+# set_location_assignment PIN_N6 -to USER_BTN
+
+set_location_assignment PIN_M6 -to user_led[0]
+set_location_assignment PIN_T4 -to user_led[1]
+set_location_assignment PIN_T3 -to user_led[2]
+set_location_assignment PIN_R3 -to user_led[3]
+set_location_assignment PIN_T2 -to user_led[4]
+set_location_assignment PIN_R4 -to user_led[5]
+set_location_assignment PIN_N5 -to user_led[6]
+set_location_assignment PIN_N3 -to user_led[7]
+
+set_location_assignment PIN_A3 -to sdram_a[0]
+set_location_assignment PIN_B5 -to sdram_a[1]
+set_location_assignment PIN_B4 -to sdram_a[2]
+set_location_assignment PIN_B3 -to sdram_a[3]
+set_location_assignment PIN_C3 -to sdram_a[4]
+set_location_assignment PIN_D3 -to sdram_a[5]
+set_location_assignment PIN_E6 -to sdram_a[6]
+set_location_assignment PIN_E7 -to sdram_a[7]
+set_location_assignment PIN_D6 -to sdram_a[8]
+set_location_assignment PIN_D8 -to sdram_a[9]
+set_location_assignment PIN_A5 -to sdram_a[10]
+set_location_assignment PIN_E8 -to sdram_a[11]
+set_location_assignment PIN_A2 -to sdram_a[12]
+set_location_assignment PIN_C6 -to sdram_a[13]
+set_location_assignment PIN_A4 -to sdram_ba[0]
+set_location_assignment PIN_B6 -to sdram_ba[1]
+set_location_assignment PIN_C8 -to sdram_cas_n
+set_location_assignment PIN_B14 -to sdram_clock
+set_location_assignment PIN_F8 -to sdram_cke
+set_location_assignment PIN_A6 -to sdram_cs_n
+set_location_assignment PIN_D12 -to sdram_dm[1]
+set_location_assignment PIN_B13 -to sdram_dm[0]
+set_location_assignment PIN_B10 -to sdram_dq[0]
+set_location_assignment PIN_A10 -to sdram_dq[1]
+set_location_assignment PIN_B11 -to sdram_dq[2]
+set_location_assignment PIN_A11 -to sdram_dq[3]
+set_location_assignment PIN_A12 -to sdram_dq[4]
+set_location_assignment PIN_D9 -to sdram_dq[5]
+set_location_assignment PIN_B12 -to sdram_dq[6]
+set_location_assignment PIN_C9 -to sdram_dq[7]
+set_location_assignment PIN_D11 -to sdram_dq[8]
+set_location_assignment PIN_E11 -to sdram_dq[9]
+set_location_assignment PIN_A15 -to sdram_dq[10]
+set_location_assignment PIN_E9 -to sdram_dq[11]
+set_location_assignment PIN_D14 -to sdram_dq[12]
+set_location_assignment PIN_F9 -to sdram_dq[13]
+set_location_assignment PIN_C14 -to sdram_dq[14]
+set_location_assignment PIN_A14 -to sdram_dq[15]
+set_location_assignment PIN_A7 -to sdram_we_n
+set_location_assignment PIN_B7 -to sdram_ras_n
+
+# set_location_assignment PIN_F3 -to SEN_SPC
+# set_location_assignment PIN_D1 -to SEN_CS
+# set_location_assignment PIN_G1 -to SEN_SDO
+# set_location_assignment PIN_G2 -to SEN_SDI
+# set_location_assignment PIN_B1 -to SEN_INT1
+# set_location_assignment PIN_C2 -to SEN_INT2
+
+set_location_assignment PIN_R7 -to uart0_rx
+set_location_assignment PIN_T7 -to uart0_tx
+set_location_assignment PIN_R6 -to BDBUS2
+set_location_assignment PIN_T6 -to BDBUS3
+set_location_assignment PIN_R5 -to BDBUS4
+set_location_assignment PIN_T5 -to BDBUS5
+set_location_assignment PIN_M8 -to ADBUS4
+set_location_assignment PIN_N8 -to ADBUS7
+
+set_location_assignment PIN_T12 -to AIN
+set_location_assignment PIN_R12 -to pll_512fs_i
+set_location_assignment PIN_T13 -to i2c0_scl
+set_location_assignment PIN_R13 -to i2c0_sda
+set_location_assignment PIN_T14 -to pll_512fs_o
+set_location_assignment PIN_P14 -to pll_256fs_falling
+set_location_assignment PIN_R14 -to pll_64fs_o
+set_location_assignment PIN_T15 -to lrclk0
+set_location_assignment PIN_R11 -to enet_mdc
+
+set_location_assignment PIN_N16 -to tdm8in_0_i
+set_location_assignment PIN_L15 -to tdm8in_1_i
+set_location_assignment PIN_L16 -to tdm8out_0_o
+set_location_assignment PIN_K15 -to tdm8out_1_o
+set_location_assignment PIN_K16 -to D4
+set_location_assignment PIN_J14 -to D5
+set_location_assignment PIN_N2 -to i2c1_scl
+set_location_assignment PIN_N1 -to i2c1_sda 
+set_location_assignment PIN_P2 -to uart1_rx 
+set_location_assignment PIN_J1 -to uart1_tx
+set_location_assignment PIN_J2 -to adda_nRST
+set_location_assignment PIN_K2 -to spiflash_cs
+set_location_assignment PIN_K1 -to D11_R
+set_location_assignment PIN_L2 -to spiflash_clk
+set_location_assignment PIN_L1 -to D12_R
+set_location_assignment PIN_P1 -to spiflash_mosi
+set_location_assignment PIN_R1 -to spiflash_miso
+
+set_location_assignment PIN_F13 -to phy_rmii_txd[1]
+set_location_assignment PIN_F15 -to phy_rmii_txd[0]
+set_location_assignment PIN_F16 -to phy_rmii_txen
+set_location_assignment PIN_D16 -to phy_rmii_rxd[0]
+set_location_assignment PIN_D15 -to phy_rmii_rxd[1]
+set_location_assignment PIN_C15 -to phy_rmii_ref_clk
+set_location_assignment PIN_B16 -to phy_rmii_crsdv
+set_location_assignment PIN_C16 -to enet_mdio
+
+# Classic Timing Assignments
+# ==========================
+set_global_assignment -name MIN_CORE_JUNCTION_TEMP 0
+set_global_assignment -name MAX_CORE_JUNCTION_TEMP 85
+set_global_assignment -name TIMING_ANALYZER_MULTICORNER_ANALYSIS ON
+
+# Compiler Assignments
+# ====================
+set_global_assignment -name ALLOW_REGISTER_RETIMING ON
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+
+# Analysis & Synthesis Assignments
+# ================================
+set_global_assignment -name FAMILY "Cyclone 10 LP"
+set_global_assignment -name TOP_LEVEL_ENTITY top_cyc1000
+set_global_assignment -name PROJECT_IP_REGENERATION_POLICY ALWAYS_REGENERATE_IP
+set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
+set_global_assignment -name VHDL_SHOW_LMF_MAPPING_MESSAGES OFF
+set_global_assignment -name SEARCH_PATH "../../../../../../verilog-ethernet-mod/rtl"
+set_global_assignment -name REMOVE_REDUNDANT_LOGIC_CELLS ON
+
+# Fitter Assignments
+# ==================
+set_global_assignment -name DEVICE 10CL025YU256C8G
+set_global_assignment -name ERROR_CHECK_FREQUENCY_DIVISOR 1
+set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVCMOS"
+
+# EDA Netlist Writer Assignments
+# ==============================
+set_global_assignment -name EDA_SIMULATION_TOOL "Questa Altera FPGA (Verilog)"
+
+
+# Power Estimation Assignments
+# ============================
+set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
+set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
+
+# start EDA_TOOL_SETTINGS(eda_simulation)
+# ---------------------------------------
+
+	# EDA Netlist Writer Assignments
+	# ==============================
+set_global_assignment -name EDA_OUTPUT_DATA_FORMAT "VERILOG HDL" -section_id eda_simulation
+set_global_assignment -name EDA_TIME_SCALE "1 ps" -section_id eda_simulation
+
+# end EDA_TOOL_SETTINGS(eda_simulation)
+# -------------------------------------
+
+# start EDA_TOOL_SETTINGS(eda_board_design_timing)
+# ------------------------------------------------
+
+	# EDA Netlist Writer Assignments
+	# ==============================
+set_global_assignment -name EDA_GENERATE_FUNCTIONAL_NETLIST OFF -section_id eda_board_design_timing
+
+# end EDA_TOOL_SETTINGS(eda_board_design_timing)
+# ----------------------------------------------
+
+# start EDA_TOOL_SETTINGS(eda_board_design_symbol)
+# ------------------------------------------------
+
+	# EDA Netlist Writer Assignments
+	# ==============================
+set_global_assignment -name EDA_GENERATE_FUNCTIONAL_NETLIST OFF -section_id eda_board_design_symbol
+
+# end EDA_TOOL_SETTINGS(eda_board_design_symbol)
+# ----------------------------------------------
+
+# start EDA_TOOL_SETTINGS(eda_board_design_signal_integrity)
+# ----------------------------------------------------------
+
+	# EDA Netlist Writer Assignments
+	# ==============================
+set_global_assignment -name EDA_GENERATE_FUNCTIONAL_NETLIST OFF -section_id eda_board_design_signal_integrity
+
+# end EDA_TOOL_SETTINGS(eda_board_design_signal_integrity)
+# --------------------------------------------------------
+
+# start EDA_TOOL_SETTINGS(eda_board_design_boundary_scan)
+# -------------------------------------------------------
+
+	# EDA Netlist Writer Assignments
+	# ==============================
+set_global_assignment -name EDA_GENERATE_FUNCTIONAL_NETLIST OFF -section_id eda_board_design_boundary_scan
+
+# end EDA_TOOL_SETTINGS(eda_board_design_boundary_scan)
+# -----------------------------------------------------
+
+
+
+# ---------------------
+# start ENTITY(top_c10)
+
+	# Pin & Location Assignments
+	# ==========================
+
+	# Fitter Assignments
+	# ==================
+    # gpio10
+    # gpio13
+	
+	
+    # gpio 1
+	
+	
+
+
+
+
+
+
+
+
+	# start DESIGN_PARTITION(Top)
+	# ---------------------------
+
+		# Incremental Compilation Assignments
+		# ===================================
+
+	# end DESIGN_PARTITION(Top)
+	# -------------------------
+
+# end ENTITY(top_c10)
+# -------------------
+set_global_assignment -name ENABLE_OCT_DONE OFF
+set_global_assignment -name ENABLE_CONFIGURATION_PINS OFF
+set_global_assignment -name ENABLE_BOOT_SEL_PIN OFF
+set_global_assignment -name USE_CONFIGURATION_DEVICE OFF
+set_global_assignment -name CRC_ERROR_OPEN_DRAIN OFF
+set_global_assignment -name OUTPUT_IO_TIMING_NEAR_END_VMEAS "HALF VCCIO" -rise
+set_global_assignment -name OUTPUT_IO_TIMING_NEAR_END_VMEAS "HALF VCCIO" -fall
+set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -rise
+set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -fall
+
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/boards/altera/trenz_cyc1000/top_cyc1000.vhd
+set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
+set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
+set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_p
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_rwds
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_rwds
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[0]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[1]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[2]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[3]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[4]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[5]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[6]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[7]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_rwds
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to PHY_MDIO
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to c10_clk50m
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_sda
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk1
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_512fs_o
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_256fs_falling
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk0
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio14
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio15
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio16
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio17
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio18
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio19
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_mosi
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8in_0_i
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_512fs_i
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio2
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio3
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio4
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8out_0_o
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8out_1_o
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio31
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio7
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio8
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_256fs_rising
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[3]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[2]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[2]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[3]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[4]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io4
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io3
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_intn
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rston
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[0]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[1]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[2]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[3]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[4]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[5]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[6]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[7]
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_cs2n
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_cs1n
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rstn
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rwds
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_p
+set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_n
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio20
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio21
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio22
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to i2c1_scl
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to i2c1_sda
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to adda_nRST
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to i2c0_scl
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to i2c0_sda
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart1_rx
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to spiflash_cs
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart1_tx
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[2]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[3]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[4]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[5]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[6]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[7]
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio30
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart0_rx
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart0_tx
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[6]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[7]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[8]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[10]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[11]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[12]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[13]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_rstn
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[5]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io5
+set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to pll_512fs_o
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io9
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[9]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_miso
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_clk
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8in_0_i
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8in_1_i
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8out_0_o
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8out_1_o
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_256fs_rising
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio10
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_512fs_o
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_256fs_falling
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
+set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

@@ -294,6 +294,22 @@ _io_cyclone10 = [
     ),
 ] + _io_common
 
+_io_cyc1000 = [
+    ("clk12", 0, Pins(1)),
+    ("sdram_clock", 0, Pins(1)),
+    ("sdram", 0,
+        Subsignal("a",     Pins(14)),
+        Subsignal("ba",    Pins(2)),
+        Subsignal("cs_n",  Pins(1)),
+        Subsignal("cke",   Pins(1)),
+        Subsignal("ras_n", Pins(1)),
+        Subsignal("cas_n", Pins(1)),
+        Subsignal("we_n",  Pins(1)),
+        Subsignal("dq",    Pins(16)),
+        Subsignal("dm",    Pins(2)),
+    ),
+] + _io_common
+
 _io_gowin = [
     ("clk27", 0, Pins(1)),
     ("ddram", 0,
@@ -348,6 +364,22 @@ class Cyclone10StubPlatform(AlteraPlatform):
 
     def __init__(self):
         AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_cyclone10, toolchain="quartus")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class Cyc1000StubPlatform(AlteraPlatform):
+    """Altera-based platform stub for Trenz CYC1000 (12 MHz clk, SDRAM)."""
+    default_clk_name   = "clk12"
+    default_clk_period = 1e9 / 12e6
+
+    def __init__(self):
+        # CYC1000 uses -C8 speed grade (commercial).
+        AlteraPlatform.__init__(self, "10CL025YU256C8G", _io_cyc1000, toolchain="quartus")
 
     def create_programmer(self):
         raise NotImplementedError
@@ -416,6 +448,49 @@ class _CRG_Cyclone10(LiteXModule):
 
         # MAC clock domains (directly fed from external FPGA Ethernet MAC).
         # Used for the FPGA-side ports of dual-port RAMs in eth_buf.
+        self.cd_mac_rx = ClockDomain(reset_less=True)
+        self.cd_mac_tx = ClockDomain(reset_less=True)
+        self.comb += [
+            self.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
+            self.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
+        ]
+
+
+# -- CRG (Clock Reset Generator) — Cyclone 10LP CYC1000 (12 MHz + SDRAM) -----
+
+class _CRG_Cyc1000(LiteXModule):
+    def __init__(self, platform, sys_clk_freq):
+        self.rst        = Signal()
+        self.cd_sys     = ClockDomain()
+        self.cd_sys_ps  = ClockDomain()  # 90° phase-shifted for SDRAM
+
+        clk12 = platform.request("clk12")
+
+        # PLL — CYC1000 is -C8 (commercial speed grade 8)
+        self.pll = pll = Cyclone10LPPLL(speedgrade="-C8")
+
+        # Stretch the incoming rst pulse for reliable CDC capture (same
+        # reasoning as _CRG_Cyclone10 — LiteX's 1-cycle soc_rst pulse can be
+        # missed by the slower 12 MHz input clock domain).
+        rst_stretch_cnt = Signal(4, reset=0)
+        rst_stretched   = Signal()
+        self.sync += [
+            If(self.rst,
+                rst_stretch_cnt.eq(8),
+            ).Elif(rst_stretch_cnt != 0,
+                rst_stretch_cnt.eq(rst_stretch_cnt - 1),
+            ),
+        ]
+        self.comb += rst_stretched.eq(self.rst | (rst_stretch_cnt != 0))
+        self.comb += pll.reset.eq(rst_stretched)
+        pll.register_clkin(clk12, 12e6)
+        pll.create_clkout(self.cd_sys,    sys_clk_freq)
+        pll.create_clkout(self.cd_sys_ps, sys_clk_freq, phase=90)
+
+        # SDRAM clock output pad (phase-shifted)
+        self.comb += platform.request("sdram_clock").eq(self.cd_sys_ps.clk)
+
+        # MAC clock domains (directly fed from external FPGA Ethernet MAC).
         self.cd_mac_rx = ClockDomain(reset_less=True)
         self.cd_mac_tx = ClockDomain(reset_less=True)
         self.comb += [
@@ -874,22 +949,31 @@ class AES67SoC(SoCCore):
         # at full RAM speed instead of slow SPI read speed (~1.5 MiB/s).
         #
         # SPI Flash layout (see boot_stub/):
-        #   0x30000000: boot_stub  (512 bytes, copies BIOS → main RAM)
+        #   0x30000000: boot_stub  (512 bytes)
         #   0x30000200: bios.bin   (up to ~63.5 KB)
         #   0x30010000: firmware   (Zephyr app, optional)
         #
-        # Main RAM size differs per target:
-        #   Cyclone10: 8 MB HyperRAM  → BIOS at 0x207F0000
-        #   Gowin:     128 MB DDR3    → BIOS at 0x27FF0000
+        # Per-target BIOS run address:
+        #   Cyclone10: copy to HyperRAM (pre-initialized by stub via CSR) →
+        #              linked at top of 8 MB HyperRAM = 0x207F0000.
+        #   Gowin:     copy to DDR3 top = 0x27FF0000.
+        #   Cyc1000:   SDR SDRAM needs an init sequence that only the BIOS
+        #              knows how to run, so we execute-in-place (XIP) the
+        #              BIOS directly from SPI flash at 0x30000200.  The
+        #              BIOS then initializes SDRAM itself, loads firmware
+        #              into SDRAM, and jumps there.
         cpu_reset_address = self.mem_map["spiflash"]  # 0x30000000
         bios_size         = 0x10000                    # 64 KB
 
         if target == "gowin":
             main_ram_size    = 128*1024*1024  # 128 MB DDR3
+            bios_run_address = 0x20000000 + main_ram_size - bios_size
+        elif target == "cyc1000":
+            main_ram_size    = 4*1024*1024    # 4 MB SDR SDRAM (M12L64322A, 64 Mbit)
+            bios_run_address = cpu_reset_address + 0x200  # XIP from flash
         else:
-            main_ram_size    = 8*1024*1024    # 8 MB HyperRAM (only used when with_hyperram)
-
-        bios_run_address = 0x20000000 + main_ram_size - bios_size
+            main_ram_size    = 8*1024*1024    # 8 MB HyperRAM
+            bios_run_address = 0x20000000 + main_ram_size - bios_size
 
         # SoCCore - must be initialized before CRG
         SoCCore.__init__(self, platform, sys_clk_freq,
@@ -909,6 +993,12 @@ class AES67SoC(SoCCore):
             timer_uptime         = True,
             **kwargs,
         )
+
+        # VexRiscv's CPU-level mem_map hardcodes main_ram at 0x40000000 and
+        # overwrites our subclass setting during SoCCore.__init__.  Restore
+        # our value so add_sdram() / bus.add_slave() place main_ram at the
+        # same address the BIOS linker region expects (0x20000000).
+        self.mem_map["main_ram"] = 0x20000000
 
         # ROM_DISABLE: no block-RAM ROM, BIOS is external.
         # Linker region "rom" points to top of main RAM so BIOS gets linked
@@ -940,6 +1030,22 @@ class AES67SoC(SoCCore):
             self.add_sdram("sdram",
                 phy           = self.ddrphy,
                 module        = MT41K64M16(sys_clk_freq, "1:2"),
+                origin        = self.mem_map["main_ram"],
+                size          = main_ram_size,
+                l2_cache_size = 8192,
+            )
+        elif target == "cyc1000":
+            # Trenz CYC1000: Cyclone10LPPLL (12 MHz in) + SDR SDRAM
+            self.crg = _CRG_Cyc1000(platform, sys_clk_freq)
+
+            from litedram.phy import GENSDRPHY
+            from litedram.modules import M12L64322A
+            self.sdrphy = GENSDRPHY(platform.request("sdram"), sys_clk_freq)
+            self.add_sdram("sdram",
+                phy           = self.sdrphy,
+                module        = M12L64322A(sys_clk_freq, "1:1"),
+                origin        = self.mem_map["main_ram"],
+                size          = main_ram_size,
                 l2_cache_size = 8192,
             )
         else:
@@ -981,26 +1087,37 @@ class AES67SoC(SoCCore):
         # SPIFLASH_SKIP_FREQ_INIT below) so it never activates the master
         # during boot — avoiding the XIP deadlock.  By the time Zephyr runs,
         # all code executes from HyperRAM, so master access is safe.
+        # XIP targets (cyc1000) run the BIOS directly from the memory-mapped
+        # SPI flash, so any master-port access during BIOS init would deadlock
+        # the CPU (the BIOS is fetching instructions from MMAP while the
+        # master tries to take over the same port).  Disable the master port
+        # entirely on XIP builds.  Targets that copy the BIOS into RAM first
+        # (cyclone10, gowin) can keep the master enabled for firmware updates.
+        xip_boot = (target == "cyc1000")
+
         from litespi.modules import W25Q64
         from litespi.opcodes import SpiNorFlashOpCodes
         self.add_spi_flash(name="spiflash", mode="1x",
             module=W25Q64(SpiNorFlashOpCodes.READ_1_1_1),
             clk_freq=20e6,
-            with_master=True)
+            with_master=not xip_boot)
 
-        # Gate the MMAP port's crossbar request with a CSR so firmware can
-        # disable memory-mapped reads while using the SPI master port.
-        # Without this, the MMAP port's round-robin arbitration interferes
-        # with master transactions, corrupting SPI flash writes/reads.
-        from litex.soc.interconnect.csr import CSRStorage
-        self.spiflash_mmap_en = CSRStorage(1, reset=1,
-            description="Set to 0 to disable MMAP flash access (allows clean master access).")
-        original_mmap_req = self.spiflash.crossbar.user_request[0]
-        gated_req = Signal()
-        self.comb += gated_req.eq(original_mmap_req & self.spiflash_mmap_en.storage)
-        self.spiflash.crossbar.user_request[0] = gated_req
+        if not xip_boot:
+            # Gate the MMAP port's crossbar request with a CSR so firmware can
+            # disable memory-mapped reads while using the SPI master port.
+            # Without this, the MMAP port's round-robin arbitration interferes
+            # with master transactions, corrupting SPI flash writes/reads.
+            from litex.soc.interconnect.csr import CSRStorage
+            self.spiflash_mmap_en = CSRStorage(1, reset=1,
+                description="Set to 0 to disable MMAP flash access (allows clean master access).")
+            original_mmap_req = self.spiflash.crossbar.user_request[0]
+            gated_req = Signal()
+            self.comb += gated_req.eq(original_mmap_req & self.spiflash_mmap_en.storage)
+            self.spiflash.crossbar.user_request[0] = gated_req
 
-        # Skip SPI Flash frequency auto-calibration (same reason as above).
+        # Skip SPI Flash frequency auto-calibration — on RAM-copy targets the
+        # master port would interfere with the MMAP arbitration; on XIP the
+        # BIOS itself is running from the flash it would be calibrating.
         self.add_constant("SPIFLASH_SKIP_FREQ_INIT", 1)
 
         # Firmware image sits after stub + BIOS region in SPI flash.
@@ -1111,36 +1228,35 @@ class AES67SoC(SoCCore):
 
 # -- Main ---------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
-    parser.add_argument("--target",             default="cyclone10", choices=["cyclone10", "gowin"], help="Target FPGA platform")
-    parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 80 MHz (cyclone10), 50 MHz (gowin)")
-    parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
-    parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (cyclone10 only)")
-    parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
-    parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
-    parser.add_argument("--output-dir",         default=None,              help="Output directory")
-    args = parser.parse_args()
+ALL_TARGETS = ["cyclone10", "cyc1000", "gowin"]
+DEFAULT_SYS_CLK_FREQ = {"cyclone10": 80e6, "cyc1000": 50e6, "gowin": 50e6}
 
-    # Per-target defaults
-    if args.sys_clk_freq is None:
-        args.sys_clk_freq = {"cyclone10": 80e6, "gowin": 50e6}[args.target]
 
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "build", args.target)
+def _build_target(target, args):
+    sys_clk_freq = args.sys_clk_freq if args.sys_clk_freq is not None else DEFAULT_SYS_CLK_FREQ[target]
+    output_dir   = args.output_dir or os.path.join(os.path.dirname(__file__), "build", target)
 
-    if args.target == "gowin":
+    if target == "gowin":
         platform = GowinStubPlatform()
         soc = AES67SoC(
             platform,
-            sys_clk_freq         = int(args.sys_clk_freq),
+            sys_clk_freq         = int(sys_clk_freq),
             target               = "gowin",
+            integrated_sram_size = args.sram_size * 1024,
+        )
+    elif target == "cyc1000":
+        platform = Cyc1000StubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq         = int(sys_clk_freq),
+            target               = "cyc1000",
             integrated_sram_size = args.sram_size * 1024,
         )
     else:
         platform = Cyclone10StubPlatform()
         soc = AES67SoC(
             platform,
-            sys_clk_freq         = int(args.sys_clk_freq),
+            sys_clk_freq         = int(sys_clk_freq),
             target               = "cyclone10",
             with_hyperram        = args.with_hyperram,
             hyperram_clk_ratio   = args.hyperram_clk_ratio,
@@ -1157,10 +1273,30 @@ def main():
     )
     builder.build(build_name="litex_soc", run=False)
 
-    print(f"\nTarget:           {args.target}")
+    print(f"\nTarget:           {target}")
     print(f"HDL generated in: {output_dir}/gateware/")
     print(f"CSR map:          {output_dir}/csr.json")
     print(f"CSR CSV:          {output_dir}/csr.csv")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
+    parser.add_argument("--target",             default=None, choices=ALL_TARGETS, help="Target FPGA platform (default: build all)")
+    parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 80 MHz (cyclone10), 50 MHz (cyc1000/gowin)")
+    parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
+    parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (cyclone10 only)")
+    parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
+    parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
+    parser.add_argument("--output-dir",         default=None,              help="Output directory")
+    args = parser.parse_args()
+
+    targets = [args.target] if args.target is not None else ALL_TARGETS
+    if len(targets) > 1 and args.output_dir is not None:
+        parser.error("--output-dir cannot be combined with multi-target build; specify --target.")
+
+    for target in targets:
+        _build_target(target, args)
+
     print(f"\nIntegrate the top-level Verilog into your FPGA design.")
 
 

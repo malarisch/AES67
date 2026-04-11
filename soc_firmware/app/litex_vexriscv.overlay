@@ -263,7 +263,7 @@
 	};
 };
 
-/* ---- UART 1: AD/DA Card LEDs (1 Mbaud, set at synthesis) ---------------- */
+/* ---- UART 1: AD/DA Card LEDs ---------------- */
 / {
 	soc {
 		uart1: serial@f0006000 {
