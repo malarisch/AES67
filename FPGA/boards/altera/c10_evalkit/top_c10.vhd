@@ -204,6 +204,7 @@ signal mac_tx_reset : std_logic;
 signal mcu_tx_req_i    : STD_LOGIC;
 signal mcu_tx_done     : STD_ULOGIC;
 signal mcu_rx_overflow : STD_ULOGIC;
+signal mac_sof_sent_pulse : STD_LOGIC;
 -- litex_soc <-> litex_eth_buffer_bridge (buffer interface)
 -- bridge-side signals (matching litex_eth_buffer_bridge types)
 signal buf_rx_data    : STD_ULOGIC_VECTOR(7 downto 0);
@@ -309,6 +310,8 @@ aes67_top_inst: entity work.aes67_top
 	mac_tx_byte_sent_o     => mac_tx_byte_sent,
 	mac_speed_o            => mac_speed,
 	mac_linkup_o           => mac_linkup,
+	mac_sof_sent_pulse_o => mac_sof_sent_pulse,
+	
 
 	-- audio clocks
 	pll_512fs_i            => pll_512fs_i,
@@ -492,6 +495,9 @@ PORT MAP(
 	mac_tx_byte_sent_i     => mac_tx_byte_sent,
 	mac_tx_busy_i          => mac_tx_busy,
 	mac_tx_dat_o           => eth_tx_data_mcu,
+	mac_sof_sent_pulse_i	=> mac_sof_sent_pulse,
+	mac_speed_in			=> mac_speed,
+
 	tx_allow_req_o         => eth_tx_allow_req_mcu,
 	tx_allow_i             => eth_tx_allow_mcu,
 

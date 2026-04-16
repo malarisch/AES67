@@ -4,6 +4,9 @@ use IEEE.NUMERIC_STD.all;
 
 
 entity ethernet_top is
+  generic (
+    MIIM_CLOCK_DIVIDER : POSITIVE := 50
+  );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
     enet_clk_i      : IN STD_LOGIC;
@@ -57,6 +60,7 @@ entity ethernet_top is
     mac_tx_busy_o : out STD_LOGIC;
     mac_rx_reset_o : out STD_LOGIC;
     mac_sof_sent_tog_o : out STD_LOGIC;
+    mac_sof_sent_pulse_o : out STD_LOGIC;
     mac_sof_recv_tog_o : out STD_LOGIC;
 
 
@@ -177,11 +181,11 @@ PORT MAP(mac_address_i => mac_addr_i,
 
 
 b2v_yol_mac : entity work.ethernet
-GENERIC MAP(MIIM_CLOCK_DIVIDER => 50,
+GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
 			MIIM_DISABLE => false,
 			MIIM_PHY_ADDRESS => "00000",
 			MIIM_POLL_WAIT_TICKS => 10000000,
-			MIIM_RESET_WAIT_TICKS => 0
+			MIIM_RESET_WAIT_TICKS => 1250000
 			)
 PORT MAP(clock_125_i => enet_clk_i,
 		 reset_i => mac_reset_i,
@@ -218,6 +222,7 @@ PORT MAP(clock_125_i => enet_clk_i,
 		 rx_error_o => mac_rx_error,
 		 tx_sof_delim_tog_o => mac_sof_sent_tog_o,
 		 rx_sof_delim_tog_o => mac_sof_recv_tog_o,
+     tx_sof_delim_o => mac_sof_sent_pulse_o,
 		 
 		 rx_data_o => mac_rx_data_su,
 		 speed_o => mac_speed

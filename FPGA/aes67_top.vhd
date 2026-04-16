@@ -13,8 +13,11 @@ ENTITY aes67_top IS
 		TX_CHANNELS		: natural := 16;
 		RX_BYTE_DEPTH	: natural := 3;
 		TX_BYTE_DEPTH	: natural := 3;
-		RX_SAMPLE_BUFFER_DEPTH : natural := 128;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 48
+		RX_SAMPLE_BUFFER_DEPTH : natural := 96;
+		TX_SAMPLE_BUFFER_DEPTH : natural := 48;
+		  
+    MIIM_CLOCK_DIVIDER : POSITIVE := 50
+  
 	);
 	PORT
 	(
@@ -58,6 +61,7 @@ ENTITY aes67_top IS
 		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
 		mac_linkup_o : OUT STD_LOGIC;
 		mac_received_packet_length_o : OUT UNSIGNED(10 downto 0);
+		mac_sof_sent_pulse_o: OUT STD_LOGIC;
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
@@ -459,6 +463,7 @@ PORT MAP(FSYNC => pll_48k_fs_tdm,
 );
 
 ethernet_top_inst: entity work.ethernet_top
+ GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,
@@ -496,6 +501,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_tx_busy_o => mac_tx_busy,
 	mac_rx_reset_o => mac_rx_reset,
 	mac_sof_sent_tog_o => mac_sof_sent_tog,
+	mac_sof_sent_pulse_o => mac_sof_sent_pulse_o,
 	mac_sof_recv_tog_o => mac_sof_recv_tog,
 	mii_rx_clock_i => mii_rx_clock_i,
 	mii_tx_clock_i => mii_tx_clock_i,

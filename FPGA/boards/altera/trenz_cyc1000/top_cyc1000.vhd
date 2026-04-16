@@ -205,6 +205,7 @@ signal eth_tx_allow_req_mcu : STD_ULOGIC;
 signal eth_tx_allow_mcu   : STD_LOGIC;
 signal received_packet_length : unsigned(10 downto 0);
 signal mac_tx_reset : std_logic;
+signal mac_sof_sent_pulse : STD_LOGIC;
 -- litex_eth_buffer_bridge internal signals
 signal mcu_tx_req_i    : STD_LOGIC;
 signal mcu_tx_done     : STD_ULOGIC;
@@ -316,9 +317,12 @@ rmii_phy_if_inst: rmii_phy_if
 );
 
 aes67_top_inst: entity work.aes67_top
+generic map(
+	MIIM_CLOCK_DIVIDER => 10
+)
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,
-	enet_clk_i             => phy_rmii_ref_clk,
+	enet_clk_i             => mac_mii_rxclk,
 	clk_mcu_i              => mcu_clk,
 	rst_n                  => c10_resetn,
 	mac_resetn_i            => c10_resetn,
@@ -351,6 +355,7 @@ aes67_top_inst: entity work.aes67_top
 	mac_tx_byte_sent_o     => mac_tx_byte_sent,
 	mac_speed_o            => mac_speed,
 	mac_linkup_o           => mac_linkup,
+	mac_sof_sent_pulse_o => mac_sof_sent_pulse,
 
 	-- audio clocks
 	pll_512fs_i            => pll_512fs_i,
@@ -541,6 +546,8 @@ PORT MAP(
 	mac_tx_byte_sent_i     => mac_tx_byte_sent,
 	mac_tx_busy_i          => mac_tx_busy,
 	mac_tx_dat_o           => eth_tx_data_mcu,
+	mac_sof_sent_pulse_i	=> mac_sof_sent_pulse,
+	mac_speed_in			=> mac_speed,
 	tx_allow_req_o         => eth_tx_allow_req_mcu,
 	tx_allow_i             => eth_tx_allow_mcu,
 

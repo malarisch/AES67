@@ -15,7 +15,6 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-library work;
 
 entity litex_eth_buffer_bridge is
   port (
@@ -57,6 +56,8 @@ entity litex_eth_buffer_bridge is
     mac_tx_byte_sent_i : in  std_ulogic;
     mac_tx_busy_i      : in  std_ulogic;
     mac_tx_dat_o    : out STD_ULOGIC_VECTOR(7 downto 0);
+    mac_sof_sent_pulse_i : in std_logic;
+    mac_speed_in        : in STD_LOGIC_VECTOR(1 downto 0);
 
     -- TX arbitration
     tx_allow_req_o     : out std_ulogic;
@@ -94,7 +95,7 @@ architecture rtl of litex_eth_buffer_bridge is
   signal tx_done_reg_2cdc  : std_ulogic := '0';
 
 
-  type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_TRANSMIT, TX_END);
+  type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_PRIME_PREFETCH, TX_TRANSMIT, TX_END);
   signal sm_tx : t_tx_sm := TX_IDLE;
 
 
@@ -123,6 +124,10 @@ architecture rtl of litex_eth_buffer_bridge is
   signal packet_length_latch : UNSIGNED(10 downto 0);
   signal packet_lenght_valid_latch : std_ulogic;
   signal packet_length_valid_counter : unsigned(3 downto 0);
+  signal tx_byte_prefetch : STD_ULOGIC_VECTOR(7 downto 0);
+  signal tx_byte_prefetch2 : STD_ULOGIC_VECTOR(7 downto 0);
+  signal tx_is_first_byte : STD_ULOGIC := '0';
+  signal tx_zsof : STD_LOGIC := '0';
 begin
 
   -- ================================================================
@@ -169,6 +174,8 @@ begin
       tx_req_meta   <= eth_tx_request_i;
       tx_req_sync   <= tx_req_meta;
       tx_req_sync_d <= tx_req_sync;
+
+      tx_zsof <= mac_sof_sent_pulse_i;
       -- Only drive data during active TX, otherwise hold at 0x00
       -- to avoid OR-mux corruption in ethernet_packet_aggregator
       case sm_tx is
@@ -187,27 +194,34 @@ begin
         when TX_WAIT_ALLOW =>
           mac_tx_dat_o <= (others => '0');
           if tx_allow_i = '1' then
-            sm_tx              <= TX_PRIME;
+              sm_tx              <= TX_PRIME;
           end if;
         when TX_PRIME =>
-              mac_tx_dat_o <= buf_tx_dat_i;
+              mac_tx_dat_o <= buf_tx_dat_i; -- output byte 0
               mac_tx_enable_o <= '1';
-              if (mac_tx_busy_i = '1') then
-                tx_preamble_bytes := tx_preamble_bytes + 1;
-                if (tx_preamble_bytes >= 6) then
-                  buf_tx_addr <= buf_tx_addr + 1;
+              if (mac_speed_in = b"10") then
+                -- gigabit
+                sm_tx <= TX_PRIME_PREFETCH;
+              else
+                sm_tx <= TX_TRANSMIT;
+                buf_tx_addr <= buf_tx_addr + 1;
 
-                  if (tx_preamble_bytes = 7) then
-                  sm_tx              <= TX_TRANSMIT;
-                  tx_preamble_bytes := (others => '0');
-                  end if;
+              end if;
+        when TX_PRIME_PREFETCH => 
+            if ((mac_sof_sent_pulse_i = '1' and tx_zsof = '0') or (mac_sof_sent_pulse_i = '0' and tx_zsof = '1')) then
+                mac_tx_dat_o <= buf_tx_dat_i; -- output byte 0
+                buf_tx_addr <= buf_tx_addr + 1;
+                if (mac_sof_sent_pulse_i = '0' and tx_zsof = '1') then
+                sm_tx <= TX_TRANSMIT;
+
                 end if;
               end if;
 
         when TX_TRANSMIT =>
-          mac_tx_dat_o <= buf_tx_dat_i;
-          mac_tx_enable_o <= '1';
+          
           if mac_tx_byte_sent_i = '1' then
+            mac_tx_dat_o <= buf_tx_dat_i;
+            
             if buf_tx_addr = buf_tx_len_i then
               sm_tx <= TX_END;
             else
