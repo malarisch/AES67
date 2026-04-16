@@ -21,7 +21,6 @@ LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 USE ieee.numeric_std.all;
 
-LIBRARY work;
 
 ENTITY ptp_module IS 
 	PORT
@@ -93,7 +92,9 @@ COMPONENT ptpv2_controller
 		 sequence_id_o : OUT UNSIGNED(15 DOWNTO 0);
 		 timestamp_nanoseconds_o : OUT UNSIGNED(31 DOWNTO 0);
 		 timestamp_seconds_o : OUT UNSIGNED(47 DOWNTO 0);
-		 tx_message_type_o : OUT STD_LOGIC_VECTOR(3 DOWNTO 0)
+		 tx_message_type_o : OUT STD_LOGIC_VECTOR(3 DOWNTO 0);
+		 tx_done_sys_i : IN STD_LOGIC;
+		 parser_log_msg_interval_i : IN STD_LOGIC_VECTOR(7 downto 0)
 	);
 END COMPONENT;
 
@@ -120,7 +121,8 @@ COMPONENT ptpv2_sender
 		 tx_enable : OUT STD_LOGIC;
 		 tx_ready_o : OUT STD_LOGIC;
 		 tx_allow_req_o : OUT STD_LOGIC;
-		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 tx_done_sys_o : OUT STD_LOGIC
 	);
 END COMPONENT;
 
@@ -255,6 +257,8 @@ SIGNAL	wallclock_set_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	wallclock_set_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
 SIGNAL	wc_fs :  STD_LOGIC;
 
+SIGNAL tx_done_sys: STD_LOGIC := '0';
+
 
 BEGIN 
 
@@ -285,7 +289,9 @@ PORT MAP(clk => sys_clk,
 		 sequence_id_o => tx_seq_id,
 		 timestamp_nanoseconds_o => tx_timesstamp_ns,
 		 timestamp_seconds_o => tx_timestamp_s,
-		 tx_message_type_o => tx_msg_type);
+		 tx_message_type_o => tx_msg_type,
+		 tx_done_sys_i => tx_done_sys,
+		 parser_log_msg_interval_i => STD_LOGIC_VECTOR(log_msg_interval));
 
 
 wallclock_locked <= ptp_is_leader OR ptp_locked_ALTERA_SYNTHESIZED;
@@ -313,7 +319,8 @@ PORT MAP(sys_clk => sys_clk,
 		 timestamp_seconds_i => tx_timestamp_s,
 		 tx_enable => tx_en_ptpfu_ALTERA_SYNTHESIZED,
 		 tx_allow_req_o => ptp_allow_req,
-		 tx_data => tx_data_ptpfu);
+		 tx_data => tx_data_ptpfu,
+		 tx_done_sys_o => tx_done_sys);
 
 
 b2v_ptpparser : ptpv2_parser

@@ -13,8 +13,8 @@ ENTITY aes67_top IS
 		TX_CHANNELS		: natural := 16;
 		RX_BYTE_DEPTH	: natural := 3;
 		TX_BYTE_DEPTH	: natural := 3;
-		RX_SAMPLE_BUFFER_DEPTH : natural := 96;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 48;
+		RX_SAMPLE_BUFFER_DEPTH : natural := 48;
+		TX_SAMPLE_BUFFER_DEPTH : natural := 24;
 		  
     MIIM_CLOCK_DIVIDER : POSITIVE := 50
   

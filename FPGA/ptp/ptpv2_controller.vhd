@@ -35,8 +35,10 @@ entity ptpv2_controller is
         t3_valid_o: out std_logic;
 		ptp_log_interval_o: out std_logic_vector(7 downto 0);
 
-        sof_sent_tog_i: in std_logic
+        sof_sent_tog_i: in std_logic;
+        tx_done_sys_i: in STD_LOGIC;
 
+		 parser_log_msg_interval_i : IN STD_LOGIC_VECTOR(7 downto 0)
 
     );
     type t_state_leader is (s_Idle,
@@ -502,7 +504,7 @@ begin
                             sync_tx_ts_seconds <= wallclock_seconds_i;
                         end if;
                         -- Wait for sender to finish (tx_en goes low after rising edge seen)
-                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                        if (tx_started = '1' and tx_done_sys_i = '1') then
                             tx_started <= '0';
                             leader_state <= s_Wait_for_Sync_Done;
                         end if;
@@ -534,7 +536,7 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';
                         end if;
-                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                        if (tx_started = '1' and tx_done_sys_i = '1') then
                             tx_started <= '0';
                             leader_state <= s_Wait_for_Follow_Up_Done;
                         end if;
@@ -560,7 +562,7 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';
                         end if;
-                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                        if (tx_started = '1' and tx_done_sys_i = '1') then
                             tx_started <= '0';
                             leader_state <= s_Wait_for_Announce_Done;
                         end if;
@@ -588,7 +590,7 @@ begin
                             tx_started <= '1';
                             frame_start_o <= '0';
                         end if;
-                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                        if (tx_started = '1' and tx_done_sys_i = '1') then
                             tx_started <= '0';
                             leader_state <= s_Wait_for_Delay_Resp_Done;
                         end if;
@@ -631,7 +633,7 @@ begin
 
                     when f_Send_Delay_Req =>
                         tx_message_type_o <= "0001";
-
+                        ptp_log_interval_o <= parser_log_msg_interval_i;
                         sequence_id_o <= sequence_id_i;
                         frame_start_o <= '1';
                         tx_started <= '0';
@@ -649,7 +651,7 @@ begin
                             timestamp_seconds_o <= wallclock_seconds_i;
                         end if;
                         -- Wait for TX to finish
-                        if (tx_started = '1' and tx_en_i_sync = '0') then
+                        if (tx_started = '1' and tx_done_sys_i = '1') then
                             tx_started <= '0';
                             follower_state <= f_Wait_for_Delay_Req_Done;
                         end if;

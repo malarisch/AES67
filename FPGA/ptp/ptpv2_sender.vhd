@@ -32,6 +32,7 @@ entity ptpv2_sender is
 
 		tx_enable				: out std_logic := '0';
 		tx_data					: out std_logic_vector(7 downto 0) := (others => '0');
+		tx_done_sys_o			: out std_logic := '0';
 
 		message_type_i : in std_logic_vector(3 downto 0) := "0000";
 		tx_ready_o			: out std_logic := '0';
@@ -553,8 +554,9 @@ begin
 			case SM_Assemble is
 				when s_A_Idle =>
 					-- Detect rising edge of frame_start
-					if (frame_start_sync2 = '1') and (frame_start_prev = '0') then
+					if (frame_start_sync2 = '1') then
 						-- Capture all input signals (stable because controller holds them while frame_start=1)
+						tx_done_sys_o <= '0';
 						cap_message_type     <= get_message_type(message_type_i);
 						cap_message_type_raw <= message_type_i;
 						cap_sequence_id      <= sequence_id;
@@ -745,6 +747,7 @@ begin
 				when s_A_WaitAckDone =>
 					if (tx_ack_sync2 = '0') then
 						SM_Assemble <= s_A_Idle;
+						tx_done_sys_o <= '1';
 					end if;
 			end case;
 		end if;
@@ -824,9 +827,11 @@ begin
 				when s_End =>
 					tx_enable <= '0';
 					tx_data <= (others => '0');
-					tx_ready_o <= '1';
-					tx_allow_req_o <= '0';
-					SM_Tx <= s_WaitDeassert;
+					if (tx_busy = '0') then -- wait for phy to finish transmission
+						tx_ready_o <= '1';
+						tx_allow_req_o <= '0';
+						SM_Tx <= s_WaitDeassert;
+					end if;
 
 				when s_WaitDeassert =>
 					-- Wait for sys_clock_process to deassert tx_frame_start

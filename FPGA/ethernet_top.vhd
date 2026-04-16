@@ -101,8 +101,16 @@ architecture rtl of ethernet_top is
 
     SIGNAL mac_rx_clock : STD_LOGIC;
     SIGNAL mac_tx_Clock : STD_LOGIC;
+    SIGNAL is_ptp_pkt_tog_receive : STD_LOGIC;
+    SIGNAL is_rtp_pkt_tog_receive : STD_LOGIC;
+
+    SIGNAL is_ptp_pkt_tog_done : STD_LOGIC;
+    SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
     
 begin
+
+  is_ptp_pkt_tog_o <= is_ptp_pkt_tog_done when mac_speed = b"01" else is_ptp_pkt_tog_receive; -- send the packet toggles once the packet was fully received on 100mbits. otherwise we read too fast.
+  is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
 
   b2v_eth_rx : entity work.ethernet_receive
     generic map(
@@ -120,8 +128,8 @@ begin
       ram_data         => eth_ram_wr_data,
       rx_byte_count    => received_packet_length_o,
       is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
-      is_ptp_pkt_tog_o => is_ptp_pkt_tog_o,
-      is_rtp_pkt_tog_o => is_rtp_pkt_tog_o);
+      is_ptp_pkt_tog_o => is_ptp_pkt_tog_receive,
+      is_rtp_pkt_tog_o => is_rtp_pkt_tog_receive);
 
 
 b2v_eth_buf : entity work.eth_ram
@@ -143,8 +151,8 @@ b2v_eth_buf : entity work.eth_ram
       dataOut_rxclk => eth_ram_data_rx_mcu_o,
 
       --is_mcu_pkt_tog_o => parse_mcu_packet_tog,
-      --is_ptp_pkt_tog_o => parse_ptp_packet_tog,
-      --is_rtp_pkt_tog_o => parse_rtp_packet,
+      is_ptp_pkt_tog_o => is_ptp_pkt_tog_done,
+      is_rtp_pkt_tog_o => is_rtp_pkt_tog_done,
       sys_clk_i => sys_clk125MHz_i);
 
       
