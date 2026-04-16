@@ -105,9 +105,11 @@ target_sources(app PRIVATE
   src/config_json.c
   src/aes67_sdp_utils.c
   src/webserver.c
-  src/fw_update.c
   src/card_manager.c
 )
+
+# SPI flash firmware update (requires LiteSPI flash driver)
+target_sources_ifdef(CONFIG_SPI_FLASH_LITESPI app PRIVATE src/fw_update.c)
 
 # RTSP server/client (RAVENNA stream control)
 target_sources_ifdef(CONFIG_RTSP app PRIVATE src/rtsp.c)

@@ -35,7 +35,9 @@
 #endif
 #include <zephyr/sys/reboot.h>
 #include "../drivers/fpga_hal/fpga_hal.h"
+#ifdef CONFIG_SPI_FLASH_LITESPI
 #include "fw_update.h"
+#endif
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
 #endif
@@ -1576,12 +1578,14 @@ static int api_handler(struct http_client_ctx *client,
 	const char *url = (const char *)client->url_buffer;
 	enum http_method method = client->method;
 
+#ifdef CONFIG_SPI_FLASH_LITESPI
 	/* Firmware update needs streaming (body too large to buffer).
 	 * Delegate immediately, including abort notifications. */
 	if (strcmp(url, "/api/fw_update") == 0) {
 		return fw_update_http_handler(client, status,
 					      request_ctx, response_ctx);
 	}
+#endif
 
 	if (status == HTTP_SERVER_DATA_ABORTED) {
 		post_body_len = 0;

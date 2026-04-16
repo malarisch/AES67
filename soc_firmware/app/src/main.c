@@ -33,7 +33,9 @@
 #include "webserver.h"
 #include "aes67_config.h"
 // TODO: FW Update is broken, SPI flash reads garbage when in master mode
+#ifdef CONFIG_SPI_FLASH_LITESPI
 #include "fw_update.h"
+#endif
 #ifdef CONFIG_RTSP
 #include "rtsp.h"
 #endif
@@ -413,7 +415,9 @@ int main(void)
 	}
 
 	/* ---- Start HTTP server (REST API + Web UI) ---- */
+#ifdef CONFIG_SPI_FLASH_LITESPI
 	fw_update_init();
+#endif
 	int web_ret = webserver_start();
 	if (web_ret < 0) {
 		LOG_ERR("Failed to start HTTP server: %d", web_ret);
