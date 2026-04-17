@@ -117,11 +117,12 @@ begin
           data_rdy_int <= '1';
         end if;
 
-        -- Start new frame
+        -- Start new frame: sample first bit (MSB of channel 0) on this edge
         frame_active <= '1';
         slot_count   <= 0;
-        bit_count    <= 0;
+        bit_count    <= 1;
         shift_reg    <= (others => '0');
+        shift_reg(0) <= DIN;
 
       elsif (frame_active = '1') then
         -- Shift in data
