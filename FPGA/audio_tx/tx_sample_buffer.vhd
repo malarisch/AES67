@@ -45,7 +45,7 @@ architecture Behavioral of tx_sample_buffer is
     
     signal ram_wr_en : std_logic := '0';
     signal ram_wr_data : std_logic_vector(7 downto 0);
-    signal ram_wr_addr : integer range 0 to global_channel_count - 1 := 0;
+    signal ram_wr_addr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
     -- Delayed wr_ready to ensure wr_ptr_o is stable when consumer reads it
     signal wr_ready_pending : std_logic := '0';
 
@@ -58,30 +58,39 @@ architecture Behavioral of tx_sample_buffer is
     -- Metering thresholds (same as rx_ringbuffer)
     -- Clip:   0x640000 ≈ -2 dBFS
     -- Signal: 0x004000 ≈ -42 dBFS
-    constant CLIP_THRESHOLD   : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#640000#, SAMPLE_BITS - 1);
-    constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
+    -- Only the top CMP_BITS of the magnitude are needed — both thresholds have zero
+    -- in the lower (SAMPLE_BITS-1 - CMP_BITS) bits, so truncating does not change the compare.
+    constant CMP_BITS : integer := 9;
+    constant CLIP_THRESHOLD   : unsigned(CMP_BITS - 1 downto 0) := to_unsigned(16#064#, CMP_BITS); -- 0x640000 >> 14
+    constant SIGNAL_THRESHOLD : unsigned(CMP_BITS - 1 downto 0) := to_unsigned(16#001#, CMP_BITS); -- 0x004000 >> 14
     signal metering_ch_id  : integer range 0 to global_channel_count - 1;
+
+    -- Pipeline registers for metering path: break the 16-to-1 mux over audio_in
+    -- from the compare logic by registering the selected sample first.
+    signal metering_sample_reg : std_logic_vector(SAMPLE_BITS - 1 downto 0) := (others => '0');
+    signal metering_ch_id_reg  : integer range 0 to global_channel_count - 1 := 0;
+    signal metering_valid_reg  : std_logic := '0';
 begin
     
     -- metering process
+    -- Pipeline:
+    --   Stage 1: select channel from audio_in (large mux) -> metering_sample_reg
+    --   Stage 2: abs on top CMP_BITS only, compare against reduced thresholds
     process (sys_clk, reset_n)
-        variable data_latch : std_logic_vector(SAMPLE_BITS - 1 downto 0);
-        variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
         variable metering_active : std_logic := '0';
-        
+        variable v_sample_top : unsigned(CMP_BITS - 1 downto 0);
     begin
         if (reset_n = '0') then
-            data_latch := (others => '0');
-            v_sample_abs := (others => '0');
             metering_active := '0';
             metering_ch_id <= 0;
-
+            metering_sample_reg <= (others => '0');
+            metering_ch_id_reg <= 0;
+            metering_valid_reg <= '0';
             metering_clear_last <= '0';
         elsif (rising_edge(sys_clk)) then
             if (zaudio_sync = '0' and fs_clk_i_sync2 = '1') then
                 metering_active := '1';
             end if;
-
 
             if (metering_clear_i_sync2 /= metering_clear_last) then
                 metering_clear_last <= metering_clear_i_sync2;
@@ -89,27 +98,33 @@ begin
                 metering_signal_o <= (others => '0');
             end if;
 
+            -- Stage 1: channel select (the big 16-to-1 mux gets its own clock)
+            metering_valid_reg <= '0';
             if (metering_active = '1') then
                 if (metering_ch_id = global_channel_count - 1) then
                     metering_active := '0';
                 end if;
-                data_latch := audio_in((SAMPLE_BITS * (metering_ch_id + 1) - 1) downto (SAMPLE_BITS * metering_ch_id ));
-                
-                -- Metering: clip & signal detection on first byte cycle
+                metering_sample_reg <=
+                    audio_in((SAMPLE_BITS * (metering_ch_id + 1) - 1) downto (SAMPLE_BITS * metering_ch_id));
+                metering_ch_id_reg <= metering_ch_id;
                 if byte_count = 0 then
-                    v_sample_abs := unsigned(data_latch(SAMPLE_BITS - 2 downto 0));
-                    if data_latch(SAMPLE_BITS - 1) = '1' then
-                        v_sample_abs := not v_sample_abs;
-                    end if;
-                    if v_sample_abs >= CLIP_THRESHOLD then
-                        metering_clip_o(metering_ch_id) <= '1';
-                    end if;
-                    if v_sample_abs >= SIGNAL_THRESHOLD then
-                        metering_signal_o(metering_ch_id) <= '1';
-                    end if;
+                    metering_valid_reg <= '1';
                 end if;
                 metering_ch_id <= metering_ch_id + 1;
-                
+            end if;
+
+            -- Stage 2: abs on the top bits only, compare against reduced thresholds
+            if (metering_valid_reg = '1') then
+                v_sample_top := unsigned(metering_sample_reg(SAMPLE_BITS - 2 downto SAMPLE_BITS - 1 - CMP_BITS));
+                if metering_sample_reg(SAMPLE_BITS - 1) = '1' then
+                    v_sample_top := not v_sample_top;
+                end if;
+                if v_sample_top >= CLIP_THRESHOLD then
+                    metering_clip_o(metering_ch_id_reg) <= '1';
+                end if;
+                if v_sample_top >= SIGNAL_THRESHOLD then
+                    metering_signal_o(metering_ch_id_reg) <= '1';
+                end if;
             end if;
         end if;
 
