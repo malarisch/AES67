@@ -318,7 +318,9 @@ rmii_phy_if_inst: rmii_phy_if
 
 aes67_top_inst: entity work.aes67_top
 generic map(
-	MIIM_CLOCK_DIVIDER => 10
+	MIIM_CLOCK_DIVIDER => 10,
+	TX_SAMPLE_BUFFER_DEPTH => 48,
+	RX_SAMPLE_BUFFER_DEPTH => 128
 )
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,

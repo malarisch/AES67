@@ -21,7 +21,6 @@ LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 USE ieee.numeric_std.all;
 
-
 ENTITY audio_tx_module IS 
 	GENERIC (bytes_per_sample : INTEGER := 3;
 			global_channel_count : INTEGER := 16;
@@ -42,22 +41,7 @@ ENTITY audio_tx_module IS
 		metering_clear_i :  IN  STD_LOGIC;
 		cfg_wr_addr_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		cfg_wr_data_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
-		ch0i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch10i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch11i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch12i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch13i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch14i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch15i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch1i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch2i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch3i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch4i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch5i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch6i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch7i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch8i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
-		ch9i :  IN  STD_LOGIC_VECTOR(23 DOWNTO 0);
+		audio_i : IN STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0);
 		ip_addr_i :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_addr_i :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
 		media_clock_i :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -107,22 +91,7 @@ GENERIC (bytes_per_sample : INTEGER;
 		 reset_n : IN STD_LOGIC;
 		 fs_clk_i : IN STD_LOGIC;
 		 metering_clear_i : IN STD_LOGIC;
-		 audio_ch0_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch10_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch11_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch12_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch13_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch14_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch15_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch1_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch2_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch3_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch4_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch5_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch6_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch7_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch8_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
-		 audio_ch9_in : IN STD_LOGIC_VECTOR(23 DOWNTO 0);
+		 audio_in : in STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0);
 		 read0Addr : IN UNSIGNED(15 DOWNTO 0);
 		 wr_ready_o : OUT STD_LOGIC;
 		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -216,22 +185,7 @@ PORT MAP(sys_clk => sys_clk,
 		 reset_n => rst_n,
 		 fs_clk_i => fs_clk_i,
 		 metering_clear_i => metering_clear_i,
-		 audio_ch0_in => ch0i,
-		 audio_ch10_in => ch10i,
-		 audio_ch11_in => ch11i,
-		 audio_ch12_in => ch12i,
-		 audio_ch13_in => ch13i,
-		 audio_ch14_in => ch14i,
-		 audio_ch15_in => ch15i,
-		 audio_ch1_in => ch1i,
-		 audio_ch2_in => ch2i,
-		 audio_ch3_in => ch3i,
-		 audio_ch4_in => ch4i,
-		 audio_ch5_in => ch5i,
-		 audio_ch6_in => ch6i,
-		 audio_ch7_in => ch7i,
-		 audio_ch8_in => ch8i,
-		 audio_ch9_in => ch9i,
+		 audio_in => audio_i,
 		 read0Addr => unsigned(sample_ram_read_addr),
 		 wr_ready_o => sample_ready,
 		 data0_out => sample_ram_read_data,

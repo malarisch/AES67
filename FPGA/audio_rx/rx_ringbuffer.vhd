@@ -14,22 +14,8 @@ entity rx_ringbuffer is
 	(
         sys_clk                    : in std_logic;
         reset_n                    : in std_logic;
-		audio_ch0_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch1_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch2_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch3_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch4_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch5_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch6_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch7_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch8_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch9_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch10_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch11_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch12_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch13_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch14_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
-		audio_ch15_out			: out std_logic_vector(bytes_per_sample * 8 - 1 downto 0);
+
+        audio_out :             out std_logic_vector(bytes_per_sample * 8 * global_channel_count - 1 downto 0);
 		fs_clk_i      				: in std_logic;
 
 		media_clock_i: in std_logic_vector(31 downto 0);
@@ -166,27 +152,13 @@ begin
         variable comp_byte : integer range 0 to 32 := 0;
         variable wr_sample_pos : unsigned(SAMPLE_IDX_BITS - 1 downto 0);
         variable v_channel_addr : unsigned(ADDR_BITS - 1 downto 0);
-        variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
-        variable v_playout_sample : std_logic_vector(SAMPLE_BITS - 1 downto 0);
     begin
         if reset_n = '0' then
             eth_read_addr_o <= (others => '0');
-            sample_rd_ptr <= (others => '0');
-            fs_clk_i_sync1 <= '0';
-            fs_clk_i_sync2 <= '0';
-            zaudio_sync <= '0';
-            packet_ready_i_sync1 <= '0';
-            packet_ready_i_sync2 <= '0';
-            packet_ready_i_sync3 <= '0';
-            output_next_sample <= '0';
+
             current_stream_channel_count <= 0;
             media_clock_latch <= (others => '0');
             config_ram_read_ptr <= 0;
-            playout_state <= ps_idle;
-            playout_channel_id <= 0;
-            playout_byte <= 0;
-            playout_data_latch <= (others => '0');
-            playout_rd_base <= (others => '0');
             packetParserState <= s_Idle;
             wr_addr_current <= (others => '0');
             wr_addr_sample_base <= (others => '0');
@@ -194,37 +166,15 @@ begin
             ram_read_wait <= '0';
             channel_map_idx <= 0;
             cached_delay <= (others => '0');
-            metering_clear_i_sync1 <= '0';
-            metering_clear_i_sync2 <= '0';
-            metering_clear_last <= '0';
             
         elsif rising_edge(sys_clk) then
             sample_wr_en <= '0';
 
-            -- CDC for fs_clk_i
-            fs_clk_i_sync1 <= fs_clk_i;
-            fs_clk_i_sync2 <= fs_clk_i_sync1;
-            zaudio_sync <= fs_clk_i_sync2;
 
-            -- CDC synchronizer for toggle signal from mac_rx_clock domain
-            packet_ready_i_sync1 <= packet_ready_i;
-            packet_ready_i_sync2 <= packet_ready_i_sync1;
-            packet_ready_i_sync3 <= packet_ready_i_sync2;
 
-            metering_clear_i_sync1 <= metering_clear_i;
-            metering_clear_i_sync2 <= metering_clear_i_sync1;
-            if (metering_clear_i_sync2 /= metering_clear_last) then
-                metering_clear_last <= metering_clear_i_sync2;
-                metering_clip_o <= (others => '0');
-                metering_signal_o <= (others => '0');
-            end if;
 
-            if zaudio_sync = '0' and fs_clk_i_sync2 = '1' then
-                output_next_sample <= '1';
-                -- Derive read pointer directly from media clock (same as write side, but without delay)
-                -- This keeps read-write distance constant at exactly the configured delay
-                sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
-            end if;
+
+
 
             -- ======== Packet parser state machine ========
             case packetParserState is
@@ -490,7 +440,73 @@ begin
                     packetParserState <= s_End;
             end case;
 
+        end if;
+    end process;
+
+
+
+    -- cdc process
+    process(sys_clk)
+
+    begin
+        if (reset_n = '0') then
+            fs_clk_i_sync1 <= '0';
+            fs_clk_i_sync2 <= '0';
+            zaudio_sync <= '0';
+            packet_ready_i_sync1 <= '0';
+            packet_ready_i_sync2 <= '0';
+            packet_ready_i_sync3 <= '0';
+
+            metering_clear_i_sync1 <= '0';
+            metering_clear_i_sync2 <= '0';
+            
+            fs_clk_i_sync1 <= '0';
+            fs_clk_i_sync2 <= '0';
+            zaudio_sync <= '0';
+        elsif (rising_edge(sys_clk)) then
+            metering_clear_i_sync1 <= metering_clear_i;
+            metering_clear_i_sync2 <= metering_clear_i_sync1;
+
+
+            -- CDC for fs_clk_i
+            fs_clk_i_sync1 <= fs_clk_i;
+            fs_clk_i_sync2 <= fs_clk_i_sync1;
+            zaudio_sync <= fs_clk_i_sync2;
+
+            -- CDC synchronizer for toggle signal from mac_rx_clock domain
+            packet_ready_i_sync1 <= packet_ready_i;
+            packet_ready_i_sync2 <= packet_ready_i_sync1;
+            packet_ready_i_sync3 <= packet_ready_i_sync2;
+        end if;
+
+    end process;
+
+    -- data playout
+    process(sys_clk)
+
+        variable v_sample_abs : unsigned(SAMPLE_BITS - 2 downto 0);
+        variable v_playout_sample : std_logic_vector(SAMPLE_BITS - 1 downto 0);
+    begin
+
+        if rising_edge(sys_clk) then
             -- ======== Playout logic (pipelined for synchronous RAM read) ========
+
+
+
+            if (metering_clear_i_sync2 /= metering_clear_last) then
+                metering_clear_last <= metering_clear_i_sync2;
+                metering_clip_o <= (others => '0');
+                metering_signal_o <= (others => '0');
+            end if;
+
+
+            if zaudio_sync = '0' and fs_clk_i_sync2 = '1' then
+                output_next_sample <= '1';
+                -- Derive read pointer directly from media clock (same as write side, but without delay)
+                -- This keeps read-write distance constant at exactly the configured delay
+                sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+            end if;
+
             case playout_state is
                 when ps_idle =>
                     if output_next_sample = '1' then
@@ -510,28 +526,13 @@ begin
                 when ps_data =>
                     -- Capture data
                     playout_data_latch((bytes_per_sample - 1 - playout_byte)*8 + 7 downto (bytes_per_sample - 1 - playout_byte)*8) <= sample_rd_data;
-
+                    
                     if playout_byte = bytes_per_sample - 1 then
                         -- Full sample assembled: output using last byte directly
-                        case playout_channel_id is
-                            when 0 => audio_ch0_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 1 => audio_ch1_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 2 => audio_ch2_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 3 => audio_ch3_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 4 => audio_ch4_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 5 => audio_ch5_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 6 => audio_ch6_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 7 => audio_ch7_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 8 => audio_ch8_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 9 => audio_ch9_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 10 => audio_ch10_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 11 => audio_ch11_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 12 => audio_ch12_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 13 => audio_ch13_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 14 => audio_ch14_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when 15 => audio_ch15_out <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
-                            when others => null;
-                        end case;
+
+                        audio_out(((playout_channel_id + 1) * (bytes_per_sample * 8)) - 1 downto playout_channel_id * (bytes_per_sample * 8)) 
+                            <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
+                        
 
                         -- Metering: clip & signal detection on assembled sample
                         -- Use variable for combinational abs + compare in same cycle
@@ -572,6 +573,7 @@ begin
                     end if;
             end case;
         end if;
+    
     end process;
 
     -- Dedicated sample_ram process (simple dual-port: sync write + sync read)
@@ -598,8 +600,6 @@ begin
     end process;
 
     -- Stream config RAM Read Process (Port B - sys_clk domain)
-    -- IMPORTANT: RAM read must be in its own process with ONLY the registered read.
-    -- Adding additional registers in the same process prevents M9K/M10K inference.
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then

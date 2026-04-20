@@ -266,7 +266,8 @@ signal pll_48k_fs_tdm  : STD_LOGIC;
 signal mcu_clk       : STD_LOGIC;
 signal hram_clk      : STD_LOGIC;
 
-
+signal tdm8in : STD_LOGIC_VECTOR(3 downto 0);
+signal tdm8out : STD_LOGIC_VECTOR(3 downto 0);
 
 BEGIN
 
@@ -275,6 +276,11 @@ enet_resetn <= c10_resetn;
 reset_p <= not c10_resetn;
 
 aes67_top_inst: entity work.aes67_top
+generic map(
+	MIIM_CLOCK_DIVIDER => 10,
+	TX_SAMPLE_BUFFER_DEPTH => 48,
+	RX_SAMPLE_BUFFER_DEPTH => 256
+)
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,
 	enet_clk_i             => enet_clk,
@@ -365,10 +371,8 @@ aes67_top_inst: entity work.aes67_top
 	audio_rx_cfg_wr_addr_i      => rx_conf_wr_addr,
 
 	-- TDM audio I/O
-	tdm8out_0_o                 => tdm8out_0_o,
-	tdm8out_1_o                 => tdm8out_1_o,
-	tdm8in_0_i                  => tdm8in_0_i,
-	tdm8in_1_i                  => tdm8in_1_i
+	tdm8out_o                 => tdm8out,
+	tdm8in_i                  => tdm8in
 );
 
 
@@ -557,6 +561,13 @@ PORT MAP(
 
 
 -- GPIO / pin assignments
+
+
+tdm8out_0_o <= tdm8out(0);
+tdm8out_1_o <= tdm8out(1);
+
+tdm8in(0) <= tdm8in_0_i;
+tdm8in(1) <= tdm8in_1_i;
 
 hbus_clk0_p   <= hram_clk;
 hbus_clk0_n   <= NOT hram_clk;

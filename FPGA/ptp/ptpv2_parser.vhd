@@ -100,14 +100,18 @@ architecture Behavioral of ptpv2_parser is
     signal current_min_abs  : unsigned(31 downto 0) := (others => '0');
     
     -- State machine
-    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_ClockSet_Calc, s_ClockSet_Apply, s_Calc_Stage1, s_Calc_MinFilter, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
+
+    type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply);
+    signal s_SM_ClockConfigurator : t_SM_ClockConfigurator := s_Idle;
+    signal configureClock : STD_LOGIC := '0';
+    signal ns_sum : unsigned(31 downto 0);
 
     -- Elapsed local time since Sync RX, for initial clock set compensation
     signal elapsed_ns : unsigned(31 downto 0) := (others => '0');
     signal byte_counter   : integer range 0 to 1500 := 0;
 
-    signal delay_resp_tx_en_reg : std_logic := '0';
 
     -- ============================================================
     -- PIPELINED PTP Calculation Registers
@@ -250,6 +254,59 @@ begin
         end if;
     end process cdc_sync_proc;
 
+
+
+    clock_config_process: process (clk, reset_n)
+
+    begin
+        if (reset_n = '0') then
+            clock_configure_timestamp_nanoseconds_o <= (others => '0');
+            clock_configure_timestamp_seconds_o <= (others => '0');
+            clock_configured <= '0';
+            clock_set_o <= '0';
+
+        elsif (rising_edge(clk)) then
+            clock_set_o <= '0';
+
+
+
+            if (s_SM_ClockConfigurator = s_Idle) then
+                if (configureClock = '1') then
+                    s_SM_ClockConfigurator <= s_ClockSet_Calc;    
+                end if;
+            elsif (s_SM_ClockConfigurator = s_ClockSet_Calc) then
+                -- Takt 1: Berechne lokal vergangene Zeit seit Sync-Empfang
+                -- elapsed_ns = latched_rx_timestamp(FollowUp) - stored_t2(Sync)
+                elapsed_ns <= unsigned(timestamp_diff_ns(
+                    latched_rx_timestamp_seconds(3 downto 0), latched_rx_timestamp_nanoseconds,
+                    stored_t2_seconds, stored_t2_nanoseconds
+                ))(31 downto 0);
+                s_SM_ClockConfigurator <= s_ClockSet_Calc2;
+            elsif (s_SM_ClockConfigurator = s_ClockSet_Calc2) then
+                ns_sum <= unsigned(unsigned(stored_t1_nanoseconds) + elapsed_ns)(31 downto 0);
+                s_SM_ClockConfigurator <= s_ClockSet_Apply;
+            elsif (s_SM_ClockConfigurator = s_ClockSet_Apply) then
+                -- Takt 2: Clock setzen auf T1 + elapsed_ns (mit Sekunden-Carry)
+                if (ns_sum >= unsigned(ONE_SECOND_NS_POS)) then
+                    clock_configure_timestamp_nanoseconds_o <= std_logic_vector(
+                        ns_sum - unsigned(ONE_SECOND_NS_POS));
+                    clock_configure_timestamp_seconds_o <=
+                        std_logic_vector(unsigned(stored_t1_seconds) + 1);
+                else
+                    clock_configure_timestamp_nanoseconds_o <=
+                        std_logic_vector(ns_sum);
+                    clock_configure_timestamp_seconds_o <= stored_t1_seconds;
+                end if;
+                clock_set_o <= '1';
+                clock_configured <= '1';
+                s_SM_ClockConfigurator <= s_Idle;
+            end if;
+        end if;
+    end process;
+
+
+
+
     -- Main State Machine Process
     main_proc: process(clk, reset_n)
         variable active_sequence_id: std_logic_vector(15 downto 0);
@@ -281,10 +338,7 @@ begin
             delta_m2s_reg <= (others => '0');
             delta_s2m_reg <= (others => '0');
 
-            clock_configure_timestamp_nanoseconds_o <= (others => '0');
-            clock_configure_timestamp_seconds_o <= (others => '0');
-            clock_configured <= '0';
-            clock_set_o <= '0';
+            
             
             -- Min filter reset (use MAX_SIGNED_32, not all-1s which = -1!)
             m2s_buffer <= (others => MAX_SIGNED_32);
@@ -308,7 +362,7 @@ begin
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
             log_msg_interval_valid_o <= '0';
-            clock_set_o <= '0';
+            configureClock <= '0';
             
             -- Capture T3 timestamp when valid
             if (t3_valid_i = '1') then
@@ -466,7 +520,7 @@ begin
                                         -- Store T1 for clock set, then compute elapsed time compensation
                                         stored_t1_seconds <= ptp_origin_timestamp_seconds;
                                         stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
-                                        s_SM_PtpParser <= s_ClockSet_Calc;
+                                        configureClock <= '1';
                                     else
                                         stored_t1_seconds <= ptp_origin_timestamp_seconds;
                                         stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
@@ -503,30 +557,7 @@ begin
                     end case;
                 end if;
 
-            elsif (s_SM_PtpParser = s_ClockSet_Calc) then
-                -- Takt 1: Berechne lokal vergangene Zeit seit Sync-Empfang
-                -- elapsed_ns = latched_rx_timestamp(FollowUp) - stored_t2(Sync)
-                elapsed_ns <= unsigned(timestamp_diff_ns(
-                    latched_rx_timestamp_seconds(3 downto 0), latched_rx_timestamp_nanoseconds,
-                    stored_t2_seconds, stored_t2_nanoseconds
-                ));
-                s_SM_PtpParser <= s_ClockSet_Apply;
-
-            elsif (s_SM_PtpParser = s_ClockSet_Apply) then
-                -- Takt 2: Clock setzen auf T1 + elapsed_ns (mit Sekunden-Carry)
-                if (unsigned(stored_t1_nanoseconds) + elapsed_ns) >= unsigned(ONE_SECOND_NS_POS) then
-                    clock_configure_timestamp_nanoseconds_o <=
-                        std_logic_vector(unsigned(stored_t1_nanoseconds) + elapsed_ns - unsigned(ONE_SECOND_NS_POS));
-                    clock_configure_timestamp_seconds_o <=
-                        std_logic_vector(unsigned(stored_t1_seconds) + 1);
-                else
-                    clock_configure_timestamp_nanoseconds_o <=
-                        std_logic_vector(unsigned(stored_t1_nanoseconds) + elapsed_ns);
-                    clock_configure_timestamp_seconds_o <= stored_t1_seconds;
-                end if;
-                clock_set_o <= '1';
-                clock_configured <= '1';
-                s_SM_PtpParser <= s_Done;
+            
 
             elsif (s_SM_PtpParser = s_Calc_Stage1) then
                 -- ============================================

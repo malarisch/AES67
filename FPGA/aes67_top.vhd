@@ -10,14 +10,15 @@ ENTITY aes67_top IS
 		TX_MAX_STREAMS : natural := 8;
 		RX_MAX_STREAMS : natural := 8;
 		RX_CHANNELS		: natural := 16;
-		TX_CHANNELS		: natural := 16;
+		TX_CHANNELS		: natural := 16; -- must be multiple of two for i2s, multiple of 8 for tdm8
 		RX_BYTE_DEPTH	: natural := 3;
 		TX_BYTE_DEPTH	: natural := 3;
-		RX_SAMPLE_BUFFER_DEPTH : natural := 48;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 24;
+		RX_SAMPLE_BUFFER_DEPTH : natural := 256;
+		TX_SAMPLE_BUFFER_DEPTH : natural := 48;
 		  
-    MIIM_CLOCK_DIVIDER : POSITIVE := 50
-  
+    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
+		AUDIO_INPUT_MODE : string := "tdm8";
+		AUDIO_OUTPUT_MODE : string := "tdm8"
 	);
 	PORT
 	(
@@ -120,12 +121,11 @@ ENTITY aes67_top IS
 		audio_rx_cfg_wr_addr_i : IN STD_LOGIC_VECTOR(7 downto 0);
 
 		-- audio outputs
-		tdm8out_0_o : OUT STD_LOGIC;
-		tdm8out_1_o : OUT STD_LOGIC;
+		tdm8out_o : OUT STD_LOGIC_VECTOR(3 downto 0);
+		
 
 		-- audio inputs
-		tdm8in_0_i : IN STD_LOGIC;
-		tdm8in_1_i : IN STD_LOGIC
+		tdm8in_i : IN STD_LOGIC_VECTOR(3 downto 0)
 
 	);
 END aes67_top;
@@ -146,10 +146,9 @@ signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal second_pulse_sys : STD_LOGIC;
 
 -- sample registers for in/output
-type t_rx_sample_register is array (0 to RX_CHANNELS) of std_logic_vector(RX_BYTE_DEPTH*8-1 downto 0);
-    signal rx_sample_register : t_rx_sample_register := (others => (others => '0'));
-type t_tx_sample_register is array (0 to TX_CHANNELS) of std_logic_vector(TX_BYTE_DEPTH*8-1 downto 0);
-    signal tx_sample_register : t_tx_sample_register := (others => (others => '0'));
+
+signal rx_sample_register : STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
+signal tx_sample_register : STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0);
 
 
 signal mac_tx_clock : STD_LOGIC;
@@ -224,24 +223,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 cfg_wr_en_i => audio_tx_cfg_wr_en_i,
 		 cfg_wr_addr_i => audio_tx_cfg_wr_addr_i,
 		 cfg_wr_data_i => audio_tx_cfg_wr_data_i,
+		audio_i => tx_sample_register,
 
-
-		 ch0i => tx_sample_register(0),
-		 ch1i => tx_sample_register(1),
-		 ch2i => tx_sample_register(2),
-		 ch3i => tx_sample_register(3),
-		 ch4i => tx_sample_register(4),
-		 ch5i => tx_sample_register(5),
-		 ch6i => tx_sample_register(6),
-		 ch7i => tx_sample_register(7),
-		 ch8i => tx_sample_register(8),
-		 ch9i => tx_sample_register(9),
-		 ch10i => tx_sample_register(10),
-		 ch11i => tx_sample_register(11),
-		 ch12i => tx_sample_register(12),
-		 ch13i => tx_sample_register(13),
-		 ch14i => tx_sample_register(14),
-		 ch15i => tx_sample_register(15),
 		 
 		 media_clock_i => media_clock,
 
@@ -366,23 +349,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 stream_config_wr_clk_i => clk_mcu_i,
 
 		 -- audio
-		 -- TODO: MAKE THIS DYNAMIC!
-		 audio_ch0_out => rx_sample_register(0),
-		 audio_ch1_out => rx_sample_register(1),
-		 audio_ch2_out => rx_sample_register(2),
-		 audio_ch3_out => rx_sample_register(3),
-		 audio_ch4_out => rx_sample_register(4),
-		 audio_ch5_out => rx_sample_register(5),
-		 audio_ch6_out => rx_sample_register(6),
-		 audio_ch7_out => rx_sample_register(7),
-		 audio_ch8_out => rx_sample_register(8),
-		 audio_ch9_out => rx_sample_register(9),
-		 audio_ch10_out => rx_sample_register(10),
-		 audio_ch11_out => rx_sample_register(11),
-		 audio_ch12_out => rx_sample_register(12),
-		 audio_ch13_out => rx_sample_register(13),
-		 audio_ch14_out => rx_sample_register(14),
-		 audio_ch15_out => rx_sample_register(15),
+		 
+		 audio_out => rx_sample_register,
 
 		 -- metering
 		 metering_clear_i => audio_meter_clear_i,
@@ -392,75 +360,50 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 
 
-tdm8_mux1_inst: entity work.tdm8_out
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => pll_48k_fs_tdm,
+
+
+
+
+
+-- generate tdm8 input modules
+gen_tdm8_in : if (AUDIO_INPUT_MODE = "tdm8") generate
+	tdm8demux : for i in 0 to (TX_CHANNELS / 8) - 1 generate
+		tdm8demux_inst: entity work.tdm8_in
+		GENERIC MAP(width => TX_BYTE_DEPTH * 8
+		)
+		PORT MAP(FSYNC => pll_48k_fs_tdm,
 		 BIT_CLK => pll_256fs_falling,
-		 RESET => rst_n,
-		 DATA_CH0 => rx_sample_register(0),
-		 DATA_CH1 => rx_sample_register(1),
-		 DATA_CH2 => rx_sample_register(2),
-		 DATA_CH3 => rx_sample_register(3),
-		 DATA_CH4 => rx_sample_register(4),
-		 DATA_CH5 => rx_sample_register(5),
-		 DATA_CH6 => rx_sample_register(6),
-		 DATA_CH7 => rx_sample_register(7),
-		 DOUT => tdm8out_0_o);
-
-
-tdm8_mux2_inst: entity work.tdm8_out
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_falling,
-		 RESET => rst_n,
-		 DATA_CH0 => rx_sample_register(8),
-		 DATA_CH1 => rx_sample_register(9),
-		 DATA_CH2 => rx_sample_register(10),
-		 DATA_CH3 => rx_sample_register(11),
-		 DATA_CH4 => rx_sample_register(12),
-		 DATA_CH5 => rx_sample_register(13),
-		 DATA_CH6 => rx_sample_register(14),
-		 DATA_CH7 => rx_sample_register(15),
-		 DOUT => tdm8out_1_o);
-
-
-tdm8demux1_inst: entity work.tdm8_in
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_falling,
-		 DIN => tdm8in_0_i,
+		 DIN => tdm8in_i(i),
 		 RESET => rst_n,
 		 SYS_CLK => sys_clk_125MHz_i,
-		 DATA_CH0 => tx_sample_register(0),
-		 DATA_CH1 => tx_sample_register(1),
-		 DATA_CH2 => tx_sample_register(2),
-		 DATA_CH3 => tx_sample_register(3),
-		 DATA_CH4 => tx_sample_register(4),
-		 DATA_CH5 => tx_sample_register(5),
-		 DATA_CH6 => tx_sample_register(6),
-		 DATA_CH7 => tx_sample_register(7)
-);
+		 data_out => tx_sample_register((TX_BYTE_DEPTH * 8 * 8) * (i + 1) - 1 downto (TX_BYTE_DEPTH * 8 * 8) * (i))
+		);
+	end generate;
 
-tdm8demux2_inst: entity work.tdm8_in
-GENERIC MAP(width => 24
-			)
-PORT MAP(FSYNC => pll_48k_fs_tdm,
+
+end generate;
+
+
+-- generate tdm8 output modules
+gen_tdm8_out : if (AUDIO_OUTPUT_MODE = "tdm8") generate
+	tdm8mux : for i in 0 to (RX_CHANNELS / 8) - 1 generate
+		tdm8mux_inst: entity work.tdm8_out
+		GENERIC MAP(width => RX_BYTE_DEPTH * 8
+		)
+		PORT MAP(FSYNC => pll_48k_fs_tdm,
 		 BIT_CLK => pll_256fs_falling,
-		 DIN => tdm8in_1_i,
+		 DOUT => tdm8out_o(i),
 		 RESET => rst_n,
-		 SYS_CLK => sys_clk_125MHz_i,
-		 DATA_CH0 => tx_sample_register(8),
-		 DATA_CH1 => tx_sample_register(9),
-		 DATA_CH2 => tx_sample_register(10),
-		 DATA_CH3 => tx_sample_register(11),
-		 DATA_CH4 => tx_sample_register(12),
-		 DATA_CH5 => tx_sample_register(13),
-		 DATA_CH6 => tx_sample_register(14),
-		 DATA_CH7 => tx_sample_register(15)
-);
+		 DIN => rx_sample_register((RX_BYTE_DEPTH * 8 * 8) * (i + 1) - 1 downto (RX_BYTE_DEPTH * 8 * 8) * (i))
+		);
+	end generate;
+
+
+end generate;
+
+
+
+
 
 ethernet_top_inst: entity work.ethernet_top
  GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER)

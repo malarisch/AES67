@@ -497,5 +497,5 @@ set_global_assignment -name DISABLE_REGISTER_MERGING_ACROSS_HIERARCHIES OFF
 set_global_assignment -name QII_AUTO_PACKED_REGISTERS "SPARSE AUTO"
 set_global_assignment -name PHYSICAL_SYNTHESIS_MAP_LOGIC_TO_MEMORY_FOR_AREA ON
 set_global_assignment -name ALM_REGISTER_PACKING_EFFORT HIGH
-set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp

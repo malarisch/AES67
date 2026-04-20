@@ -45,14 +45,7 @@ entity tdm8_in is
     SYS_CLK : in std_logic; -- System Clock for CDC
 
     -- Parallel output ports
-    DATA_CH0 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH1 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH2 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH3 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH4 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH5 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH6 : out std_logic_vector(width - 1 downto 0);
-    DATA_CH7 : out std_logic_vector(width - 1 downto 0);
+    data_out : out STD_LOGIC_VECTOR(width * 8 - 1 downto 0);
 
     -- Output status
     DATA_RDY : out std_logic -- Pulse when frame is complete
@@ -181,7 +174,7 @@ begin
       if (data_rdy_sync2 = '1' and data_rdy_prev = '0') then
         -- Rising edge: latch all channels
         for i in 0 to 7 loop
-          ch_data_sys(i) <= ch_data(i);
+          data_out((i+1) * width - 1 downto i*width) <= ch_data(i);
         end loop;
         DATA_RDY <= '1';
       elsif (data_rdy_sync2 = '0' and data_rdy_prev = '1') then
@@ -189,15 +182,5 @@ begin
       end if;
     end if;
   end process data_transfer;
-
-  -- Output Assignment
-  DATA_CH0 <= ch_data_sys(0);
-  DATA_CH1 <= ch_data_sys(1);
-  DATA_CH2 <= ch_data_sys(2);
-  DATA_CH3 <= ch_data_sys(3);
-  DATA_CH4 <= ch_data_sys(4);
-  DATA_CH5 <= ch_data_sys(5);
-  DATA_CH6 <= ch_data_sys(6);
-  DATA_CH7 <= ch_data_sys(7);
 
 end rtl;

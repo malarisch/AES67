@@ -16,29 +16,9 @@
 -- - Data (DOUT) is MSB-first, valid on rising SCLK edge
 -- - Each slot is 32 bits wide, left-justified, zero-padded
 -- - Data transitions occur on falling SCLK edge
---
--- FSYNC input is already in the correct format: 1 BCLK wide pulse,
--- synchronous to BIT_CLK, shared with the DACs. It is passed through
--- as LRCK directly.
---
--- Timing (F = falling edge, R = rising edge):
---
---  SCLK: ...F...R...F...R...F...R...F...R...F...R...
---  LRCK:        ___/‾‾‾‾‾‾‾‾‾‾‾\____________________
---                   ^sampled high    ^sampled low
---  DOUT: ---------X MSB        X b22        X b21
---                   ^valid          ^valid
---
--- Input takes:
--- - DATA_CH0..DATA_CH7 parallel audio words
+
 -- - BIT_CLK Bit clock (256*Fs)
--- - FSYNC Frame sync (1 BCLK wide pulse, shared with DACs)
--- - RESET Asynchronous Reset (Active Low)
---
--- Output provides:
--- - DOUT TDM serial data (valid on rising SCLK)
--- - LRCK Frame sync passthrough
---
+
 --------------------------------------------------------------------------------
 library ieee;
 use ieee.std_logic_1164.all;
@@ -52,20 +32,12 @@ entity tdm8_out is
     FSYNC     : in  std_logic; -- Frame sync (1 BCLK pulse, shared with DACs)
     BIT_CLK   : in  std_logic; -- Bit clock (256*Fs)
     DOUT      : out std_logic; -- Serial data output (valid on rising SCLK)
-    LRCK      : out std_logic; -- Frame sync passthrough
 
     -- Control ports
     RESET   : in std_logic; -- Asynchronous Reset (Active Low)
 
-    -- Parallel input ports
-    DATA_CH0 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH1 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH2 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH3 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH4 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH5 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH6 : in std_logic_vector(width - 1 downto 0);
-    DATA_CH7 : in std_logic_vector(width - 1 downto 0)
+
+    DIN      : IN std_logic_vector(width * 8 - 1 downto 0)
   );
 end tdm8_out;
 
@@ -74,11 +46,9 @@ architecture rtl of tdm8_out is
   signal shift_reg    : std_logic_vector(31 downto 0);
   signal bit_count    : unsigned(7 downto 0); -- 0..255 counts through entire frame
   signal running      : std_logic;
-
+  signal z_fsync      : std_logic;
   -- Latched input data array
-  type channel_array_t is array (0 to 7) of std_logic_vector(width - 1 downto 0);
-  signal ch_data_lat  : channel_array_t;
-
+  
   -- Pad audio data to 32 bits (left-justified, zero-padded)
   function pad32(d : std_logic_vector(width - 1 downto 0)) return std_logic_vector is
     variable result : std_logic_vector(31 downto 0) := (others => '0');
@@ -89,8 +59,7 @@ architecture rtl of tdm8_out is
 
 begin
 
-  -- FSYNC is already the correct LRCK signal, pass through directly
-  LRCK <= FSYNC;
+
 
   -------------------------------------------------------------------------
   -- Data shift-out on falling SCLK edge.
@@ -111,30 +80,22 @@ begin
       bit_count  <= (others => '0');
       running    <= '0';
       DOUT       <= '0';
-      for i in 0 to 7 loop
-        ch_data_lat(i) <= (others => '0');
-      end loop;
+
 
     elsif falling_edge(BIT_CLK) then
+      z_fsync <= FSYNC;
 
-      if (FSYNC = '1') then
-        -- Frame start: FSYNC is high for exactly 1 BCLK.
-        -- Latch all channel data and output MSB of slot 0.
-        ch_data_lat(0) <= DATA_CH0;
-        ch_data_lat(1) <= DATA_CH1;
-        ch_data_lat(2) <= DATA_CH2;
-        ch_data_lat(3) <= DATA_CH3;
-        ch_data_lat(4) <= DATA_CH4;
-        ch_data_lat(5) <= DATA_CH5;
-        ch_data_lat(6) <= DATA_CH6;
-        ch_data_lat(7) <= DATA_CH7;
 
-        shift_reg <= pad32(DATA_CH0);
-        DOUT      <= DATA_CH0(width - 1);
+      if (FSYNC = '1' and z_fsync = '0') then
+        -- Frame start
+
+        shift_reg <= pad32(DIN(width - 1 downto 0));
+        DOUT      <= DIN(width - 1);
         bit_count <= to_unsigned(1, 8);
         running   <= '1';
-
-      elsif (running = '1') then
+      end if;
+      
+      if (running = '1') then
         -- Shift out current MSB
         DOUT      <= shift_reg(31);
         shift_reg <= shift_reg(30 downto 0) & '0';
@@ -143,7 +104,7 @@ begin
         if (bit_count(4 downto 0) = "11111") then
           next_slot := to_integer(bit_count(7 downto 5)) + 1;
           if (next_slot <= 7) then
-            shift_reg <= pad32(ch_data_lat(next_slot));
+            shift_reg <= pad32(DIN((next_slot + 1) * width - 1 downto next_slot * width));
           end if;
         end if;
 
