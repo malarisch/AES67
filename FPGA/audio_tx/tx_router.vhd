@@ -23,6 +23,7 @@ entity tx_router is
 
         packet_time_i                   : in std_logic_vector(31 downto 0);
         packet_time_o                   : out std_logic_vector(31 downto 0) := (others => '0');
+        sequence_id_o                   : out unsigned(15 downto 0) := (others => '0');
 
         -- max 8 channels per stream
         ch_ids_o                        : out std_logic_vector(63 downto 0) := (others => '0');
@@ -40,6 +41,7 @@ entity tx_router is
 
         audio_packet_tx_start_o         : out std_logic := '0';
         tx_en_i                         : in std_logic;
+        tx_busy_i                       : in std_logic;
         config_wr_clk_i                  : in std_logic
     );
 end entity;
@@ -60,9 +62,6 @@ architecture Behavioral of tx_router is
     type t_config_ram is array (0 to 255) of std_logic_vector(7 downto 0);
     signal config_ram : t_config_ram := (others => (others => '0'));
     
-    -- Synthesis attributes for Block RAM inference (Intel/Altera)
-    attribute ramstyle : string;
-    attribute ramstyle of config_ram : signal is "M10K";
     
     -- Registered read address and data for Block RAM (Port B - sys_clk domain)
     signal ram_rd_addr   : unsigned(7 downto 0) := (others => '0');
@@ -87,13 +86,15 @@ architecture Behavioral of tx_router is
     signal sample_count : t_sample_count := (others => (others => '0'));
 
     -- TX ready FIFOs: parallel FIFOs for stream index, write pointer, and packet time
-    constant FIFO_DEPTH : integer := 8;
-    type t_stream_fifo is array (0 to FIFO_DEPTH - 1) of unsigned(2 downto 0);
-    type t_wrptr_fifo is array (0 to FIFO_DEPTH - 1) of std_logic_vector(15 downto 0);
-    type t_time_fifo is array (0 to FIFO_DEPTH - 1) of std_logic_vector(31 downto 0);
+    
+    type t_stream_fifo is array (0 to max_streams - 1) of unsigned(2 downto 0);
+    type t_wrptr_fifo is array (0 to max_streams - 1) of std_logic_vector(15 downto 0);
+    type t_seqid_fifo is array (0 to max_streams - 1) of unsigned(15 downto 0);
+    type t_time_fifo is array (0 to max_streams - 1) of std_logic_vector(31 downto 0);
     signal fifo_stream  : t_stream_fifo := (others => (others => '0'));
     signal fifo_wrptr   : t_wrptr_fifo := (others => (others => '0'));
     signal fifo_time    : t_time_fifo := (others => (others => '0'));
+    signal fifo_seqid   : t_seqid_fifo := (others => (others => '0'));
     signal fifo_wr_ptr  : unsigned(2 downto 0) := (others => '0');
     signal fifo_rd_ptr  : unsigned(2 downto 0) := (others => '0');
 
@@ -107,7 +108,7 @@ architecture Behavioral of tx_router is
         LOAD_CH0, LOAD_CH1, LOAD_CH2, LOAD_CH3,
         LOAD_CH4, LOAD_CH5, LOAD_CH6, LOAD_CH7,
         LOAD_SSRC1, LOAD_SSRC2, LOAD_SSRC3, LOAD_SSRC4,
-        ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_EN_LOW
+        ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_BUSY_LOW
     );
     signal tx_state : t_tx_state := IDLE;
 
@@ -122,7 +123,11 @@ architecture Behavioral of tx_router is
 
     -- CDC synchronizer for tx_en_i (crosses clock domain)
     signal tx_en_meta        : std_logic := '0';
+    
     signal tx_en_sync        : std_logic := '0';
+
+    signal tx_busy_meta        : std_logic := '0';
+    signal tx_busy_sync        : std_logic := '0';
     attribute PRESERVE : boolean;
     attribute PRESERVE of tx_en_meta : signal is true;
     attribute PRESERVE of tx_en_sync : signal is true;
@@ -186,8 +191,6 @@ begin
     -- Uses shadow registers instead of direct RAM access
     -- ==========================================================================
     process(sys_clk_i, reset_n)
-        variable num_streams : integer;
-        variable spp : unsigned(7 downto 0);
     begin
         if reset_n = '0' then
             sample_count <= (others => (others => '0'));
@@ -201,24 +204,21 @@ begin
 
             -- Rising edge of sample_ready
             if sample_ready_i = '1' and sample_ready_sync = '0' then
-                for i in 0 to 7 loop
-                    if i < max_streams then
-                        -- Use pre-computed threshold (spp-1) to reduce critical path
-                        -- The subtraction was done at config time, not here
-                        spp := unsigned(samples_per_packet_sync(i));
-                        if spp /= 0 then
-                            if sample_count(i) >= threshold_sync(i) then
-                                sample_count(i) <= (others => '0');
-                                -- Enqueue into parallel FIFOs with snapshot of current state
-                                fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
-                                fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
-                                fifo_time(to_integer(fifo_wr_ptr)) <= packet_time_i;
-                                fifo_wr_ptr <= fifo_wr_ptr + 1;
-                            else
-                                sample_count(i) <= sample_count(i) + 1;
-                            end if;
+                for i in 0 to max_streams -1 loop
+
+                    if unsigned(samples_per_packet_sync(i)) /= 0 then
+                        if sample_count(i) >= threshold_sync(i) then
+                            sample_count(i) <= (others => '0');
+                            -- Enqueue into parallel FIFOs with snapshot of current state
+                            fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
+                            fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
+                            fifo_time(to_integer(fifo_wr_ptr)) <= packet_time_i;
+                            fifo_wr_ptr <= fifo_wr_ptr + 1;
+                        else
+                            sample_count(i) <= sample_count(i) + 1;
                         end if;
                     end if;
+                    
                 end loop;
             end if;
 
@@ -233,9 +233,13 @@ begin
         if reset_n = '0' then
             tx_en_meta <= '0';
             tx_en_sync <= '0';
+            tx_busy_meta <= '0';
+            tx_busy_sync <= '0';
         elsif rising_edge(sys_clk_i) then
             tx_en_meta <= tx_en_i;
             tx_en_sync <= tx_en_meta;
+            tx_busy_meta <= tx_busy_i;
+            tx_busy_sync <= tx_busy_meta;
         end if;
     end process;
 
@@ -378,6 +382,7 @@ begin
                     ip_addr_o <= ip_addr_latch;
                     ch_ids_o <= ch_ids_latch;
                     ssrc_o <= ssrc_latch(31 downto 8) & ram_rd_data;
+                    sequence_id_o <= fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr))));
                     sample_buffer_tx_start_addr_o <= current_wr_ptr;
                     packet_time_o <= current_time;
                     audio_packet_tx_start_o <= '1';
@@ -386,12 +391,13 @@ begin
                 when WAIT_TX_EN_HIGH =>
                     if tx_en_sync = '1' then
                         audio_packet_tx_start_o <= '0';
-                        tx_state <= WAIT_TX_EN_LOW;
+                        tx_state <= WAIT_TX_BUSY_LOW;
                     end if;
 
-                when WAIT_TX_EN_LOW =>
-                    if tx_en_sync = '0' then
+                when WAIT_TX_BUSY_LOW =>
+                    if tx_busy_sync = '0' then
                         tx_state <= IDLE;
+                        fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr)))) <= fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr)))) + 1;
                     end if;
 
             end case;

@@ -217,6 +217,7 @@ begin
     begin
         if rising_edge(sys_clk) then
             data0_out <= sample_ram(to_integer(read0Addr));
+            -- sample_ram(to_integer(read0Addr)) <= (others => '0');
         end if;
     end process;
 

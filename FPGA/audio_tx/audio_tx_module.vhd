@@ -66,6 +66,7 @@ GENERIC (bytes_per_sample : INTEGER;
 		 config_wr_en_i : IN STD_LOGIC;
 		 sample_ready_i : IN STD_LOGIC;
 		 tx_en_i : IN STD_LOGIC;
+		 tx_busy_i : IN STD_LOGIC;
 		 config_wr_clk_i : IN STD_LOGIC;
 		 config_wr_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 config_wr_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -78,7 +79,8 @@ GENERIC (bytes_per_sample : INTEGER;
 		 packet_time_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 sample_buffer_tx_start_addr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
 		 samples_per_packet_per_channel_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 ssrc_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+		 ssrc_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 sequence_id_o : OUT UNSIGNED(15 downto 0)
 	);
 END COMPONENT;
 
@@ -125,7 +127,8 @@ GENERIC (bytes_per_sample : INTEGER;
 		 tx_enable : OUT STD_LOGIC;
 		 tx_req_o : OUT STD_LOGIC;
 		 sample_ram_read_addr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 sequence_id_in : IN UNSIGNED(15 downto 0)
 	);
 END COMPONENT;
 
@@ -145,6 +148,8 @@ SIGNAL	tx_en_audiotx :  STD_LOGIC;
 SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC;
 SIGNAL	SYNTHESIZED_WIRE_1 :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 
+SIGNAL sequence_id : UNSIGNED(15 downto 0);
+
 
 BEGIN 
 
@@ -161,6 +166,7 @@ PORT MAP(sys_clk_i => sys_clk,
 		 config_wr_en_i => cfg_wr_en_i,
 		 sample_ready_i => sample_ready,
 		 tx_en_i => tx_en_audiotx,
+		 tx_busy_i => mac_tx_busy,
 		 config_wr_clk_i => fmc_clk,
 		 config_wr_addr_i => cfg_wr_addr_i,
 		 config_wr_data_i => cfg_wr_data_i,
@@ -173,7 +179,8 @@ PORT MAP(sys_clk_i => sys_clk,
 		 packet_time_o => packet_time,
 		 sample_buffer_tx_start_addr_o => sample_buffer_start_addr,
 		 samples_per_packet_per_channel_o => samples_per_packet_per_ch,
-		 ssrc_o => ssrc);
+		 ssrc_o => ssrc,
+		 sequence_id_o => sequence_id);
 
 
 b2v_tx_sample_buffer : tx_sample_buffer
@@ -218,7 +225,8 @@ PORT MAP(sys_clk => sys_clk,
 		 tx_enable => tx_en_audiotx,
 		 tx_req_o => audio_allow_req,
 		 sample_ram_read_addr_o => sample_ram_read_addr,
-		 tx_data => tx_data_audiotx);
+		 tx_data => tx_data_audiotx,
+		 sequence_id_in => sequence_id);
 
 tx_en_o <= tx_en_audiotx;
 tx_req_o <= audio_allow_req;

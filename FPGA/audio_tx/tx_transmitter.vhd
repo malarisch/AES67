@@ -29,6 +29,7 @@ entity tx_transmitter is
 		
 		
 		sample_counter			: in std_logic_vector(31 downto 0) := (others => '0');
+		sequence_id_in			: in unsigned(15 downto 0) := (others => '0');
 		
 		tx_enable				: out std_logic := '0';  -- TX valid
 		tx_data					: out std_logic_vector(7 downto 0) := (others => '0'); -- data-octet
@@ -94,8 +95,7 @@ architecture Behavioral of tx_transmitter is
 	) return std_logic_vector is
 		--constant total_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
 		--constant udp_length	: std_logic_vector(15 downto 0) := std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16));
-		constant pkt_cnt	: std_logic_vector(15 downto 0) := std_logic_vector(packet_ctr);
-		constant smpl_cnt : std_logic_vector(31 downto 0) := std_logic_vector(sample_ctr);
+
 	begin
 		case idx is
 		
@@ -120,8 +120,8 @@ architecture Behavioral of tx_transmitter is
 			when 15=> return x"00";
 			when 16=> return total_length(15 downto 8);
 			when 17=> return total_length(7 downto 0);
-			when 18=> return pkt_cnt(15 downto 8);
-			when 19=> return pkt_cnt(7 downto 0);
+			when 18=> return STD_LOGIC_VECTOR(packet_ctr(15 downto 8));
+			when 19=> return STD_LOGIC_VECTOR(packet_ctr(7 downto 0));
 			when 20=> return x"00";
 			when 21=> return x"00";
 			when 22=> return x"80";
@@ -158,15 +158,15 @@ architecture Behavioral of tx_transmitter is
 			when 43=> return x"61";
 			
 			-- packet counter (2 bytes, big-endian)
-			when 44=> return pkt_cnt(15 downto 8);
-			when 45=> return pkt_cnt(7 downto 0);
+			when 44=> return STD_LOGIC_VECTOR(packet_ctr(15 downto 8));
+			when 45=> return STD_LOGIC_VECTOR(packet_ctr(7 downto 0));
 
 			-- sample counter (4 bytes, big-endian)
 			
-			when  46=> return smpl_cnt(31 downto 24);
-			when  47=> return smpl_cnt(23 downto 16);
-			when  48=> return smpl_cnt(15 downto 8);
-			when  49=> return smpl_cnt(7 downto 0);
+			when  46=> return sample_ctr(31 downto 24);
+			when  47=> return sample_ctr(23 downto 16);
+			when  48=> return sample_ctr(15 downto 8);
+			when  49=> return sample_ctr(7 downto 0);
 			-- ssrc
 			when 50=> return ssrc(31 downto 24);
 			when 51=> return ssrc(23 downto 16);
@@ -217,7 +217,7 @@ architecture Behavioral of tx_transmitter is
 
 	attribute ram_style of packet_ram : signal is "block";
 
-	signal frame_start		: std_logic := '0';
+
 
 	-- True dual-port RAM signals: Port A (sys_clk) for write + checksum read, Port B (tx_clk) for TX read
 	signal asm_rd_addr		: integer range 0 to 1518 - 1 := 0;
@@ -234,8 +234,7 @@ architecture Behavioral of tx_transmitter is
 	signal tx_bytes_remaining	: integer range 0 to 1518 := 0;
 	signal tx_read_pointer	: integer range 0 to 1518 := 0;
 
-	signal packet_counter		: unsigned(15 downto 0) := to_unsigned(1, 16);
-
+	
 	signal ip_checksum_acc	: unsigned(31 downto 0) := (others => '0');
 	signal ip_checksum_upper_byte	: std_logic_vector(7 downto 0) := (others => '0');
 	signal ip_checksum_byte_phase	: std_logic := '0';
@@ -358,8 +357,6 @@ begin
 						checksum_write_index <= 0;
 
 
-						packet_counter <= packet_counter + 1;
-
 						-- ===== IP CHECKSUM PIPELINE STAGE 1 =====
 						-- Split 8-way addition into two stages to meet timing
 						-- Stage 1: Compute partial sums (src_ip + 0x8011) and (dst_ip)
@@ -392,7 +389,7 @@ begin
 					ip_checksum_acc <= ip_checksum_partial1 + ip_checksum_partial2 +
 						resize(to_unsigned(16#4500#, 16), 32) +
 						resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32) +
-						resize(packet_counter, 32);  -- already incremented in s_A_CalcValues
+						resize(sequence_id_in, 32);  -- already incremented in s_A_CalcValues
 					SM_AssemblePacket <= s_A_PrepFrame;
                         
                 when s_A_PrepFrame =>
@@ -402,7 +399,7 @@ begin
 					if (frame_write_index < PACKET_HEADER_LENGTH) then
 							
                         header_data := get_header_byte(frame_write_index, src_mac_address, src_ip_address, 
-                            dst_ip_address, packet_counter, sample_counter, samples_per_packet_per_channel_i,
+                            dst_ip_address, sequence_id_in, sample_counter, samples_per_packet_per_channel_i,
                             channel_count_i, ssrc_i, std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)), 
                             std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)));
 

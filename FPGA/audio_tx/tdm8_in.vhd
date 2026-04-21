@@ -104,13 +104,7 @@ begin
       fsync_prev <= FSYNC;
 
       if (FSYNC = '1' and fsync_prev = '0') then
-        -- Frame start: if previous frame was active, store last slot
-        if (frame_active = '1') then
-          ch_data(slot_count) <= shift_reg;
-          data_rdy_int <= '1';
-        end if;
-
-        -- Start new frame: sample first bit (MSB of channel 0) on this edge
+        -- Frame start: sample first bit (MSB of channel 0) on this edge
         frame_active <= '1';
         slot_count   <= 0;
         bit_count    <= 1;
@@ -133,8 +127,11 @@ begin
 
           if (slot_count < 7) then
             slot_count <= slot_count + 1;
+          else
+            -- Slot 7 just captured: full frame complete
+            data_rdy_int <= '1';
+            frame_active <= '0';
           end if;
-          -- slot 7 completion is handled at next FSYNC edge
         else
           bit_count <= bit_count + 1;
         end if;
