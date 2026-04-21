@@ -35,14 +35,14 @@ extern "C" {
 #define FPGA_HAL_ETH_LINK_UP         BIT(8)
 #define FPGA_HAL_ETH_SPEED_MASK      (BIT(9) | BIT(10))
 #define FPGA_HAL_ETH_SPEED_SHIFT     9
+#define FPGA_HAL_PTP_IS_LEADER       BIT(11)
+#define FPGA_HAL_PTP_IS_FOLLOWER     BIT(12)
 
 /* ---- Control flags (backend-independent) ---- */
 #define FPGA_HAL_CTRL_PPB_START       BIT(0)
 #define FPGA_HAL_CTRL_RESET_WALLCLOCK BIT(1)
 #define FPGA_HAL_CTRL_RESET_PTP       BIT(2)
 #define FPGA_HAL_CTRL_RESET_ETHERNET  BIT(3)
-#define FPGA_HAL_CTRL_PTP_IS_LEADER   BIT(4)
-#define FPGA_HAL_CTRL_PTP_IS_FOLLOWER BIT(5)
 
 /**
  * @brief Callback type for FPGA recovery events.
@@ -114,15 +114,24 @@ int fpga_hal_write_ip(const struct in_addr *ip);
 /**
  * @brief Write PTP configuration to the FPGA.
  *
- * @param leader_clock_id        8-byte leader clock identity (big-endian).
+ * The leader clock identity is selected by the on-FPGA BMA and is
+ * read back via fpga_hal_read_ptp_leader_id().
+ *
  * @param time_source            PTP time source (IEEE 1588 enum).
  * @param log_msg_interval       logMessageInterval for Sync (signed).
  * @param log_announce_interval  logAnnounceInterval (signed).
  */
-int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
-			      uint8_t time_source,
+int fpga_hal_write_ptp_config(uint8_t time_source,
 			      int8_t log_msg_interval,
 			      int8_t log_announce_interval);
+
+/**
+ * @brief Read the PTP leader clock identity selected by the FPGA BMA.
+ *
+ * @param leader_clock_id  Output: 8-byte clock identity (big-endian).
+ * @return true if a leader is selected (non-zero ID), false otherwise.
+ */
+bool fpga_hal_read_ptp_leader_id(uint8_t leader_clock_id[8]);
 
 /**
  * @brief Write PTP grandmaster quality fields to the FPGA.

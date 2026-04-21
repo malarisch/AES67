@@ -117,9 +117,9 @@ COMPONENT litex_soc
 		aes67_ctrl_ptp_gm_clock_class       : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		aes67_ctrl_ptp_gm_priority1         : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		aes67_ctrl_ptp_gm_priority2         : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_is_follower          : OUT STD_LOGIC;
-		aes67_ctrl_ptp_is_leader            : OUT STD_LOGIC;
-		aes67_ctrl_ptp_leader_id            : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
+		aes67_ctrl_ptp_is_follower          : IN  STD_LOGIC;
+		aes67_ctrl_ptp_is_leader            : IN  STD_LOGIC;
+		aes67_ctrl_ptp_leader_id            : IN  STD_LOGIC_VECTOR(63 DOWNTO 0);
 		aes67_ctrl_ptp_log_msg_interval     : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		aes67_ctrl_ptp_offset               : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		aes67_ctrl_ptp_path_delay           : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);

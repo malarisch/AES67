@@ -100,8 +100,8 @@ COMPONENT litex_soc
 		 aes67_ctrl_eth_tx_request : OUT STD_LOGIC;
 		 aes67_ctrl_meter_clear : OUT STD_LOGIC;
 		 aes67_ctrl_pll_ppb_start : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_follower : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_leader : OUT STD_LOGIC;
+		 aes67_ctrl_ptp_is_follower : IN STD_LOGIC;
+		 aes67_ctrl_ptp_is_leader : IN STD_LOGIC;
 		 eth_buf_rx_ack : OUT STD_LOGIC;
 		 hyperram_clk : OUT STD_LOGIC;
 		 hyperram_cs_n : OUT STD_LOGIC;
@@ -124,7 +124,7 @@ COMPONENT litex_soc
 		 aes67_ctrl_ptp_gm_clock_class : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_gm_priority1 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_gm_priority2 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_leader_id : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 aes67_ctrl_ptp_leader_id : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
 		 aes67_ctrl_ptp_log_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_time_source : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 eth_buf_tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -335,11 +335,11 @@ generic map(
 	ptp_clock_class_i           => ptp_clock_class,
 	ptp_gm_prioone_i            => ptp_gm_prioone,
 	ptp_gm_priotwo_i            => ptp_gm_priotwo,
-	ptp_current_leader_id_i     => ptp_current_leader_id,
+	ptp_current_leader_id_o     => ptp_current_leader_id,
 	ptp_log_message_interval_i  => ptp_log_message_interval,
 	ptp_time_source_i           => ptp_time_source,
-	ptp_is_follower_i           => ptp_is_follower,
-	ptp_is_leader_i             => ptp_is_leader,
+	ptp_is_follower_o           => ptp_is_follower,
+	ptp_is_leader_o             => ptp_is_leader,
 
 	-- status to SoC
 	ptp_sync_lost_o             => ptp_sync_lost,

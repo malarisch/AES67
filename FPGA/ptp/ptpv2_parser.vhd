@@ -49,8 +49,19 @@ entity ptpv2_parser is
         clock_configure_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0); 
         ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
         ptp_is_follower_i : in std_logic;
-        ptp_locked_i : in std_logic
+        ptp_locked_i : in std_logic;
 
+        -- Announce dataset outputs (for BMC)
+        announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
+        announce_clock_identity_o        : out std_logic_vector(63 downto 0);
+        announce_priority1_o             : out std_logic_vector(7 downto 0);
+        announce_clock_class_o           : out std_logic_vector(7 downto 0);
+        announce_clock_accuracy_o        : out std_logic_vector(7 downto 0);
+        announce_offset_scaled_log_var_o : out std_logic_vector(15 downto 0);
+        announce_priority2_o             : out std_logic_vector(7 downto 0);
+        announce_steps_removed_o         : out std_logic_vector(15 downto 0);
+        announce_time_source_o           : out std_logic_vector(7 downto 0);
+        announce_log_msg_interval_o      : out std_logic_vector(7 downto 0)
     );
 end entity;
 
@@ -347,6 +358,16 @@ begin
             offset_from_master_ns_o <= (others => '0');
             log_msg_interval_o <= (others => '0');
             log_msg_interval_valid_o <= '0';
+            announce_valid_o <= '0';
+            announce_clock_identity_o <= (others => '0');
+            announce_priority1_o <= (others => '0');
+            announce_clock_class_o <= (others => '0');
+            announce_clock_accuracy_o <= (others => '0');
+            announce_offset_scaled_log_var_o <= (others => '0');
+            announce_priority2_o <= (others => '0');
+            announce_steps_removed_o <= (others => '0');
+            announce_time_source_o <= (others => '0');
+            announce_log_msg_interval_o <= (others => '0');
 
             active_sequence_id := (others => '0');
             stored_t1_seconds <= (others => '0');
@@ -384,6 +405,7 @@ begin
             ptp_calc_valid_o <= '0';
             log_msg_interval_valid_o <= '0';
             configureClock <= '0';
+            announce_valid_o <= '0';
             
             
 
@@ -498,8 +520,12 @@ begin
                 end if;
 
             elsif (s_SM_PtpParser = s_Interpret_Packet) then
-                -- VERSION CHECK: Only accept PTPv2 packets
-                if ptp_version /= x"2" or (ptp_source_port_identity /= ptp_current_leader_id_i and is_leader = '0' and ptp_is_follower_i = '1') then
+                -- VERSION CHECK: Only accept PTPv2 packets.
+                -- Announce messages always pass through so the BMC can see all peers.
+                if ptp_version /= x"2" or
+                   (ptp_source_port_identity /= ptp_current_leader_id_i
+                    and is_leader = '0' and ptp_is_follower_i = '1'
+                    and ptp_message_type(3 downto 0) /= x"B") then
                     s_SM_PtpParser <= s_Done;
                 else
                     case ptp_message_type(3 downto 0) is
@@ -567,7 +593,19 @@ begin
                             end if;
                             
                         when x"A" => s_SM_PtpParser <= s_Done;  -- Pdelay_Resp_Follow_Up
-                        when x"B" => s_SM_PtpParser <= s_Done;  -- Announce
+                        when x"B" =>
+                            -- Announce: publish dataset to BMC
+                            announce_clock_identity_o        <= ptp_clock_identity;
+                            announce_priority1_o             <= ptp_announce_grandmaster_priority1;
+                            announce_clock_class_o           <= ptp_announce_grandmaster_clockClass;
+                            announce_clock_accuracy_o        <= ptp_announce_grandmaster_clockAccuracy;
+                            announce_offset_scaled_log_var_o <= ptp_announce_grandmaster_offset_scaled_log_variance;
+                            announce_priority2_o             <= ptp_announce_grandmaster_priority2;
+                            announce_steps_removed_o         <= ptp_announce_steps_removed;
+                            announce_time_source_o           <= ptp_announce_time_source;
+                            announce_log_msg_interval_o      <= ptp_log_msg_interval;
+                            announce_valid_o                 <= '1';
+                            s_SM_PtpParser <= s_Done;
                         when x"C" => s_SM_PtpParser <= s_Done;  -- Signaling
                         when x"D" => s_SM_PtpParser <= s_Done;  -- Management
                         when others => s_SM_PtpParser <= s_Done;

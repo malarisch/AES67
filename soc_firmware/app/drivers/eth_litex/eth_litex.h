@@ -48,11 +48,11 @@ extern "C" {
                                       << AES67_STATUS_ETH_SPEED_SHIFT)
 #define AES67_STATUS_ETH_TX_DONE    BIT(CSR_AES67_CSR_STATUS_ETH_TX_DONE_OFFSET)
 #define AES67_STATUS_ETH_RX_OVF     BIT(CSR_AES67_CSR_STATUS_ETH_RX_OVERFLOW_OFFSET)
+#define AES67_STATUS_PTP_IS_LEADER  BIT(CSR_AES67_CSR_STATUS_PTP_IS_LEADER_OFFSET)
+#define AES67_STATUS_PTP_IS_FOLLOWER BIT(CSR_AES67_CSR_STATUS_PTP_IS_FOLLOWER_OFFSET)
 
 /* ---- Control register bit fields (CSR_AES67_CSR_CTRL) ---- */
 #define AES67_CTRL_PPB_START        BIT(CSR_AES67_CSR_CTRL_PLL_PPB_START_OFFSET)
-#define AES67_CTRL_PTP_IS_LEADER    BIT(CSR_AES67_CSR_CTRL_PTP_IS_LEADER_OFFSET)
-#define AES67_CTRL_PTP_IS_FOLLOWER  BIT(CSR_AES67_CSR_CTRL_PTP_IS_FOLLOWER_OFFSET)
 #define AES67_CTRL_ETH_TX_REQUEST   BIT(CSR_AES67_CSR_CTRL_ETH_TX_REQUEST_OFFSET)
 #define AES67_CTRL_ADDA_NRST        BIT(CSR_AES67_CSR_CTRL_ADDA_NRST_OFFSET)
 
@@ -109,10 +109,19 @@ int eth_litex_write_ip(const struct device *dev, const struct in_addr *ip);
  * @brief Write PTP configuration to FPGA CSR registers.
  */
 int eth_litex_write_ptp_config(const struct device *dev,
-			       const uint8_t leader_clock_id[8],
 			       uint8_t time_source,
 			       int8_t log_msg_interval,
 			       int8_t log_announce_interval);
+
+/**
+ * @brief Read the PTP leader clock identity selected by the FPGA BMA.
+ *
+ * @param dev              Device pointer.
+ * @param leader_clock_id  Output: 8-byte clock identity (big-endian).
+ * @return true if a leader is selected (non-zero ID), false otherwise.
+ */
+bool eth_litex_read_ptp_leader_id(const struct device *dev,
+				  uint8_t leader_clock_id[8]);
 
 /**
  * @brief Write PTP grandmaster quality fields to FPGA CSR registers.

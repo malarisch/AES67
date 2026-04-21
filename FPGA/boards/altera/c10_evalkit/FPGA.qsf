@@ -71,6 +71,7 @@ set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_sender.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_servo.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_controller.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_bmc.vhd
 set_global_assignment -name VHDL_FILE ../../../audio_rx/i2s_out.vhd
 set_global_assignment -name VHDL_FILE ../../../audio_rx/rx_ringbuffer.vhd
 set_global_assignment -name VHDL_FILE ../../../eth_tx_arbiter.vhd

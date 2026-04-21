@@ -85,11 +85,11 @@ ENTITY aes67_top IS
 		ptp_clock_class_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_gm_prioone_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_gm_priotwo_i : IN STD_LOGIC_VECTOR(7 downto 0);
-		ptp_current_leader_id_i : IN STD_LOGIC_VECTOR(63 downto 0);
+		ptp_current_leader_id_o : OUT STD_LOGIC_VECTOR(63 downto 0);
 		ptp_log_message_interval_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		ptp_time_source_i : IN STD_LOGIC_VECTOR(7 downto 0);
-		ptp_is_follower_i : IN STD_LOGIC;
-		ptp_is_leader_i : IN STD_LOGIC;
+		ptp_is_follower_o : OUT STD_LOGIC;
+		ptp_is_leader_o : OUT STD_LOGIC;
 		ptp_sync_lost_o : OUT STD_LOGIC;
 		ptp_mean_path_delay_o : OUT STD_LOGIC_VECTOR(31 downto 0);
 		ptp_offset_from_master_o : OUT STD_LOGIC_VECTOR(31 downto 0);
@@ -291,11 +291,11 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ptp_clock_class => ptp_clock_class_i,
 		 ptp_clock_priorityone => ptp_gm_prioone_i,
 		 ptp_clock_prioritytwo => ptp_gm_priotwo_i,
-		 ptp_current_leader_id => ptp_current_leader_id_i,
+		 ptp_current_leader_id_o => ptp_current_leader_id_o,
 		 ptp_log_message_interval => ptp_log_message_interval_i,
 		 ptp_time_source => ptp_time_source_i,
-		ptp_is_follower => ptp_is_follower_i,
-		ptp_is_leader => ptp_is_leader_i,
+		ptp_is_follower_o => ptp_is_follower_o,
+		ptp_is_leader_o => ptp_is_leader_o,
 		 ptp_sync_lost => ptp_sync_lost_o,
 		 wallclock_locked => wallclock_locked_o,
 		 wallclock_configured => wallclock_configured_o,

@@ -11,6 +11,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include "fpga_hal.h"
 #include "../eth_litex/eth_litex.h"
@@ -68,8 +69,7 @@ int fpga_hal_write_ip(const struct in_addr *ip)
 	return eth_litex_write_ip(dev, ip);
 }
 
-int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
-			      uint8_t time_source,
+int fpga_hal_write_ptp_config(uint8_t time_source,
 			      int8_t log_msg_interval,
 			      int8_t log_announce_interval)
 {
@@ -78,8 +78,19 @@ int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
 	if (!dev) {
 		return -ENODEV;
 	}
-	return eth_litex_write_ptp_config(dev, leader_clock_id, time_source,
+	return eth_litex_write_ptp_config(dev, time_source,
 					  log_msg_interval, log_announce_interval);
+}
+
+bool fpga_hal_read_ptp_leader_id(uint8_t leader_clock_id[8])
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		memset(leader_clock_id, 0, 8);
+		return false;
+	}
+	return eth_litex_read_ptp_leader_id(dev, leader_clock_id);
 }
 
 int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
@@ -147,12 +158,6 @@ int fpga_hal_ctrl_set_bits(uint32_t bits)
 	if (bits & FPGA_HAL_CTRL_PPB_START) {
 		litex_bits |= AES67_CTRL_PPB_START;
 	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_LEADER) {
-		litex_bits |= AES67_CTRL_PTP_IS_LEADER;
-	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_FOLLOWER) {
-		litex_bits |= AES67_CTRL_PTP_IS_FOLLOWER;
-	}
 
 	return eth_litex_ctrl_set_bits(dev, litex_bits);
 }
@@ -169,12 +174,6 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits)
 
 	if (bits & FPGA_HAL_CTRL_PPB_START) {
 		litex_bits |= AES67_CTRL_PPB_START;
-	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_LEADER) {
-		litex_bits |= AES67_CTRL_PTP_IS_LEADER;
-	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_FOLLOWER) {
-		litex_bits |= AES67_CTRL_PTP_IS_FOLLOWER;
 	}
 
 	return eth_litex_ctrl_clear_bits(dev, litex_bits);
@@ -223,6 +222,12 @@ uint32_t fpga_hal_read_status(void)
 	}
 	if (raw & AES67_STATUS_ETH_LINK_UP) {
 		hal |= FPGA_HAL_ETH_LINK_UP;
+	}
+	if (raw & AES67_STATUS_PTP_IS_LEADER) {
+		hal |= FPGA_HAL_PTP_IS_LEADER;
+	}
+	if (raw & AES67_STATUS_PTP_IS_FOLLOWER) {
+		hal |= FPGA_HAL_PTP_IS_FOLLOWER;
 	}
 
 	/* Map speed field */

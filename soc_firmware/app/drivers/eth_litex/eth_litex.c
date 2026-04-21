@@ -128,34 +128,36 @@ int eth_litex_write_ip(const struct device *dev, const struct in_addr *ip)
 }
 
 int eth_litex_write_ptp_config(const struct device *dev,
-			       const uint8_t leader_clock_id[8],
 			       uint8_t time_source,
 			       int8_t log_msg_interval,
 			       int8_t log_announce_interval)
 {
 	ARG_UNUSED(dev);
 
-	/* leader_clock_id is 8 bytes in network (big-endian) order.
-	 * FPGA expects id_hi(31..0) = bytes 0..3, id_lo(31..0) = bytes 4..7,
-	 * each in big-endian bit order within the CSR register.
-	 * On a little-endian CPU, memcpy into uint32_t would byte-swap,
-	 * so we pack manually — same pattern as write_mac / write_ip. */
-	uint32_t id_hi = ((uint32_t)leader_clock_id[0] << 24) |
-			 ((uint32_t)leader_clock_id[1] << 16) |
-			 ((uint32_t)leader_clock_id[2] << 8) |
-			 (uint32_t)leader_clock_id[3];
-	uint32_t id_lo = ((uint32_t)leader_clock_id[4] << 24) |
-			 ((uint32_t)leader_clock_id[5] << 16) |
-			 ((uint32_t)leader_clock_id[6] << 8) |
-			 (uint32_t)leader_clock_id[7];
-
-	litex_csr_write(CSR_AES67_CSR_PTP_LEADER_ID_LO_ADDR, id_lo);
-	litex_csr_write(CSR_AES67_CSR_PTP_LEADER_ID_HI_ADDR, id_hi);
 	litex_csr_write(CSR_AES67_CSR_PTP_TIME_SOURCE_ADDR, time_source);
 	litex_csr_write(CSR_AES67_CSR_PTP_LOG_MSG_INTERVAL_ADDR, (uint8_t)log_msg_interval);
 	litex_csr_write(CSR_AES67_CSR_PTP_ANNOUNCE_MSG_INTERVAL_ADDR, (uint8_t)log_announce_interval);
 
 	return 0;
+}
+
+bool eth_litex_read_ptp_leader_id(const struct device *dev, uint8_t leader_clock_id[8])
+{
+	ARG_UNUSED(dev);
+
+	uint32_t id_lo = litex_csr_read(CSR_AES67_CSR_PTP_LEADER_ID_LO_ADDR);
+	uint32_t id_hi = litex_csr_read(CSR_AES67_CSR_PTP_LEADER_ID_HI_ADDR);
+
+	leader_clock_id[0] = (uint8_t)(id_hi >> 24);
+	leader_clock_id[1] = (uint8_t)(id_hi >> 16);
+	leader_clock_id[2] = (uint8_t)(id_hi >> 8);
+	leader_clock_id[3] = (uint8_t)(id_hi);
+	leader_clock_id[4] = (uint8_t)(id_lo >> 24);
+	leader_clock_id[5] = (uint8_t)(id_lo >> 16);
+	leader_clock_id[6] = (uint8_t)(id_lo >> 8);
+	leader_clock_id[7] = (uint8_t)(id_lo);
+
+	return (id_lo | id_hi) != 0;
 }
 
 int eth_litex_write_ptp_gm_quality(const struct device *dev,

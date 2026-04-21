@@ -31,8 +31,8 @@ ENTITY ptp_module IS
 		mac_tx_busy :  IN  STD_LOGIC;
 		mac_tx_byte_sent :  IN  STD_LOGIC;
 		parse_ptp_packet_tog :  IN  STD_LOGIC;
-		ptp_is_leader :  IN  STD_LOGIC;
-		ptp_is_follower :  IN  STD_LOGIC;
+		ptp_is_leader_o :  OUT  STD_LOGIC;
+		ptp_is_follower_o :  OUT  STD_LOGIC;
 		sof_recv_tog_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
 		mac_tx_allow_i :  IN  STD_LOGIC;
 		sof_sent_tog_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
@@ -44,7 +44,7 @@ ENTITY ptp_module IS
 		ptp_clock_class :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_clock_priorityone :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_clock_prioritytwo :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
-		ptp_current_leader_id :  IN  STD_LOGIC_VECTOR(63 DOWNTO 0);
+		ptp_current_leader_id_o : OUT  STD_LOGIC_VECTOR(63 DOWNTO 0);
 		ptp_log_message_interval :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_time_source :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		tx_en_ptpfu :  OUT  STD_LOGIC;
@@ -158,7 +158,41 @@ GENERIC (MIN_FILTER_DEPTH : INTEGER
 		 rx_follower_identity_o : OUT STD_LOGIC_VECTOR(79 DOWNTO 0);
 		 rx_timestamp_nanoseconds_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 rx_timestamp_seconds_o : OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 sequence_id_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
+		 sequence_id_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 announce_valid_o : OUT STD_LOGIC;
+		 announce_clock_identity_o : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 announce_priority1_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_clock_class_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_clock_accuracy_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_offset_scaled_log_var_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 announce_priority2_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_steps_removed_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 announce_time_source_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_log_msg_interval_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
+	);
+END COMPONENT;
+
+COMPONENT ptpv2_bmc
+	PORT(clk : IN STD_LOGIC;
+		 reset_n : IN STD_LOGIC;
+		 second_pulse_i : IN STD_LOGIC;
+		 my_clock_identity_i : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 my_priority1_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 my_clock_class_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 my_clock_accuracy_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 my_offset_scaled_log_var_i : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 my_priority2_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_valid_i : IN STD_LOGIC;
+		 announce_clock_identity_i : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 announce_priority1_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_clock_class_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_clock_accuracy_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_offset_scaled_log_var_i : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 announce_priority2_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 announce_log_msg_interval_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 is_leader_o : OUT STD_LOGIC;
+		 is_follower_o : OUT STD_LOGIC;
+		 current_leader_id_o : OUT STD_LOGIC_VECTOR(63 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -259,18 +293,53 @@ SIGNAL	wc_fs :  STD_LOGIC;
 
 SIGNAL tx_done_sys: STD_LOGIC := '0';
 
+-- BMC signals
+SIGNAL bmc_is_leader         : STD_LOGIC;
+SIGNAL bmc_is_follower       : STD_LOGIC;
+SIGNAL bmc_current_leader_id : STD_LOGIC_VECTOR(63 DOWNTO 0);
+SIGNAL my_clock_identity     : STD_LOGIC_VECTOR(63 DOWNTO 0);
 
-BEGIN 
+-- Effective selection inputs consumed by controller/parser: BMC output.
+SIGNAL eff_is_leader         : STD_LOGIC;
+SIGNAL eff_is_follower       : STD_LOGIC;
+SIGNAL eff_current_leader_id : STD_LOGIC_VECTOR(63 DOWNTO 0);
+
+-- Parser announce outputs
+SIGNAL ann_valid            : STD_LOGIC;
+SIGNAL ann_clock_identity   : STD_LOGIC_VECTOR(63 DOWNTO 0);
+SIGNAL ann_priority1        : STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL ann_clock_class      : STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL ann_clock_accuracy   : STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL ann_oslv             : STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL ann_priority2        : STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL ann_steps_removed    : STD_LOGIC_VECTOR(15 DOWNTO 0);
+SIGNAL ann_time_source      : STD_LOGIC_VECTOR(7 DOWNTO 0);
+SIGNAL ann_log_msg_interval : STD_LOGIC_VECTOR(7 DOWNTO 0);
 
 
+BEGIN
+
+-- EUI-64 clock identity from MAC (same mapping as ptpv2_parser)
+my_clock_identity <= (mac_address(47 downto 40) XOR x"02")
+                   & mac_address(39 downto 24)
+                   & x"FFFE"
+                   & mac_address(23 downto 0);
+
+eff_is_leader         <= bmc_is_leader;
+eff_is_follower       <= bmc_is_follower;
+eff_current_leader_id <= bmc_current_leader_id;
+
+ptp_is_leader_o <= bmc_is_leader;
+ptp_is_follower_o <= bmc_is_follower;
+ptp_current_leader_id_o <= bmc_current_leader_id;
 
 b2v_controller : ptpv2_controller
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 send_delay_resp_in => rx_send_delay_resp,
 		 second_pulse_i => second_pulse_sys_ALTERA_SYNTHESIZED,
-		 is_leader_i => ptp_is_leader,
-		 is_follower_i => ptp_is_follower,
+		 is_leader_i => eff_is_leader,
+		 is_follower_i => eff_is_follower,
 		 tx_en_i => tx_en_ptpfu_ALTERA_SYNTHESIZED,
 		 send_delay_req_i => rx_send_delay_req,
 		 sof_sent_tog_i => sof_sent_tog_i,
@@ -294,7 +363,7 @@ PORT MAP(clk => sys_clk,
 		 parser_log_msg_interval_i => STD_LOGIC_VECTOR(log_msg_interval));
 
 
-wallclock_locked <= ptp_is_leader OR ptp_locked_ALTERA_SYNTHESIZED;
+wallclock_locked <= eff_is_leader OR ptp_locked_ALTERA_SYNTHESIZED;
 
 
 b2v_pptx : ptpv2_sender
@@ -328,12 +397,12 @@ GENERIC MAP(MIN_FILTER_DEPTH => 3
 			)
 PORT MAP(clk => sys_clk,
 		 parse_ptp_packet_tog => parse_ptp_packet_tog,
-		 is_leader => ptp_is_leader,
+		 is_leader => eff_is_leader,
 		 reset_n => powerGood,
 		 t3_valid_i => tx_t3_valid,
-		 ptp_is_follower_i => ptp_is_follower,
+		 ptp_is_follower_i => eff_is_follower,
 		 ptp_locked_i => ptp_locked_ALTERA_SYNTHESIZED,
-		 ptp_current_leader_id_i => ptp_current_leader_id,
+		 ptp_current_leader_id_i => eff_current_leader_id,
 		 ram_data => mac_ram_data,
 		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
 		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
@@ -355,7 +424,40 @@ PORT MAP(clk => sys_clk,
 		 rx_follower_identity_o => rx_follower_identity,
 		 rx_timestamp_nanoseconds_o => rx_ts_ns,
 		 rx_timestamp_seconds_o => rx_ts_s,
-		 sequence_id_o => rx_sequence_id);
+		 sequence_id_o => rx_sequence_id,
+		 announce_valid_o => ann_valid,
+		 announce_clock_identity_o => ann_clock_identity,
+		 announce_priority1_o => ann_priority1,
+		 announce_clock_class_o => ann_clock_class,
+		 announce_clock_accuracy_o => ann_clock_accuracy,
+		 announce_offset_scaled_log_var_o => ann_oslv,
+		 announce_priority2_o => ann_priority2,
+		 announce_steps_removed_o => ann_steps_removed,
+		 announce_time_source_o => ann_time_source,
+		 announce_log_msg_interval_o => ann_log_msg_interval);
+
+
+b2v_bmc : ptpv2_bmc
+PORT MAP(clk => sys_clk,
+		 reset_n => powerGood,
+		 second_pulse_i => second_pulse_sys_ALTERA_SYNTHESIZED,
+		 my_clock_identity_i => my_clock_identity,
+		 my_priority1_i => ptp_clock_priorityone,
+		 my_clock_class_i => ptp_clock_class,
+		 my_clock_accuracy_i => ptp_clock_accuracy,
+		 my_offset_scaled_log_var_i => x"FFFF",
+		 my_priority2_i => ptp_clock_prioritytwo,
+		 announce_valid_i => ann_valid,
+		 announce_clock_identity_i => ann_clock_identity,
+		 announce_priority1_i => ann_priority1,
+		 announce_clock_class_i => ann_clock_class,
+		 announce_clock_accuracy_i => ann_clock_accuracy,
+		 announce_offset_scaled_log_var_i => ann_oslv,
+		 announce_priority2_i => ann_priority2,
+		 announce_log_msg_interval_i => ann_log_msg_interval,
+		 is_leader_o => bmc_is_leader,
+		 is_follower_o => bmc_is_follower,
+		 current_leader_id_o => bmc_current_leader_id);
 
 
 b2v_rx_tsu : ethernet_timestamp

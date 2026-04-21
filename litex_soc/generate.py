@@ -228,13 +228,14 @@ _io_common = [
         Subsignal("ptp_offset",         Pins(32)),
         Subsignal("eth_tx_done",        Pins(1)),
         Subsignal("eth_rx_overflow",    Pins(1)),
-        # Outputs (SoC -> external FPGA logic)
-        Subsignal("pll_ppb_start",      Pins(1)),
+        # PTP BMA results (FPGA -> SoC, read-only status)
         Subsignal("ptp_is_leader",      Pins(1)),
         Subsignal("ptp_is_follower",    Pins(1)),
+        Subsignal("ptp_leader_id",      Pins(64)),
+        # Outputs (SoC -> external FPGA logic)
+        Subsignal("pll_ppb_start",      Pins(1)),
         Subsignal("mac_addr",           Pins(48)),
         Subsignal("ip_addr",            Pins(32)),
-        Subsignal("ptp_leader_id",      Pins(64)),
         Subsignal("ptp_time_source",    Pins(8)),
         Subsignal("ptp_log_msg_interval", Pins(8)),
         Subsignal("ptp_announce_msg_interval", Pins(8)),
@@ -584,6 +585,10 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.i_ptp_offset          = Signal(32)
         self.i_eth_tx_done         = Signal()
         self.i_eth_rx_overflow     = Signal()
+        # PTP BMA results (from FPGA BMC)
+        self.i_ptp_is_leader       = Signal()
+        self.i_ptp_is_follower     = Signal()
+        self.i_ptp_leader_id       = Signal(64)
         self.i_rx_meter_signal     = Signal(16)
         self.i_rx_meter_clip       = Signal(16)
         self.i_tx_meter_signal     = Signal(16)
@@ -593,11 +598,8 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # Output signals (directly active to external FPGA logic)
         # =====================================================================
         self.o_pll_ppb_start       = Signal()
-        self.o_ptp_is_leader       = Signal()
-        self.o_ptp_is_follower     = Signal()
         self.o_mac_addr            = Signal(48)
         self.o_ip_addr             = Signal(32)
-        self.o_ptp_leader_id       = Signal(64)
         self.o_ptp_time_source     = Signal(8)
         self.o_ptp_log_msg_interval = Signal(8)
         self.o_ptp_announce_msg_interval = Signal(8)
@@ -627,6 +629,8 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("eth_speed",           size=2, offset=5, description="Ethernet speed (00=10M,01=100M,10=1G)"),
             CSRField("eth_tx_done",         size=1, offset=7, description="Ethernet TX done"),
             CSRField("eth_rx_overflow",     size=1, offset=8, description="Ethernet RX overflow"),
+            CSRField("ptp_is_leader",       size=1, offset=9, description="PTP BMA result: node is leader"),
+            CSRField("ptp_is_follower",     size=1, offset=10, description="PTP BMA result: node is follower"),
         ])
 
         self.ptp_path_delay = CSRStatus(32, description="PTP path delay (ns)")
@@ -637,8 +641,6 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # =====================================================================
         self.ctrl = CSRStorage(32, fields=[
             CSRField("pll_ppb_start",   size=1, offset=0, description="Start PPB measurement"),
-            CSRField("ptp_is_leader",   size=1, offset=1, description="PTP leader mode"),
-            CSRField("ptp_is_follower", size=1, offset=2, description="PTP follower mode"),
             CSRField("eth_tx_request",  size=1, offset=3, description="Request Ethernet TX"),
             CSRField("adda_nrst",       size=1, offset=4, description="AD/DA card reset release: 0=held in reset, 1=released"),
         ])
@@ -647,8 +649,8 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.mac_addr_hi = CSRStorage(32, description="MAC address [47:32] (bits [15:0] used)")
         self.ip_addr     = CSRStorage(32, description="IP address [31:0]")
 
-        self.ptp_leader_id_lo = CSRStorage(32, description="PTP leader identity [31:0]")
-        self.ptp_leader_id_hi = CSRStorage(32, description="PTP leader identity [63:32]")
+        self.ptp_leader_id_lo = CSRStatus(32, description="PTP leader identity [31:0] (from FPGA BMA)")
+        self.ptp_leader_id_hi = CSRStatus(32, description="PTP leader identity [63:32] (from FPGA BMA)")
 
         self.ptp_time_source = CSRStorage(8, description="PTP time source")
         self.ptp_log_msg_interval = CSRStorage(8, description="PTP logMessageInterval")
@@ -687,9 +689,14 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.status.fields.eth_speed.eq(self.i_eth_speed),
             self.status.fields.eth_tx_done.eq(self.i_eth_tx_done),
             self.status.fields.eth_rx_overflow.eq(self.i_eth_rx_overflow),
+            self.status.fields.ptp_is_leader.eq(self.i_ptp_is_leader),
+            self.status.fields.ptp_is_follower.eq(self.i_ptp_is_follower),
 
             self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
             self.ptp_offset.status.eq(self.i_ptp_offset),
+
+            self.ptp_leader_id_lo.status.eq(self.i_ptp_leader_id[:32]),
+            self.ptp_leader_id_hi.status.eq(self.i_ptp_leader_id[32:]),
 
             self.rx_meter_signal.status.eq(self.i_rx_meter_signal),
             self.rx_meter_clip.status.eq(self.i_rx_meter_clip),
@@ -702,8 +709,6 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # =====================================================================
         self.comb += [
             self.o_pll_ppb_start.eq(self.ctrl.fields.pll_ppb_start),
-            self.o_ptp_is_leader.eq(self.ctrl.fields.ptp_is_leader),
-            self.o_ptp_is_follower.eq(self.ctrl.fields.ptp_is_follower),
             self.o_eth_tx_request.eq(self.ctrl.fields.eth_tx_request),
             self.o_adda_nrst.eq(self.ctrl.fields.adda_nrst),
             self.o_meter_clear.eq(self.meter_clear.storage),
@@ -711,7 +716,6 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_mac_addr.eq(Cat(self.mac_addr_lo.storage, self.mac_addr_hi.storage[:16])),
             self.o_ip_addr.eq(self.ip_addr.storage),
 
-            self.o_ptp_leader_id.eq(Cat(self.ptp_leader_id_lo.storage, self.ptp_leader_id_hi.storage)),
             self.o_ptp_time_source.eq(self.ptp_time_source.storage),
             self.o_ptp_log_msg_interval.eq(self.ptp_log_msg_interval.storage),
             self.o_ptp_announce_msg_interval.eq(self.ptp_announce_msg_interval.storage),
@@ -1152,17 +1156,17 @@ class AES67SoC(SoCCore):
             self.aes67_csr.i_ptp_offset.eq(aes67_pads.ptp_offset),
             self.aes67_csr.i_eth_tx_done.eq(aes67_pads.eth_tx_done),
             self.aes67_csr.i_eth_rx_overflow.eq(aes67_pads.eth_rx_overflow),
+            self.aes67_csr.i_ptp_is_leader.eq(aes67_pads.ptp_is_leader),
+            self.aes67_csr.i_ptp_is_follower.eq(aes67_pads.ptp_is_follower),
+            self.aes67_csr.i_ptp_leader_id.eq(aes67_pads.ptp_leader_id),
             self.aes67_csr.i_rx_meter_signal.eq(aes67_pads.rx_meter_signal),
             self.aes67_csr.i_rx_meter_clip.eq(aes67_pads.rx_meter_clip),
             self.aes67_csr.i_tx_meter_signal.eq(aes67_pads.tx_meter_signal),
             self.aes67_csr.i_tx_meter_clip.eq(aes67_pads.tx_meter_clip),
             # Outputs: CSR -> pads
             aes67_pads.pll_ppb_start.eq(self.aes67_csr.o_pll_ppb_start),
-            aes67_pads.ptp_is_leader.eq(self.aes67_csr.o_ptp_is_leader),
-            aes67_pads.ptp_is_follower.eq(self.aes67_csr.o_ptp_is_follower),
             aes67_pads.mac_addr.eq(self.aes67_csr.o_mac_addr),
             aes67_pads.ip_addr.eq(self.aes67_csr.o_ip_addr),
-            aes67_pads.ptp_leader_id.eq(self.aes67_csr.o_ptp_leader_id),
             aes67_pads.ptp_time_source.eq(self.aes67_csr.o_ptp_time_source),
             aes67_pads.ptp_log_msg_interval.eq(self.aes67_csr.o_ptp_log_msg_interval),
             aes67_pads.ptp_announce_msg_interval.eq(self.aes67_csr.o_ptp_announce_msg_interval),

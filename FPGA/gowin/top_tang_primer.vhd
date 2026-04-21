@@ -245,8 +245,8 @@ COMPONENT litex_soc
 		 aes67_ctrl_eth_tx_request : OUT STD_LOGIC;
 		 aes67_ctrl_meter_clear : OUT STD_LOGIC;
 		 aes67_ctrl_pll_ppb_start : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_follower : OUT STD_LOGIC;
-		 aes67_ctrl_ptp_is_leader : OUT STD_LOGIC;
+		 aes67_ctrl_ptp_is_follower : IN STD_LOGIC;
+		 aes67_ctrl_ptp_is_leader : IN STD_LOGIC;
 		 eth_buf_rx_ack : OUT STD_LOGIC;
 		 ddram_a : OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
 		 ddram_ba : OUT STD_LOGIC_VECTOR(2 DOWNTO 0);
@@ -278,7 +278,7 @@ COMPONENT litex_soc
 		 aes67_ctrl_ptp_gm_clock_class : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_gm_priority1 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_gm_priority2 : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 aes67_ctrl_ptp_leader_id : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
+		 aes67_ctrl_ptp_leader_id : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
 		 aes67_ctrl_ptp_log_msg_interval : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_ptp_time_source : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 eth_buf_tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);

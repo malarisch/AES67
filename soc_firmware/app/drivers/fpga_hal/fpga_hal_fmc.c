@@ -10,6 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include "fpga_hal.h"
 #include "../eth_fmc_basic/eth_fmc_basic.h"
@@ -83,18 +84,27 @@ int fpga_hal_write_ip(const struct in_addr *ip)
 				 (const uint8_t *)&ip->s_addr, 4);
 }
 
-int fpga_hal_write_ptp_config(const uint8_t leader_clock_id[8],
-			      uint8_t time_source,
+int fpga_hal_write_ptp_config(uint8_t time_source,
 			      int8_t log_msg_interval,
 			      int8_t log_announce_interval)
 {
 	const struct device *dev = fpga_hal_get_dev();
+	static const uint8_t zero_id[8] = {0};
 
 	if (!dev) {
 		return -ENODEV;
 	}
-	return eth_fmc_write_ptp_config(dev, leader_clock_id, time_source,
+	/* Legacy FMC backend signature still takes a leader_clock_id; pass zeros
+	 * since the FPGA BMA now owns leader selection. */
+	return eth_fmc_write_ptp_config(dev, zero_id, time_source,
 					log_msg_interval, log_announce_interval);
+}
+
+bool fpga_hal_read_ptp_leader_id(uint8_t leader_clock_id[8])
+{
+	/* FMC backend has no readback for FPGA-selected leader ID. */
+	memset(leader_clock_id, 0, 8);
+	return false;
 }
 
 int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
@@ -169,13 +179,6 @@ int fpga_hal_ctrl_set_bits(uint32_t bits)
 	if (bits & FPGA_HAL_CTRL_RESET_ETHERNET) {
 		fmc_bits |= ETH_FMC_FLAG_RESET_ETHERNET;
 	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_LEADER) {
-		fmc_bits |= ETH_FMC_FLAG_PTP_IS_LEADER;
-	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_FOLLOWER) {
-		fmc_bits |= ETH_FMC_FLAG_PTP_IS_FOLLOWER;
-	}
-
 	return eth_fmc_status_set_bits(dev, fmc_bits);
 }
 
@@ -201,13 +204,6 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits)
 	if (bits & FPGA_HAL_CTRL_RESET_ETHERNET) {
 		fmc_bits |= ETH_FMC_FLAG_RESET_ETHERNET;
 	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_LEADER) {
-		fmc_bits |= ETH_FMC_FLAG_PTP_IS_LEADER;
-	}
-	if (bits & FPGA_HAL_CTRL_PTP_IS_FOLLOWER) {
-		fmc_bits |= ETH_FMC_FLAG_PTP_IS_FOLLOWER;
-	}
-
 	return eth_fmc_status_clear_bits(dev, fmc_bits);
 }
 
