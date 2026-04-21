@@ -164,6 +164,9 @@ begin
             byte_count <= 0;
             wr_ready_o <= '0';
             wr_ready_pending <= '0';
+            ram_wr_en <= '0';
+            ram_wr_data <= (others => '0');
+            ram_wr_addr <= 0;
         elsif rising_edge(sys_clk) then
             
             -- Delay wr_ready by 1 clock: wr_ready_pending -> wr_ready_o

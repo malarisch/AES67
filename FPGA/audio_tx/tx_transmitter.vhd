@@ -675,6 +675,7 @@ begin
 					if (tx_byte_sent = '1') then
 						if (tx_bytes_remaining = 0) then
 							s_SM_Ethernet <= s_End;
+							tx_enable <= '0';
 						else
 							tx_data <= tx_rd_data;
 							if (tx_read_pointer < PACKET_LENGTH) then

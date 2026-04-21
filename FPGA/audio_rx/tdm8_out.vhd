@@ -87,15 +87,17 @@ begin
 
 
       if (FSYNC = '1' and z_fsync = '0') then
-        -- Frame start
-
-        shift_reg <= pad32(DIN(width - 1 downto 0));
+        -- Frame start: drive MSB of slot 0 directly, and pre-shift the shift
+        -- register by one bit so the next falling edge drives bit (width-2),
+        -- not (width-1) again. Without the pre-shift the MSB would be
+        -- duplicated on slot 0 only (slots 1-7 pre-load at bit 31 of the
+        -- previous slot and therefore do not exhibit this off-by-one).
+        shift_reg                     <= (others => '0');
+        shift_reg(31 downto 33 - width) <= DIN(width - 2 downto 0);
         DOUT      <= DIN(width - 1);
         bit_count <= to_unsigned(1, 8);
         running   <= '1';
-      end if;
-      
-      if (running = '1') then
+      elsif (running = '1') then
         -- Shift out current MSB
         DOUT      <= shift_reg(31);
         shift_reg <= shift_reg(30 downto 0) & '0';
