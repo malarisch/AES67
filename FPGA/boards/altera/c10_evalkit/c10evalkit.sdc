@@ -52,28 +52,21 @@ create_generated_clock -name {litex_sys_clk} \
     [get_pins {litex_soc_inst|ALTPLL|auto_generated|pll1|clk[0]}]
 
 # RGMII TX PLL (rgmiiclks_inst) output clk[0]: 125 MHz TX internal clock
-create_generated_clock -name {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]} \
+create_generated_clock -name {rgmii_rx_pll} \
     -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
     -duty_cycle 50.00 -multiply_by 1 -divide_by 1 \
     -master_clock {enet_clk_125m} \
     [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}]
 
 # RGMII TX PLL (rgmiiclks_inst) output clk[1]: 125 MHz with 90° phase shift (for DDR TX timing)
-create_generated_clock -name {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]} \
+create_generated_clock -name {rgmii_tx_pll} \
     -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
     -duty_cycle 50.00 -multiply_by 1 -divide_by 1 \
     -phase 90.0 \
     -master_clock {enet_clk_125m} \
     [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}]
 
-# MAC TX clock: routed out of ethernet_top to drive tx_transmitter and other TX-domain logic.
-# Frequency/phase identical to rgmiiclks_inst clk[0]; declared as generated clock so
-# TimeQuest sees an 8 ns intra-domain period instead of falling back to a PLL-internal
-# relationship (which previously caused spurious 4 ns launch-to-latch analysis).
-create_generated_clock -name {mac_tx_clock} \
-    -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}] \
-    -master_clock {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]} \
-    [get_nets {*mac_tx_clock*}]
+
 
 
 source ../../../sdc/audioclocks.sdc
@@ -97,7 +90,7 @@ set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
+    -group [get_clocks {enet_clk_125m rgmii_rx_pll rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
     -group [get_clocks {enet_rx_clk_125m}]
 
 
@@ -111,102 +104,6 @@ set_false_path -from * -to [get_ports {enet_mdio}]
 set_false_path -from [get_ports {enet_mdio}] -to *
 set_false_path -from * -to [get_ports {enet_resetn}]
 
-# --- CDC synchronizers in PTP logic (inside ptp_module ptp_inst) ---
-set_false_path -from [get_registers {*ptp_inst|b2v_pptx|tx_enable}] -to [get_registers {*ptp_inst|b2v_controller|tx_en_i_meta}]
-set_false_path -to [get_registers {*ptp_inst|b2v_ptpparser|parse_ptp_packet_meta}]
-
-# --- PTP is_leader/is_follower: litex_sys_clk -> sys_clk_125m ---
-# Slow-changing configuration signals from LiteX SoC CSR to PTP modules
-set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_controller|*}]
-set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_ptpparser|*}]
-
-# --- tx_router threshold_shadow CDC (config_wr_clk -> sys_clk) ---
-# threshold_shadow is written once at boot during stream setup from
-# config_wr_clk domain and read in sys_clk sample counting logic.
-# Single-write, static thereafter — no bus-consistency requirement.
-set_false_path -from [get_registers {*audiotx_inst|b2v_tx_router|threshold_shadow[*][*]}]
-
-# --- tx_router tx_en CDC (tx_transmitter domain -> sys_clk) ---
-set_false_path -to [get_registers {*audiotx_inst|b2v_tx_router|tx_en_meta}]
-
-# --- LiteX SoC reset signals - static during normal operation ---
-set_false_path -from [get_registers {*aes67soc_reset_storage*}] -to *
-set_false_path -from [get_registers {*aes67soc_reset_re*}] -to *
-
-# --- LiteX SoC CSR registers crossing to FPGA logic domains ---
-# All aes67_csr_* storage registers live in litex_sys_clk (80 MHz) and
-# drive signals consumed in sys_clk_125m, enet_rx_clk, or audio_mclk domains.
-# CDC is handled by 2-FF synchronizers in the FPGA logic.
-
-# Control register (pll_ppb_start, ptp_is_leader, ptp_is_follower, eth_tx_request)
-set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}]
-
-# Static configuration registers
-set_false_path -from [get_registers {*aes67_csr_mac_addr*storage*}]
-set_false_path -from [get_registers {*aes67_csr_ip_addr*storage*}]
-set_false_path -from [get_registers {*aes67_csr_ptp_leader_id*storage*}]
-set_false_path -from [get_registers {*aes67_csr_ptp_announce*storage*}]
-set_false_path -from [get_registers {*aes67_csr_ptp_log*storage*}]
-set_false_path -from [get_registers {*aes67_csr_ptp_time_source*storage*}]
-
-# Stream config RAM write signals: litex_sys_clk -> FPGA logic
-# The StreamConfigRAM is a Wishbone slave (not a CSR), so its write signals are
-# driven directly from the SoC bus. The tx_router config_wr_clk_i is litex_sys_clk
-# and writes are slow (stream setup only). The shadow registers in tx_router are
-# covered by the async clock group separation (litex_sys_clk vs sys_clk_125m).
-
-# --- Ethernet packet buffer CDC (mac_rx/mac_tx <-> litex_sys_clk) ---
-# CDC handled by dual-port SRAM and synchronizers in LiteX EthPacketBuffer
-
-# litex_eth_buffer_bridge (litex_eth_inst): enet_rx_clk_125m -> litex_sys_clk
-set_false_path -from [get_registers {*litex_eth_inst|rx_overflow_reg*}]
-set_false_path -from [get_registers {*litex_eth_inst|rx_valid_reg*}]
-set_false_path -from [get_registers {*litex_eth_inst|buf_rx_len_o[*]}]
-
-# LiteX SoC internal RX buffer CDC synchronizers
-set_false_path -to [get_registers {*eth_buf_rx_valid_meta*}]
-set_false_path -to [get_registers {*eth_buf_rx_len_latched*}]
-
-# LiteX SoC TX buffer length and ack crossing litex_sys_clk -> mac_tx
-set_false_path -from [get_registers {*eth_buf_tx_len*storage*}]
-set_false_path -from [get_registers {*eth_buf_rx_ack*storage*}]
-
-# --- I/O port false paths (directly driven by LiteX SoC, no FPGA-side timing) ---
-# Serial UARTs
-set_false_path -from * -to [get_ports {arduino_io2}]
-set_false_path -from [get_ports {arduino_io1}] -to *
-#set_false_path -from * -to [get_ports {gpio4}]
-#set_false_path -from [get_ports {arduino_io3}] -to *
-
-# I2C (directly connected to LiteX SoC, open-drain, slow)
-set_false_path -from * -to [get_ports {i2c0_scl i2c0_sda}]
-set_false_path -from [get_ports {i2c0_scl i2c0_sda}] -to *
-set_false_path -from * -to [get_ports {i2c1_scl i2c1_sda}]
-set_false_path -from [get_ports {i2c1_scl i2c1_sda}] -to *
-
-# HyperRAM (LiteX SDR PHY, 4:1 ratio, all logic in litex_sys_clk domain)
-# Internal register-to-register timing is covered by litex_sys_clk (12.5ns).
-# I/O paths need max_delay constraints to ensure registers are placed in/near
-# I/O cells, preventing excessive routing delay that causes read data errors.
-#
-# Control signals (active before/after transfers, not timing-critical)
-set_false_path -from * -to [get_ports {hbus_rstn hbus_cs2n}]
-#
-# Clock output: must have minimal and matched skew between P/N
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_p}] 6.0
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_n}] 6.0
-#
-# DQ output: data must be stable before HyperRAM samples on hbus_clk edge
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_dq[*]}] 6.0
-#
-# DQ input: data from HyperRAM must meet setup to litex_sys_clk register
-set_max_delay -from [get_ports {hbus_dq[*]}] -to [get_clocks {litex_sys_clk}] 6.0
-#
-# RWDS output: strobe/mask timing during writes
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_rwds}] 6.0
-#
-# RWDS input: strobe edge detection must meet setup to litex_sys_clk
-set_max_delay -from [get_ports {hbus_rwds}] -to [get_clocks {litex_sys_clk}] 6.0
 
 # User LED
 set_false_path -from * -to [get_ports {user_led[*]}]
@@ -215,88 +112,14 @@ set_false_path -from * -to [get_ports {user_led[*]}]
 set_false_path -from [get_ports {c10_resetn}] -to *
 
 
+source ../../../sdc/hyperram.sdc
+source ../../../sdc/ptp.sdc
+source ../../../sdc/litex_csr.sdc
+
 #**************************************************************
 # Set Multicycle Path
 #**************************************************************
 
-# --- PTP ClockConfigurator FSM (ptpv2_parser clock_config_process) ---
-# The FSM inserts a wait cycle between each arithmetic step via
-# configure_wait_cycle, so the combinational chain feeding elapsed_ns, ns_sum,
-# and clock_configure_timestamp_*_o has 2 sys_clk_125m periods to settle.
-# Setup multicycle = 2, hold multicycle = 1 to keep hold analysis on the
-# original launch edge.
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
-
-# --- PTP Servo PI controller FSM (ptpv2_servo PI process) ---
-# The PI FSM toggles pi_wait_state every cycle, so multiplications, shifts and
-# clamp arithmetic have 2 sys_clk_125m periods between register updates.
-# Setup multicycle = 2, hold multicycle = 1.
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_input[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_input[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_mult_p[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_mult_p[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_mult_i[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_mult_i[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_proportional[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_proportional[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_int_update[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_int_update[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_sum_raw[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|pi_sum_raw[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|integral_sum[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|integral_sum[*]}]
-
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_servo|freq_correction[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_servo|freq_correction[*]}]
-
-# --- Wallclock NCO ppb adjustment (wallclock nco_ppb_adj_proc) ---
-# ppb_adj_reg is written every second cycle (gated by nco_ppb_adj_wait), giving
-# the signed multiply + shift 2 sys_clk_125m periods. Setup multicycle = 2,
-# hold multicycle = 1.
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_wallclock|ppb_adj_reg[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_wallclock|ppb_adj_reg[*]}]
 
 
 
@@ -324,7 +147,7 @@ source ../../../sdc/rgmii_io.sdc
 
 # RGMII interface — these procs create enet_rx_clk_125m and enet_tx_clk_125m
 constrain_rgmii_input_pins "enet" "enet_rx_clk" "enet_rx_dv enet_rx_d*"
-constrain_rgmii_output_pins "enet" "rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]" "enet_tx_clk" "enet_tx_en enet_tx_d*"
+constrain_rgmii_output_pins "enet" "rgmii_tx_pll" "enet_tx_clk" "enet_tx_en enet_tx_d*"
 
 # Final clock group declaration — after derive_pll_clocks and rgmii_io.sdc procs,
 # so all clocks now exist. litex_sys_clk is the manually-defined name for the
@@ -333,5 +156,5 @@ set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
-    -group [get_clocks {enet_rx_clk_125m}]
+    -group [get_clocks {enet_clk_125m rgmii_tx_pll mac_tx_clock}] \
+    -group [get_clocks {enet_rx_clk_125m rgmii_rx_pll}]
