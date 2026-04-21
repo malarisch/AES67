@@ -314,7 +314,22 @@ begin
 
 
 
+    t3_capture_proc: process (clk, reset_n)
 
+    begin
+        if reset_n = '0' then
+            stored_t3_seconds <= (others => '0');
+            stored_t3_nanoseconds <= (others => '0');
+        elsif rising_edge(clk) then
+            -- Capture T3 timestamp when valid
+            if (t3_valid_i = '1') then
+                stored_t3_seconds <= tx_timestamp_seconds_i(3 downto 0);
+                stored_t3_nanoseconds <= tx_timestamp_nanoseconds_i;
+            end if;
+
+        end if;
+
+    end process;
     -- Main State Machine Process
     main_proc: process(clk, reset_n)
         variable active_sequence_id: std_logic_vector(15 downto 0);
@@ -338,8 +353,6 @@ begin
             stored_t1_nanoseconds <= (others => '0');
             stored_t2_seconds <= (others => '0');
             stored_t2_nanoseconds <= (others => '0');
-            stored_t3_seconds <= (others => '0');
-            stored_t3_nanoseconds <= (others => '0');
             stored_t4_seconds <= (others => '0');
             stored_t4_nanoseconds <= (others => '0');
 
@@ -372,11 +385,7 @@ begin
             log_msg_interval_valid_o <= '0';
             configureClock <= '0';
             
-            -- Capture T3 timestamp when valid
-            if (t3_valid_i = '1') then
-                stored_t3_seconds <= tx_timestamp_seconds_i(3 downto 0);
-                stored_t3_nanoseconds <= tx_timestamp_nanoseconds_i;
-            end if;
+            
 
             if (s_SM_PtpParser = s_Idle) then
                 if (parse_ptp_packet_prev /= parse_ptp_packet_sync) then

@@ -158,7 +158,7 @@ architecture Behavioral of wallclock is
     --            Stage B: compare/normalize → apply to nsec_reg, new_nsec_pipe
     signal phase_jump_pending : std_logic := '0';
     signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
-    
+    signal nco_ppb_adj_wait : std_logic := '0';
 begin
 
     -- Output assignments
@@ -180,27 +180,40 @@ begin
     --   Stage 1: ppb_adj_reg <= (freq_correction * NCO_PPB_SCALE) >> 16
     --   Stage 2: nco_increment <= NCO_BASE_INC + ppb_adj_reg
     -- ============================================================
+
+    nco_ppb_adj_proc: process(clk, reset_n)
+    begin
+        if reset_n = '0' then
+            nco_ppb_adj_wait <= '0';
+            ppb_adj_reg      <= (others => '0');
+        elsif rising_edge(clk) then
+            if (nco_ppb_adj_wait = '0') then
+                nco_ppb_adj_wait <= '1';
+            ppb_adj_reg <= resize(
+                shift_right(freq_correction_ppb_i * NCO_PPB_SCALE, 16), 32);
+                
+            else
+                nco_ppb_adj_wait <= '0';
+            end if;
+        end if;
+    end process;
     nco_proc: process(clk, reset_n)
     begin
         if reset_n = '0' then
             nco_phase        <= (others => '0');
             nco_phase_prev   <= '0';
             nco_increment    <= NCO_BASE_INC;
-            ppb_adj_reg      <= (others => '0');
             bclk_cnt         <= (others => '0');
             lrck_reg         <= '0';
             sample_pulse_int <= '0';
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
             
-            -- ===== NCO INCREMENT PIPELINE =====
-            -- Stage 1: Multiply + shift (32×16 → 48 bits, keep upper 32)
-            ppb_adj_reg <= resize(
-                shift_right(freq_correction_ppb_i * NCO_PPB_SCALE, 16), 32);
             
-            -- Stage 2: Add base increment (uses ppb_adj_reg from previous cycle)
-            nco_increment <= NCO_BASE_INC + ppb_adj_reg;
-            
+            -- latch in when calc stable
+            if (nco_ppb_adj_wait = '0') then
+                nco_increment <= NCO_BASE_INC + ppb_adj_reg;
+            end if;
             -- Advance NCO phase accumulator
             nco_phase <= unsigned(signed(nco_phase) + nco_increment);
             nco_phase_prev <= std_logic(nco_phase(31));
