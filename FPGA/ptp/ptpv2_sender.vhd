@@ -45,6 +45,7 @@ entity ptpv2_sender is
 		ptp_priotwo : std_logic_vector(7 downto 0);
 		ptp_clockclass : std_logic_vector(7 downto 0);
 		ptp_clockaccuracy : std_logic_vector(7 downto 0)
+		
 	);
 end entity;
 
@@ -53,8 +54,7 @@ architecture Behavioral of ptpv2_sender is
 	constant MAC_HEADER_LENGTH			: integer := 14;
 	constant IP_HEADER_LENGTH			: integer := 20;
 	constant UDP_HEADER_LENGTH			: integer := 8;
-	constant MAX_UDP_PAYLOAD_LENGTH	: integer := 64;
-	constant MAX_PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + MAX_UDP_PAYLOAD_LENGTH;
+
 	-- RAM depth must be power-of-2 for M9K block RAM inference (106 bytes too small otherwise)
 	constant RAM_DEPTH					: integer := 256;
 
@@ -412,9 +412,8 @@ architecture Behavioral of ptpv2_sender is
 	-- ============================================================
 	type t_packet_ram is array (0 to RAM_DEPTH - 1) of std_logic_vector(7 downto 0);
 	signal packet_ram : t_packet_ram := (others => (others => '0'));
-
-	attribute ram_style : string;
-	attribute ram_style of packet_ram : signal is "block";
+	signal read_addr : integer range 0 to 200 := 0;
+	signal tx_done_reg : std_logic := '0';
 
 	-- Port A (sys_clk): write + checksum read
 	signal packet_wr_en   : std_logic := '0';
@@ -424,9 +423,6 @@ architecture Behavioral of ptpv2_sender is
 	signal asm_rd_data    : std_logic_vector(7 downto 0) := (others => '0');
 	signal asm_rd_data_r  : std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register
 
-	-- Port B (tx_clk): TX read
-	signal tx_rd_addr : integer range 0 to RAM_DEPTH - 1 := 0;
-	signal tx_rd_data : std_logic_vector(7 downto 0) := (others => '0');
 
 	-- First byte cache (avoids RAM read latency for byte 0)
 	signal first_packet_byte : std_logic_vector(7 downto 0) := (others => '0');
@@ -488,12 +484,10 @@ architecture Behavioral of ptpv2_sender is
 	-- ============================================================
 	-- TX state machine (tx_clk domain)
 	-- ============================================================
-	type t_SM_Tx is (s_Idle, s_WaitForAllow, s_LatchCDC, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
+	type t_SM_Tx is (s_Idle, s_WaitForAllow, s_Transmit, s_End, s_WaitDeassert);
 	signal SM_Tx : t_SM_Tx := s_Idle;
 
-	signal tx_bytes_remaining : integer range 0 to RAM_DEPTH - 1 := 0;
-	signal tx_read_pointer    : integer range 0 to RAM_DEPTH - 1 := 0;
-	signal prime_wait         : integer range 0 to 1 := 0;
+
 
 	-- Prevent register optimization for CDC registers
 	attribute PRESERVE : boolean;
@@ -507,17 +501,6 @@ architecture Behavioral of ptpv2_sender is
 begin
 
 	-- ============================================================
-	-- Packet RAM Port B (tx_clk domain): TX read only
-	-- Separate process for true dual-port inference (different clock)
-	-- ============================================================
-	packet_ram_port_b : process(tx_clk)
-	begin
-		if falling_edge(tx_clk) then
-			tx_rd_data <= packet_ram(tx_rd_addr);
-		end if;
-	end process packet_ram_port_b;
-
-	-- ============================================================
 	-- Packet Assembly Process (sys_clk domain)
 	-- Includes RAM Port A (write + read) for proper block RAM inference.
 	-- Only ONE ram access (read or write) per clock cycle on this port.
@@ -526,7 +509,6 @@ begin
 		variable header_data       : std_logic_vector(7 downto 0);
 		variable pseudo_header_sum : unsigned(31 downto 0);
 		variable udp_pl_len        : integer;
-		variable pkt_len           : integer;
 	begin
 		if rising_edge(sys_clk) then
 			-- ---- RAM Port A: one write OR one read per cycle ----
@@ -753,6 +735,35 @@ begin
 		end if;
 	end process sys_clock_process;
 
+
+
+	packet_ram_port_b : process(tx_clk)
+	begin
+		if rising_edge(tx_clk) then
+			if (tx_byte_sent = '1') then
+					tx_data <= packet_ram(read_addr + 1);
+			else 
+					tx_data <= packet_ram(read_addr);
+			end if;
+			if tx_ack = '1' and tx_allow_i = '1' then
+				tx_enable <= '1';
+				if read_addr < cap_packet_length - 1  then
+					tx_done_reg <= '0';
+					if tx_byte_sent = '1' then
+						read_addr <= read_addr + 1;
+					end if;
+				else 
+					tx_enable <= '0';
+					tx_done_reg <= '1';
+				end if;
+				
+			else
+				tx_enable <= '0';
+				read_addr <= 0;
+			end if;
+			
+		end if;
+	end process packet_ram_port_b;
 	-- ============================================================
 	-- TX Process (tx_clk domain)
 	-- Reads packet bytes from RAM and sends them to MAC
@@ -768,7 +779,6 @@ begin
 
 			case SM_Tx is
 				when s_Idle =>
-					tx_enable <= '0';
 					tx_ack <= '0';
 					tx_allow_req_o <= '0';
 					if (tx_frame_start_sync2 = '1') then
@@ -779,54 +789,18 @@ begin
 
 				when s_WaitForAllow =>
 					if (tx_allow_i = '1') then
-						SM_Tx <= s_LatchCDC;
+						SM_Tx <= s_Transmit;
+						
 					end if;
 
-				when s_LatchCDC =>
-					-- Initialize TX from assembled packet
-					tx_data <= first_packet_byte;
-					if (cap_packet_length > 1) then
-						tx_rd_addr <= 1;
-						tx_read_pointer <= 2;
-						tx_bytes_remaining <= cap_packet_length - 1;
-						SM_Tx <= s_PrimeTx;
-					else
-						tx_bytes_remaining <= 0;
-						SM_Tx <= s_End;
-					end if;
-					prime_wait <= 0;
-
-				when s_PrimeTx =>
-					-- Wait one cycle for tx_rd_data to be valid from RAM (falling_edge read)
-					tx_enable <= '0';
-					if (prime_wait = 0) then
-						prime_wait <= 1;
-					else
-						if (tx_busy = '0') then
-							tx_enable <= '1';
-							SM_Tx <= s_Transmit;
-						end if;
-					end if;
 
 				when s_Transmit =>
-					tx_enable <= '1';
-					if (tx_byte_sent = '1') then
-						if (tx_bytes_remaining = 0) then
-							tx_enable <= '0';
-							SM_Tx <= s_End;
-						else
-							tx_data <= tx_rd_data;
-							if (tx_read_pointer < cap_packet_length) then
-								tx_rd_addr <= tx_read_pointer;
-								tx_read_pointer <= tx_read_pointer + 1;
-							end if;
-							tx_bytes_remaining <= tx_bytes_remaining - 1;
-						end if;
+					if (tx_done_reg = '1') then
+						SM_Tx <= s_End;
 					end if;
 
 				when s_End =>
-					tx_enable <= '0';
-					tx_data <= (others => '0');
+					
 					if (tx_busy = '0') then -- wait for phy to finish transmission
 						tx_ready_o <= '1';
 						tx_allow_req_o <= '0';

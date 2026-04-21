@@ -67,20 +67,12 @@ architecture Behavioral of tx_router is
     signal ram_rd_addr   : unsigned(7 downto 0) := (others => '0');
     signal ram_rd_data   : std_logic_vector(7 downto 0) := (others => '0');
     
-    -- Shadow registers for samples_per_packet (offset 0x06 in each stream config)
-    -- These are updated on config write and used by sample counting logic
-    -- Avoids multi-port RAM access from sample counting process
-    type t_samples_per_packet_shadow is array (0 to 7) of std_logic_vector(7 downto 0);
-    signal samples_per_packet_shadow : t_samples_per_packet_shadow := (others => (others => '0'));
-    
+
     -- Pre-computed threshold (samples_per_packet - 1) to reduce critical path
     -- Computed in config_wr_clk domain and synchronized
     type t_threshold_shadow is array (0 to 7) of unsigned(7 downto 0);
     signal threshold_shadow : t_threshold_shadow := (others => (others => '0'));
-    signal threshold_sync   : t_threshold_shadow := (others => (others => '0'));
     
-    -- CDC synchronizer for shadow registers (config_wr_clk -> sys_clk)
-    signal samples_per_packet_sync : t_samples_per_packet_shadow := (others => (others => '0'));
 
     type t_sample_count is array (0 to 7) of unsigned(7 downto 0);
     signal sample_count : t_sample_count := (others => (others => '0'));
@@ -128,6 +120,7 @@ architecture Behavioral of tx_router is
 
     signal tx_busy_meta        : std_logic := '0';
     signal tx_busy_sync        : std_logic := '0';
+    signal calc_step : std_logic := '0';
     attribute PRESERVE : boolean;
     attribute PRESERVE of tx_en_meta : signal is true;
     attribute PRESERVE of tx_en_sync : signal is true;
@@ -151,10 +144,9 @@ begin
                 stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 5)));
                 offset := to_integer(unsigned(config_wr_addr_i(4 downto 0)));
                 if offset = 6 and stream_idx < 8 then
-                    samples_per_packet_shadow(stream_idx) <= config_wr_data_i;
                     -- Pre-compute threshold (spp - 1) to reduce critical path in sample counting
                     -- This subtraction is done at config time, not every sample
-                    threshold_shadow(stream_idx) <= unsigned(config_wr_data_i) - 1;
+                    threshold_shadow(stream_idx) <= unsigned(config_wr_data_i);
                 end if;
             end if;
         end if;
@@ -170,21 +162,7 @@ begin
             ram_rd_data <= config_ram(to_integer(ram_rd_addr));
         end if;
     end process;
-    
-    -- ==========================================================================
-    -- CDC Synchronizer for shadow registers (config_wr_clk -> sys_clk)
-    -- Simple register stage - values change slowly (config writes)
-    -- ==========================================================================
-    process (sys_clk_i, reset_n)
-    begin
-        if reset_n = '0' then
-            samples_per_packet_sync <= (others => (others => '0'));
-            threshold_sync <= (others => (others => '0'));
-        elsif rising_edge(sys_clk_i) then
-            samples_per_packet_sync <= samples_per_packet_shadow;
-            threshold_sync <= threshold_shadow;
-        end if;
-    end process;
+
 
     -- ==========================================================================
     -- Sample counting + FIFO write process
@@ -196,7 +174,6 @@ begin
             sample_count <= (others => (others => '0'));
             fifo_stream <= (others => (others => '0'));
             fifo_wrptr <= (others => (others => '0'));
-            fifo_time <= (others => (others => '0'));
             fifo_wr_ptr <= (others => '0');
             sample_ready_sync <= '0';
         elsif rising_edge(sys_clk_i) then
@@ -206,13 +183,14 @@ begin
             if sample_ready_i = '1' and sample_ready_sync = '0' then
                 for i in 0 to max_streams -1 loop
 
-                    if unsigned(samples_per_packet_sync(i)) /= 0 then
-                        if sample_count(i) >= threshold_sync(i) then
+                    if threshold_shadow(i) > 4 then
+                        if sample_count(i) >= threshold_shadow(i) -1 then
                             sample_count(i) <= (others => '0');
                             -- Enqueue into parallel FIFOs with snapshot of current state
                             fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
                             fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
-                            fifo_time(to_integer(fifo_wr_ptr)) <= packet_time_i;
+                            -- capture time of first ssample
+                            
                             fifo_wr_ptr <= fifo_wr_ptr + 1;
                         else
                             sample_count(i) <= sample_count(i) + 1;
@@ -222,6 +200,17 @@ begin
                 end loop;
             end if;
 
+        end if;
+    end process;
+
+    process (sys_clk_i)
+    begin
+        if rising_edge(sys_clk_i) then
+            if sample_ready_i = '1' and sample_ready_sync = '0' then
+                for i in 0 to max_streams -1 loop
+                    fifo_time(to_integer(fifo_wr_ptr)) <= std_logic_vector(unsigned(packet_time_i) - (unsigned(threshold_shadow(i)) - 1));
+                end loop;
+            end if;
         end if;
     end process;
 
@@ -248,7 +237,6 @@ begin
     -- Sequential RAM reads (one byte per clock) for Block RAM compatibility
     -- ==========================================================================
     process(sys_clk_i, reset_n)
-        variable base : unsigned(7 downto 0);
     begin
         if reset_n = '0' then
             fifo_rd_ptr <= (others => '0');
@@ -280,6 +268,7 @@ begin
                         -- Setup first RAM read address (IP byte 1 at offset 1)
                         -- Base address = stream_index * 32 (5 zero bits)
                         ram_rd_addr <= (fifo_stream(to_integer(fifo_rd_ptr)) & "00000") + 1;
+                        sequence_id_o <= fifo_seqid(to_integer(current_stream));
                         tx_state <= LOAD_IP1;
                     end if;
 
@@ -382,7 +371,7 @@ begin
                     ip_addr_o <= ip_addr_latch;
                     ch_ids_o <= ch_ids_latch;
                     ssrc_o <= ssrc_latch(31 downto 8) & ram_rd_data;
-                    sequence_id_o <= fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr))));
+                    
                     sample_buffer_tx_start_addr_o <= current_wr_ptr;
                     packet_time_o <= current_time;
                     audio_packet_tx_start_o <= '1';
@@ -397,7 +386,7 @@ begin
                 when WAIT_TX_BUSY_LOW =>
                     if tx_busy_sync = '0' then
                         tx_state <= IDLE;
-                        fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr)))) <= fifo_seqid(to_integer(fifo_stream(to_integer(fifo_rd_ptr)))) + 1;
+                        fifo_seqid(to_integer(current_stream)) <= fifo_seqid(to_integer(current_stream)) + 1;
                     end if;
 
             end case;

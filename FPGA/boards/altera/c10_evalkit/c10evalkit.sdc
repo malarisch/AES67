@@ -66,6 +66,14 @@ create_generated_clock -name {rgmiiclks_inst|altpll_component|auto_generated|pll
     -master_clock {enet_clk_125m} \
     [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}]
 
+# MAC TX clock: routed out of ethernet_top to drive tx_transmitter and other TX-domain logic.
+# Frequency/phase identical to rgmiiclks_inst clk[0]; declared as generated clock so
+# TimeQuest sees an 8 ns intra-domain period instead of falling back to a PLL-internal
+# relationship (which previously caused spurious 4 ns launch-to-latch analysis).
+create_generated_clock -name {mac_tx_clock} \
+    -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}] \
+    -master_clock {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]} \
+    [get_nets {*mac_tx_clock*}]
 
 
 source ../../../sdc/audioclocks.sdc
@@ -89,7 +97,7 @@ set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}] \
+    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
     -group [get_clocks {enet_rx_clk_125m}]
 
 
@@ -112,10 +120,11 @@ set_false_path -to [get_registers {*ptp_inst|b2v_ptpparser|parse_ptp_packet_meta
 set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_controller|*}]
 set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_ptpparser|*}]
 
-# --- tx_router shadow register CDC ---
-# samples_per_packet_shadow and threshold_shadow no longer have separate _sync
-# registers (CDC removed from tx_router). Shadow registers are written from
-# config_wr_clk domain and read in sys_clk — covered by stream_cfg false_path below.
+# --- tx_router threshold_shadow CDC (config_wr_clk -> sys_clk) ---
+# threshold_shadow is written once at boot during stream setup from
+# config_wr_clk domain and read in sys_clk sample counting logic.
+# Single-write, static thereafter — no bus-consistency requirement.
+set_false_path -from [get_registers {*audiotx_inst|b2v_tx_router|threshold_shadow[*][*]}]
 
 # --- tx_router tx_en CDC (tx_transmitter domain -> sys_clk) ---
 set_false_path -to [get_registers {*audiotx_inst|b2v_tx_router|tx_en_meta}]
@@ -210,6 +219,32 @@ set_false_path -from [get_ports {c10_resetn}] -to *
 # Set Multicycle Path
 #**************************************************************
 
+# --- PTP ClockConfigurator FSM (ptpv2_parser clock_config_process) ---
+# The FSM inserts a wait cycle between each arithmetic step via
+# configure_wait_cycle, so the combinational chain feeding elapsed_ns, ns_sum,
+# and clock_configure_timestamp_*_o has 2 sys_clk_125m periods to settle.
+# Setup multicycle = 2, hold multicycle = 1 to keep hold analysis on the
+# original launch edge.
+set_multicycle_path -setup -end 2 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
+set_multicycle_path -hold  -end 1 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
+
+set_multicycle_path -setup -end 2 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
+set_multicycle_path -hold  -end 1 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
+
+set_multicycle_path -setup -end 2 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
+set_multicycle_path -hold  -end 1 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
+
+set_multicycle_path -setup -end 2 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
+set_multicycle_path -hold  -end 1 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
+
 
 
 #**************************************************************
@@ -245,5 +280,5 @@ set_clock_groups -asynchronous \
     -group [get_clocks {c10_clk50m sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}] \
+    -group [get_clocks {enet_clk_125m rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0] rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
     -group [get_clocks {enet_rx_clk_125m}]

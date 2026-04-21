@@ -103,7 +103,7 @@ architecture Behavioral of ptpv2_parser is
     type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
 
-    type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply);
+    type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply, s_ClockSet_Apply2);
     signal s_SM_ClockConfigurator : t_SM_ClockConfigurator := s_Idle;
     signal configureClock : STD_LOGIC := '0';
     signal ns_sum : unsigned(31 downto 0);
@@ -203,7 +203,7 @@ architecture Behavioral of ptpv2_parser is
     
     signal latched_rx_timestamp_seconds     : std_logic_vector(47 downto 0) := (others => '0');
     signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-
+    signal configure_wait_cycle: std_logic := '0';
     attribute PRESERVE of stored_t1_nanoseconds : signal is true;
     attribute PRESERVE of stored_t2_nanoseconds : signal is true;
     attribute PRESERVE of stored_t3_nanoseconds : signal is true;
@@ -269,7 +269,7 @@ begin
             clock_set_o <= '0';
 
 
-
+            if (configure_wait_cycle = '0') then
             if (s_SM_ClockConfigurator = s_Idle) then
                 if (configureClock = '1') then
                     s_SM_ClockConfigurator <= s_ClockSet_Calc;    
@@ -282,9 +282,11 @@ begin
                     stored_t2_seconds, stored_t2_nanoseconds
                 ))(31 downto 0);
                 s_SM_ClockConfigurator <= s_ClockSet_Calc2;
+                configure_wait_cycle <= '1';
             elsif (s_SM_ClockConfigurator = s_ClockSet_Calc2) then
                 ns_sum <= unsigned(unsigned(stored_t1_nanoseconds) + elapsed_ns)(31 downto 0);
                 s_SM_ClockConfigurator <= s_ClockSet_Apply;
+                configure_wait_cycle <= '1';
             elsif (s_SM_ClockConfigurator = s_ClockSet_Apply) then
                 -- Takt 2: Clock setzen auf T1 + elapsed_ns (mit Sekunden-Carry)
                 if (ns_sum >= unsigned(ONE_SECOND_NS_POS)) then
@@ -297,9 +299,15 @@ begin
                         std_logic_vector(ns_sum);
                     clock_configure_timestamp_seconds_o <= stored_t1_seconds;
                 end if;
+                s_SM_ClockConfigurator <= s_ClockSet_Apply2;
+                configure_wait_cycle <= '1';
+            elsif (s_SM_ClockConfigurator = s_ClockSet_Apply2) then
                 clock_set_o <= '1';
                 clock_configured <= '1';
                 s_SM_ClockConfigurator <= s_Idle;
+            end if;
+        else
+            configure_wait_cycle <= '0';
             end if;
         end if;
     end process;

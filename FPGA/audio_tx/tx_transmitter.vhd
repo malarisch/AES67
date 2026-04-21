@@ -72,7 +72,7 @@ architecture Behavioral of tx_transmitter is
     signal audio_samples_x_channels : integer range 0 to 65535 := 0; -- samples * channels (Stage 1)
     signal audio_data_length : integer range 0 to 65535 := 0;        -- (samples * channels) * bytes (Stage 2)
 	-- Types
-	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_LatchCDC, s_PrimeTx, s_Transmit, s_End, s_WaitDeassert);
+	type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_Transmit, s_End, s_WaitDeassert);
     type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcAudioLen, s_A_CalcValues, s_A_CalcChecksum, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_CalcUdpChecksum, s_FinalizeChecksum, s_WriteChecksum);
 	type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
     
@@ -288,6 +288,8 @@ architecture Behavioral of tx_transmitter is
     signal tx_frame_start    : std_logic := '0';
     signal tx_frame_start_sync1 : std_logic := '0';
     signal tx_frame_start_sync2 : std_logic := '0';
+	signal read_addr : integer range 0 to 1532 := 0;
+	signal tx_done_reg : std_logic := '0';
 begin
 
 	-- True dual-port packet RAM
@@ -298,18 +300,38 @@ begin
 			if (packet_wr_en = '1') then
 				packet_ram(packet_wr_addr) <= packet_wr_data;
 			end if;
-			-- Stage 1: RAM output register (M10K inference)
 			asm_rd_data <= packet_ram(asm_rd_addr);
-			-- Stage 2: Pipeline register (breaks timing path to checksum logic)
 			asm_rd_data_r <= asm_rd_data;
 		end if;
 	end process packet_ram_port_a;
 
 	-- Port B (tx_clk): TX read
+	-- Synchronous read: address register -> RAM -> registered output (tx_data)
 	packet_ram_port_b : process(tx_clk)
 	begin
-		if falling_edge(tx_clk) then
-			tx_rd_data <= packet_ram(tx_rd_addr);
+		if rising_edge(tx_clk) then
+			if (tx_byte_sent = '1') then
+					tx_data <= packet_ram(read_addr + 1);
+			else 
+					tx_data <= packet_ram(read_addr);
+			end if;
+			if tx_ack = '1' and tx_allow_i = '1' then
+				tx_enable <= '1';
+				if read_addr < PACKET_LENGTH - 1  then
+					tx_done_reg <= '0';
+					if tx_byte_sent = '1' then
+						read_addr <= read_addr + 1;
+					end if;
+				else 
+					tx_enable <= '0';
+					tx_done_reg <= '1';
+				end if;
+				
+			else
+				tx_enable <= '0';
+				read_addr <= 0;
+			end if;
+			
 		end if;
 	end process packet_ram_port_b;
 
@@ -623,7 +645,6 @@ begin
 
 			case s_SM_Ethernet is
 				when s_Idle =>
-					tx_enable <= '0';
                     tx_ack <= '0';
 					tx_req_o <= '0';
 					if (tx_frame_start_sync2 = '1') then
@@ -634,58 +655,15 @@ begin
 					end if;
 				when s_waitForAllow =>
 					if (tx_allow_i = '1') then
-						s_SM_Ethernet <= s_LatchCDC;
+						s_SM_Ethernet <= s_Transmit;
 					end if;
-				when s_LatchCDC =>
-					-- wait one cycle to all latched valus are stable
-					-- Initialize TX state from sys-domain latched values (stable by now)
-						tx_data <= first_packet_byte;
-						
-						if (PACKET_LENGTH > 1) then
-							tx_rd_addr <= 1;
-							tx_read_pointer <= 2;
-							tx_bytes_remaining <= PACKET_LENGTH - 1;
-							s_SM_Ethernet <= s_PrimeTx;
-						else
-							tx_rd_addr <= 0;
-							tx_read_pointer <= 0;
-							tx_bytes_remaining <= 0;
-							s_SM_Ethernet <= s_End; -- no bytes to send, skip directly to end state
-						end if;
-						prime_wait <= 0;
-
-				when s_PrimeTx =>
-					tx_enable <= '0';
-					if (prime_wait = 0) then
-						-- allow one cycle for tx_rd_data to capture the next byte from RAM
-						prime_wait <= 1;
-							else
-								if (tx_busy = '0') then
-									tx_enable <= '1';
-									s_SM_Ethernet <= s_Transmit;
-								end if;
-							end if;
-
 				when s_Transmit =>
 					
-					tx_enable <= '1';
-					if (tx_byte_sent = '1') then
-						if (tx_bytes_remaining = 0) then
-							s_SM_Ethernet <= s_End;
-							tx_enable <= '0';
-						else
-							tx_data <= tx_rd_data;
-							if (tx_read_pointer < PACKET_LENGTH) then
-								tx_rd_addr <= tx_read_pointer;
-								tx_read_pointer <= tx_read_pointer + 1;
-							end if;
-							tx_bytes_remaining <= tx_bytes_remaining - 1;
-						end if;
+					if (tx_done_reg = '1') then
+						s_SM_Ethernet <= s_End;
 					end if;
 					
 				when s_End =>
-					tx_enable <= '0';
-					tx_data <= (others => '0');
 					s_SM_Ethernet <= s_WaitDeassert;
 					tx_req_o <= '0'; 
 				when s_WaitDeassert =>

@@ -153,7 +153,6 @@ begin
     end process;
 
     process(sys_clk, reset_n)
-    variable data_latch : std_logic_vector(SAMPLE_BITS - 1 downto 0);
     begin
         if reset_n = '0' then
             wr_ptr_o <= (others => '0');
