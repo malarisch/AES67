@@ -1,28 +1,30 @@
 # --- PTP ClockConfigurator FSM (ptpv2_parser clock_config_process) ---
-# The FSM inserts a wait cycle between each arithmetic step via
-# configure_wait_cycle, so the combinational chain feeding elapsed_ns, ns_sum,
-# and clock_configure_timestamp_*_o has 2 sys_clk_125m periods to settle.
-# Setup multicycle = 2, hold multicycle = 1 to keep hold analysis on the
+# The FSM advances one step every 8 sys_clk_125m cycles: configure_wait_cycle
+# is an unsigned(2 downto 0) that decrements unconditionally and wraps
+# (0 -> 7 -> 6 -> ... -> 1 -> 0), gating state transitions to wait_cycle = 0.
+# So the combinational chain feeding elapsed_ns, ns_sum, and
+# clock_configure_timestamp_*_o has 8 clock periods to settle.
+# Setup multicycle = 8, hold multicycle = 7 to keep hold analysis on the
 # original launch edge.
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns[*]}]
+set_multicycle_path -setup -end 8 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns*}]
+set_multicycle_path -hold  -end 7 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|elapsed_ns*}]
 
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum[*]}]
+set_multicycle_path -setup -end 8 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum*}]
+set_multicycle_path -hold  -end 7 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|ns_sum*}]
 
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o[*]}]
+set_multicycle_path -setup -end 8 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o*}]
+set_multicycle_path -hold  -end 7 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_nanoseconds_o*}]
 
-set_multicycle_path -setup -end 2 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
-set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o[*]}]
+set_multicycle_path -setup -end 8 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o*}]
+set_multicycle_path -hold  -end 7 \
+    -to [get_registers {*ptp_inst|b2v_ptpparser|clock_configure_timestamp_seconds_o*}]
 
 # --- PTP Servo PI controller FSM (ptpv2_servo PI process) ---
 # The PI FSM toggles pi_wait_state every cycle, so multiplications, shifts and

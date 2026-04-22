@@ -50,7 +50,7 @@ entity ptpv2_parser is
         ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
         ptp_is_follower_i : in std_logic;
         ptp_locked_i : in std_logic;
-
+        
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
         announce_clock_identity_o        : out std_logic_vector(63 downto 0);
@@ -67,6 +67,8 @@ end entity;
 
 architecture Behavioral of ptpv2_parser is
 
+
+    
     -- EUI-64 Clock Identity from MAC address (IEEE 1588)
     signal my_clock_id : std_logic_vector(79 downto 0);
     
@@ -80,26 +82,36 @@ architecture Behavioral of ptpv2_parser is
     -- MIN FILTER for path delay measurements
     -- Keeps track of the minimum value over the last MIN_FILTER_DEPTH samples
     -- Separate buffers for Master->Slave (m2s) and Slave->Master (s2m) paths
+    --
+    -- Buffers are inferred as Block RAM (no reset, no parallel read).
     -- ============================================================
-    type delay_buffer_t is array(0 to MIN_FILTER_DEPTH-1) of signed(31 downto 0);
-    
     -- Initialize to maximum positive signed value (not all 1s which = -1!)
     constant MAX_SIGNED_32 : signed(31 downto 0) := to_signed(2_147_483_647, 32);
-    
-    -- M2S (Master to Slave = T2 - T1) min filter
-    signal m2s_buffer       : delay_buffer_t := (others => MAX_SIGNED_32);
+
+    -- Combined M2S + S2M buffer sharing a single M9K block.
+    -- Layout: addresses 0..DEPTH-1           = M2S samples
+    --         addresses DEPTH..2*DEPTH-1     = S2M samples
+    type delay_buffer_shared_t is array(0 to 2*MIN_FILTER_DEPTH-1) of signed(31 downto 0);
+    signal delay_buffer     : delay_buffer_shared_t;
+    -- Registered RAM output (REQUIRED for M9K inference — synchronous read)
+    signal ram_rd_data      : signed(31 downto 0) := (others => '0');
+    signal ram_rd_addr      : integer range 0 to 2*MIN_FILTER_DEPTH-1 := 0;
+    attribute ramstyle : string;
+    attribute ramstyle of delay_buffer : signal is "M9K";
+
     signal m2s_write_idx    : integer range 0 to MIN_FILTER_DEPTH-1 := 0;
     signal m2s_fill_count   : integer range 0 to MIN_FILTER_DEPTH := 0;
-    signal m2s_min_value    : signed(31 downto 0) := MAX_SIGNED_32;
-    
-    -- S2M (Slave to Master = T4 - T3) min filter
-    signal s2m_buffer       : delay_buffer_t := (others => MAX_SIGNED_32);
     signal s2m_write_idx    : integer range 0 to MIN_FILTER_DEPTH-1 := 0;
     signal s2m_fill_count   : integer range 0 to MIN_FILTER_DEPTH := 0;
-    signal s2m_min_value    : signed(31 downto 0) := MAX_SIGNED_32;
-    
-    -- Min search state machine (2-stage pipeline: FETCH+ABS, then COMPARE)
-    type min_search_state_t is (MS_IDLE, MS_M2S_ABS, MS_M2S_CMP, MS_S2M_CALC, MS_S2M_ABS, MS_S2M_CMP, MS_OUTPUT);
+
+    -- Min search state machine
+    -- RAM has 1-cycle read latency, so we need an extra FETCH stage before ABS:
+    --   ISSUE (set addr) -> FETCH (capture q, abs) -> CMP
+    type min_search_state_t is (MS_IDLE,
+                                 MS_M2S_ISSUE, MS_M2S_FETCH, MS_M2S_CMP,
+                                 MS_S2M_CALC,
+                                 MS_S2M_ISSUE, MS_S2M_FETCH, MS_S2M_CMP,
+                                 MS_OUTPUT);
     signal min_search_state : min_search_state_t := MS_IDLE;
     signal search_idx       : integer range 0 to MIN_FILTER_DEPTH-1 := 0;
     signal temp_min_m2s     : signed(31 downto 0) := MAX_SIGNED_32;
@@ -170,9 +182,6 @@ architecture Behavioral of ptpv2_parser is
     signal parse_ptp_packet_sync : std_logic := '0';
     signal parse_ptp_packet_prev : std_logic := '0';
 
-    attribute PRESERVE : boolean;
-    attribute PRESERVE of parse_ptp_packet_meta : signal is true;
-    attribute PRESERVE of parse_ptp_packet_sync : signal is true;
 
     signal clock_configured: std_logic := '0';
 
@@ -214,15 +223,7 @@ architecture Behavioral of ptpv2_parser is
     
     signal latched_rx_timestamp_seconds     : std_logic_vector(47 downto 0) := (others => '0');
     signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal configure_wait_cycle: std_logic := '0';
-    attribute PRESERVE of stored_t1_nanoseconds : signal is true;
-    attribute PRESERVE of stored_t2_nanoseconds : signal is true;
-    attribute PRESERVE of stored_t3_nanoseconds : signal is true;
-    attribute PRESERVE of stored_t4_nanoseconds : signal is true;
-    attribute PRESERVE of stored_t1_seconds : signal is true;
-    attribute PRESERVE of stored_t2_seconds : signal is true;
-    attribute PRESERVE of stored_t3_seconds : signal is true;
-    attribute PRESERVE of stored_t4_seconds : signal is true;
+    signal configure_wait_cycle: unsigned (2 downto 0) := (others => '0') ;
     
     type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up);
     
@@ -242,6 +243,7 @@ architecture Behavioral of ptpv2_parser is
     end function;
 
 begin
+    
     -- Generate Clock Identity from MAC address
     my_clock_id <= (src_mac_address(47 downto 40) xor x"02") & 
                    src_mac_address(39 downto 24) & 
@@ -275,13 +277,14 @@ begin
             clock_configure_timestamp_seconds_o <= (others => '0');
             clock_configured <= '0';
             clock_set_o <= '0';
-
+            configure_wait_cycle <= (others => '0');
         elsif (rising_edge(clk)) then
             clock_set_o <= '0';
 
-
-            if (configure_wait_cycle = '0') then
+            configure_wait_cycle <= configure_wait_cycle - 1;
+            if (configure_wait_cycle = 0) then
             if (s_SM_ClockConfigurator = s_Idle) then
+                
                 if (configureClock = '1') then
                     s_SM_ClockConfigurator <= s_ClockSet_Calc;    
                 end if;
@@ -293,11 +296,11 @@ begin
                     stored_t2_seconds, stored_t2_nanoseconds
                 ))(31 downto 0);
                 s_SM_ClockConfigurator <= s_ClockSet_Calc2;
-                configure_wait_cycle <= '1';
+                
             elsif (s_SM_ClockConfigurator = s_ClockSet_Calc2) then
                 ns_sum <= unsigned(unsigned(stored_t1_nanoseconds) + elapsed_ns)(31 downto 0);
                 s_SM_ClockConfigurator <= s_ClockSet_Apply;
-                configure_wait_cycle <= '1';
+                
             elsif (s_SM_ClockConfigurator = s_ClockSet_Apply) then
                 -- Takt 2: Clock setzen auf T1 + elapsed_ns (mit Sekunden-Carry)
                 if (ns_sum >= unsigned(ONE_SECOND_NS_POS)) then
@@ -311,19 +314,30 @@ begin
                     clock_configure_timestamp_seconds_o <= stored_t1_seconds;
                 end if;
                 s_SM_ClockConfigurator <= s_ClockSet_Apply2;
-                configure_wait_cycle <= '1';
+                
             elsif (s_SM_ClockConfigurator = s_ClockSet_Apply2) then
                 clock_set_o <= '1';
                 clock_configured <= '1';
                 s_SM_ClockConfigurator <= s_Idle;
             end if;
-        else
-            configure_wait_cycle <= '0';
+            
             end if;
         end if;
     end process;
 
 
+
+    -- ============================================================
+    -- BRAM READ PORT (synchronous, unconditional — required for M9K inference)
+    -- Address is driven by ram_rd_addr; data appears on ram_rd_data one
+    -- clock later. M2S samples live at 0..DEPTH-1, S2M at DEPTH..2*DEPTH-1.
+    -- ============================================================
+    min_filter_ram_rd_proc: process(clk)
+    begin
+        if rising_edge(clk) then
+            ram_rd_data <= delay_buffer(ram_rd_addr);
+        end if;
+    end process;
 
     t3_capture_proc: process (clk, reset_n)
 
@@ -382,19 +396,17 @@ begin
 
             
             
-            -- Min filter reset (use MAX_SIGNED_32, not all-1s which = -1!)
-            m2s_buffer <= (others => MAX_SIGNED_32);
+            -- Min filter reset — buffers are BRAM-inferred, NOT reset here
+            -- (fill_count gates reads of uninitialized slots).
             m2s_write_idx <= 0;
             m2s_fill_count <= 0;
-            m2s_min_value <= MAX_SIGNED_32;
-            s2m_buffer <= (others => MAX_SIGNED_32);
             s2m_write_idx <= 0;
             s2m_fill_count <= 0;
-            s2m_min_value <= MAX_SIGNED_32;
             min_search_state <= MS_IDLE;
             search_idx <= 0;
             temp_min_m2s <= MAX_SIGNED_32;
             temp_min_s2m <= MAX_SIGNED_32;
+            ram_rd_addr <= 0;
             fetched_val <= (others => '0');
             fetched_abs <= (others => '0');
             current_min_abs <= (others => '0');
@@ -404,7 +416,9 @@ begin
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
             log_msg_interval_valid_o <= '0';
+            if (clock_configured) then
             configureClock <= '0';
+            end if;
             announce_valid_o <= '0';
             
             
@@ -642,8 +656,8 @@ begin
                 -- ============================================
                 case min_search_state is
                     when MS_IDLE =>
-                        -- Store new m2s sample in buffer and start search
-                        m2s_buffer(m2s_write_idx) <= delta_m2s_reg;
+                        -- Write new m2s sample (address range 0..DEPTH-1)
+                        delay_buffer(m2s_write_idx) <= delta_m2s_reg;
 
                         -- Update write index (circular)
                         if m2s_write_idx = MIN_FILTER_DEPTH - 1 then
@@ -657,103 +671,99 @@ begin
                             m2s_fill_count <= m2s_fill_count + 1;
                         end if;
 
-                        -- Initialize min search for m2s
+                        -- Initialize min search for m2s; seed with current sample
                         search_idx <= 0;
-                        temp_min_m2s <= delta_m2s_reg;  -- Start with current sample
+                        ram_rd_addr <= 0;  -- M2S region starts at 0
+                        temp_min_m2s <= delta_m2s_reg;
                         current_min_abs <= unsigned(abs(delta_m2s_reg));
-                        min_search_state <= MS_M2S_ABS;
+                        min_search_state <= MS_M2S_ISSUE;
 
-                    when MS_M2S_ABS =>
-                        -- Pipeline stage 1: Fetch buffer element and compute abs()
+                    when MS_M2S_ISSUE =>
+                        -- Address is already on ram_rd_addr, data arrives next cycle.
                         if search_idx < m2s_fill_count then
-                            fetched_val <= m2s_buffer(search_idx);
-                            fetched_abs <= unsigned(abs(m2s_buffer(search_idx)));
-                            min_search_state <= MS_M2S_CMP;
+                            min_search_state <= MS_M2S_FETCH;
                         else
-                            -- Buffer not full yet, done with m2s search
+                            -- Buffer not yet filled past this index, skip remaining
                             min_search_state <= MS_S2M_CALC;
                         end if;
 
+                    when MS_M2S_FETCH =>
+                        -- Synchronous BRAM output is valid now on ram_rd_data
+                        fetched_val <= ram_rd_data;
+                        fetched_abs <= unsigned(abs(ram_rd_data));
+                        min_search_state <= MS_M2S_CMP;
+
                     when MS_M2S_CMP =>
-                        -- Pipeline stage 2: Compare registered abs values
                         if fetched_abs < current_min_abs then
                             temp_min_m2s <= fetched_val;
                             current_min_abs <= fetched_abs;
                         end if;
 
                         if search_idx = MIN_FILTER_DEPTH - 1 then
-                            -- Done searching m2s (full buffer), move to s2m
                             min_search_state <= MS_S2M_CALC;
                         else
                             search_idx <= search_idx + 1;
-                            min_search_state <= MS_M2S_ABS;
+                            ram_rd_addr <= ram_rd_addr + 1;
+                            min_search_state <= MS_M2S_ISSUE;
                         end if;
 
                     when MS_S2M_CALC =>
-                        -- Store new s2m sample in buffer
-                        s2m_buffer(s2m_write_idx) <= delta_s2m_reg;
+                        -- Write new s2m sample (address range DEPTH..2*DEPTH-1)
+                        delay_buffer(MIN_FILTER_DEPTH + s2m_write_idx) <= delta_s2m_reg;
 
-                        -- Update write index (circular)
                         if s2m_write_idx = MIN_FILTER_DEPTH - 1 then
                             s2m_write_idx <= 0;
                         else
                             s2m_write_idx <= s2m_write_idx + 1;
                         end if;
 
-                        -- Update fill count
                         if s2m_fill_count < MIN_FILTER_DEPTH then
                             s2m_fill_count <= s2m_fill_count + 1;
                         end if;
 
-                        -- Initialize min search for s2m
+                        -- Initialize min search for s2m; seed with current sample
                         search_idx <= 0;
-                        temp_min_s2m <= delta_s2m_reg;  -- Start with current sample
+                        ram_rd_addr <= MIN_FILTER_DEPTH;  -- S2M region starts here
+                        temp_min_s2m <= delta_s2m_reg;
                         current_min_abs <= unsigned(abs(delta_s2m_reg));
-                        min_search_state <= MS_S2M_ABS;
+                        min_search_state <= MS_S2M_ISSUE;
 
-                    when MS_S2M_ABS =>
-                        -- Pipeline stage 1: Fetch buffer element and compute abs()
+                    when MS_S2M_ISSUE =>
                         if search_idx < s2m_fill_count then
-                            fetched_val <= s2m_buffer(search_idx);
-                            fetched_abs <= unsigned(abs(s2m_buffer(search_idx)));
-                            min_search_state <= MS_S2M_CMP;
+                            min_search_state <= MS_S2M_FETCH;
                         else
-                            -- Buffer not full yet, done with s2m search
                             min_search_state <= MS_OUTPUT;
                         end if;
 
+                    when MS_S2M_FETCH =>
+                        fetched_val <= ram_rd_data;
+                        fetched_abs <= unsigned(abs(ram_rd_data));
+                        min_search_state <= MS_S2M_CMP;
+
                     when MS_S2M_CMP =>
-                        -- Pipeline stage 2: Compare registered abs values
                         if fetched_abs < current_min_abs then
                             temp_min_s2m <= fetched_val;
                             current_min_abs <= fetched_abs;
                         end if;
 
                         if search_idx = MIN_FILTER_DEPTH - 1 then
-                            -- Done searching s2m (full buffer)
                             min_search_state <= MS_OUTPUT;
                         else
                             search_idx <= search_idx + 1;
-                            min_search_state <= MS_S2M_ABS;
+                            ram_rd_addr <= ram_rd_addr + 1;
+                            min_search_state <= MS_S2M_ISSUE;
                         end if;
-                        
+
                     when MS_OUTPUT =>
-                        -- Calculate mean path delay and offset using temp_min values
-                        -- (which contain the just-computed minimum values)
                         -- mean_path_delay = (min_m2s + min_s2m) / 2
-                        -- offset = (min_m2s - min_s2m) / 2
+                        -- offset          = (min_m2s - min_s2m) / 2
                         mean_path_delay_ns_o <= shift_right(temp_min_m2s + temp_min_s2m, 1);
                         if (ptp_locked_i = '1') then
                             offset_from_master_ns_o <= shift_right(temp_min_m2s - temp_min_s2m, 1);
-                            else 
+                        else
                             offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
                         end if;
-                        
-                        
-                        -- Store the computed minimum values for reference
-                        m2s_min_value <= temp_min_m2s;
-                        s2m_min_value <= temp_min_s2m;
-                        
+
                         ptp_calc_valid_o <= '1';
                         min_search_state <= MS_IDLE;
                         s_SM_PtpParser <= s_Done;

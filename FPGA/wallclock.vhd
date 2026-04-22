@@ -162,6 +162,8 @@ architecture Behavioral of wallclock is
     signal phase_jump_pending : std_logic := '0';
     signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
     signal nco_ppb_adj_wait : std_logic := '0';
+    signal wallclock_set_i_reg : std_logic;
+    
 begin
 
     -- Output assignments
@@ -276,14 +278,15 @@ begin
             media_nsec_reg   <= (others => '0');
             media_mult_reg   <= (others => '0');
             media_resync_cnt <= (others => '0');
+            wallclock_set_i_reg <= '0';
         elsif rising_edge(clk) then
             -- ===== Pipeline: always running for wallclock_set resync =====
             -- Stage 0: register nsec
             media_nsec_reg <= unsigned(nsec_reg);
             -- Stage 1: multiply (32×18 = 50 bits)
             media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
-
-            if wallclock_set_i = '1' then
+            wallclock_set_i_reg <= wallclock_set_i;
+            if wallclock_set_i_reg = '1' then
                 -- Hard set: compute media_base from wallclock seconds
                 media_base <= resize(
                     wallclock_seconds_i(31 downto 0)

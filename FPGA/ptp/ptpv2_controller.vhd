@@ -133,7 +133,7 @@ entity ptpv2_controller is
     signal sof_toggle_meta : std_logic := '0';  -- metastability stage
     signal sof_toggle_sync : std_logic := '0';  -- stable synchronized value
     signal sof_toggle_prev : std_logic := '0';  -- previous value for edge detection
-
+    signal interval_decode_step : std_logic := '0';
     attribute PRESERVE of sof_toggle_meta : signal is true;
     attribute PRESERVE of sof_toggle_sync : signal is true;
     end entity;
@@ -168,8 +168,12 @@ begin
     interval_input_reg: process(clk)
     begin
         if rising_edge(clk) then
+            if (interval_decode_step = '1') then
             ptp_log_msg_int_r     <= ptp_log_message_interval_i;
+            else
             ptp_ann_log_msg_int_r <= ptp_announce_log_message_interval_i;
+            end if;
+            interval_decode_step <= not interval_decode_step;
         end if;
     end process interval_input_reg;
 
