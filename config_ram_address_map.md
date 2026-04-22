@@ -1,3 +1,13 @@
+# Read General
+Read 0x00 => 8 bytes
+FPGAVERSION (2 bytes)
+TXSTREAMS
+RXSTREAMS
+TXCHANNELS
+RXCHANNELS
+BITDEPTH
+SAMPLERATE
+
 # Registers: Ethernet
 
 Write Register 0x00 Eth TX Length LSB Impl
@@ -85,8 +95,8 @@ Write Register 0x50 - Flag Bitmask
 [1] Reset Wallclock -- Implementation: Output pin reset_wallclock_o
 [2] Reset PTP -- Implementation: Output pin reset_ptp_o
 [3] Reset Ethernet -- Implementation: Output pin reset_ethernet_o
-[4] PTP: Is Leader -- Implementattion: Output pin ptp_is_leader
-[5] PTP: Is Follower -- Output pin
+[4] 
+[5] 
 [6]
 [7]
 
@@ -94,11 +104,11 @@ Read Register 0x50 - Flag Bitmask -- Clocking
 
 [0] PLL PPB Measurement Valid -- simple input pin, needs cdc
 [1] Wallclock Locked -- simple input pin, needs CDC
-[2] Wallclock Did Phasejump -- simple input pin, needs CDC
-[3] Wallclock Configured -- simple input pin, needs cdc
-[4] PTP Leader lost -- simple input pin, needs cdc
-[5]
-[6]
+[2] Wallclock Configured -- simple input pin, needs cdc
+[3] PTP -> isLeader
+[4] PTP -> isFollower
+[5] 
+[6] 
 [7]
 
 Read Register 0x51 - Flag Bitmask -- Ethernet
@@ -113,7 +123,7 @@ Read Register 0x51 - Flag Bitmask -- Ethernet
 
 Read Register 0x52 -- Path Delay -- Four Byte Read: Input path_delay_i (31..0)
 Read Register 0x53 -- Leader Offset -- Four Byte Read: Input leader_offset_i (31..0)
-Read Regiter  0x54 -- pll_ptp_ppb offset -- Four Byte Read: Input clock_ppb_meter_i (31..0) - only if pll_ppb_measurement_valid_i is high, if not output just zeros
-
+Read Regiter  0x54 -- pll_ptp_counters -- 8 byte read: Counters from wallclock_ppb_measurement
+Read Regiter  0x55 -- gmid
 Read Register 0x60 .. 0x7F
 -- Direct Access to RAM (system_config_reg.vhd) - Address minus 0x60

@@ -7,6 +7,17 @@ USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
 ENTITY top_c10 IS
+	generic (
+		soctype : string := "spi"; -- spi or litex
+		FPGAVERSIONMSB : integer := 1;
+        FPGAVERSIONLSB : integer := 123;
+        TXSTREAMS      : integer := 8;
+        RXSTREAMS       : INTEGER := 8;
+        TXCHANNELS      : INTEGER := 8;
+        RXCHANNELS      : INTEGER := 8;
+        BITDEPTH        : INTEGER := 24;
+        SAMPLERATE      : INTEGER := 48
+	);
 	PORT
 	(
 		c10_resetn :  IN  STD_LOGIC;
@@ -54,7 +65,11 @@ ENTITY top_c10 IS
 		spiflash_mosi :  OUT  STD_LOGIC;
 		adda_nRST :  OUT  STD_LOGIC;
 		uart1_tx :  OUT  STD_LOGIC;
-		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
+		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
+		conf_spi_clk : IN STD_LOGIC;
+		conf_spi_cs_n : IN STD_LOGIC;
+		conf_spi_di : IN STD_LOGIC;
+		conf_spi_do : OUT STD_LOGIC
 	);
 END top_c10;
 
@@ -375,6 +390,10 @@ generic map(
 	tdm8in_i                  => tdm8in
 );
 
+socgen: if (soctype = "litex") generate
+
+	hbus_clk0_p   <= hram_clk;
+	hbus_clk0_n   <= NOT hram_clk;
 
 litex_soc_inst: litex_soc
 PORT MAP(
@@ -514,7 +533,42 @@ PORT MAP(
 	eth_ram_addr_o         => mcu_ram_addr,
 	packet_length_valid_i  => '1'
 );
+end generate;
 
+
+spigen: if (soctype = "spi") generate
+	spictrl_inst: entity work.spictrl
+	 generic map(
+		FPGAVERSIONMSB => FPGAVERSIONMSB,
+		FPGAVERSIONLSB => FPGAVERSIONLSB,
+		TXSTREAMS => TXSTREAMS,
+		RXSTREAMS => RXSTREAMS,
+		TXCHANNELS => TXCHANNELS,
+		RXCHANNELS => RXCHANNELS,
+		BITDEPTH => BITDEPTH,
+		SAMPLERATE => SAMPLERATE
+	)
+	 port map(
+		sys_clk_i => clk_125MHz,
+		rst_n_i => c10_resetn,
+		spi_clk_i => conf_spi_clk,
+		spi_cs_n_i => conf_spi_cs_n,
+		spi_do_o => conf_spi_do,
+		spi_di_i => conf_spi_di,
+		ptp_path_delay_i => unsigned(ptp_mean_path_delay),
+		ptp_offset_i => unsigned(ptp_offset_from_master),
+		ptp_gmid_i => ptp_current_leader_id,
+		ptp_is_follower_i => ptp_is_follower,
+		ptp_is_leader_i => ptp_is_leader,
+		wallclock_locked_i => wallclock_locked,
+		wallclock_configured_i => wallclock_configured,
+		wallclock_ppb_meas_valid_i => pll_meas_valid,
+		wallclock_counter_wc => b"0000000" & wc_counter,
+		wallclock_counter_pll => b"0000000" & pll_counter,
+		ethernet_link_up_i => mac_linkup,
+		ethernet_link_speed => mac_speed
+	);
+end generate;
 
 rgmii_if_inst: rgmii_phy_if
 GENERIC MAP(
@@ -569,8 +623,6 @@ tdm8out_1_o <= tdm8out(1);
 tdm8in(0) <= tdm8in_0_i;
 tdm8in(1) <= tdm8in_1_i;
 
-hbus_clk0_p   <= hram_clk;
-hbus_clk0_n   <= NOT hram_clk;
 
 lrclk1        <= pll_48k_fs_tdm; -- gpio13
 lrclk0        <= pll_48k_fs_tdm; -- gpio11
