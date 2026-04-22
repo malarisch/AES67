@@ -1,7 +1,7 @@
 -- ============================================================================
 -- clock_ppb_meter.vhd
 --
--- Measures edge counts of two clocks (wallclock_64fs vs. pll_64fs) over a 
+-- Measures edge counts of two clocks (wallclock_512fs vs. pll_512fs) over a
 -- one-second measurement window defined by wallclock_second_pulse_i.
 -- The raw counter values are output for MCU to calculate PPB.
 --
@@ -25,14 +25,14 @@ entity clock_ppb_meter is
         sys_clk                  : in  std_logic;   -- 125 MHz system clock
         reset_n                  : in  std_logic;   -- Active-low reset
         -- Asynchronous clock inputs to be measured
-        wallclock_64fs_in        : in  std_logic;   -- 64·fs from wallclock
-        pll_64fs_in              : in  std_logic;   -- 64·fs from local PLL
+        wallclock_512fs_in       : in  std_logic;   -- 512·fs from wallclock
+        pll_512fs_in             : in  std_logic;   -- 512·fs from local PLL
         -- Control (active in sys_clk domain)
         wallclock_second_pulse_i : in  std_logic;   -- 1-PPS from wallclock
         start_i                  : in  std_logic;   -- Start a measurement
         -- Results: raw counter values for MCU to compute PPB
-        count_wc_o               : out unsigned(21 downto 0);  -- Wallclock edge count
-        count_pll_o              : out unsigned(21 downto 0);  -- PLL edge count
+        count_wc_o               : out unsigned(24 downto 0);  -- Wallclock edge count
+        count_pll_o              : out unsigned(24 downto 0);  -- PLL edge count
         valid_o                  : out std_logic               -- High when counts are valid
     );
 end entity clock_ppb_meter;
@@ -68,16 +68,16 @@ architecture rtl of clock_ppb_meter is
     signal start_rise : std_logic;
 
     -- ======================================================================
-    -- Edge counters  (22 bits → max 4 194 303, covers 64·48 000 = 3 072 000)
+    -- Edge counters  (25 bits → max 33 554 431, covers 512·48 000 = 24 576 000)
     -- ======================================================================
-    signal count_wc  : unsigned(21 downto 0) := (others => '0');
-    signal count_pll : unsigned(21 downto 0) := (others => '0');
+    signal count_wc  : unsigned(24 downto 0) := (others => '0');
+    signal count_pll : unsigned(24 downto 0) := (others => '0');
 
     -- ======================================================================
     -- Output registers
     -- ======================================================================
-    signal count_wc_reg  : unsigned(21 downto 0) := (others => '0');
-    signal count_pll_reg : unsigned(21 downto 0) := (others => '0');
+    signal count_wc_reg  : unsigned(24 downto 0) := (others => '0');
+    signal count_pll_reg : unsigned(24 downto 0) := (others => '0');
     signal valid_reg     : std_logic             := '0';
 
 begin
@@ -87,13 +87,13 @@ begin
     valid_o     <= valid_reg;
 
     -- ==================================================================
-    -- CDC: Synchronise the two asynchronous 64-fs clocks into sys_clk
+    -- CDC: Synchronise the two asynchronous 512·fs clocks into sys_clk
     -- ==================================================================
     p_cdc : process(sys_clk)
     begin
         if rising_edge(sys_clk) then
-            wc_sync  <= wc_sync(1 downto 0)  & wallclock_64fs_in;
-            pll_sync <= pll_sync(1 downto 0) & pll_64fs_in;
+            wc_sync  <= wc_sync(1 downto 0)  & wallclock_512fs_in;
+            pll_sync <= pll_sync(1 downto 0) & pll_512fs_in;
         end if;
     end process p_cdc;
 

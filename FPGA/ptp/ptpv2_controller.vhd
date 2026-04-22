@@ -21,7 +21,7 @@ entity ptpv2_controller is
         sequence_id_i         : in  unsigned(15 downto 0);
         send_delay_resp_in        : in std_logic;
 
-        second_pulse_i       : in  std_logic;
+        ms_pulse_i            : in  std_logic;
 
         is_leader_i   : in  std_logic;
         is_follower_i : in  std_logic;
@@ -69,7 +69,6 @@ entity ptpv2_controller is
     signal tx_started : std_logic := '0';       -- Flag: have we seen tx_en go high?
 
     signal is_leader : std_logic := '0';
-    signal second_pulse_i_reg : std_logic := '0';
     signal send_delay_resp_in_reg : std_logic := '0';  -- Edge detection for same clock domain
     signal sequence_id_i_latched : unsigned(15 downto 0) := (others => '0');
     signal request_port_identity_i_latched : std_logic_vector(79 downto 0) := (others => '0');
@@ -94,33 +93,28 @@ entity ptpv2_controller is
 
 
     -- ============================================================
-    -- Wallclock-based message timing
+    -- Millisecond-based message scheduling
     -- ============================================================
-    -- Sync interval decoded from ptp_log_message_interval_i (registered)
-    signal sync_interval_sec : unsigned(7 downto 0)  := to_unsigned(1, 8);
-    signal sync_interval_ns  : unsigned(31 downto 0) := (others => '0');
+    -- Wallclock-constrained ms counter. 16 bits wrap every ~65.5 s — far longer than
+    -- any supported announce/sync interval (max 16 s), so modular compare
+    -- (diff MSB) works cleanly.
+    signal ms_counter        : unsigned(15 downto 0) := (others => '0');
 
-    -- Announce interval decoded from ptp_announce_log_message_interval_i (registered)
-    signal announce_interval_sec : unsigned(7 downto 0)  := to_unsigned(2, 8);
-    signal announce_interval_ns  : unsigned(31 downto 0) := (others => '0');
+    -- Decoded intervals in ms. Max supported interval is 16 s = 16000 ms.
+    signal sync_interval_ms     : unsigned(15 downto 0) := to_unsigned(1000, 16);
+    signal announce_interval_ms : unsigned(15 downto 0) := to_unsigned(2000, 16);
 
-    -- Next-send wallclock targets (4-bit seconds, wraps cleanly)
-    signal sync_next_sec     : unsigned(3 downto 0) := (others => '0');
-    signal sync_next_ns      : unsigned(31 downto 0) := (others => '0');
-    signal announce_next_sec : unsigned(3 downto 0) := (others => '0');
-    signal announce_next_ns  : unsigned(31 downto 0) := (others => '0');
+    -- Next-send targets (ms counter values).
+    signal sync_next_ms     : unsigned(15 downto 0) := (others => '0');
+    signal announce_next_ms : unsigned(15 downto 0) := (others => '0');
 
-    -- Combinational time-reached flags
+    -- Combinational time-reached flags (modular compare: past if MSB of
+    -- (ms_counter - next) is 0 and the diff is non-zero — equivalent to
+    -- "ms_counter is within the next half-wrap ahead of target").
     signal sync_time_reached     : std_logic;
     signal announce_time_reached : std_logic;
-
-    -- Wrapping difference for modular comparison
-    signal sync_sec_diff     : unsigned(3 downto 0);
-    signal announce_sec_diff : unsigned(3 downto 0);
-
-    -- Registered wallclock for coherent multi-bit sampling (low 4 bits of seconds)
-    signal wc_sec_r  : unsigned(3 downto 0) := (others => '0');
-    signal wc_ns_r   : unsigned(31 downto 0) := (others => '0');
+    signal sync_ms_diff          : unsigned(15 downto 0);
+    signal announce_ms_diff      : unsigned(15 downto 0);
 
     -- Leader mode transition detection
     signal was_leader : std_logic := '0';
@@ -131,56 +125,50 @@ entity ptpv2_controller is
     attribute PRESERVE of tx_en_i_sync : signal is true;
     attribute PRESERVE of is_leader : signal is true;
 
-    -- Registered input for interval decode (breaks combinatorial path from port to decode)
-    signal ptp_log_msg_int_r : std_logic_vector(7 downto 0) := (others => '0');
+    -- Registered inputs for interval decode (breaks port -> decode combinatorial path)
+    signal ptp_log_msg_int_r     : std_logic_vector(7 downto 0) := (others => '0');
     signal ptp_ann_log_msg_int_r : std_logic_vector(7 downto 0) := (others => '0');
-
-    -- Pipeline registers after interval decode (breaks ROM output -> timer calc critical path)
-    signal sync_interval_sec_r     : unsigned(7 downto 0)  := to_unsigned(1, 8);
-    signal sync_interval_ns_r      : unsigned(31 downto 0) := (others => '0');
-    signal announce_interval_sec_r : unsigned(7 downto 0)  := to_unsigned(2, 8);
-    signal announce_interval_ns_r  : unsigned(31 downto 0) := (others => '0');
-
-    -- ============================================================
-    -- Precomputed next-time pipeline (breaks wc_ns_r → *_next_ns critical path)
-    -- Stage 1: ns_sum = wc_ns_r + interval_ns_r (33-bit add)
-    -- Stage 2: overflow detect, normalized values ready for use
-    -- ============================================================
-    signal sync_ns_sum_reg     : unsigned(32 downto 0) := (others => '0');
-    signal announce_ns_sum_reg : unsigned(32 downto 0) := (others => '0');
-    signal sync_next_ns_pre    : unsigned(31 downto 0) := (others => '0');
-    signal sync_next_sec_pre   : unsigned(3 downto 0)  := (others => '0');
-    signal sync_overflow       : std_logic := '0';
-    signal announce_next_ns_pre  : unsigned(31 downto 0) := (others => '0');
-    signal announce_next_sec_pre : unsigned(3 downto 0)  := (others => '0');
-    signal announce_overflow     : std_logic := '0';
 
     -- CDC for sof_sent toggle signal (from TX clock domain)
     signal sof_toggle_meta : std_logic := '0';  -- metastability stage
     signal sof_toggle_sync : std_logic := '0';  -- stable synchronized value
     signal sof_toggle_prev : std_logic := '0';  -- previous value for edge detection
-    signal sof_detected    : std_logic;          -- combinational: toggle changed = SOF occurred
 
     attribute PRESERVE of sof_toggle_meta : signal is true;
     attribute PRESERVE of sof_toggle_sync : signal is true;
     end entity;
 architecture Behavioral of ptpv2_controller is
-    constant ONE_SECOND_NS : unsigned(31 downto 0) := to_unsigned(1000000000, 32);
+
+    -- Decode log2(interval seconds) -> milliseconds.
+    -- Covers the spec range -7..+4; anything outside falls back to 1000 ms.
+    function log_interval_to_ms(log_int : std_logic_vector(7 downto 0))
+        return unsigned is
+    begin
+        case log_int is
+            when x"F9" => return to_unsigned(    8, 16); -- -7 ~  7.8 ms
+            when x"FA" => return to_unsigned(   16, 16); -- -6 ~ 15.6 ms
+            when x"FB" => return to_unsigned(   31, 16); -- -5 ~ 31.25 ms
+            when x"FC" => return to_unsigned(   63, 16); -- -4 ~ 62.5 ms
+            when x"FD" => return to_unsigned(  125, 16); -- -3  125 ms
+            when x"FE" => return to_unsigned(  250, 16); -- -2  250 ms
+            when x"FF" => return to_unsigned(  500, 16); -- -1  500 ms
+            when x"00" => return to_unsigned( 1000, 16); --  0
+            when x"01" => return to_unsigned( 2000, 16); --  1
+            when x"02" => return to_unsigned( 4000, 16); --  2
+            when x"03" => return to_unsigned( 8000, 16); --  3
+            when x"04" => return to_unsigned(16000, 16); --  4
+            when others => return to_unsigned(1000, 16);
+        end case;
+    end function;
+
 begin
 
-    -- SOF toggle detection: any change in synchronized toggle means SOF occurred
-    
-
-    -- ============================================================
-    -- Decode ptp_log_message_interval_i to seconds + nanoseconds
-    -- 2-stage pipeline: Stage 1 registers the input, Stage 2 decodes.
-    -- Uses if/elsif instead of case-on-to_integer to prevent Quartus
-    -- from inferring Block RAM (ROM) for the decode table.
-    -- ============================================================
+    -- Register raw log-interval inputs (1 cycle) and the decoded ms values
+    -- (1 more cycle) to break the port -> decode combinatorial path.
     interval_input_reg: process(clk)
     begin
         if rising_edge(clk) then
-            ptp_log_msg_int_r <= ptp_log_message_interval_i;
+            ptp_log_msg_int_r     <= ptp_log_message_interval_i;
             ptp_ann_log_msg_int_r <= ptp_announce_log_message_interval_i;
         end if;
     end process interval_input_reg;
@@ -188,163 +176,18 @@ begin
     interval_decode: process(clk)
     begin
         if rising_edge(clk) then
-            -- Default: 1 second
-            sync_interval_sec <= to_unsigned(1, 8);
-            sync_interval_ns  <= (others => '0');
-
-            if    ptp_log_msg_int_r = x"F9" then  -- -7
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(7812500, 32);
-            elsif ptp_log_msg_int_r = x"FA" then  -- -6
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(15625000, 32);
-            elsif ptp_log_msg_int_r = x"FB" then  -- -5
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(31250000, 32);
-            elsif ptp_log_msg_int_r = x"FC" then  -- -4
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(62500000, 32);
-            elsif ptp_log_msg_int_r = x"FD" then  -- -3
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(125000000, 32);
-            elsif ptp_log_msg_int_r = x"FE" then  -- -2
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(250000000, 32);
-            elsif ptp_log_msg_int_r = x"FF" then  -- -1
-                sync_interval_sec <= to_unsigned(0, 8);
-                sync_interval_ns  <= to_unsigned(500000000, 32);
-            elsif ptp_log_msg_int_r = x"00" then  --  0
-                sync_interval_sec <= to_unsigned(1, 8);
-                sync_interval_ns  <= (others => '0');
-            elsif ptp_log_msg_int_r = x"01" then  --  1
-                sync_interval_sec <= to_unsigned(2, 8);
-                sync_interval_ns  <= (others => '0');
-            elsif ptp_log_msg_int_r = x"02" then  --  2
-                sync_interval_sec <= to_unsigned(4, 8);
-                sync_interval_ns  <= (others => '0');
-            elsif ptp_log_msg_int_r = x"03" then  --  3
-                sync_interval_sec <= to_unsigned(8, 8);
-                sync_interval_ns  <= (others => '0');
-            elsif ptp_log_msg_int_r = x"04" then  --  4
-                sync_interval_sec <= to_unsigned(16, 8);
-                sync_interval_ns  <= (others => '0');
-            end if;
+            sync_interval_ms     <= log_interval_to_ms(ptp_log_msg_int_r);
+            announce_interval_ms <= log_interval_to_ms(ptp_ann_log_msg_int_r);
         end if;
     end process interval_decode;
 
-    -- Pipeline stage: register interval values to break ROM->calc critical path
-    interval_pipeline: process(clk)
-    begin
-        if rising_edge(clk) then
-            sync_interval_sec_r <= sync_interval_sec;
-            sync_interval_ns_r  <= sync_interval_ns;
-            announce_interval_sec_r <= announce_interval_sec;
-            announce_interval_ns_r  <= announce_interval_ns;
-        end if;
-    end process interval_pipeline;
-
-    -- ============================================================
-    -- Decode ptp_announce_log_message_interval_i to seconds + nanoseconds
-    -- Same approach: if/elsif on registered input to prevent ROM inference.
-    -- ============================================================
-    announce_interval_decode: process(clk)
-    begin
-        if rising_edge(clk) then
-            -- Default: 2 seconds (logAnnounceInterval = 1)
-            announce_interval_sec <= to_unsigned(2, 8);
-            announce_interval_ns  <= (others => '0');
-
-            if    ptp_ann_log_msg_int_r = x"F9" then  -- -7
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(7812500, 32);
-            elsif ptp_ann_log_msg_int_r = x"FA" then  -- -6
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(15625000, 32);
-            elsif ptp_ann_log_msg_int_r = x"FB" then  -- -5
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(31250000, 32);
-            elsif ptp_ann_log_msg_int_r = x"FC" then  -- -4
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(62500000, 32);
-            elsif ptp_ann_log_msg_int_r = x"FD" then  -- -3
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(125000000, 32);
-            elsif ptp_ann_log_msg_int_r = x"FE" then  -- -2
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(250000000, 32);
-            elsif ptp_ann_log_msg_int_r = x"FF" then  -- -1
-                announce_interval_sec <= to_unsigned(0, 8);
-                announce_interval_ns  <= to_unsigned(500000000, 32);
-            elsif ptp_ann_log_msg_int_r = x"00" then  --  0
-                announce_interval_sec <= to_unsigned(1, 8);
-                announce_interval_ns  <= (others => '0');
-            elsif ptp_ann_log_msg_int_r = x"01" then  --  1
-                announce_interval_sec <= to_unsigned(2, 8);
-                announce_interval_ns  <= (others => '0');
-            elsif ptp_ann_log_msg_int_r = x"02" then  --  2
-                announce_interval_sec <= to_unsigned(4, 8);
-                announce_interval_ns  <= (others => '0');
-            elsif ptp_ann_log_msg_int_r = x"03" then  --  3
-                announce_interval_sec <= to_unsigned(8, 8);
-                announce_interval_ns  <= (others => '0');
-            elsif ptp_ann_log_msg_int_r = x"04" then  --  4
-                announce_interval_sec <= to_unsigned(16, 8);
-                announce_interval_ns  <= (others => '0');
-            end if;
-        end if;
-    end process announce_interval_decode;
-
-    -- ============================================================
-    -- Next-time precomputation pipeline (continuous)
-    -- Stage 1: Compute 33-bit sums: wc_ns_r + sync_interval_ns_r
-    -- Stage 2: Normalize (subtract 1e9 if overflow) + compute sec offset
-    -- These values are sampled by the state machine when scheduling.
-    -- ============================================================
-    next_time_precompute: process(clk)
-    begin
-        if rising_edge(clk) then
-            -- Stage 1: 33-bit adds
-            sync_ns_sum_reg     <= ('0' & wc_ns_r) + ('0' & sync_interval_ns_r);
-            announce_ns_sum_reg <= ('0' & wc_ns_r) + ('0' & announce_interval_ns_r);
-            
-            -- Stage 2: Overflow detect and normalize (uses PREVIOUS cycle's sums)
-            if sync_ns_sum_reg >= ('0' & ONE_SECOND_NS) then
-                sync_next_ns_pre  <= sync_ns_sum_reg(31 downto 0) - ONE_SECOND_NS;
-                sync_next_sec_pre <= wc_sec_r + resize(sync_interval_sec_r, 4) + 1;
-                sync_overflow     <= '1';
-            else
-                sync_next_ns_pre  <= sync_ns_sum_reg(31 downto 0);
-                sync_next_sec_pre <= wc_sec_r + resize(sync_interval_sec_r, 4);
-                sync_overflow     <= '0';
-            end if;
-            
-            if announce_ns_sum_reg >= ('0' & ONE_SECOND_NS) then
-                announce_next_ns_pre  <= announce_ns_sum_reg(31 downto 0) - ONE_SECOND_NS;
-                announce_next_sec_pre <= wc_sec_r + resize(announce_interval_sec_r, 4) + 1;
-                announce_overflow     <= '1';
-            else
-                announce_next_ns_pre  <= announce_ns_sum_reg(31 downto 0);
-                announce_next_sec_pre <= wc_sec_r + resize(announce_interval_sec_r, 4);
-                announce_overflow     <= '0';
-            end if;
-        end if;
-    end process next_time_precompute;
-
-    -- ============================================================
-    -- Wallclock time comparisons (modular 4-bit wrapping)
-    -- diff = wc - target; reached when diff is in [1..7] (past)
-    -- or diff=0 and ns >= target_ns (same second, ns reached)
-    -- ============================================================
-    sync_sec_diff     <= wc_sec_r - sync_next_sec;
-    announce_sec_diff <= wc_sec_r - announce_next_sec;
-
-    sync_time_reached <= '1' when (sync_sec_diff(3) = '0' and sync_sec_diff /= "0000") or
-                                  (sync_sec_diff = "0000" and wc_ns_r >= sync_next_ns)
-                         else '0';
-
-    announce_time_reached <= '1' when (announce_sec_diff(3) = '0' and announce_sec_diff /= "0000") or
-                                      (announce_sec_diff = "0000" and wc_ns_r >= announce_next_ns)
-                             else '0';
+    -- Modular "time reached": target is in the past if (ms_counter - next)
+    -- is within the lower half of the wrap window. The intervals are at most
+    -- 16 s; the window is 65.5 s, so this comparison is unambiguous.
+    sync_ms_diff          <= ms_counter - sync_next_ms;
+    announce_ms_diff      <= ms_counter - announce_next_ms;
+    sync_time_reached     <= '1' when sync_ms_diff(15) = '0'     else '0';
+    announce_time_reached <= '1' when announce_ms_diff(15) = '0' else '0';
 
     cdc_sync_proc: process(clk)
     begin
@@ -366,7 +209,6 @@ begin
             sync_sequence_id        <= (others => '0');
             announce_sequence_id    <= (others => '0');
             is_leader               <= '0';
-            second_pulse_i_reg      <= '0';
             send_delay_resp_in_reg  <= '0';
             leader_state           <= s_Idle;
             tx_started              <= '0';
@@ -376,23 +218,20 @@ begin
             follower_state         <= f_Idle;
             t3_valid_o              <= '0';
             was_leader              <= '0';
-            sync_next_sec           <= (others => '1');
-            sync_next_ns            <= (others => '1');
-            announce_next_sec       <= (others => '1');
-            announce_next_ns        <= (others => '1');
-            wc_sec_r                <= (others => '0');
-            wc_ns_r                 <= (others => '0');
+            ms_counter              <= (others => '0');
+            sync_next_ms            <= (others => '0');
+            announce_next_ms        <= (others => '0');
             ptp_log_interval_o      <= (others => '0');
             sof_toggle_meta         <= '0';
             sof_toggle_sync         <= '0';
             sof_toggle_prev         <= '0';
         elsif rising_edge(clk) then
-            -- Register wallclock once per cycle for coherent sampling
-            wc_sec_r <= wallclock_seconds_i(3 downto 0);
-            wc_ns_r  <= wallclock_nanoseconds_i;
+            -- Free-running ms counter
+            if ms_pulse_i = '1' then
+                ms_counter <= ms_counter + 1;
+            end if;
 
             -- Edge detection registers (same clock domain - no CDC needed)
-            second_pulse_i_reg <= second_pulse_i;
             send_delay_resp_in_reg <= send_delay_resp_in;
             -- CDC synchronizer for SOF toggle from TX clock domain
             sof_toggle_meta <= sof_sent_tog_i;
@@ -409,31 +248,22 @@ begin
                     -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Idle;
                 when p2p_Send_Pdelay_Req =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Idle;
                 when p2p_Wait_for_Pdelay_Req_Ack =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Idle;
                 when p2p_Wait_for_Pdelay_Req_Done =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Idle;
                 when p2p_Send_Pdelay_Resp =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Wait_for_Pdelay_Resp_Ack;
                 when p2p_Wait_for_Pdelay_Resp_Ack =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Wait_for_Pdelay_Resp_Done;
                 when p2p_Wait_for_Pdelay_Resp_Done =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Send_Pdelay_Follow_Up;
                 when p2p_Send_Pdelay_Follow_Up =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Wait_for_Pdelay_Follow_Up_Ack;
                 when p2p_Wait_for_Pdelay_Follow_Up_Ack =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Wait_for_Pdelay_Follow_Up_Done;
                 when p2p_Wait_for_Pdelay_Follow_Up_Done =>
-                    -- P2P delay mechanism not implemented yet
                     p2p_state <= p2p_Idle;
                 when others =>
                     p2p_state <= p2p_Idle;
@@ -445,12 +275,11 @@ begin
 
                 -- Initialize timers on leader mode entry
                 if was_leader = '0' then
-                    -- First cycle as leader: schedule first send using precomputed values
-                    -- The precompute pipeline already has valid values from continuous operation.
-                    sync_next_ns  <= sync_next_ns_pre;
-                    sync_next_sec <= sync_next_sec_pre;
-                    announce_next_ns  <= announce_next_ns_pre;
-                    announce_next_sec <= announce_next_sec_pre;
+                    -- First cycle as leader: schedule first send one interval
+                    -- from "now". The decoded interval registers are already
+                    -- valid (continuously updated).
+                    sync_next_ms     <= ms_counter + sync_interval_ms;
+                    announce_next_ms <= ms_counter + announce_interval_ms;
                 else
 
                 -- Leader logic - simple state machine (runs from 2nd cycle as leader onwards)
@@ -464,16 +293,14 @@ begin
                             leader_state <= s_Send_Sync;
                             ptp_log_interval_o <= ptp_log_message_interval_i;
 
-                            -- Advance sync timer using precomputed values
-                            sync_next_ns  <= sync_next_ns_pre;
-                            sync_next_sec <= sync_next_sec_pre;
+                            -- Advance sync timer by one interval
+                            sync_next_ms <= sync_next_ms + sync_interval_ms;
                         elsif (announce_time_reached = '1') then
                             leader_state <= s_Send_Announce;
                             ptp_log_interval_o <= ptp_announce_log_message_interval_i;
 
-                            -- Advance announce timer using precomputed values
-                            announce_next_ns  <= announce_next_ns_pre;
-                            announce_next_sec <= announce_next_sec_pre;
+                            -- Advance announce timer by one interval
+                            announce_next_ms <= announce_next_ms + announce_interval_ms;
                         end if;
 
                     -- ========================================
@@ -510,7 +337,7 @@ begin
                         end if;
 
                     when s_Wait_for_Sync_Done =>
-                        -- Copy dedicated sync TX timestamp to output 
+                        -- Copy dedicated sync TX timestamp to output
                         timestamp_nanoseconds_o <= sync_tx_ts_nanoseconds;
                         timestamp_seconds_o <= sync_tx_ts_seconds;
                         leader_state <= s_Latch_Sync_Timestamp;
@@ -576,7 +403,7 @@ begin
                     when s_Send_Delay_Resp =>
                         sequence_id_o <= sequence_id_i_latched;
                         request_port_identity_o <= request_port_identity_i_latched;
-                        tx_message_type_o <= x"9"; 
+                        tx_message_type_o <= x"9";
 						ptp_log_interval_o <= ptp_log_message_interval_i;
                         timestamp_nanoseconds_o <= timestamp_nanoseconds_i_latched;
                         timestamp_seconds_o <= timestamp_seconds_i_latched;

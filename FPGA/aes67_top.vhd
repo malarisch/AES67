@@ -100,8 +100,8 @@ ENTITY aes67_top IS
 		-- ppb meter for external pll
 		ppb_meter_start_i : IN STD_LOGIC;
 		pll_meas_valid_o : OUT STD_LOGIC;
-		pll_counter_o : OUT unsigned(21 downto 0);
-		wc_counter_o : OUT unsigned(21 downto 0);
+		pll_counter_o : OUT unsigned(24 downto 0);
+		wc_counter_o : OUT unsigned(24 downto 0);
 		
 
 		-- audio metering
@@ -141,9 +141,11 @@ SIGNAL pll_48k_fs_tdm : STD_LOGIC;
 signal pll_256fs_falling : STD_LOGIC;
 signal pll_256fs_rising : STD_LOGIC;
 
-signal wc_64fs : STD_LOGIC; -- nco generated from wallclock
+signal wc_mclk : STD_LOGIC; -- 512·fs NCO generated from wallclock
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal second_pulse_sys : STD_LOGIC;
+signal mac_linkup : STD_LOGIC;
+-- mac_linkup_o is driven from internal mac_linkup below
 
 -- sample registers for in/output
 
@@ -253,8 +255,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 ppb_meter_inst: entity work.clock_ppb_meter
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => rst_n,
-		 wallclock_64fs_in => wc_64fs,
-		 pll_64fs_in => pll_64fs,
+		 wallclock_512fs_in => wc_mclk,
+		 pll_512fs_in => pll_512fs_i,
 		 wallclock_second_pulse_i => second_pulse_sys,
 		 start_i => ppb_meter_start_i,
 		 valid_o => pll_meas_valid_o,
@@ -262,11 +264,14 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 count_wc_o => wc_counter_o);
 
 
+mac_linkup_o <= mac_linkup;
+
 ptp_inst: entity work.ptp_module
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => rst_n,
 
 		 -- mac signals
+		 mac_link_up_i => mac_linkup,
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
@@ -307,7 +312,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 
 
 		 -- generated clocks
-		 wc_64fs => wc_64fs,
+		 wc_mclk => wc_mclk,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock
 		 );
@@ -438,7 +443,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_reset_i => mac_reset,
 	mac_addr_i => mac_address_i,
 	mac_speed_o => mac_speed_o,
-	mac_linkup_o => mac_linkup_o,
+	mac_linkup_o => mac_linkup,
 	mac_tx_byte_sent_o => mac_tx_byte_sent,
 	mac_tx_reset_o => mac_tx_reset_o,
 	mac_tx_busy_o => mac_tx_busy,

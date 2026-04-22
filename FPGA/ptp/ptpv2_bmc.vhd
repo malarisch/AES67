@@ -7,9 +7,14 @@ use ieee.numeric_std.all;
 -- Tracks a single best-external-candidate from received Announce messages,
 -- compares it against this node's own dataset, and drives the leader/follower
 -- outputs. An external candidate is considered lost after 3 x announceInterval
--- seconds without a refreshing Announce; at that point the node falls back
--- to becoming leader if its own dataset is better than no candidate (trivially
--- true) or remains follower of nothing (is_leader=1).
+-- (counted in ms via ms_pulse_i) without a refreshing Announce; at that point
+-- the node falls back to becoming leader if its own dataset is better than no
+-- candidate (trivially true) or remains follower of nothing (is_leader=1).
+--
+-- Startup grace: the BMC stays idle (neither leader nor follower) while the
+-- MAC link is down. On link-up it waits GRACE_MS milliseconds collecting
+-- Announces before making the first decision, so we don't briefly claim
+-- leadership and then yield to an existing leader a moment later.
 --
 -- Dataset comparison order per IEEE 1588 (lower value wins):
 --   priority1 -> clockClass -> clockAccuracy -> offsetScaledLogVariance
@@ -28,7 +33,8 @@ entity ptpv2_bmc is
     port (
         clk                : in  std_logic;
         reset_n            : in  std_logic;
-        second_pulse_i     : in  std_logic;   -- 1 Hz tick (sys clk domain)
+        ms_pulse_i         : in  std_logic;   -- 1 kHz tick (sys clk domain)
+        mac_link_up_i      : in  std_logic;   -- '1' when Ethernet PHY link is up
 
         -- Own dataset (local clock)
         my_clock_identity_i        : in std_logic_vector(63 downto 0);
@@ -66,13 +72,25 @@ architecture rtl of ptpv2_bmc is
     signal ext_oslv         : std_logic_vector(15 downto 0) := (others => '1');
     signal ext_priority2    : std_logic_vector(7 downto 0) := (others => '1');
 
-    -- Timeout counter (seconds remaining before external candidate expires)
-    signal ext_timeout_sec  : unsigned(7 downto 0) := (others => '0');
+    -- Timeout counter (milliseconds remaining before external candidate expires).
+    -- 3 x 16s = 48000 ms worst case, so 16 bits is enough.
+    signal ext_timeout_ms   : unsigned(15 downto 0) := (others => '0');
 
-    -- Result registers
-    signal is_leader_r       : std_logic := '1';
+    -- Result registers. Start neutral (neither leader nor follower) until the
+    -- startup grace period has elapsed and a first decision has been made.
+    signal is_leader_r       : std_logic := '0';
     signal is_follower_r     : std_logic := '0';
     signal current_leader_r  : std_logic_vector(63 downto 0) := (others => '0');
+
+    -- Startup grace: while the MAC link is down, the BMC is held idle. Once
+    -- the link goes up we wait GRACE_MS milliseconds to collect Announces
+    -- from any existing leader before making the first decision. This avoids
+    -- briefly claiming leadership on boot only to yield to a better external
+    -- candidate a moment later.
+    constant GRACE_MS        : natural := 5000;
+    signal grace_cnt_ms      : unsigned(15 downto 0) := (others => '0');
+    signal grace_active      : std_logic := '1';   -- '1' while waiting / link down
+    signal link_up_d         : std_logic := '0';
 
     -- Registered comparator outputs. The two processes P_CMP_ANN_EXT and
     -- P_CMP_EXT_SELF run the long dataset comparisons continuously and park
@@ -84,29 +102,27 @@ architecture rtl of ptpv2_bmc is
     -- ext-vs-self comparator time to settle before the main FSM samples it.
     signal update_wait_r     : std_logic := '0';
 
-    -- Decode signed log2(interval seconds) -> seconds (clamped to >=1),
-    -- then multiply by 3 for the announceReceiptTimeout.
-    function decode_timeout_sec(log_msg_interval : std_logic_vector(7 downto 0))
+    -- Decode signed log2(interval seconds) -> milliseconds, then multiply by 3
+    -- for the announceReceiptTimeout. Negative log values are sub-second
+    -- intervals (e.g. -3 -> 125 ms); positive values are whole seconds.
+    function decode_timeout_ms(log_msg_interval : std_logic_vector(7 downto 0))
         return unsigned is
         variable s : signed(7 downto 0);
-        variable secs : unsigned(7 downto 0);
+        variable ms : unsigned(15 downto 0);
     begin
         s := signed(log_msg_interval);
-        if s <= 0 then
-            secs := to_unsigned(1, 8);   -- sub-second or 1s -> treat as 1s
-        elsif s = 1 then
-            secs := to_unsigned(2, 8);
-        elsif s = 2 then
-            secs := to_unsigned(4, 8);
-        elsif s = 3 then
-            secs := to_unsigned(8, 8);
-        elsif s = 4 then
-            secs := to_unsigned(16, 8);
-        else
-            secs := to_unsigned(16, 8);  -- clamp large values
+        if    s <= -4 then ms := to_unsigned(  63, 16);  -- 2^-4 s ~ 62.5ms, clamp low
+        elsif s  = -3 then ms := to_unsigned( 125, 16);
+        elsif s  = -2 then ms := to_unsigned( 250, 16);
+        elsif s  = -1 then ms := to_unsigned( 500, 16);
+        elsif s  =  0 then ms := to_unsigned(1000, 16);
+        elsif s  =  1 then ms := to_unsigned(2000, 16);
+        elsif s  =  2 then ms := to_unsigned(4000, 16);
+        elsif s  =  3 then ms := to_unsigned(8000, 16);
+        else               ms := to_unsigned(16000, 16);  -- clamp s >= 4
         end if;
         -- 3 x interval
-        return resize(secs + secs + secs, 8);
+        return resize(ms + ms + ms, 16);
     end function;
 
     -- Return '1' if dataset A is strictly better than dataset B
@@ -204,24 +220,56 @@ begin
             ext_clock_acc    <= (others => '1');
             ext_oslv         <= (others => '1');
             ext_priority2    <= (others => '1');
-            ext_timeout_sec  <= (others => '0');
-            is_leader_r      <= '1';
+            ext_timeout_ms   <= (others => '0');
+            is_leader_r      <= '0';
             is_follower_r    <= '0';
             current_leader_r <= (others => '0');
             update_wait_r    <= '0';
+            grace_active     <= '1';
+            grace_cnt_ms     <= (others => '0');
+            link_up_d        <= '0';
 
         elsif rising_edge(clk) then
 
             -- default: wait state clears after one cycle
             update_wait_r <= '0';
+            link_up_d     <= mac_link_up_i;
 
-            -- 1 Hz timeout countdown for external candidate
-            if second_pulse_i = '1' and ext_valid = '1' then
-                if ext_timeout_sec <= 1 then
-                    ext_valid       <= '0';
-                    ext_timeout_sec <= (others => '0');
+            -- Link-down: hold BMC idle and reset grace/ext state so we start
+            -- fresh when the link returns.
+            if mac_link_up_i = '0' then
+                grace_active     <= '1';
+                grace_cnt_ms     <= to_unsigned(GRACE_MS, grace_cnt_ms'length);
+                ext_valid        <= '0';
+                ext_timeout_ms   <= (others => '0');
+                is_leader_r      <= '0';
+                is_follower_r    <= '0';
+                current_leader_r <= (others => '0');
+            else
+                -- Rising edge of link: (re)arm the grace timer
+                if link_up_d = '0' then
+                    grace_active <= '1';
+                    grace_cnt_ms <= to_unsigned(GRACE_MS, grace_cnt_ms'length);
+                end if;
+
+                -- Count down the grace period on the ms tick
+                if grace_active = '1' and ms_pulse_i = '1' then
+                    if grace_cnt_ms <= 1 then
+                        grace_cnt_ms <= (others => '0');
+                        grace_active <= '0';
+                    else
+                        grace_cnt_ms <= grace_cnt_ms - 1;
+                    end if;
+                end if;
+            end if;
+
+            -- 1 kHz timeout countdown for external candidate
+            if ms_pulse_i = '1' and ext_valid = '1' then
+                if ext_timeout_ms <= 1 then
+                    ext_valid      <= '0';
+                    ext_timeout_ms <= (others => '0');
                 else
-                    ext_timeout_sec <= ext_timeout_sec - 1;
+                    ext_timeout_ms <= ext_timeout_ms - 1;
                 end if;
             end if;
 
@@ -248,14 +296,15 @@ begin
                     ext_clock_acc   <= announce_clock_accuracy_i;
                     ext_oslv        <= announce_offset_scaled_log_var_i;
                     ext_priority2   <= announce_priority2_i;
-                    ext_timeout_sec <= decode_timeout_sec(announce_log_msg_interval_i);
+                    ext_timeout_ms  <= decode_timeout_ms(announce_log_msg_interval_i);
                     update_wait_r   <= '1';  -- stall output update one cycle
                 end if;
             end if;
 
             -- Recompute leader/follower from registered state. Skip during
             -- the wait state so ext_beats_self_r reflects the *new* ext.
-            if update_wait_r = '0' then
+            -- Also hold idle while link is down or during startup grace.
+            if update_wait_r = '0' and mac_link_up_i = '1' and grace_active = '0' then
                 if ext_valid = '1' then
                     if ext_beats_self_r = '1' then
                         is_leader_r      <= '0';

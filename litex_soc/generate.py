@@ -216,8 +216,8 @@ _io_common = [
     ("aes67_ctrl", 0,
         # Inputs (from external FPGA logic -> SoC)
         Subsignal("pll_ppb_valid",      Pins(1)),
-        Subsignal("pll_ppb_wc_count",   Pins(22)),
-        Subsignal("pll_ppb_pll_count",  Pins(22)),
+        Subsignal("pll_ppb_wc_count",   Pins(25)),
+        Subsignal("pll_ppb_pll_count",  Pins(25)),
         Subsignal("wallclock_locked",   Pins(1)),
         Subsignal("wallclock_phasejump", Pins(1)),
         Subsignal("wallclock_configured", Pins(1)),
@@ -573,8 +573,8 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # Input signals (directly active from external FPGA logic)
         # =====================================================================
         self.i_pll_ppb_valid       = Signal()
-        self.i_pll_ppb_wc_count    = Signal(22)
-        self.i_pll_ppb_pll_count   = Signal(22)
+        self.i_pll_ppb_wc_count    = Signal(25)
+        self.i_pll_ppb_pll_count   = Signal(25)
         self.i_wallclock_locked    = Signal()
         self.i_wallclock_phasejump = Signal()
         self.i_wallclock_configured = Signal()
@@ -617,8 +617,8 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.pll_ppb_status = CSRStatus(32, fields=[
             CSRField("valid",     size=1,  offset=0,  description="PPB measurement valid"),
         ])
-        self.pll_ppb_wc_count = CSRStatus(32, description="PPB measurement wallclock count [21:0]")
-        self.pll_ppb_pll_count = CSRStatus(32, description="PPB measurement PLL count [21:0]")
+        self.pll_ppb_wc_count = CSRStatus(32, description="PPB measurement wallclock count [24:0]")
+        self.pll_ppb_pll_count = CSRStatus(32, description="PPB measurement PLL count [24:0]")
 
         self.status = CSRStatus(32, fields=[
             CSRField("wallclock_locked",    size=1, offset=0, description="Wallclock locked"),

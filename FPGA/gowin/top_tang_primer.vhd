@@ -229,8 +229,8 @@ COMPONENT litex_soc
 		 i2c1_scl : INOUT STD_LOGIC;
 		 i2c1_sda : INOUT STD_LOGIC;
 		 aes67_ctrl_eth_speed : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
-		 aes67_ctrl_pll_ppb_pll_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
-		 aes67_ctrl_pll_ppb_wc_count : IN STD_LOGIC_VECTOR(21 DOWNTO 0);
+		 aes67_ctrl_pll_ppb_pll_count : IN STD_LOGIC_VECTOR(24 DOWNTO 0);
+		 aes67_ctrl_pll_ppb_wc_count : IN STD_LOGIC_VECTOR(24 DOWNTO 0);
 		 aes67_ctrl_ptp_offset : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 aes67_ctrl_ptp_path_delay : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 aes67_ctrl_rx_meter_clip : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
@@ -348,13 +348,13 @@ END COMPONENT;
 COMPONENT clock_ppb_meter
 	PORT(sys_clk : IN STD_LOGIC;
 		 reset_n : IN STD_LOGIC;
-		 wallclock_64fs_in : IN STD_LOGIC;
-		 pll_64fs_in : IN STD_LOGIC;
+		 wallclock_512fs_in : IN STD_LOGIC;
+		 pll_512fs_in : IN STD_LOGIC;
 		 wallclock_second_pulse_i : IN STD_LOGIC;
 		 start_i : IN STD_LOGIC;
 		 valid_o : OUT STD_LOGIC;
-		 count_pll_o : OUT UNSIGNED(21 DOWNTO 0);
-		 count_wc_o : OUT UNSIGNED(21 DOWNTO 0)
+		 count_pll_o : OUT UNSIGNED(24 DOWNTO 0);
+		 count_wc_o : OUT UNSIGNED(24 DOWNTO 0)
 	);
 END COMPONENT;
 
@@ -389,9 +389,8 @@ COMPONENT ptp_module
 		 wallclock_locked : OUT STD_LOGIC;
 		 wallclock_configured : OUT STD_LOGIC;
 		 wallclock_phasejump : OUT STD_LOGIC;
-		 wc_64fs : OUT STD_LOGIC;
+		 wc_mclk : OUT STD_LOGIC;
 		 second_pulse_sys : OUT STD_LOGIC;
-		 pin_name1 : OUT STD_LOGIC;
 		 media_clock : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 ptp_mean_path_delay : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 ptp_offset_from_master : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -660,7 +659,7 @@ SIGNAL	parse_rtp_packet :  STD_LOGIC;
 SIGNAL	parser_ram_addr :  UNSIGNED(10 DOWNTO 0);
 SIGNAL	parser_ram_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	phy_reset :  STD_LOGIC;
-SIGNAL	pll_counter :  UNSIGNED(21 DOWNTO 0);
+SIGNAL	pll_counter :  UNSIGNED(24 DOWNTO 0);
 SIGNAL	pll_fs128 :  STD_LOGIC;
 SIGNAL	pll_fs256 :  STD_LOGIC;
 SIGNAL	pll_fs512 :  STD_LOGIC;
@@ -711,9 +710,8 @@ SIGNAL	tx_wr_en :  STD_LOGIC;
 SIGNAL	wallclock_configured :  STD_LOGIC;
 SIGNAL	wallclock_locked :  STD_LOGIC;
 SIGNAL	wallclock_phasejump :  STD_LOGIC;
-SIGNAL	wc_64fs :  STD_LOGIC;
-SIGNAL	wc_counter :  UNSIGNED(21 DOWNTO 0);
-SIGNAL	wc_fs :  STD_LOGIC;
+SIGNAL	wc_mclk :  STD_LOGIC;
+SIGNAL	wc_counter :  UNSIGNED(24 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_1 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
 SIGNAL	SYNTHESIZED_WIRE_2 :  STD_LOGIC_VECTOR(23 DOWNTO 0);
@@ -1001,8 +999,8 @@ PORT MAP(clk_i => mac_tx_clock,
 b2v_ppb_meter : clock_ppb_meter
 PORT MAP(sys_clk => clk_125MHz,
 		 reset_n => powerGood,
-		 wallclock_64fs_in => wc_64fs,
-		 pll_64fs_in => pll_fs64,
+		 wallclock_512fs_in => wc_mclk,
+		 pll_512fs_in => pll_fs512,
 		 wallclock_second_pulse_i => second_pulse_sys,
 		 start_i => ppb_meter_start,
 		 valid_o => pll_meas_valid,
@@ -1040,7 +1038,7 @@ PORT MAP(sys_clk => clk_125MHz,
 		 wallclock_locked => wallclock_locked,
 		 wallclock_configured => wallclock_configured,
 		 wallclock_phasejump => wallclock_phasejump,
-		 wc_64fs => wc_64fs,
+		 wc_mclk => wc_mclk,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
 		 ptp_mean_path_delay => ptp_mean_path_delay,

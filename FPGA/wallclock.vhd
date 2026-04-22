@@ -31,15 +31,13 @@ entity wallclock is
         second_pulse_o          : out std_logic;
 
         -- ============================================
-        -- PTP-disciplined Audio Clocks (NCO-direct, no PLL)
-        -- All outputs are register-driven from sys_clk domain.
+        -- PTP-disciplined master audio clock (NCO-direct, no PLL)
+        -- Output is register-driven from sys_clk domain.
         -- Jitter: ±1 sys_clk period (±8ns @125MHz).
-        -- This is acceptable for I2S codecs (2.5% of BCLK period).
-        -- The NCO is disciplined via freq_correction_ppb, so these
-        -- clocks track PTP time with sub-PPB accuracy.
+        -- The NCO is disciplined via freq_correction_ppb, so this
+        -- clock tracks PTP time with sub-PPB accuracy.
         -- ============================================
-        audio_bclk_o            : out std_logic;  -- I2S bit clock, fs*64 = 3.072 MHz
-        audio_lrck_o            : out std_logic;  -- I2S L/R clock, fs = 48 kHz
+        audio_mclk_o            : out std_logic;  -- Master clock, fs*512 = 24.576 MHz
 
         -- ============================================
         -- Media clock for RTP packets (32-bit, from PTP epoch)
@@ -47,7 +45,9 @@ entity wallclock is
         -- ============================================
         media_clock_o           : out unsigned(31 downto 0);
         -- Pulse at fs rate in sys_clk domain (rising edge of LRCK)
-        sample_pulse_o          : out std_logic
+        sample_pulse_o          : out std_logic;
+        -- 1 ms tick in sys_clk domain (derived from sample_pulse, audio_fs/1000 samples)
+        ms_pulse_o              : out std_logic
     );
 end wallclock;
 
@@ -70,22 +70,22 @@ architecture Behavioral of wallclock is
     signal second_pulse_int : std_logic := '0';
     
     -- ============================================================
-    -- NCO for direct Audio Clock generation (BCLK = fs * 64)
+    -- NCO for direct master clock generation (MCLK = fs * 512)
     -- ============================================================
     -- Phase accumulator: 32-bit, MSB toggles at NCO frequency.
-    -- NCO freq = fs * 64 = 3.072 MHz (for 48 kHz).
-    -- Increment per 125 MHz tick: 3072000/125e6 * 2^32 = 105,553,116
-    -- Jitter: ±8ns (1 sys_clk period). At BCLK period = 325ns → 2.5%.
-    -- Standard I2S codecs (CS4272, PCM1808 etc.) tolerate >5% jitter.
+    -- NCO freq = fs * 512 = 24.576 MHz (for 48 kHz).
+    -- Increment per 125 MHz tick: 24576000/125e6 * 2^32 = 844,424,930
+    -- Jitter: ±8ns (1 sys_clk period). At MCLK period ~40ns → ~20%.
+    -- Intended for use as reference into an external PLL/PPB meter,
+    -- not as a direct codec MCLK.
     -- ============================================================
-    constant NCO_BASE_INC : signed(31 downto 0) := 
-        to_signed(integer(real(audio_fs * 64) / real(sys_clk_hz) * 4294967296.0), 32);
-    
+    constant NCO_BASE_INC : signed(31 downto 0) :=
+        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0), 32);
+
     -- PPB scaling: how much to adjust NCO increment per PPB of correction.
     -- adj = NCO_BASE_INC * ppb / 1e9 ≈ (ppb * NCO_PPB_SCALE) >> 16
-    -- For 105553116 / 1e9 * 2^16 = 6917
-    constant NCO_PPB_SCALE : signed(15 downto 0) := 
-        to_signed(integer(real(audio_fs * 64) / real(sys_clk_hz) * 4294967296.0 / 1.0e9 * 65536.0), 16);
+    constant NCO_PPB_SCALE : signed(15 downto 0) :=
+        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0 / 1.0e9 * 65536.0), 16);
     
     signal nco_phase      : unsigned(31 downto 0) := (others => '0');
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
@@ -96,12 +96,15 @@ architecture Behavioral of wallclock is
     -- Split: Stage 1 (multiply+shift) → Stage 2 (add)
     signal ppb_adj_reg    : signed(31 downto 0) := (others => '0');
     
-    -- LRCK divider: count 64 BCLK rising edges → 1 sample period
-    -- BCLK MSB rising edge = one BCLK cycle. 64 cycles = 1 LRCK period.
-    -- Counter counts 0..63, toggles LRCK at 0 and 32 (50% duty cycle).
-    signal bclk_cnt      : unsigned(5 downto 0) := (others => '0');
-    signal lrck_reg      : std_logic := '0';
+    -- Sample divider: count 512 MCLK rising edges → 1 sample period.
+    -- MCLK MSB rising edge = one MCLK cycle. 512 cycles = 1 fs period.
+    signal mclk_cnt      : unsigned(8 downto 0) := (others => '0');
     signal sample_pulse_int : std_logic := '0';
+
+    -- Millisecond tick: count audio_fs/1000 sample pulses per ms.
+    constant MS_DIVIDER    : natural := audio_fs / 1000;
+    signal ms_cnt          : unsigned(15 downto 0) := (others => '0');
+    signal ms_pulse_int    : std_logic := '0';
     
     -- ============================================================
     -- Media Clock (AES67): epoch-aligned, NCO-coherent
@@ -165,10 +168,10 @@ begin
     wallclock_nanoseconds_o <= unsigned(nsec_reg);
     wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
-    audio_bclk_o            <= std_logic(nco_phase(31));  -- NCO MSB = BCLK at ~3.072 MHz
-    audio_lrck_o            <= lrck_reg;                   -- LRCK at ~48 kHz
+    audio_mclk_o            <= std_logic(nco_phase(31));  -- NCO MSB = MCLK at ~24.576 MHz
     media_clock_o           <= media_clock_reg;
     sample_pulse_o          <= sample_pulse_int;
+    ms_pulse_o              <= ms_pulse_int;
 
     -- ============================================================
     -- NCO Process: Generate PTP-disciplined audio clocks
@@ -203,13 +206,11 @@ begin
             nco_phase        <= (others => '0');
             nco_phase_prev   <= '0';
             nco_increment    <= NCO_BASE_INC;
-            bclk_cnt         <= (others => '0');
-            lrck_reg         <= '0';
+            mclk_cnt         <= (others => '0');
             sample_pulse_int <= '0';
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
-            
-            
+
             -- latch in when calc stable
             if (nco_ppb_adj_wait = '0') then
                 nco_increment <= NCO_BASE_INC + ppb_adj_reg;
@@ -217,23 +218,42 @@ begin
             -- Advance NCO phase accumulator
             nco_phase <= unsigned(signed(nco_phase) + nco_increment);
             nco_phase_prev <= std_logic(nco_phase(31));
-            
-            -- Detect rising edge of BCLK (NCO MSB 0→1)
+
+            -- Detect rising edge of MCLK (NCO MSB 0→1): count 512 per sample
             if nco_phase_prev = '0' and nco_phase(31) = '1' then
-                -- Count 64 BCLK cycles per LRCK period
-                if bclk_cnt = 63 then
-                    bclk_cnt         <= (others => '0');
-                    lrck_reg         <= '0';  -- Left channel starts
+                if mclk_cnt = 511 then
+                    mclk_cnt         <= (others => '0');
                     sample_pulse_int <= '1';  -- One sys_clk pulse at sample boundary
-                elsif bclk_cnt = 31 then
-                    bclk_cnt <= bclk_cnt + 1;
-                    lrck_reg <= '1';  -- Right channel starts (50% duty cycle)
                 else
-                    bclk_cnt <= bclk_cnt + 1;
+                    mclk_cnt <= mclk_cnt + 1;
                 end if;
             end if;
         end if;
     end process nco_proc;
+
+    -- ============================================================
+    -- Millisecond Pulse Process
+    -- Counts audio_fs/1000 sample pulses (48 @ 48 kHz) and emits a
+    -- one-cycle pulse in sys_clk domain. Phase-coherent with the
+    -- PTP-disciplined NCO, so drift is bounded by PTP accuracy.
+    -- ============================================================
+    ms_proc: process(clk, reset_n)
+    begin
+        if reset_n = '0' then
+            ms_cnt       <= (others => '0');
+            ms_pulse_int <= '0';
+        elsif rising_edge(clk) then
+            ms_pulse_int <= '0';
+            if sample_pulse_int = '1' then
+                if ms_cnt = MS_DIVIDER - 1 then
+                    ms_cnt       <= (others => '0');
+                    ms_pulse_int <= '1';
+                else
+                    ms_cnt <= ms_cnt + 1;
+                end if;
+            end if;
+        end if;
+    end process ms_proc;
 
     -- ============================================================
     -- Media Clock Process (AES67)

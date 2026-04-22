@@ -27,6 +27,7 @@ ENTITY ptp_module IS
 	(
 		sys_clk :  IN  STD_LOGIC;
 		rst_n :  IN  STD_LOGIC;
+		mac_link_up_i :  IN  STD_LOGIC;
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
 		mac_tx_byte_sent :  IN  STD_LOGIC;
@@ -53,10 +54,9 @@ ENTITY ptp_module IS
 		ptp_sync_lost :  OUT  STD_LOGIC;
 		wallclock_locked :  OUT  STD_LOGIC;
 		wallclock_configured :  OUT  STD_LOGIC;
-		wc_64fs :  OUT  STD_LOGIC;
+		wc_mclk :  OUT  STD_LOGIC;
 		second_pulse_sys :  OUT  STD_LOGIC;
 		wallclock_phasejump :  OUT  STD_LOGIC;
-		pin_name1 :  OUT  STD_LOGIC;
 		media_clock :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_mean_path_delay :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_offset_from_master :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -71,7 +71,7 @@ COMPONENT ptpv2_controller
 	PORT(clk : IN STD_LOGIC;
 		 reset_n : IN STD_LOGIC;
 		 send_delay_resp_in : IN STD_LOGIC;
-		 second_pulse_i : IN STD_LOGIC;
+		 ms_pulse_i : IN STD_LOGIC;
 		 is_leader_i : IN STD_LOGIC;
 		 is_follower_i : IN STD_LOGIC;
 		 tx_en_i : IN STD_LOGIC;
@@ -175,7 +175,8 @@ END COMPONENT;
 COMPONENT ptpv2_bmc
 	PORT(clk : IN STD_LOGIC;
 		 reset_n : IN STD_LOGIC;
-		 second_pulse_i : IN STD_LOGIC;
+		 ms_pulse_i : IN STD_LOGIC;
+		 mac_link_up_i : IN STD_LOGIC;
 		 my_clock_identity_i : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
 		 my_priority1_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 my_clock_class_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -242,8 +243,8 @@ GENERIC (audio_fs : INTEGER;
 		 wallclock_nanoseconds_i : IN UNSIGNED(31 DOWNTO 0);
 		 wallclock_seconds_i : IN UNSIGNED(47 DOWNTO 0);
 		 second_pulse_o : OUT STD_LOGIC;
-		 audio_bclk_o : OUT STD_LOGIC;
-		 audio_lrck_o : OUT STD_LOGIC;
+		 ms_pulse_o : OUT STD_LOGIC;
+		 audio_mclk_o : OUT STD_LOGIC;
 		 sample_pulse_o : OUT STD_LOGIC;
 		 media_clock_o : OUT UNSIGNED(31 DOWNTO 0);
 		 wallclock_nanoseconds_o : OUT UNSIGNED(31 DOWNTO 0);
@@ -289,9 +290,9 @@ SIGNAL	wallclock_seconds :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_set :  STD_LOGIC;
 SIGNAL	wallclock_set_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
 SIGNAL	wallclock_set_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
-SIGNAL	wc_fs :  STD_LOGIC;
 
 SIGNAL tx_done_sys: STD_LOGIC := '0';
+SIGNAL ms_pulse_sys : STD_LOGIC;
 
 -- BMC signals
 SIGNAL bmc_is_leader         : STD_LOGIC;
@@ -337,7 +338,7 @@ b2v_controller : ptpv2_controller
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 send_delay_resp_in => rx_send_delay_resp,
-		 second_pulse_i => second_pulse_sys_ALTERA_SYNTHESIZED,
+		 ms_pulse_i => ms_pulse_sys,
 		 is_leader_i => eff_is_leader,
 		 is_follower_i => eff_is_follower,
 		 tx_en_i => tx_en_ptpfu_ALTERA_SYNTHESIZED,
@@ -440,7 +441,8 @@ PORT MAP(clk => sys_clk,
 b2v_bmc : ptpv2_bmc
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
-		 second_pulse_i => second_pulse_sys_ALTERA_SYNTHESIZED,
+		 ms_pulse_i => ms_pulse_sys,
+		 mac_link_up_i => mac_link_up_i,
 		 my_clock_identity_i => my_clock_identity,
 		 my_priority1_i => ptp_clock_priorityone,
 		 my_clock_class_i => ptp_clock_class,
@@ -499,8 +501,8 @@ PORT MAP(clk => sys_clk,
 		 wallclock_nanoseconds_i => unsigned(wallclock_set_ns),
 		 wallclock_seconds_i => unsigned(wallclock_set_s),
 		 second_pulse_o => second_pulse_sys_ALTERA_SYNTHESIZED,
-		 audio_bclk_o => wc_64fs,
-		 audio_lrck_o => wc_fs,
+		 ms_pulse_o => ms_pulse_sys,
+		 audio_mclk_o => wc_mclk,
 		 media_clock_o => media_clock_u,
 		 wallclock_nanoseconds_o => wallclock_nanoseconds,
 		 wallclock_seconds_o => wallclock_seconds);
@@ -512,7 +514,6 @@ ptp_allow <= mac_tx_allow_i;
 ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
 second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 wallclock_phasejump <= wallclock_phasejump_ALTERA_SYNTHESIZED;
-pin_name1 <= wc_fs;
 media_clock <= std_logic_vector(media_clock_u);
 ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
 ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);
