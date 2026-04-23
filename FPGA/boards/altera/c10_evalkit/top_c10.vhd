@@ -66,10 +66,10 @@ ENTITY top_c10 IS
 		adda_nRST :  OUT  STD_LOGIC;
 		uart1_tx :  OUT  STD_LOGIC;
 		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
-		conf_spi_clk : IN STD_LOGIC;
-		conf_spi_cs_n : IN STD_LOGIC;
-		conf_spi_di : IN STD_LOGIC;
-		conf_spi_do : OUT STD_LOGIC
+		arduino_io0 : IN STD_LOGIC;
+		arduino_io1 : IN STD_LOGIC;
+		arduino_io2 : IN STD_LOGIC;
+		arduino_io3 : OUT STD_LOGIC
 	);
 END top_c10;
 
@@ -537,6 +537,20 @@ end generate;
 
 
 spigen: if (soctype = "spi") generate
+	-- In SPI mode there is no LiteX SoC generating mcu_clk, so the stream
+	-- config RAMs inside aes67_top would have their write-port clock tied to
+	-- GND. Drive them from the same clock as spictrl.
+	mcu_clk <= clk_125MHz;
+
+	-- The aes67_top MCU ethernet path (used by LiteX to send/receive frames)
+	-- is unused here. Tie the request line low and drive the data inputs
+	-- with zeros so the internal TX arbiter keeps its RTP/PTP paths alive
+	-- and does not get optimized away.
+	eth_tx_en_mcu        <= '0';
+	eth_tx_data_mcu      <= (others => '0');
+	eth_tx_allow_req_mcu <= '0';
+	mcu_ram_addr         <= (others => '0');
+
 	spictrl_inst: entity work.spictrl
 	 generic map(
 		FPGAVERSIONMSB => FPGAVERSIONMSB,
@@ -551,10 +565,12 @@ spigen: if (soctype = "spi") generate
 	 port map(
 		sys_clk_i => clk_125MHz,
 		rst_n_i => c10_resetn,
-		spi_clk_i => conf_spi_clk,
-		spi_cs_n_i => conf_spi_cs_n,
-		spi_do_o => conf_spi_do,
-		spi_di_i => conf_spi_di,
+		spi_clk_i => arduino_io0,
+		spi_cs_n_i => arduino_io1,
+		spi_do_o => arduino_io3,
+		spi_di_i => arduino_io2,
+
+		-- status inputs
 		ptp_path_delay_i => unsigned(ptp_mean_path_delay),
 		ptp_offset_i => unsigned(ptp_offset_from_master),
 		ptp_gmid_i => ptp_current_leader_id,
@@ -563,10 +579,37 @@ spigen: if (soctype = "spi") generate
 		wallclock_locked_i => wallclock_locked,
 		wallclock_configured_i => wallclock_configured,
 		wallclock_ppb_meas_valid_i => pll_meas_valid,
-		wallclock_counter_wc => b"0000000" & wc_counter,
-		wallclock_counter_pll => b"0000000" & pll_counter,
+		wallclock_counter_wc => resize(wc_counter, 32),
+		wallclock_counter_pll => resize(pll_counter, 32),
 		ethernet_link_up_i => mac_linkup,
-		ethernet_link_speed => mac_speed
+		ethernet_link_speed => mac_speed,
+
+		-- config outputs
+		mac_address_o => mac_address,
+		ip_address_o => ip_address,
+		ptp_time_source_o => ptp_time_source,
+		ptp_log_sync_interval_o => ptp_log_message_interval,
+		ptp_log_announce_interval_o => ptp_announce_interval,
+		ptp_priority1_o => ptp_gm_prioone,
+		ptp_priority2_o => ptp_gm_priotwo,
+		ptp_clock_class_o => ptp_clock_class,
+		ptp_clock_accuracy_o => ptp_clock_accuracy,
+
+		-- control flags
+		ppb_meter_start_o => ppb_meter_start,
+		wallclock_reset_o => open, -- TODO: wire when aes67_top exposes reset inputs
+		ptp_reset_o => open,
+		ethernet_reset_o => open,
+		meter_clear_o => audio_meter_clear,
+		adda_nrst_o => adda_nRST,
+
+		-- stream config RAM (byte-wise passthrough to aes67_top)
+		tx_cfg_wr_en_o => tx_wr_en,
+		tx_cfg_wr_addr_o => tx_wr_addr,
+		tx_cfg_wr_data_o => tx_wr_data,
+		rx_cfg_wr_en_o => rx_conf_wr_en,
+		rx_cfg_wr_addr_o => rx_conf_wr_addr,
+		rx_cfg_wr_data_o => rx_conf_wr_data
 	);
 end generate;
 

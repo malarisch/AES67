@@ -1,129 +1,122 @@
-# Read General
-Read 0x00 => 8 bytes
-FPGAVERSION (2 bytes)
-TXSTREAMS
-RXSTREAMS
-TXCHANNELS
-RXCHANNELS
-BITDEPTH
-SAMPLERATE
+# SPI Register Map
 
-# Registers: Ethernet
+The SPI command byte is `[R/W][addr6..addr0]` where bit 7 = 1 → write, 0 → read.
+CS_N is not used for framing (some masters toggle it mid-transfer); transaction
+length is determined by the register's declared payload length. After the last
+payload byte the controller returns to IDLE, so back-to-back transactions
+without CS toggle are legal.
 
-Write Register 0x00 Eth TX Length LSB Impl
-Write Register 0x01 Eth TX Length MSB Impl
-Write Register 0x02 Eth TX CTRL Impl
-Content Bit [0] => Reg TX Start
+All multi-byte fields are **big-endian (MSB first)** on the wire. Multi-byte
+writes to scalar registers (MAC, IP, PTP config, flags) are **atomic**: bytes
+are collected in a shadow register and only committed to the FPGA outputs on
+the last byte of the transaction. Stream-config writes pass through byte-wise
+to block RAM (tx_router / rx_ringbuffer).
 
-Write Register 0x22 Eth RX Status Clear Impl
-Content Bit [0] => Reg RX Clear
+---
 
-Write Register 0x10 - 0x20 ETH TX FRAME - Length From 0x00 0x01 Impl
+## Reads
 
-Write Register 0x40 - 6 Bytes MAC ADDR Impl
-0x000 Mac Addr 0
-0x001 Mac Addr 1
-0x002 Mac Addr 2
-0x003 Mac Addr 3
-0x004 Mac Addr 4
-0x005 Mac Addr 5
+### 0x00 — FPGA info (8 B)
+| Offset | Field              |
+|--------|--------------------|
+| 0      | FPGA version MSB   |
+| 1      | FPGA version LSB   |
+| 2      | TX streams         |
+| 3      | RX streams         |
+| 4      | TX channels        |
+| 5      | RX channels        |
+| 6      | Bit depth          |
+| 7      | Sample rate (kHz)  |
 
+### 0x50 — Clocking status (1 B)
+| Bit | Meaning                      |
+|-----|------------------------------|
+| 7   | PLL PPB measurement valid    |
+| 6   | Wallclock locked             |
+| 5   | Wallclock configured         |
+| 4   | PTP is leader                |
+| 3   | PTP is follower              |
+| 2–0 | reserved                     |
 
-Write Register 0x41 - 4 Bytes IP ADDR Impl
-0x006 IP Addr 0
-0x007 IP Addr 1
-0x008 IP Addr 2
-0x009 IP Addr 4
+### 0x51 — Ethernet status (1 B)
+| Bit | Meaning                       |
+|-----|-------------------------------|
+| 7   | Link up                       |
+| 6–5 | Link speed (00=10, 01=100, 10=1000 Mbps) |
+| 4–0 | reserved                      |
 
+### 0x52 — PTP mean path delay (4 B)
+32-bit unsigned, little-endian byte order on the wire (byte 0 = bits 7..0).
 
+### 0x53 — PTP leader offset (4 B)
+32-bit signed, little-endian byte order on the wire.
 
-Read Register 0x20 ETH RX Lengh LSB Impl
-Read Register 0x21 ETH RX Length MSB Impl
-Read Register 0x22 ETH RX Status Impl
-Bit [0] Reg RX Ready
-Bit [1] Reg RX Overflow
+### 0x54 — PLL/WC PPB counters (8 B)
+Bytes 0–3: PLL counter (little-endian). Bytes 4–7: wallclock counter (little-endian).
 
-Read Register 0x30 - 0x40: ETH RX FRAME - Length MSB + LSB Impl
+### 0x55 — Current grandmaster clock identity (8 B)
+Little-endian byte order on the wire.
 
-# Write Registers - PTP Configuration
+---
 
-Write Register 0x55 -- PTP Configuration - 11 Byte Write
-FPGA RAM 0x010..0x17 Byte 1..8: Current Leader Clock Identity
-FPGA RAM 0x018 Byte 9 PTP Time Source
-FPGA RAM 0x019 Byte 10 ptp LogMessageInterval_Sync
-FPGA RAM 0x020 Byte 11 ptp LogMessageInterval_Announce
+## Writes
 
-# Write Registers - Audio Stream Destination
+### 0x40 — MAC address (6 B, atomic)
+Network byte order: byte 0 = MAC[47:40], byte 5 = MAC[7:0].
 
-Write Register 0x57 -- Audio Destination IP + Port - 6 Byte Write
-Byte 0: Destination IP Addr 0 (MSB, network byte order)
-Byte 1: Destination IP Addr 1
-Byte 2: Destination IP Addr 2
-Byte 3: Destination IP Addr 3 (LSB)
-Byte 4: Destination UDP Port MSB
-Byte 5: Destination UDP Port LSB
-Output: audio_dst_ip_o(31..0), audio_dst_port_o(15..0)
+### 0x41 — IP address (4 B, atomic)
+Network byte order: byte 0 = IP[31:24], byte 3 = IP[7:0].
 
-# Write Registers - TX Stream Config
+### 0x50 — Control flags (1 B, atomic)
+| Bit | Meaning                                 |
+|-----|-----------------------------------------|
+| 0   | Start PLL PPB measurement (level; held until `pll_meas_valid` falls, then auto-cleared) |
+| 1   | Reset wallclock (level)                 |
+| 2   | Reset PTP (level)                       |
+| 3   | Reset Ethernet (level)                  |
+| 4   | Meter clear (pulse, 1 sys_clk)          |
+| 5   | ADDA nRST (level, high = run)           |
+| 6–7 | reserved                                |
 
-Write Register 0x58 -- TX Stream Config - 20 Byte Write (per stream, base = stream_id * 32)
-Byte 0:     stream_id (0..7)
-Bytes 1-4:  Destination IP address (network byte order, MSB first)
-Byte 5:     Channel count (1..8)
-Byte 6:     Samples per packet per channel
-Bytes 7-14: Channel IDs (up to 8, one byte each)
-Byte 15:    Reserved
-Bytes 16-19: SSRC (32-bit, big-endian, for RTP header)
-Output: tx_stream_config_wr_en_o, tx_stream_config_wr_addr_o, tx_stream_config_wr_data_o
+### 0x55 — PTP configuration (7 B, atomic)
+| Offset | Field                             |
+|--------|-----------------------------------|
+| 0      | PTP time source                   |
+| 1      | Log message interval (Sync)       |
+| 2      | Log message interval (Announce)   |
+| 3      | GM priority1                      |
+| 4      | GM priority2                      |
+| 5      | GM clock class                    |
+| 6      | GM clock accuracy                 |
 
-# Write Registers - RX Stream Config
+Note: the current leader clock identity is read-only status (see read 0x55)
+and is determined on-chip by the BMC algorithm; it cannot be written.
 
-Write Register 0x59 -- RX Stream Config - 18 Byte Write (per stream)
-Byte 0:      Base address in stream_ram (caller computes stream_id * 32)
-Bytes 1-4:   Destination IP address (big-endian) -- match incoming multicast packets
-Bytes 5-6:   Destination UDP port (big-endian) -- match incoming packets
-Bytes 7-14:  Channel output map (8 bytes: output channel id per input channel)
-Byte 15:     Channel count (1..8)
-Byte 16:     Output delay in samples
-Byte 17:     Samples per channel per packet
-Output: rx_stream_config_wr_clk_o, rx_stream_config_wr_addr_o, rx_stream_config_wr_data_o
+### 0x58 — TX stream configuration (20 B, byte-wise to RAM)
+Target RAM base address = `stream_id * 32` (computed by spictrl from byte 0).
+Bytes 1..19 of the SPI payload are written to RAM offsets 0x01..0x13.
+Byte 0 (stream_id) is also echoed to RAM offset 0x00 for consistency.
 
-# Status Registers
+| SPI byte | RAM offset | Field                                    |
+|----------|------------|------------------------------------------|
+| 0        | 0x00       | stream_id (0..7) — selects RAM base      |
+| 1–4      | 0x01–0x04  | Destination IP (network byte order)      |
+| 5        | 0x05       | Channel count (1..8)                     |
+| 6        | 0x06       | Samples per packet per channel           |
+| 7–14     | 0x07–0x0E  | Channel IDs (up to 8, one byte each)     |
+| 15       | 0x0F       | reserved                                 |
+| 16–19    | 0x10–0x13  | SSRC (32-bit, big-endian)                |
 
-Write Register 0x50 - Flag Bitmask
-[0] Start PLL PPB Measurement; FPGA Implementation: sets output PLL_PBB_Measurment_start_o high until acknowledged by Input PLL_PBB_Measurement_valid_i going low. Then the output must be set to low as well. Note: The valid I is for the first measurement low, since no measurement was taken yet
-[1] Reset Wallclock -- Implementation: Output pin reset_wallclock_o
-[2] Reset PTP -- Implementation: Output pin reset_ptp_o
-[3] Reset Ethernet -- Implementation: Output pin reset_ethernet_o
-[4] 
-[5] 
-[6]
-[7]
+### 0x59 — RX stream configuration (18 B, byte-wise to RAM)
+Target RAM base address = `stream_id * 32` (computed by spictrl from byte 0).
+Bytes 1..17 of the SPI payload are written to RAM offsets 0x00..0x10.
 
-Read Register 0x50 - Flag Bitmask -- Clocking
-
-[0] PLL PPB Measurement Valid -- simple input pin, needs cdc
-[1] Wallclock Locked -- simple input pin, needs CDC
-[2] Wallclock Configured -- simple input pin, needs cdc
-[3] PTP -> isLeader
-[4] PTP -> isFollower
-[5] 
-[6] 
-[7]
-
-Read Register 0x51 - Flag Bitmask -- Ethernet
-[0] Ethernet Link up -- input pin, needs cdc
-[1] Ethernet Link Speed 0 Bitmask: 00 10 Mbps - 01 100 Mbps - 10 1000 Mbps -- input, needs cdc
-[2] Ethernet Link Speed 1 -- input pin, needs cdc
-[3] 
-[4]
-[5]
-[6]
-[7]
-
-Read Register 0x52 -- Path Delay -- Four Byte Read: Input path_delay_i (31..0)
-Read Register 0x53 -- Leader Offset -- Four Byte Read: Input leader_offset_i (31..0)
-Read Regiter  0x54 -- pll_ptp_counters -- 8 byte read: Counters from wallclock_ppb_measurement
-Read Regiter  0x55 -- gmid
-Read Register 0x60 .. 0x7F
--- Direct Access to RAM (system_config_reg.vhd) - Address minus 0x60
+| SPI byte | RAM offset | Field                                       |
+|----------|------------|---------------------------------------------|
+| 0        | —          | stream_id (0..7) — selects RAM base, not stored |
+| 1–4      | 0x00–0x03  | Destination IP (big-endian) — match filter  |
+| 5–6      | 0x04–0x05  | Destination UDP port (big-endian) — match   |
+| 7–14     | 0x06–0x0D  | Channel output map (low nibble used)        |
+| 15       | 0x0E       | Channel count (1..8)                        |
+| 16       | 0x0F       | Output delay (samples)                      |
+| 17       | 0x10       | Samples per channel per packet              |

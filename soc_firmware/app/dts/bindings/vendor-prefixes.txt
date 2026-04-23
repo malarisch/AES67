@@ -1,3 +1,0 @@
-# zephyr-keep-sorted-start
-vendor	Custom FPGA Ethernet Bridge
-# zephyr-keep-sorted-stop

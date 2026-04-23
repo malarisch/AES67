@@ -111,6 +111,16 @@ set_false_path -from * -to [get_ports {user_led[*]}]
 # Reset input
 set_false_path -from [get_ports {c10_resetn}] -to *
 
+# --- SPI config slave (arduino_io0..3, spigen variant of top_c10) ---
+# SPI_SLAVE inside spictrl samples SCK/CS/MOSI with 2-FF synchronizers in the
+# sys_clk_125m domain, so these are proper async inputs. MISO is launched
+# from sys_clk_125m and read by the external master on its own SCK, also
+# async with respect to the FPGA timing analyzer.
+set_false_path -from [get_ports {arduino_io0}] -to *
+set_false_path -from [get_ports {arduino_io1}] -to *
+set_false_path -from [get_ports {arduino_io2}] -to *
+set_false_path -from * -to [get_ports {arduino_io3}]
+
 
 source ../../../sdc/hyperram.sdc
 source ../../../sdc/ptp.sdc
