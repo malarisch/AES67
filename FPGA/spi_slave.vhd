@@ -42,6 +42,7 @@ architecture RTL of SPI_SLAVE is
     signal cs_n_meta          : std_logic;
     signal mosi_meta          : std_logic;
     signal sclk_reg           : std_logic;
+    signal sclk_filtered      : std_logic;
     signal cs_n_reg           : std_logic;
     signal mosi_reg           : std_logic;
     signal spi_clk_reg        : std_logic;
@@ -74,7 +75,7 @@ begin
             mosi_reg  <= mosi_meta;
         end if;
     end process;
-
+    sclk_filtered <= sclk_reg when sclk_meta = sclk_reg else sclk_filtered;
     -- -------------------------------------------------------------------------
     --  SPI CLOCK REGISTER
     -- -------------------------------------------------------------------------
@@ -86,7 +87,7 @@ begin
             if (RST = '1') then
                 spi_clk_reg <= '0';
             else
-                spi_clk_reg <= sclk_reg;
+                spi_clk_reg <= sclk_filtered;
             end if;
         end if;
     end process;
@@ -96,9 +97,9 @@ begin
     -- -------------------------------------------------------------------------
 
     -- Falling edge is detect when sclk_reg=0 and spi_clk_reg=1.
-    spi_clk_fedge_en <= not sclk_reg and spi_clk_reg;
+    spi_clk_fedge_en <= not sclk_filtered and spi_clk_reg;
     -- Rising edge is detect when sclk_reg=1 and spi_clk_reg=0.
-    spi_clk_redge_en <= sclk_reg and not spi_clk_reg;
+    spi_clk_redge_en <= sclk_filtered and not spi_clk_reg;
 
     -- -------------------------------------------------------------------------
     --  RECEIVED BITS COUNTER
