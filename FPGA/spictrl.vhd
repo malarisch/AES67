@@ -1,7 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-
+use IEEE.MATH_REAL.ALL;
 entity spictrl is
     generic (
         FPGAVERSIONMSB : integer := 1;
@@ -71,20 +71,26 @@ entity spictrl is
         rx_packet_ram_read_data_i : IN STD_LOGIC_VECTOR(7 downto 0);
 
         tx_clk_i : IN STD_LOGIC;
-        tx_busy_i : IN STD_LOGIC;
         tx_allow_i : IN STD_LOGIC;
         tx_byte_sent_i : IN STD_LOGIC;
         tx_req_o : OUT STD_LOGIC;
         tx_en_o : OUT STD_LOGIC;
-        tx_data_o : OUT STD_LOGIC_VECTOR(7 downto 0);
+        tx_data_o : OUT STD_ULOGIC_VECTOR(7 downto 0);
 
-        mcu_irq_o : OUT STD_LOGIC
+        mcu_irq_o : OUT STD_LOGIC;
+
+        rx_channel_meter_sig_i : IN STD_LOGIC_VECTOR(RXCHANNELS - 1 downto 0);
+        rx_channel_meter_clip_i : IN STD_LOGIC_VECTOR(RXCHANNELS - 1 downto 0);
+        tx_channel_meter_sig_i : IN STD_LOGIC_VECTOR(TXCHANNELS - 1 downto 0);
+        tx_channel_meter_clip_i : IN STD_LOGIC_VECTOR(TXCHANNELS - 1 downto 0)
     );
 end entity;
 
 
 architecture rtl of spictrl is
 
+    constant metering_bits             : integer := rx_channel_meter_sig_i'length + rx_channel_meter_clip_i'length +tx_channel_meter_sig_i'length + tx_channel_meter_clip_i'length;
+    constant metering_bytes           : integer := natural(ceil(real((RXCHANNELS / 8) * 2 + (TXCHANNELS / 8) * 2)));
     signal spi_data_to_host          : std_logic_vector(7 downto 0);
     signal spi_data_from_host        : std_logic_vector(7 downto 0);
     signal spi_data_to_host_valid    : std_logic;
@@ -134,6 +140,7 @@ architecture rtl of spictrl is
     signal packet_tog_z : std_logic := '0';
     signal packet_available : std_logic := '0';
     signal rx_overflow : std_logic := '0';
+    signal metering_shadow : std_logic_vector(metering_bits - 1 downto 0);
 
 
 begin
@@ -181,7 +188,7 @@ begin
                                    (state_writing = '1' and write_bytes /= 0
                                     and transaction_byte_counter >= write_bytes)))
                             else '0';
-
+    metering_shadow <= rx_channel_meter_sig_i & rx_channel_meter_clip_i & tx_channel_meter_sig_i & tx_channel_meter_clip_i;
 
     fsm_controller: process (sys_clk_i, rst_n_i)
     begin
@@ -258,8 +265,11 @@ begin
         if rst_n_i = '0' then
             spi_data_to_host <= (others => '0');
             spi_data_to_host_valid <= '0';
+            meter_clear_o <= '0';
+
         elsif rising_edge(sys_clk_i) then
             spi_data_to_host_valid <= '0';
+            meter_clear_o <= '0';
             if (state_transaction_active = '1' and state_reading = '1' and address_received = '1') then
                 if (spi_data_to_host_ready_z = '1') then
                 spi_data_to_host_valid <= '1';    
@@ -276,17 +286,22 @@ begin
                                 when 7 => spi_data_to_host <= std_logic_vector(to_unsigned(SAMPLERATE, 8));
                                 when others => spi_data_to_host <= x"00";
                             end case;
-                        when x"21" =>
+                        when "0100001" =>
                             if (transaction_byte_counter = 0) then
-                                spi_data_to_host <= std_logic_vector(resize(rx_packet_length_i(10 downto 0), 8));
+                                spi_data_to_host <= std_logic_vector(resize(rx_packet_length_i(10 downto 8), 8));
                             elsif (transaction_byte_counter = 1) then
                                 spi_data_to_host <= std_logic_vector(rx_packet_length_i(7 downto 0));
                             else
                                 spi_data_to_host <= (others => '0');
                             end if;
-                        when x"22" =>
+                        when "0100010" =>
                             spi_data_to_host <= rx_packet_ram_read_data_i;
-                            
+                        when "0110000" =>
+                            spi_data_to_host <= metering_shadow((transaction_byte_counter * 8) + 7
+                                                                                  downto transaction_byte_counter * 8);
+                            if (transaction_byte_counter >= metering_bytes) then
+                                meter_clear_o <= '1';
+                            end if;
                         when "1010000" => -- 0x50
                             spi_data_to_host <= wallclock_ppb_meas_valid_i & wallclock_locked_i & wallclock_configured_i
                                                 & ptp_is_leader_i & ptp_is_follower_i & packet_available & rx_overflow & "0";
@@ -326,8 +341,9 @@ begin
             if (state_transaction_active = '1' and state_reading = '1') then
                 case active_register is
                     when "0000000" => read_bytes <= 8; -- 0x00 FPGA info
-                    when x"21"      => read_bytes <= 2; -- 0x21 RX Packet length
-                    when x"22"      => read_bytes <= to_integer(rx_packet_length_i); -- rx packet
+                    when "0100001"      => read_bytes <= 2; -- 0x21 RX Packet length
+                    when "0100010"      => read_bytes <= to_integer(rx_packet_length_i); -- rx packet 0x22
+                    when "0110000"      => read_bytes <= metering_bytes; -- 0x30
                     when "1010000" => read_bytes <= 1; -- 0x50 clocking status
                     when "1010001" => read_bytes <= 1; -- 0x51 eth status
                     when "1010010" => read_bytes <= 4; -- 0x52 path delay
@@ -352,7 +368,7 @@ begin
             if (state_transaction_active = '1' and state_writing = '1') then
                 case active_register is
                     when "1000000" => write_bytes <= 6;  -- 0x40 MAC
-                    when x"20"      => write_bytes <= 1500; -- ethernet packet to fpga
+                    when "0100000"      => write_bytes <= 1500; -- ethernet packet to fpga 0x20
                     when "1000001" => write_bytes <= 4;  -- 0x41 IP
                     when "1010000" => write_bytes <= 1;  -- 0x50 flags
                     when "1010101" => write_bytes <= 7;  -- 0x55 PTP config
@@ -360,7 +376,7 @@ begin
                     when "1011001" => write_bytes <= 18; -- 0x59 RX stream
                     when others    => write_bytes <= 0;
                 end case;
-                if (active_register = x"20" and transaction_byte_counter >= 2) then
+                if (active_register = "0100000" and transaction_byte_counter >= 2) then
                     write_bytes <= to_integer(tx_packet_length);
                 end if;
             end if;
@@ -382,16 +398,16 @@ begin
                 end if;
 
             end if;
-            if (active_register = x"22" and transaction_byte_counter = rx_packet_length_i) then
+            if (active_register = "0100010" and transaction_byte_counter = rx_packet_length_i) then
                 packet_available <= '0';
             end if;
-            if (active_register = x"50" and transaction_done = '1') then
+            if (active_register = "1010000" and transaction_done = '1') then
                 rx_overflow <= '0';
 
             end if;
         end if;
     end process;
-    mcu_irq_o <= packet_available;
+    mcu_irq_o <= not packet_available;
 
     -- get packet from mcu and write to blockram
     ethernet_packet_capture_process : process (sys_clk_i, rst_n_i)
@@ -403,11 +419,11 @@ begin
             if (tx_done = '1') then
             tx_packet_ready <= '0';
             end if;
-            if (state_transaction_active = '1' and state_writing = '1' and active_register = x"20") then
+            if (state_transaction_active = '1' and state_writing = '1' and active_register = "0100000") then
                 -- write received data to packet ram
                 if (spi_data_from_host_valid = '1') then
                     if (transaction_byte_counter = 0) then
-                        tx_packet_length(15 downto 8) <= UNSIGNED(spi_data_from_host);
+                        tx_packet_length(10 downto 8) <= resize(UNSIGNED(spi_data_from_host), 3);
                     elsif (transaction_byte_counter = 1) then
                         tx_packet_length(7 downto 0) <= UNSIGNED(spi_data_from_host);
                     else
@@ -428,9 +444,9 @@ begin
 	begin
 		if rising_edge(tx_clk_i) then
 			if (tx_byte_sent_i = '1') then
-					tx_data_o <= tx_packet_ram(tx_packet_ram_addr + 1);
-			else 
-					tx_data_o <= tx_packet_ram(tx_packet_ram_addr);
+					tx_data_o <= std_ulogic_vector(tx_packet_ram(tx_packet_ram_addr + 1));
+			else
+					tx_data_o <= std_ulogic_vector(tx_packet_ram(tx_packet_ram_addr));
 			end if;
 			if tx_packet_ready = '1' and tx_allow_i = '1' then
 				tx_en_o <= '1';
@@ -514,12 +530,9 @@ begin
             wallclock_reset_o           <= '0';
             ptp_reset_o                 <= '0';
             ethernet_reset_o            <= '0';
-            meter_clear_o               <= '0';
             adda_nrst_o                 <= '0';
             ppb_meas_valid_z            <= '0';
         elsif rising_edge(sys_clk_i) then
-            -- Meter clear is a single-cycle pulse
-            meter_clear_o <= '0';
 
             -- PPB-meter auto-clear: drop ppb_meter_start_o when valid falls
             ppb_meas_valid_z <= wallclock_ppb_meas_valid_i;
@@ -540,9 +553,7 @@ begin
                         wallclock_reset_o <= flag_shadow(1);
                         ptp_reset_o       <= flag_shadow(2);
                         ethernet_reset_o  <= flag_shadow(3);
-                        if flag_shadow(4) = '1' then
-                            meter_clear_o <= '1';
-                        end if;
+                        
                         adda_nrst_o       <= flag_shadow(5);
                     when "1010101" => -- 0x55 PTP: order per map
                         ptp_time_source_o           <= ptp_shadow(55 downto 48); -- byte 0
