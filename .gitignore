@@ -65,3 +65,5 @@ dev_scripts/spi_flash_flasher/wifi_credentials.h
 */FPGA/gowin/fpga_project/impl/**
 FPGA/gowin/fpga_project/impl/
 **/cbx_args.txt
+
+**/build-esp32/

@@ -73,6 +73,7 @@ architecture rtl of spictrl is
     signal spi_data_to_host          : std_logic_vector(7 downto 0);
     signal spi_data_from_host        : std_logic_vector(7 downto 0);
     signal spi_data_to_host_valid    : std_logic;
+    signal spi_data_to_host_valid_reg: std_logic;
     signal spi_data_to_host_ready    : std_logic;
     signal spi_data_to_host_ready_z  : std_logic;
     signal spi_data_from_host_valid  : std_logic := '0';
@@ -107,6 +108,14 @@ architecture rtl of spictrl is
     -- every data byte).
     signal stream_id_latched : unsigned(2 downto 0) := (others => '0');
 
+    signal spi_cs_n_sync : STD_LOGIC;
+    signal spi_cs_n_reg : std_logic;
+    signal spi_cs_n_reg_z : std_logic := '1';
+    -- One-cycle pulse when CS_N transitions low -> high (end of a SPI burst).
+    -- Used to flush half-received transactions caused by wire glitches; does
+    -- NOT short-circuit transaction_done, so atomic commits still happen.
+    signal cs_rise_pulse : std_logic;
+
 begin
 
     SPI_SLAVE_inst: entity work.SPI_SLAVE
@@ -126,9 +135,25 @@ begin
         DOUT => spi_data_from_host,
         DOUT_VLD => spi_data_from_host_valid
     );
+    
+    cdc_proc : process (sys_clk_i, rst_n_i)
+    begin
+        if rst_n_i = '0' then
+            spi_cs_n_sync <= '1';
+            spi_cs_n_reg  <= '1';
+            spi_cs_n_reg_z <= '1';
+            cs_rise_pulse <= '0';
+        elsif rising_edge(sys_clk_i) then
+            spi_cs_n_sync  <= spi_cs_n_i;
+            spi_cs_n_reg   <= spi_cs_n_sync;
+            spi_cs_n_reg_z <= spi_cs_n_reg;
+            cs_rise_pulse <= '0';
+            if spi_cs_n_reg = '1' and spi_cs_n_reg_z = '0' then
+                cs_rise_pulse <= '1';
+            end if;
+        end if;
+    end process;
 
-    -- Transaction end is signalled by the byte count matching the declared
-    -- length for reads or writes. CS_N is intentionally ignored.
     transaction_done <= '1' when (state_transaction_active = '1' and address_received = '1' and
                                   ((state_reading = '1' and read_bytes /= 0
                                     and transaction_byte_counter >= read_bytes)
@@ -150,7 +175,12 @@ begin
             address_received <= '0';
             active_register <= (others => '0');
         elsif rising_edge(sys_clk_i) then
-            if transaction_done = '1' then
+            -- Finish on either the normal end-of-transaction (commit fires
+            -- via transaction_done in commit_proc) or on a CS rising edge
+            -- that represents an aborted/glitched burst. The CS-rise path
+            -- does NOT fire transaction_done, so half-received writes stay
+            -- in the shadow registers and never reach the FPGA outputs.
+            if transaction_done = '1' or cs_rise_pulse = '1' then
                 state_transaction_active <= '0';
                 state_reading <= '0';
                 state_writing <= '0';
@@ -183,7 +213,12 @@ begin
         if rst_n_i = '0' then
             transaction_byte_counter <= 0;
         elsif rising_edge(sys_clk_i) then
-            if transaction_done = '1' then
+            -- Finish on either the normal end-of-transaction (commit fires
+            -- via transaction_done in commit_proc) or on a CS rising edge
+            -- that represents an aborted/glitched burst. The CS-rise path
+            -- does NOT fire transaction_done, so half-received writes stay
+            -- in the shadow registers and never reach the FPGA outputs.
+            if transaction_done = '1' or cs_rise_pulse = '1' then
                 transaction_byte_counter <= 0;
             elsif (state_transaction_active = '1' and address_received = '1') then
                 if (state_writing = '1' and byte_received_pulse = '1') then
@@ -209,8 +244,8 @@ begin
         elsif rising_edge(sys_clk_i) then
             spi_data_to_host_valid <= '0';
             if (state_transaction_active = '1' and state_reading = '1' and address_received = '1') then
-                if (spi_data_to_host_ready = '1') then
-                    spi_data_to_host_valid <= '1';
+                if (spi_data_to_host_ready_z = '1') then
+                spi_data_to_host_valid <= '1';    
                     case active_register is
                         when "0000000" => -- 0x00 FPGA info
                             case transaction_byte_counter is
@@ -250,6 +285,7 @@ begin
                         when others =>
                             spi_data_to_host <= x"00";
                     end case;
+                
                 end if;
             end if;
         end if;

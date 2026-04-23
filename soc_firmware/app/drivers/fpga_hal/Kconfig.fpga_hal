@@ -10,6 +10,7 @@ choice FPGA_HAL_BACKEND
 	prompt "FPGA HAL backend"
 	default FPGA_HAL_FMC if ETH_FMC_BASIC
 	default FPGA_HAL_LITEX if ETH_LITEX
+	default FPGA_HAL_SPI if FPGA_SPI
 
 config FPGA_HAL_FMC
 	bool "FMC backend (STM32H7)"
@@ -23,6 +24,23 @@ config FPGA_HAL_LITEX
 	help
 	  Use LiteX CSR registers for FPGA register access.
 
+config FPGA_HAL_SPI
+	bool "SPI backend (external MCU)"
+	depends on FPGA_SPI
+	help
+	  Use the on-FPGA spictrl SPI slave for register access. Intended
+	  for boards where Zephyr runs on an external MCU and communicates
+	  with the FPGA over SPI.
+
 endchoice
+
+config FPGA_HAL_SHELL
+	bool "FPGA HAL shell commands"
+	depends on SHELL
+	default y
+	help
+	  Register an `fpga` shell command tree that exposes the HAL read
+	  and write APIs (status, mac, ip, ptp, gm, ctrl set/clear, adda,
+	  meter, tx, rx). Works with every HAL backend.
 
 endif # FPGA_HAL

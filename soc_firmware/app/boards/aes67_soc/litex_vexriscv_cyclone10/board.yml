@@ -1,0 +1,6 @@
+board:
+  name: litex_vexriscv_cyclone10
+  full_name: AES67 LiteX VexRiscv (Cyclone 10LP, HyperRAM)
+  vendor: aes67_soc
+  socs:
+  - name: litex_vexriscv

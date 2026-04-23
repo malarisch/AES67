@@ -1,0 +1,13 @@
+identifier: litex_vexriscv_cyclone10
+name: AES67 LiteX VexRiscv (Cyclone 10LP, HyperRAM)
+type: mcu
+arch: riscv
+toolchain:
+  - zephyr
+ram: 8192
+supported:
+  - gpio
+  - uart
+  - spi
+  - i2c
+vendor: aes67_soc

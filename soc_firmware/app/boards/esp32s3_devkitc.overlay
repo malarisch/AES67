@@ -1,0 +1,59 @@
+/*
+ * ESP32-S3 DevKitC-1 (N16R8) overlay for AES67.
+ *
+ * Wires SPI2 to the on-FPGA `spictrl` block and selects it as
+ * `zephyr,fpga-spi` so the fpga_spi driver picks it up.
+ *
+ * Pins (placeholders — update to match the hardware):
+ *   SCK  = GPIO12
+ *   MOSI = GPIO11
+ *   MISO = GPIO13
+ *   CS   = GPIO10
+ * Bus speed starts at 10 MHz for bring-up; raise after signal integrity
+ * is validated.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&psram0 {
+	size = <DT_SIZE_M(8)>;
+};
+
+&pinctrl {
+	spim2_fpga: spim2_fpga {
+		group1 {
+			pinmux = <SPIM2_MISO_GPIO13>,
+				 <SPIM2_SCLK_GPIO12>,
+				 <SPIM2_CSEL_GPIO10>;
+		};
+		group2 {
+			pinmux = <SPIM2_MOSI_GPIO11>;
+			output-low;
+		};
+	};
+};
+
+&spi2 {
+	status = "okay";
+	pinctrl-0 = <&spim2_fpga>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	fpga_spi: fpga@0 {
+		compatible = "aes67,fpga-spi";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,fpga-spi = &fpga_spi;
+	};
+};

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Generate a Zephyr device-tree overlay fragment from a LiteX csr.json file.
+Generate a Zephyr device-tree include (.dtsi) from a LiteX csr.json.
 
-The static overlay `litex_vexriscv.overlay` hardcodes base addresses that
-change between SoC targets (cyclone10 / cyc1000 / gowin).  Rather than
-duplicating the overlay per target, this script derives all target-specific
-addresses from the LiteX-generated `csr.json` and emits a small overlay
-fragment that is included before the static overlay.
+Each AES67 LiteX board variant (cyclone10, cyc1000, …) has a checked-in
+`litex_vexriscv_<target>.dts` file that `#include`s the generated
+`<target>_csr.dtsi`. The dtsi contains all target-specific base addresses
+(peripherals, RAM, CPU clock) so that adding or removing a CSR in the SoC
+simply regenerates the file without touching the hand-written DTS.
 
 Outputs:
-  - <out>/litex_soc_generated.overlay  (DT fragment with all base addresses)
+  <out-dir>/<target>_csr.dtsi
 
 Usage:
-  gen_litex_overlay.py --csr-json <path> --out-dir <path>
+  gen_litex_overlay.py --csr-json <path> --target <name> --out-dir <path>
 """
 
 import argparse
@@ -21,9 +21,43 @@ import os
 import sys
 
 
+PERIPHS = {
+    # csr name -> (DT label used in *.dts, reg-names list)
+    "ctrl":   ("ctrl0", ["reset", "scratch", "bus_errors"]),
+    "timer0": ("timer0", ["load", "reload", "en", "update_value", "value",
+                          "ev_status", "ev_pending", "ev_enable",
+                          "uptime_latch", "uptime_cycles"]),
+    "uart":   ("uart0", ["rxtx", "txfull", "rxempty", "ev_status", "ev_pending",
+                         "ev_enable", "txempty", "rxfull"]),
+    "uart1":  ("uart1", ["rxtx", "txfull", "rxempty", "ev_status", "ev_pending",
+                         "ev_enable", "txempty", "rxfull"]),
+    "i2c0":   ("i2c0", ["write", "read"]),
+    "i2c1":   ("i2c_card", ["phy_speed_mode", "master_active", "master_settings",
+                            "master_addr", "master_rxtx", "master_status"]),
+    "spi0":   ("spi0", ["control", "status", "mosi", "miso", "cs", "loopback"]),
+}
+
+
+def emit_periph(lines, csr_name, base, reg_names):
+    label = PERIPHS[csr_name][0]
+    off = 0
+    regs = []
+    for n in reg_names:
+        size = 8 if n == "uptime_cycles" else 4
+        regs.append((base + off, size))
+        off += size
+
+    lines.append(f"&{label} {{")
+    reg_entries = [f"<0x{a:08x} 0x{s:x}>" for a, s in regs]
+    lines.append("\treg = " + ",\n\t      ".join(reg_entries) + ";")
+    lines.append("};")
+    lines.append("")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csr-json", required=True)
+    ap.add_argument("--target",   required=True)
     ap.add_argument("--out-dir",  required=True)
     args = ap.parse_args()
 
@@ -36,18 +70,19 @@ def main():
 
     sys_clk_freq = int(constants.get("config_clock_frequency", 0))
     if sys_clk_freq == 0:
-        print("warning: config_clock_frequency missing from csr.json", file=sys.stderr)
+        print(f"warning: config_clock_frequency missing from {args.csr_json}",
+              file=sys.stderr)
 
     main_ram = memories["main_ram"]
     ram_base = main_ram["base"]
     ram_size = main_ram["size"]
 
-    # -- Build overlay text ---------------------------------------------------
     lines = [
         "/*",
         " * AUTO-GENERATED — DO NOT EDIT.",
-        f" * Generated from {os.path.abspath(args.csr_json)}",
-        " * by soc_firmware/app/scripts/gen_litex_overlay.py",
+        f" * Target:  {args.target}",
+        f" * Source:  {os.path.abspath(args.csr_json)}",
+        " * Regenerate by re-running `make` in litex_soc/ and rebuilding the app.",
         " */",
         "",
         "&cpu0 {",
@@ -60,68 +95,23 @@ def main():
         "",
     ]
 
-    # Peripheral base address overrides.  Every peripheral the static overlay
-    # touches gets its `reg` list regenerated here with the correct base.
-    reg_names = {
-        "ctrl":   ["reset", "scratch", "bus_errors"],
-        "timer0": ["load", "reload", "en", "update_value", "value",
-                   "ev_status", "ev_pending", "ev_enable",
-                   "uptime_latch", "uptime_cycles"],
-        "uart":   ["rxtx", "txfull", "rxempty", "ev_status", "ev_pending",
-                   "ev_enable", "txempty", "rxfull"],
-        "uart1":  ["rxtx", "txfull", "rxempty", "ev_status", "ev_pending",
-                   "ev_enable", "txempty", "rxfull"],
-        "i2c0":   ["write", "read"],
-        "i2c1":   ["phy_speed_mode", "master_active", "master_settings",
-                   "master_addr", "master_rxtx", "master_status"],
-        "spi0":   ["control", "status", "mosi", "miso", "cs", "loopback"],
-    }
-
-    # Mapping csr name -> DT node label used in overlay
-    node_label = {
-        "ctrl":   "ctrl0",
-        "timer0": "timer0",
-        "uart":   "uart0",     # LiteX calls console uart "uart"; DT label is uart0
-        "uart1":  "uart1",
-        "i2c0":   "i2c0",
-        "i2c1":   "i2c_card",  # static overlay defines this as i2c@… node
-        "spi0":   "spi0",
-    }
-
-    for csr_name, label in node_label.items():
+    for csr_name, (_label, reg_names) in PERIPHS.items():
         if csr_name not in bases:
-            print(f"warning: {csr_name} missing from csr.json", file=sys.stderr)
+            # uart1 is optional on some targets — skip silently.
+            if csr_name == "uart1":
+                continue
+            print(f"warning: {csr_name} missing from {args.csr_json}",
+                  file=sys.stderr)
             continue
-        base = bases[csr_name]
-        names = reg_names[csr_name]
+        emit_periph(lines, csr_name, bases[csr_name], reg_names)
 
-        regs = []
-        off = 0
-        for n in names:
-            size = 8 if n == "uptime_cycles" else 4
-            regs.append(f"\t      <0x{base + off:08x} 0x{size:x}>")
-            off += size
-
-        lines.append(f"&{label} {{")
-        lines.append("\treg = " + regs[0].lstrip() + ("," if len(regs) > 1 else ";"))
-        for i, r in enumerate(regs[1:]):
-            sep = "," if i < len(regs) - 2 else ";"
-            lines.append(r + sep)
-        lines.append("};")
-        lines.append("")
-
-    # Note: eth_buf is a dummy DT node used only for IRQ dispatch; its `reg`
-    # is arbitrary (the real buffer is accessed via the memories.eth_buf
-    # region directly in C).  No override needed here.
-
-    # -- Write overlay --------------------------------------------------------
     os.makedirs(args.out_dir, exist_ok=True)
-    out_path = os.path.join(args.out_dir, "litex_soc_generated.overlay")
+    out_path = os.path.join(args.out_dir, f"{args.target}_csr.dtsi")
     new = "\n".join(lines) + "\n"
     if os.path.exists(out_path):
         with open(out_path) as f:
             if f.read() == new:
-                return  # unchanged → don't retrigger cmake
+                return
     with open(out_path, "w") as f:
         f.write(new)
     print(f"[gen_litex_overlay] wrote {out_path}")

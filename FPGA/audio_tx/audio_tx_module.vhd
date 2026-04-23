@@ -47,8 +47,8 @@ ENTITY audio_tx_module IS
 		media_clock_i :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		tx_en_o :  OUT  STD_LOGIC;
 		tx_req_o :  OUT  STD_LOGIC;
-		metering_clip_o :  OUT  STD_LOGIC_VECTOR(15 DOWNTO 0);
-		metering_signal_o :  OUT  STD_LOGIC_VECTOR(15 DOWNTO 0);
+		metering_clip_o :  OUT  STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
+		metering_signal_o :  OUT  STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
 		tx_data_o :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END audio_tx_module;
@@ -97,8 +97,8 @@ GENERIC (bytes_per_sample : INTEGER;
 		 read0Addr : IN UNSIGNED(15 DOWNTO 0);
 		 wr_ready_o : OUT STD_LOGIC;
 		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 metering_clip_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 metering_signal_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 metering_clip_o : OUT STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
+		 metering_signal_o : OUT STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
 		 wr_ptr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
 	);
 END COMPONENT;

@@ -1,0 +1,13 @@
+identifier: litex_vexriscv_cyc1000
+name: AES67 LiteX VexRiscv (CYC1000, SDRAM)
+type: mcu
+arch: riscv
+toolchain:
+  - zephyr
+ram: 4096
+supported:
+  - gpio
+  - uart
+  - spi
+  - i2c
+vendor: aes67_soc

@@ -9,6 +9,7 @@ USE ieee.numeric_std.all;
 ENTITY top_c10 IS
 	generic (
 		soctype : string := "spi"; -- spi or litex
+		USE_EXTERNAL_PLL : string := "false";
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
@@ -16,7 +17,9 @@ ENTITY top_c10 IS
         TXCHANNELS      : INTEGER := 8;
         RXCHANNELS      : INTEGER := 8;
         BITDEPTH        : INTEGER := 24;
-        SAMPLERATE      : INTEGER := 48
+        SAMPLERATE      : INTEGER := 48;
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48
 	);
 	PORT
 	(
@@ -259,10 +262,10 @@ signal wallclock_phasejump : STD_LOGIC;
 signal pll_meas_valid      : STD_LOGIC;
 signal pll_counter         : unsigned(24 downto 0);
 signal wc_counter          : unsigned(24 downto 0);
-signal audio_meter_rx_clip   : STD_LOGIC_VECTOR(15 downto 0);
-signal audio_meter_rx_signal : STD_LOGIC_VECTOR(15 downto 0);
-signal audio_meter_tx_clip   : STD_LOGIC_VECTOR(15 downto 0);
-signal audio_meter_tx_signal : STD_LOGIC_VECTOR(15 downto 0);
+signal audio_meter_rx_clip   : STD_LOGIC_VECTOR(RXCHANNELS -1 downto 0);
+signal audio_meter_rx_signal : STD_LOGIC_VECTOR(RXCHANNELS -1 downto 0);
+signal audio_meter_tx_clip   : STD_LOGIC_VECTOR(TXCHANNELS -1 downto 0);
+signal audio_meter_tx_signal : STD_LOGIC_VECTOR(TXCHANNELS -1 downto 0);
 
 -- stream configuration
 signal tx_wr_en       : STD_LOGIC;
@@ -293,8 +296,15 @@ reset_p <= not c10_resetn;
 aes67_top_inst: entity work.aes67_top
 generic map(
 	MIIM_CLOCK_DIVIDER => 10,
-	TX_SAMPLE_BUFFER_DEPTH => 48,
-	RX_SAMPLE_BUFFER_DEPTH => 256
+	TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
+	RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
+	RX_BYTE_DEPTH => BITDEPTH / 8,
+	TX_BYTE_DEPTH => BITDEPTH / 8,
+	RX_CHANNELS => RXCHANNELS,
+	TX_CHANNELS => TXCHANNELS,
+	RX_MAX_STREAMS => RXSTREAMS,
+	TX_MAX_STREAMS => TXSTREAMS,
+	USE_EXTERNAL_PLL => USE_EXTERNAL_PLL
 )
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,

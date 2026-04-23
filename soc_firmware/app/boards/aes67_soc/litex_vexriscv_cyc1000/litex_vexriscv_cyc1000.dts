@@ -1,0 +1,23 @@
+/*
+ * AES67 LiteX VexRiscv on Arrow CYC1000, 4 MB SDRAM.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <riscv32-litex-vexriscv.dtsi>
+
+/ {
+	model = "AES67 LiteX VexRiscv (CYC1000 / SDRAM)";
+	compatible = "aes67,litex-vexriscv-cyc1000", "litex,vexriscv";
+
+	ram0: memory@20000000 {
+		device_type = "memory";
+		/* size overridden by generated CSR dtsi */
+		reg = <0x20000000 0x00400000>;
+	};
+};
+
+#include "../litex_vexriscv_common.dtsi"
+#include "litex_vexriscv_cyc1000_csr.dtsi"

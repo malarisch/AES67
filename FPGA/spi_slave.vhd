@@ -117,6 +117,9 @@ begin
                 else
                     bit_cnt <= bit_cnt + 1;
                 end if;
+            elsif cs_n_reg = '1' then
+                bit_cnt <= (others => '0'); -- reset bit counter when cs is deasserted
+
             end if;
         end if;
     end process;
@@ -177,7 +180,7 @@ begin
     
     -- The new input data is loaded into the shift register when the SPI slave
     -- is ready and input data are valid.
-    load_data_en <= slave_ready and DIN_VLD;
+    load_data_en <= DIN_VLD;
 
     -- -------------------------------------------------------------------------
     --  DATA SHIFT REGISTER

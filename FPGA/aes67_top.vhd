@@ -18,7 +18,9 @@ ENTITY aes67_top IS
 		  
     	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
 		AUDIO_INPUT_MODE : string := "tdm8";
-		AUDIO_OUTPUT_MODE : string := "tdm8"
+		AUDIO_OUTPUT_MODE : string := "tdm8";
+		USE_EXTERNAL_PLL : string := "true"
+
 	);
 	PORT
 	(
@@ -140,7 +142,7 @@ SIGNAL pll_48k_fs_tdm : STD_LOGIC;
 
 signal pll_256fs_falling : STD_LOGIC;
 signal pll_256fs_rising : STD_LOGIC;
-
+signal clk_512fs : STD_LOGIC;
 signal wc_mclk : STD_LOGIC; -- 512·fs NCO generated from wallclock
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal second_pulse_sys : STD_LOGIC;
@@ -191,8 +193,18 @@ mac_reset <= not mac_resetn_i;
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
+mclk_switch_extern: if USE_EXTERNAL_PLL = "true" generate
+	clk_512fs <= pll_512fs_i;
+end generate;
+
+mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
+	clk_512fs <= wc_mclk;
+end generate;
+
+
+
 audioclocks_inst: entity work.audioclock_generator
-PORT MAP(mclk => pll_512fs_i,
+PORT MAP(mclk => clk_512fs,
 		 rst_n => rst_n,
 		 clk_64fs => pll_64fs,
 		 fs => pll_48k_fs,

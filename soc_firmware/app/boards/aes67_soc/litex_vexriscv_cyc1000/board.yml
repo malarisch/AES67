@@ -1,0 +1,6 @@
+board:
+  name: litex_vexriscv_cyc1000
+  full_name: AES67 LiteX VexRiscv (Arrow CYC1000, SDRAM)
+  vendor: aes67_soc
+  socs:
+  - name: litex_vexriscv
