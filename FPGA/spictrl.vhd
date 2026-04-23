@@ -63,7 +63,22 @@ entity spictrl is
         tx_cfg_wr_data_o : OUT std_logic_vector(7 downto 0) := (others => '0');
         rx_cfg_wr_en_o   : OUT std_logic := '0';
         rx_cfg_wr_addr_o : OUT std_logic_vector(7 downto 0) := (others => '0');
-        rx_cfg_wr_data_o : OUT std_logic_vector(7 downto 0) := (others => '0')
+        rx_cfg_wr_data_o : OUT std_logic_vector(7 downto 0) := (others => '0');
+
+        rx_packet_length_i : IN UNSIGNED(10 downto 0);
+        rx_packet_tog_i     : IN STD_LOGIC;
+        rx_packet_ram_read_addr_o : OUT UNSIGNED(10 downto 0);
+        rx_packet_ram_read_data_i : IN STD_LOGIC_VECTOR(7 downto 0);
+
+        tx_clk_i : IN STD_LOGIC;
+        tx_busy_i : IN STD_LOGIC;
+        tx_allow_i : IN STD_LOGIC;
+        tx_byte_sent_i : IN STD_LOGIC;
+        tx_req_o : OUT STD_LOGIC;
+        tx_en_o : OUT STD_LOGIC;
+        tx_data_o : OUT STD_LOGIC_VECTOR(7 downto 0);
+
+        mcu_irq_o : OUT STD_LOGIC
     );
 end entity;
 
@@ -73,12 +88,9 @@ architecture rtl of spictrl is
     signal spi_data_to_host          : std_logic_vector(7 downto 0);
     signal spi_data_from_host        : std_logic_vector(7 downto 0);
     signal spi_data_to_host_valid    : std_logic;
-    signal spi_data_to_host_valid_reg: std_logic;
     signal spi_data_to_host_ready    : std_logic;
     signal spi_data_to_host_ready_z  : std_logic;
     signal spi_data_from_host_valid  : std_logic := '0';
-    signal spi_data_from_host_valid_z: std_logic := '0';
-    signal byte_received_pulse       : std_logic; -- one-cycle rising-edge pulse on DOUT_VLD
 
     -- Transaction tracking (CS_N intentionally ignored)
     signal state_transaction_active : std_logic := '0';
@@ -86,9 +98,10 @@ architecture rtl of spictrl is
     signal state_writing            : std_logic := '0';
     signal address_received         : std_logic := '0';
     signal active_register          : std_logic_vector(6 downto 0) := (others => '0');
-    signal transaction_byte_counter : integer range 0 to 63 := 0;
-    signal read_bytes               : integer range 0 to 63 := 0;
-    signal write_bytes              : integer range 0 to 63 := 0;
+    signal transaction_byte_counter : integer range 0 to 1531 := 0;
+    signal read_bytes               : integer range 0 to 1531 := 0;
+    signal write_bytes              : integer range 0 to 1531 := 0;
+    signal tx_packet_ram_addr : integer range 0 to 1531 := 0;
     signal transaction_done         : std_logic;
 
     -- Shadow registers for atomic writes (committed on transaction_done)
@@ -111,10 +124,17 @@ architecture rtl of spictrl is
     signal spi_cs_n_sync : STD_LOGIC;
     signal spi_cs_n_reg : std_logic;
     signal spi_cs_n_reg_z : std_logic := '1';
-    -- One-cycle pulse when CS_N transitions low -> high (end of a SPI burst).
-    -- Used to flush half-received transactions caused by wire glitches; does
-    -- NOT short-circuit transaction_done, so atomic commits still happen.
     signal cs_rise_pulse : std_logic;
+
+    type t_packet_ram is array (0 to 1531) of std_logic_vector(7 downto 0);
+	signal tx_packet_ram : t_packet_ram := (others => (others => '0'));
+    signal tx_packet_length : UNSIGNED(10 downto 0);
+    signal tx_packet_ready : std_logic := '0';
+    signal tx_done : std_logic;
+    signal packet_tog_z : std_logic := '0';
+    signal packet_available : std_logic := '0';
+    signal rx_overflow : std_logic := '0';
+
 
 begin
 
@@ -162,9 +182,6 @@ begin
                                     and transaction_byte_counter >= write_bytes)))
                             else '0';
 
-    byte_received_pulse <= '1' when (spi_data_from_host_valid = '1'
-                                     and spi_data_from_host_valid_z = '0')
-                               else '0';
 
     fsm_controller: process (sys_clk_i, rst_n_i)
     begin
@@ -185,7 +202,7 @@ begin
                 state_reading <= '0';
                 state_writing <= '0';
                 address_received <= '0';
-            elsif (state_transaction_active = '0' and byte_received_pulse = '1') then
+            elsif (state_transaction_active = '0' and spi_data_from_host_valid = '1') then
                 state_transaction_active <= '1';
                 address_received <= '1';
                 active_register <= spi_data_from_host(6 downto 0);
@@ -202,12 +219,12 @@ begin
     begin
         if rising_edge(sys_clk_i) then
             spi_data_to_host_ready_z <= spi_data_to_host_ready;
-            spi_data_from_host_valid_z <= spi_data_from_host_valid;
         end if;
     end process;
 
     -- Payload byte counter. The command byte itself does not increment the
     -- counter. Reset on transaction_done.
+    rx_packet_ram_read_addr_o <= TO_UNSIGNED(transaction_byte_counter, rx_packet_ram_read_addr_o'length);
     transaction_byte_counter_proc : process (sys_clk_i, rst_n_i)
     begin
         if rst_n_i = '0' then
@@ -221,7 +238,7 @@ begin
             if transaction_done = '1' or cs_rise_pulse = '1' then
                 transaction_byte_counter <= 0;
             elsif (state_transaction_active = '1' and address_received = '1') then
-                if (state_writing = '1' and byte_received_pulse = '1') then
+                if (state_writing = '1' and spi_data_from_host_valid = '1') then
                     transaction_byte_counter <= transaction_byte_counter + 1;
                 end if;
                 if (state_reading = '1' and
@@ -259,10 +276,20 @@ begin
                                 when 7 => spi_data_to_host <= std_logic_vector(to_unsigned(SAMPLERATE, 8));
                                 when others => spi_data_to_host <= x"00";
                             end case;
-
+                        when x"21" =>
+                            if (transaction_byte_counter = 0) then
+                                spi_data_to_host <= std_logic_vector(resize(rx_packet_length_i(10 downto 0), 8));
+                            elsif (transaction_byte_counter = 1) then
+                                spi_data_to_host <= std_logic_vector(rx_packet_length_i(7 downto 0));
+                            else
+                                spi_data_to_host <= (others => '0');
+                            end if;
+                        when x"22" =>
+                            spi_data_to_host <= rx_packet_ram_read_data_i;
+                            
                         when "1010000" => -- 0x50
                             spi_data_to_host <= wallclock_ppb_meas_valid_i & wallclock_locked_i & wallclock_configured_i
-                                                & ptp_is_leader_i & ptp_is_follower_i & "000";
+                                                & ptp_is_leader_i & ptp_is_follower_i & packet_available & rx_overflow & "0";
                         when "1010001" => -- 0x51
                             spi_data_to_host <= ethernet_link_up_i & ethernet_link_speed & "00000";
                         when "1010010" => -- 0x52 path delay
@@ -299,6 +326,8 @@ begin
             if (state_transaction_active = '1' and state_reading = '1') then
                 case active_register is
                     when "0000000" => read_bytes <= 8; -- 0x00 FPGA info
+                    when x"21"      => read_bytes <= 2; -- 0x21 RX Packet length
+                    when x"22"      => read_bytes <= to_integer(rx_packet_length_i); -- rx packet
                     when "1010000" => read_bytes <= 1; -- 0x50 clocking status
                     when "1010001" => read_bytes <= 1; -- 0x51 eth status
                     when "1010010" => read_bytes <= 4; -- 0x52 path delay
@@ -323,6 +352,7 @@ begin
             if (state_transaction_active = '1' and state_writing = '1') then
                 case active_register is
                     when "1000000" => write_bytes <= 6;  -- 0x40 MAC
+                    when x"20"      => write_bytes <= 1500; -- ethernet packet to fpga
                     when "1000001" => write_bytes <= 4;  -- 0x41 IP
                     when "1010000" => write_bytes <= 1;  -- 0x50 flags
                     when "1010101" => write_bytes <= 7;  -- 0x55 PTP config
@@ -330,9 +360,97 @@ begin
                     when "1011001" => write_bytes <= 18; -- 0x59 RX stream
                     when others    => write_bytes <= 0;
                 end case;
+                if (active_register = x"20" and transaction_byte_counter >= 2) then
+                    write_bytes <= to_integer(tx_packet_length);
+                end if;
             end if;
         end if;
     end process;
+
+
+    ethernet_rx_packetcaptrue : process (sys_clk_i, rst_n_i) begin
+        if (rst_n_i = '0') then
+            packet_tog_z <= '0';
+            packet_available <= '0';
+        elsif rising_edge(sys_clk_i) then
+            packet_tog_z <= rx_packet_tog_i;
+            if (packet_tog_z /= rx_packet_tog_i) then
+                if (packet_available = '1') then
+                    rx_overflow <= '1';
+                else
+                    packet_available <= '1';
+                end if;
+
+            end if;
+            if (active_register = x"22" and transaction_byte_counter = rx_packet_length_i) then
+                packet_available <= '0';
+            end if;
+            if (active_register = x"50" and transaction_done = '1') then
+                rx_overflow <= '0';
+
+            end if;
+        end if;
+    end process;
+    mcu_irq_o <= packet_available;
+
+    -- get packet from mcu and write to blockram
+    ethernet_packet_capture_process : process (sys_clk_i, rst_n_i)
+    begin
+        if rst_n_i = '0' then
+
+            tx_packet_ready <= '0';
+        elsif rising_edge(sys_clk_i) then
+            if (tx_done = '1') then
+            tx_packet_ready <= '0';
+            end if;
+            if (state_transaction_active = '1' and state_writing = '1' and active_register = x"20") then
+                -- write received data to packet ram
+                if (spi_data_from_host_valid = '1') then
+                    if (transaction_byte_counter = 0) then
+                        tx_packet_length(15 downto 8) <= UNSIGNED(spi_data_from_host);
+                    elsif (transaction_byte_counter = 1) then
+                        tx_packet_length(7 downto 0) <= UNSIGNED(spi_data_from_host);
+                    else
+                        if (transaction_byte_counter < tx_packet_length) then
+                            tx_packet_ram(transaction_byte_counter - 2) <= spi_data_from_host;
+                        end if;
+                        if (transaction_byte_counter - 2 = tx_packet_length) then
+                            tx_packet_ready <= '1';
+                        
+                        end if;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+    tx_req_o <= tx_packet_ready;
+    packet_ram_port_b : process(tx_clk_i)
+	begin
+		if rising_edge(tx_clk_i) then
+			if (tx_byte_sent_i = '1') then
+					tx_data_o <= tx_packet_ram(tx_packet_ram_addr + 1);
+			else 
+					tx_data_o <= tx_packet_ram(tx_packet_ram_addr);
+			end if;
+			if tx_packet_ready = '1' and tx_allow_i = '1' then
+				tx_en_o <= '1';
+				if tx_packet_ram_addr < tx_packet_length - 1  then
+					tx_done <= '0';
+					if tx_byte_sent_i = '1' then
+						tx_packet_ram_addr <= tx_packet_ram_addr + 1;
+					end if;
+				else 
+					tx_en_o <= '0';
+					tx_done <= '1';
+				end if;
+				
+			else
+				tx_en_o <= '0';
+				tx_packet_ram_addr <= 0;
+			end if;
+			
+		end if;
+	end process packet_ram_port_b;
 
     -- Shadow register capture. Each received payload byte goes into the slot
     -- addressed by transaction_byte_counter (0-based; command byte is not
@@ -348,7 +466,7 @@ begin
             stream_id_latched <= (others => '0');
         elsif rising_edge(sys_clk_i) then
             if (state_transaction_active = '1' and state_writing = '1'
-                and address_received = '1' and byte_received_pulse = '1') then
+                and address_received = '1' and spi_data_from_host_valid = '1') then
                 byte_idx := transaction_byte_counter; -- 0 = first payload byte
                 case active_register is
                     when "1000000" => -- 0x40 MAC: byte 0 = MSB (bits 47..40)
@@ -466,7 +584,7 @@ begin
             rx_cfg_wr_en_o <= '0';
 
             if (state_transaction_active = '1' and state_writing = '1'
-                and address_received = '1' and byte_received_pulse = '1') then
+                and address_received = '1' and spi_data_from_host_valid = '1') then
 
                 byte_idx := transaction_byte_counter;
 
