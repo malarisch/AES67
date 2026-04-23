@@ -39,19 +39,17 @@ static int flags_write_locked(uint8_t new_bits)
 	return fpga_spi_write(dev, FPGA_SPI_REG_FLAGS, &new_bits, 1);
 }
 
-static int flags_update(uint8_t set_mask, uint8_t clear_mask, uint8_t pulse_mask)
+static int flags_update(uint8_t set_mask, uint8_t clear_mask)
 {
 	k_spinlock_key_t key = k_spin_lock(&g_flags.lock);
 	uint8_t bits = g_flags.bits;
 
 	bits &= ~clear_mask;
 	bits |= set_mask;
-
-	uint8_t wire = bits | pulse_mask; /* pulses are not stored */
 	g_flags.bits = bits;
 	k_spin_unlock(&g_flags.lock, key);
 
-	return flags_write_locked(wire);
+	return flags_write_locked(bits);
 }
 
 /* ---- Device accessor ---- */
@@ -291,20 +289,20 @@ static uint8_t hal_to_flag_bits(uint32_t bits)
 
 int fpga_hal_ctrl_set_bits(uint32_t bits)
 {
-	return flags_update(hal_to_flag_bits(bits), 0, 0);
+	return flags_update(hal_to_flag_bits(bits), 0);
 }
 
 int fpga_hal_ctrl_clear_bits(uint32_t bits)
 {
-	return flags_update(0, hal_to_flag_bits(bits), 0);
+	return flags_update(0, hal_to_flag_bits(bits));
 }
 
 int fpga_hal_set_adda_nrst(bool released)
 {
 	if (released) {
-		return flags_update(FPGA_SPI_FLAG_ADDA_NRST, 0, 0);
+		return flags_update(FPGA_SPI_FLAG_ADDA_NRST, 0);
 	}
-	return flags_update(0, FPGA_SPI_FLAG_ADDA_NRST, 0);
+	return flags_update(0, FPGA_SPI_FLAG_ADDA_NRST);
 }
 
 /* ---- Status reads ---- */
@@ -411,9 +409,61 @@ bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)
 
 /* ---- Audio metering ----
  *
- * The SPI register map exposes no metering readback; only the meter_clear
- * pulse is wired (flag bit 4). We clear the sticky detectors on demand and
- * return zeros for the bitmasks. */
+ * Register 0x30 returns `metering_bytes` bytes. With N_RX/N_TX channels
+ * each contributing a 1-bit signal and a 1-bit clip flag, the FPGA shadow
+ * is concatenated as `rx_sig & rx_clip & tx_sig & tx_clip` (MSB-first in
+ * the shadow, i.e. rx_sig is at the top). Bytes are shifted out starting
+ * from the LSB, so the wire order is tx_clip, tx_sig, rx_clip, rx_sig.
+ *
+ * Byte count is derived from the FPGA info register (0x00): byte 4 =
+ * TXCHANNELS, byte 5 = RXCHANNELS. We cache that on the first call so
+ * subsequent reads stay hot.
+ *
+ * The FPGA asserts its internal `meter_clear` pulse as soon as the last
+ * byte of the 0x30 read transaction has been clocked out — no flag write
+ * needed from the host. */
+
+static struct {
+	uint8_t tx_channels;
+	uint8_t rx_channels;
+	bool    known;
+} g_meter_cfg;
+
+static int meter_info_fetch(const struct device *dev)
+{
+	uint8_t info[8];
+	int ret = fpga_spi_read(dev, FPGA_SPI_REG_INFO, info, sizeof(info));
+
+	if (ret < 0) {
+		return ret;
+	}
+	g_meter_cfg.tx_channels = info[4];
+	g_meter_cfg.rx_channels = info[5];
+	g_meter_cfg.known = true;
+	return 0;
+}
+
+static int meter_ch_to_bytes(uint8_t ch)
+{
+	/* Ceil(ch / 8), capped at 2 bytes since the HAL API returns uint16_t. */
+	int b = (ch + 7) / 8;
+
+	if (b > 2) {
+		b = 2;
+	}
+	return b;
+}
+
+static uint16_t pack_bytes_le(const uint8_t *buf, int nbytes)
+{
+	uint16_t v = 0;
+
+	for (int i = 0; i < nbytes; i++) {
+		v |= (uint16_t)buf[i] << (8 * i);
+	}
+	return v;
+}
+
 void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 			    uint16_t *tx_signal, uint16_t *tx_clip)
 {
@@ -422,5 +472,38 @@ void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 	if (tx_signal) *tx_signal = 0;
 	if (tx_clip)   *tx_clip   = 0;
 
-	(void)flags_update(0, 0, FPGA_SPI_FLAG_METER_CLEAR);
+	const struct device *dev = fpga_spi_get_dev();
+
+	if (!dev) {
+		return;
+	}
+	if (!g_meter_cfg.known && meter_info_fetch(dev) < 0) {
+		return;
+	}
+
+	int tx_bytes = meter_ch_to_bytes(g_meter_cfg.tx_channels);
+	int rx_bytes = meter_ch_to_bytes(g_meter_cfg.rx_channels);
+	int total    = 2 * tx_bytes + 2 * rx_bytes;
+
+	if (total == 0 || total > 8) {
+		return;
+	}
+
+	uint8_t buf[8];
+
+	if (fpga_spi_read(dev, FPGA_SPI_REG_METERING, buf, total) < 0) {
+		return;
+	}
+
+	/* Wire order (low-to-high byte index): tx_clip, tx_sig, rx_clip, rx_sig. */
+	int off = 0;
+	uint16_t vtc = pack_bytes_le(&buf[off], tx_bytes); off += tx_bytes;
+	uint16_t vts = pack_bytes_le(&buf[off], tx_bytes); off += tx_bytes;
+	uint16_t vrc = pack_bytes_le(&buf[off], rx_bytes); off += rx_bytes;
+	uint16_t vrs = pack_bytes_le(&buf[off], rx_bytes);
+
+	if (tx_clip)   *tx_clip   = vtc;
+	if (tx_signal) *tx_signal = vts;
+	if (rx_clip)   *rx_clip   = vrc;
+	if (rx_signal) *rx_signal = vrs;
 }

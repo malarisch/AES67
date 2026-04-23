@@ -11,7 +11,14 @@ entity spictrl is
         TXCHANNELS     : integer := 8;
         RXCHANNELS     : integer := 8;
         BITDEPTH       : integer := 24;
-        SAMPLERATE     : integer := 48
+        SAMPLERATE     : integer := 48;
+        -- Some SPI masters (e.g. ESP32) split a logical transfer into
+        -- <= 64-byte hardware bursts, briefly de-asserting CS between
+        -- bursts. For packet registers (0x20 TX, 0x22 RX data) we
+        -- therefore keep the transaction open across short CS-high
+        -- gaps and only tear it down once CS has been high for longer
+        -- than PACKET_CS_GAP_TIMEOUT sys_clk cycles (genuine abort).
+        PACKET_CS_GAP_TIMEOUT : integer := 2048
     );
     port(
         sys_clk_i : IN STD_LOGIC;
@@ -132,6 +139,19 @@ architecture rtl of spictrl is
     signal spi_cs_n_reg_z : std_logic := '1';
     signal cs_rise_pulse : std_logic;
 
+    -- True while a packet-register transaction (0x20 TX, 0x22 RX data)
+    -- is in progress. During those, short CS-high gaps between 64-byte
+    -- ESP32 bursts must NOT tear the transaction down.
+    signal in_packet_burst : std_logic;
+    -- Counts sys_clk cycles CS has been continuously high while the
+    -- transaction is active. Exceeds PACKET_CS_GAP_TIMEOUT -> genuine
+    -- abort, clear the transaction.
+    signal cs_gap_counter : integer range 0 to PACKET_CS_GAP_TIMEOUT := 0;
+    signal cs_gap_abort   : std_logic;
+    -- Effective CS-rise-triggered reset: only fires when we are *not*
+    -- in the middle of a packet-register burst.
+    signal cs_reset       : std_logic;
+
     type t_packet_ram is array (0 to 1531) of std_logic_vector(7 downto 0);
 	signal tx_packet_ram : t_packet_ram := (others => (others => '0'));
     signal tx_packet_length : UNSIGNED(10 downto 0);
@@ -181,6 +201,42 @@ begin
         end if;
     end process;
 
+    
+
+
+    -- Genuine abort detection: if CS stays high for PACKET_CS_GAP_TIMEOUT
+    -- sys_clk cycles while we are in a packet burst, treat it as the
+    -- master having aborted and tear the transaction down anyway.
+    cs_gap_proc : process (sys_clk_i, rst_n_i)
+    begin
+        if rst_n_i = '0' then
+            cs_gap_counter <= 0;
+        elsif rising_edge(sys_clk_i) then
+            if (state_transaction_active = '1' and
+                                 address_received = '1' and
+                                 (active_register = "0100010" or
+                                  active_register = "0100000")) then
+											 in_packet_burst <= '1';
+                           else
+									in_packet_burst <= '0';
+									end if;
+            if spi_cs_n_reg = '0' or in_packet_burst = '0' then
+                cs_gap_counter <= 0;
+            elsif cs_gap_counter < PACKET_CS_GAP_TIMEOUT then
+                cs_gap_counter <= cs_gap_counter + 1;
+            end if;
+        end if;
+    end process;
+
+    cs_gap_abort <= '1' when (in_packet_burst = '1' and
+                              cs_gap_counter >= PACKET_CS_GAP_TIMEOUT)
+                        else '0';
+
+    -- Effective CS-driven reset: cs_rise_pulse triggers the usual
+    -- tear-down for all non-packet registers; during packet bursts we
+    -- wait for the timeout before giving up.
+    cs_reset <= (cs_rise_pulse and not in_packet_burst) or cs_gap_abort;
+
     transaction_done <= '1' when (state_transaction_active = '1' and address_received = '1' and
                                   ((state_reading = '1' and read_bytes /= 0
                                     and transaction_byte_counter >= read_bytes)
@@ -204,7 +260,7 @@ begin
             -- that represents an aborted/glitched burst. The CS-rise path
             -- does NOT fire transaction_done, so half-received writes stay
             -- in the shadow registers and never reach the FPGA outputs.
-            if transaction_done = '1' or cs_rise_pulse = '1' then
+            if transaction_done = '1' or cs_reset = '1' then
                 state_transaction_active <= '0';
                 state_reading <= '0';
                 state_writing <= '0';
@@ -242,7 +298,7 @@ begin
             -- that represents an aborted/glitched burst. The CS-rise path
             -- does NOT fire transaction_done, so half-received writes stay
             -- in the shadow registers and never reach the FPGA outputs.
-            if transaction_done = '1' or cs_rise_pulse = '1' then
+            if transaction_done = '1' or cs_reset = '1' then
                 transaction_byte_counter <= 0;
             elsif (state_transaction_active = '1' and address_received = '1') then
                 if (state_writing = '1' and spi_data_from_host_valid = '1') then
@@ -377,7 +433,7 @@ begin
                     when others    => write_bytes <= 0;
                 end case;
                 if (active_register = "0100000" and transaction_byte_counter >= 2) then
-                    write_bytes <= to_integer(tx_packet_length);
+                    write_bytes <= to_integer(tx_packet_length + 2);
                 end if;
             end if;
         end if;
@@ -430,11 +486,12 @@ begin
                         if (transaction_byte_counter < tx_packet_length) then
                             tx_packet_ram(transaction_byte_counter - 2) <= spi_data_from_host;
                         end if;
-                        if (transaction_byte_counter - 2 = tx_packet_length) then
-                            tx_packet_ready <= '1';
                         
-                        end if;
                     end if;
+                end if;
+                if (transaction_byte_counter = tx_packet_length + 2) then
+                    tx_packet_ready <= '1';
+                        
                 end if;
             end if;
         end if;
@@ -448,10 +505,11 @@ begin
 			else
 					tx_data_o <= std_ulogic_vector(tx_packet_ram(tx_packet_ram_addr));
 			end if;
+            tx_done <= '0';
 			if tx_packet_ready = '1' and tx_allow_i = '1' then
 				tx_en_o <= '1';
-				if tx_packet_ram_addr < tx_packet_length - 1  then
-					tx_done <= '0';
+				if tx_packet_ram_addr < tx_packet_length  then
+				
 					if tx_byte_sent_i = '1' then
 						tx_packet_ram_addr <= tx_packet_ram_addr + 1;
 					end if;

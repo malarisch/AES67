@@ -72,7 +72,8 @@ ENTITY top_c10 IS
 		arduino_io0 : IN STD_LOGIC;
 		arduino_io1 : IN STD_LOGIC;
 		arduino_io2 : IN STD_LOGIC;
-		arduino_io3 : OUT STD_LOGIC
+		arduino_io3 : OUT STD_LOGIC;
+		arduino_io4 : OUT STD_LOGIC
 	);
 END top_c10;
 
@@ -552,14 +553,7 @@ spigen: if (soctype = "spi") generate
 	-- GND. Drive them from the same clock as spictrl.
 	mcu_clk <= clk_125MHz;
 
-	-- The aes67_top MCU ethernet path (used by LiteX to send/receive frames)
-	-- is unused here. Tie the request line low and drive the data inputs
-	-- with zeros so the internal TX arbiter keeps its RTP/PTP paths alive
-	-- and does not get optimized away.
-	eth_tx_en_mcu        <= '0';
-	eth_tx_data_mcu      <= (others => '0');
-	eth_tx_allow_req_mcu <= '0';
-	mcu_ram_addr         <= (others => '0');
+
 
 	spictrl_inst: entity work.spictrl
 	 generic map(
@@ -619,7 +613,24 @@ spigen: if (soctype = "spi") generate
 		tx_cfg_wr_data_o => tx_wr_data,
 		rx_cfg_wr_en_o => rx_conf_wr_en,
 		rx_cfg_wr_addr_o => rx_conf_wr_addr,
-		rx_cfg_wr_data_o => rx_conf_wr_data
+		rx_cfg_wr_data_o => rx_conf_wr_data,
+		rx_packet_length_i => received_packet_length,
+		rx_packet_tog_i => is_mcu_pkt_tog,
+		rx_packet_ram_read_addr_o => mcu_ram_addr,
+		rx_packet_ram_read_data_i => eth_ram_data_rx_mcu,
+		tx_clk_i => mac_tx_clock,
+		tx_allow_i => eth_tx_allow_mcu,
+		tx_req_o => eth_tx_allow_req_mcu,
+		tx_byte_sent_i => mac_tx_byte_sent,
+		tx_en_o => eth_tx_en_mcu,
+		tx_data_o => eth_tx_data_mcu,
+		
+		tx_channel_meter_clip_i => audio_meter_tx_clip,
+		tx_channel_meter_sig_i => audio_meter_tx_signal,
+		rx_channel_meter_clip_i => audio_meter_rx_clip,
+		rx_channel_meter_sig_i => audio_meter_rx_signal,
+
+		mcu_irq_o => arduino_io4
 	);
 end generate;
 

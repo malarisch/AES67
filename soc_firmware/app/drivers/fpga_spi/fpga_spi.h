@@ -31,19 +31,26 @@ extern "C" {
 #endif
 
 /* ---- Register addresses (7-bit) ---- */
-#define FPGA_SPI_REG_INFO         0x00 /* R 8  */
-#define FPGA_SPI_REG_MAC          0x40 /* W 6  */
-#define FPGA_SPI_REG_IP           0x41 /* W 4  */
-#define FPGA_SPI_REG_STATUS_CLK   0x50 /* R 1  */
-#define FPGA_SPI_REG_FLAGS        0x50 /* W 1  */
-#define FPGA_SPI_REG_STATUS_ETH   0x51 /* R 1  */
-#define FPGA_SPI_REG_PATH_DELAY   0x52 /* R 4  */
-#define FPGA_SPI_REG_PTP_OFFSET   0x53 /* R 4  */
-#define FPGA_SPI_REG_PPB_COUNTERS 0x54 /* R 8  */
-#define FPGA_SPI_REG_GM_ID        0x55 /* R 8  */
-#define FPGA_SPI_REG_PTP_CONFIG   0x55 /* W 7  */
-#define FPGA_SPI_REG_TX_STREAM    0x58 /* W 20 */
-#define FPGA_SPI_REG_RX_STREAM    0x59 /* W 18 */
+#define FPGA_SPI_REG_INFO         0x00 /* R  8            */
+#define FPGA_SPI_REG_ETH_TX       0x20 /* W  len-prefixed */
+#define FPGA_SPI_REG_ETH_RX_LEN   0x21 /* R  2            */
+#define FPGA_SPI_REG_ETH_RX_DATA  0x22 /* R  variable     */
+#define FPGA_SPI_REG_METERING     0x30 /* R  variable     */
+#define FPGA_SPI_REG_MAC          0x40 /* W  6            */
+#define FPGA_SPI_REG_IP           0x41 /* W  4            */
+#define FPGA_SPI_REG_STATUS_CLK   0x50 /* R  1            */
+#define FPGA_SPI_REG_FLAGS        0x50 /* W  1            */
+#define FPGA_SPI_REG_STATUS_ETH   0x51 /* R  1            */
+#define FPGA_SPI_REG_PATH_DELAY   0x52 /* R  4            */
+#define FPGA_SPI_REG_PTP_OFFSET   0x53 /* R  4            */
+#define FPGA_SPI_REG_PPB_COUNTERS 0x54 /* R  8            */
+#define FPGA_SPI_REG_GM_ID        0x55 /* R  8            */
+#define FPGA_SPI_REG_PTP_CONFIG   0x55 /* W  7            */
+#define FPGA_SPI_REG_TX_STREAM    0x58 /* W  20           */
+#define FPGA_SPI_REG_RX_STREAM    0x59 /* W  18           */
+
+/* Max Ethernet payload carried over the SPI packet registers. */
+#define FPGA_SPI_ETH_MAX_PKT      1500
 
 /* ---- Clocking status bits (read 0x50) ---- */
 #define FPGA_SPI_CLK_PPB_VALID     BIT(7)
@@ -51,18 +58,22 @@ extern "C" {
 #define FPGA_SPI_CLK_WC_CONFIGURED BIT(5)
 #define FPGA_SPI_CLK_PTP_LEADER    BIT(4)
 #define FPGA_SPI_CLK_PTP_FOLLOWER  BIT(3)
+#define FPGA_SPI_CLK_RX_AVAILABLE  BIT(2)
+#define FPGA_SPI_CLK_RX_OVERFLOW   BIT(1)
 
 /* ---- Ethernet status bits (read 0x51) ---- */
 #define FPGA_SPI_ETH_LINK_UP       BIT(7)
 #define FPGA_SPI_ETH_SPEED_SHIFT   5
 #define FPGA_SPI_ETH_SPEED_MASK    (BIT(6) | BIT(5))
 
-/* ---- Flag register bits (write 0x50) ---- */
+/* ---- Flag register bits (write 0x50) ----
+ * Bit 4 (METER_CLEAR) is gone: the FPGA clears its sticky metering bits
+ * automatically when the host finishes reading register 0x30.
+ */
 #define FPGA_SPI_FLAG_PPB_START        BIT(0)
 #define FPGA_SPI_FLAG_RESET_WALLCLOCK  BIT(1)
 #define FPGA_SPI_FLAG_RESET_PTP        BIT(2)
 #define FPGA_SPI_FLAG_RESET_ETHERNET   BIT(3)
-#define FPGA_SPI_FLAG_METER_CLEAR      BIT(4)
 #define FPGA_SPI_FLAG_ADDA_NRST        BIT(5)
 
 /**
@@ -90,6 +101,33 @@ int fpga_spi_read(const struct device *dev, uint8_t reg,
  */
 int fpga_spi_write(const struct device *dev, uint8_t reg,
 		   const uint8_t *buf, size_t len);
+
+/**
+ * @brief Read the pending RX Ethernet frame length from register 0x21.
+ *
+ * @return 0..1500 = pending frame length in bytes, 0 if no frame.
+ *         Negative errno on SPI error.
+ */
+int fpga_spi_eth_rx_len(const struct device *dev);
+
+/**
+ * @brief Read a pending RX Ethernet frame from register 0x22.
+ *
+ * Clears the packet_available flag on the FPGA once @p len bytes have
+ * been clocked out. Caller must use @ref fpga_spi_eth_rx_len first to
+ * learn the length.
+ */
+int fpga_spi_eth_rx_read(const struct device *dev,
+			 uint8_t *buf, size_t len);
+
+/**
+ * @brief Write an Ethernet frame to the FPGA for transmission.
+ *
+ * Payload on the wire is `[len_hi, len_lo, data...]` under register
+ * 0x20; `len` is the total number of bytes in @p buf.
+ */
+int fpga_spi_eth_tx_write(const struct device *dev,
+			  const uint8_t *buf, size_t len);
 
 #ifdef __cplusplus
 }

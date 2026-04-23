@@ -61,10 +61,12 @@ project(app)
 add_subdirectory(drivers)
 
 # ---------- Application sources ----------
-# The networking / HTTP / mDNS / RTSP stacks only exist on the LiteX boards.
-# The ESP32 SPI-bring-up build uses a much smaller main that just reads
-# FPGA status over SPI.
-if(CONFIG_NETWORKING)
+# The full control plane (HTTP / mDNS / RTSP / SD / card manager) is gated
+# on the FPGA HAL backend: LiteX and FMC carry the whole app. The SPI
+# backend (external MCU, currently ESP32-S3) uses a much smaller bring-up
+# main that just programs defaults and polls status — while still getting
+# Zephyr networking + the eth_spi driver for DHCP/TCP.
+if(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC)
     # HTTP server: register per-service resource linker sections.
     zephyr_linker_sources(SECTIONS sections-rom.ld)
     zephyr_linker_section(NAME http_resource_desc_aes67_http

@@ -1,0 +1,45 @@
+menuconfig ETH_SPI
+	bool "Ethernet over FPGA SPI"
+	depends on FPGA_SPI && NET_L2_ETHERNET
+	help
+	  Zephyr Ethernet driver that uses the fpga_spi bus driver to
+	  exchange frames with the on-FPGA spictrl block (registers
+	  0x20 TX, 0x21 RX length, 0x22 RX data). An IRQ GPIO connected
+	  to the FPGA's `mcu_irq` line wakes the RX thread.
+
+if ETH_SPI
+
+module = ETH_SPI
+module-str = eth_spi
+source "subsys/logging/Kconfig.template.log_config"
+
+config ETH_SPI_RX_STACK_SIZE
+	int "RX/TX thread stack size"
+	default 2048
+	help
+	  Stack size for the RX and TX worker threads.
+
+config ETH_SPI_TX_QUEUE_DEPTH
+	int "TX packet queue depth"
+	default 8
+	help
+	  Number of outbound packets that can be queued while the TX
+	  thread is busy.
+
+config ETH_SPI_POLL_INTERVAL_MS
+	int "Fallback RX poll interval (ms)"
+	default 500
+	help
+	  Upper bound for RX latency if the IRQ line is not wired or
+	  fires spuriously. The RX thread uses this as the timeout on
+	  the semaphore it waits on. Lower for tighter latency at the
+	  cost of SPI bus occupancy.
+
+config ETH_SPI_INIT_PRIORITY
+	int "Driver init priority"
+	default 81
+	help
+	  Must run after CONFIG_FPGA_SPI_INIT_PRIORITY (default 60) and
+	  after the SPI controller (typically 50).
+
+endif # ETH_SPI

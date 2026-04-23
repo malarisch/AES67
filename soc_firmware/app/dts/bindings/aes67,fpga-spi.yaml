@@ -8,3 +8,12 @@ compatible: "aes67,fpga-spi"
 
 include:
   - name: spi-device.yaml
+
+properties:
+  int-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      GPIO line driven by the FPGA `mcu_irq_o` output. Active-high while
+      an RX Ethernet frame is waiting in the FPGA RX buffer. Used by the
+      eth_spi driver; when absent the driver falls back to polling.

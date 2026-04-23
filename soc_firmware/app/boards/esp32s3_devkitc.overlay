@@ -9,6 +9,7 @@
  *   MOSI = GPIO11
  *   MISO = GPIO13
  *   CS   = GPIO10
+ *   IRQ  = GPIO9  (FPGA mcu_irq_o — active high while an RX frame waits)
  * Bus speed starts at 10 MHz for bring-up; raise after signal integrity
  * is validated.
  */
@@ -45,6 +46,7 @@
 		compatible = "aes67,fpga-spi";
 		reg = <0>;
 		spi-max-frequency = <10000000>;
+		//int-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
 	};
 };
 
