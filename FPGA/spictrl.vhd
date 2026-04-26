@@ -161,7 +161,7 @@ architecture rtl of spictrl is
     signal packet_available : std_logic := '0';
     signal rx_overflow : std_logic := '0';
     signal metering_shadow : std_logic_vector(metering_bits - 1 downto 0);
-
+    signal rx_packet_length_latch : unsigned(10 downto 0);
 
 begin
 
@@ -344,9 +344,9 @@ begin
                             end case;
                         when "0100001" =>
                             if (transaction_byte_counter = 0) then
-                                spi_data_to_host <= std_logic_vector(resize(rx_packet_length_i(10 downto 8), 8));
+                                spi_data_to_host <= std_logic_vector(resize(rx_packet_length_latch(10 downto 8), 8));
                             elsif (transaction_byte_counter = 1) then
-                                spi_data_to_host <= std_logic_vector(rx_packet_length_i(7 downto 0));
+                                spi_data_to_host <= std_logic_vector(rx_packet_length_latch(7 downto 0));
                             else
                                 spi_data_to_host <= (others => '0');
                             end if;
@@ -398,7 +398,7 @@ begin
                 case active_register is
                     when "0000000" => read_bytes <= 8; -- 0x00 FPGA info
                     when "0100001"      => read_bytes <= 2; -- 0x21 RX Packet length
-                    when "0100010"      => read_bytes <= to_integer(rx_packet_length_i); -- rx packet 0x22
+                    when "0100010"      => read_bytes <= to_integer(rx_packet_length_latch - 1); -- rx packet 0x22
                     when "0110000"      => read_bytes <= metering_bytes; -- 0x30
                     when "1010000" => read_bytes <= 1; -- 0x50 clocking status
                     when "1010001" => read_bytes <= 1; -- 0x51 eth status
@@ -450,11 +450,12 @@ begin
                 if (packet_available = '1') then
                     rx_overflow <= '1';
                 else
+                    rx_packet_length_latch <= rx_packet_length_i;
                     packet_available <= '1';
                 end if;
 
             end if;
-            if (active_register = "0100010" and transaction_byte_counter = rx_packet_length_i) then
+            if (active_register = "0100010" and transaction_byte_counter = rx_packet_length_latch - 1) then
                 packet_available <= '0';
             end if;
             if (active_register = "1010000" and transaction_done = '1') then
@@ -483,7 +484,7 @@ begin
                     elsif (transaction_byte_counter = 1) then
                         tx_packet_length(7 downto 0) <= UNSIGNED(spi_data_from_host);
                     else
-                        if (transaction_byte_counter < tx_packet_length) then
+                        if (transaction_byte_counter -2 < tx_packet_length) then
                             tx_packet_ram(transaction_byte_counter - 2) <= spi_data_from_host;
                         end if;
                         
@@ -508,7 +509,7 @@ begin
             tx_done <= '0';
 			if tx_packet_ready = '1' and tx_allow_i = '1' then
 				tx_en_o <= '1';
-				if tx_packet_ram_addr < tx_packet_length  then
+				if tx_packet_ram_addr < tx_packet_length -1  then
 				
 					if tx_byte_sent_i = '1' then
 						tx_packet_ram_addr <= tx_packet_ram_addr + 1;
