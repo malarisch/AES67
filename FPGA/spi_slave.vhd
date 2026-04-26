@@ -38,11 +38,10 @@ architecture RTL of SPI_SLAVE is
 
     constant BIT_CNT_WIDTH : natural := natural(ceil(log2(real(WORD_SIZE))));
 
-    signal sclk_meta          : std_logic;
+    --signal sclk_meta          : std_logic;
     signal cs_n_meta          : std_logic;
-    signal mosi_meta          : std_logic;
+    --signal mosi_meta          : std_logic;
     signal sclk_reg           : std_logic;
-    signal sclk_filtered      : std_logic;
     signal cs_n_reg           : std_logic;
     signal mosi_reg           : std_logic;
     signal spi_clk_reg        : std_logic;
@@ -52,7 +51,8 @@ architecture RTL of SPI_SLAVE is
     signal bit_cnt_max        : std_logic;
     signal last_bit_en        : std_logic;
     signal load_data_en       : std_logic;
-    signal data_shreg         : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal tx_shreg           : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal rx_shreg           : std_logic_vector(WORD_SIZE-1 downto 0);
     signal slave_ready        : std_logic;
     signal shreg_busy         : std_logic;
     signal rx_data_vld        : std_logic;
@@ -63,19 +63,19 @@ begin
     --  INPUT SYNCHRONIZATION REGISTERS
     -- -------------------------------------------------------------------------
 
-    -- Synchronization registers to eliminate possible metastability.
     sync_ffs_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            sclk_meta <= SCLK;
             cs_n_meta <= CS_N;
-            mosi_meta <= MOSI;
-            sclk_reg  <= sclk_meta;
             cs_n_reg  <= cs_n_meta;
-            mosi_reg  <= mosi_meta;
+            if (cs_n_reg = '0') then
+                sclk_reg  <= SCLK;
+                mosi_reg <= MOSI;
+            else
+                sclk_reg  <= '0';
+            end if;
         end if;
     end process;
-    sclk_filtered <= sclk_reg when sclk_meta = sclk_reg else sclk_filtered;
     -- -------------------------------------------------------------------------
     --  SPI CLOCK REGISTER
     -- -------------------------------------------------------------------------
@@ -87,7 +87,7 @@ begin
             if (RST = '1') then
                 spi_clk_reg <= '0';
             else
-                spi_clk_reg <= sclk_filtered;
+                spi_clk_reg <= sclk_reg;
             end if;
         end if;
     end process;
@@ -97,9 +97,9 @@ begin
     -- -------------------------------------------------------------------------
 
     -- Falling edge is detect when sclk_reg=0 and spi_clk_reg=1.
-    spi_clk_fedge_en <= not sclk_filtered and spi_clk_reg;
+    spi_clk_fedge_en <= not sclk_reg and spi_clk_reg;
     -- Rising edge is detect when sclk_reg=1 and spi_clk_reg=0.
-    spi_clk_redge_en <= sclk_filtered and not spi_clk_reg;
+    spi_clk_redge_en <= sclk_reg and not spi_clk_reg;
 
     -- -------------------------------------------------------------------------
     --  RECEIVED BITS COUNTER
@@ -184,35 +184,43 @@ begin
     load_data_en <= DIN_VLD;
 
     -- -------------------------------------------------------------------------
-    --  DATA SHIFT REGISTER
+    --  TX SHIFT REGISTER (MISO, CPHA=0: shift on falling edge)
     -- -------------------------------------------------------------------------
 
-    -- The shift register holds data for sending to master, capture and store
-    -- incoming data from master.
-    data_shreg_p : process (CLK)
+    -- For SPI mode 0 the slave must present the next MISO bit on the falling
+    -- edge of SCLK so the master sees it stable on the following rising edge.
+    -- MISO is driven combinationally from the MSB of tx_shreg, eliminating an
+    -- extra output register and reducing SCLK->MISO latency by one sys_clk.
+    --
+    -- Inter-byte glitch avoidance: do NOT shift on the falling edge that
+    -- follows the last bit of a byte. Otherwise MISO would briefly drop
+    -- to the shifted-in '0' (or to the previous bit 6) for one sys_clk
+    -- before load_data_en swaps in the next byte's MSB — long enough for
+    -- the master to sample the wrong value on the following rising edge.
+    -- Holding the last bit on MISO until DIN is loaded keeps the line
+    -- glitch-free across byte boundaries.
+    tx_shreg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
             if (load_data_en = '1') then
-                data_shreg <= DIN;
-            elsif (spi_clk_redge_en = '1' and cs_n_reg = '0') then
-                data_shreg <= data_shreg(WORD_SIZE-2 downto 0) & mosi_reg;
+                tx_shreg <= DIN;
+            elsif (spi_clk_fedge_en = '1' and cs_n_reg = '0' and last_bit_en = '0') then
+                tx_shreg <= tx_shreg(WORD_SIZE-2 downto 0) & '0';
             end if;
         end if;
     end process;
 
+    MISO <= tx_shreg(WORD_SIZE-1);
+
     -- -------------------------------------------------------------------------
-    --  MISO REGISTER
+    --  RX SHIFT REGISTER (MOSI, CPHA=0: sample on rising edge)
     -- -------------------------------------------------------------------------
 
-    -- The output MISO register ensures that the bits are transmit to the master
-    -- when is not assert cs_n_reg and falling edge of SPI clock is detected.
-    miso_p : process (CLK)
+    rx_shreg_p : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (load_data_en = '1') then
-                MISO <= DIN(WORD_SIZE-1);
-            elsif (spi_clk_fedge_en = '1' and cs_n_reg = '0') then
-                MISO <= data_shreg(WORD_SIZE-1);
+            if (spi_clk_redge_en = '1' and cs_n_reg = '0') then
+                rx_shreg <= rx_shreg(WORD_SIZE-2 downto 0) & mosi_reg;
             end if;
         end if;
     end process;
@@ -220,9 +228,9 @@ begin
     -- -------------------------------------------------------------------------
     --  ASSIGNING OUTPUT SIGNALS
     -- -------------------------------------------------------------------------
-    
+
     DIN_RDY  <= slave_ready;
-    DOUT     <= data_shreg;
+    DOUT     <= rx_shreg;
     DOUT_VLD <= rx_data_vld;
 
 end architecture;

@@ -94,19 +94,6 @@ static const struct eth_spi_config eth_spi_cfg_0 = {
  */
 
 #if ETH_SPI_HAS_IRQ_GPIO
-static inline void eth_spi_irq_disable(const struct eth_spi_config *cfg)
-{
-	gpio_pin_interrupt_configure_dt(&cfg->irq_gpio, GPIO_INT_DISABLE);
-}
-
-static inline void eth_spi_irq_enable(const struct eth_spi_config *cfg)
-{
-	gpio_pin_interrupt_configure_dt(&cfg->irq_gpio,
-					(cfg->irq_gpio.dt_flags & GPIO_ACTIVE_LOW)
-						? GPIO_INT_LEVEL_LOW
-						: GPIO_INT_LEVEL_HIGH);
-}
-
 static void eth_spi_irq_handler(const struct device *port,
 				struct gpio_callback *cb, uint32_t pins)
 {
@@ -114,11 +101,12 @@ static void eth_spi_irq_handler(const struct device *port,
 	ARG_UNUSED(pins);
 
 	struct eth_spi_data *data = CONTAINER_OF(cb, struct eth_spi_data, irq_cb);
-	const struct eth_spi_config *cfg = data->dev->config;
 
-	/* Mask first, sem_give after — otherwise the IRQ keeps re-firing
-	 * because the FPGA line is still high. The RX thread re-arms us. */
-	eth_spi_irq_disable(cfg);
+	/* Edge-triggered: fires once per rising edge. We don't mask the
+	 * IRQ because there's no level-storm risk — and crucially, on
+	 * ESP32 a level IRQ that was masked may re-fire from a stale
+	 * latch when re-enabled, even if the line is already low, which
+	 * would cause spurious double-reads. */
 	k_sem_give(&data->rx_sem);
 }
 #endif
@@ -171,7 +159,7 @@ static void eth_spi_rx_one(struct eth_spi_data *data)
 		return;
 	}
 
-	LOG_HEXDUMP_DBG(data->rx_buf, len, "RX frame");
+	//LOG_HEXDUMP_DBG(data->rx_buf, len, "RX frame");
 
 	struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(
 		data->iface, len, AF_UNSPEC, 0, K_NO_WAIT);
@@ -209,11 +197,14 @@ static void eth_spi_rx_thread(void *p1, void *p2, void *p3)
 		eth_spi_rx_one(data);
 
 #if ETH_SPI_HAS_IRQ_GPIO
-		/* Re-arm the level-triggered IRQ. If packet_available is
-		 * still asserted (next frame already queued), the
-		 * controller fires us again immediately — exactly what we
-		 * want: one IRQ per frame. */
-		eth_spi_irq_enable(cfg);
+		/* Edge IRQs don't fire while the line stayed high through
+		 * our frame read. If a second frame arrived during drain
+		 * the FPGA holds the line high without a fresh edge, so
+		 * we'd miss it. Re-check the pin level once and loop if
+		 * still asserted. */
+		while (gpio_pin_get_dt(&cfg->irq_gpio) == 1) {
+			eth_spi_rx_one(data);
+		}
 #endif
 	}
 }
@@ -324,7 +315,7 @@ static void eth_spi_link_work(struct k_work *work)
 
 	/* Periodic status snapshot — kept off the RX hot path. */
 	uint8_t raw = eth_spi_read_status();
-	LOG_DBG("status 0x%02x  rx_avail=%d rx_overflow=%d "
+	/*LOG_DBG("status 0x%02x  rx_avail=%d rx_overflow=%d "
 		"ptp_leader=%d ptp_follower=%d wc_locked=%d wc_cfg=%d ppb_valid=%d",
 		raw,
 		!!(raw & FPGA_SPI_CLK_RX_AVAILABLE),
@@ -334,7 +325,7 @@ static void eth_spi_link_work(struct k_work *work)
 		!!(raw & FPGA_SPI_CLK_WC_LOCKED),
 		!!(raw & FPGA_SPI_CLK_WC_CONFIGURED),
 		!!(raw & FPGA_SPI_CLK_PPB_VALID));
-
+*/
 	k_work_schedule(dwork, K_MSEC(500));
 }
 
@@ -403,14 +394,21 @@ static int eth_spi_init(const struct device *dev)
 	gpio_init_callback(&data->irq_cb, eth_spi_irq_handler,
 			   BIT(cfg->irq_gpio.pin));
 	gpio_add_callback(cfg->irq_gpio.port, &data->irq_cb);
-	/* Level-active: the FPGA pin reflects packet_available. While the
-	 * line is asserted we keep waking the RX thread; once it drains the
-	 * frame and the FPGA drops the line, the IRQ stops firing. */
+	/* Edge-triggered, single-shot per FPGA assertion. The RX thread
+	 * re-checks the pin level after each frame to catch frames that
+	 * arrived while the line stayed asserted (no fresh edge). */
 	gpio_pin_interrupt_configure_dt(&cfg->irq_gpio,
 					(cfg->irq_gpio.dt_flags & GPIO_ACTIVE_LOW)
-						? GPIO_INT_LEVEL_LOW
-						: GPIO_INT_LEVEL_HIGH);
-	LOG_INF("IRQ on %s pin %d", cfg->irq_gpio.port->name, cfg->irq_gpio.pin);
+						? GPIO_INT_EDGE_FALLING
+						: GPIO_INT_EDGE_RISING);
+	LOG_INF("IRQ on %s pin %d (edge)", cfg->irq_gpio.port->name, cfg->irq_gpio.pin);
+
+	/* The line may already be asserted at boot (frame queued before
+	 * we configured the IRQ), and an edge trigger only fires on
+	 * transitions — so kick the RX thread once if needed. */
+	if (gpio_pin_get_dt(&cfg->irq_gpio) == 1) {
+		k_sem_give(&data->rx_sem);
+	}
 #else
 	ARG_UNUSED(cfg);
 	LOG_INF("no IRQ GPIO — falling back to %dms polling",

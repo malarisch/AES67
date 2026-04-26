@@ -31,8 +31,10 @@ struct fpga_spi_config {
 static struct fpga_spi_data fpga_spi_data_inst;
 
 static const struct fpga_spi_config fpga_spi_config_inst = {
+	/* FPGA SPI_SLAVE supports SPI mode 0 only (CPOL=0, CPHA=0). */
 	.bus = SPI_DT_SPEC_GET(FPGA_SPI_NODE,
-			       SPI_WORD_SET(8) | SPI_TRANSFER_MSB, 0),
+			       SPI_OP_MODE_MASTER | SPI_WORD_SET(8) |
+			       SPI_TRANSFER_MSB, 0),
 };
 
 static int fpga_spi_init(const struct device *dev)

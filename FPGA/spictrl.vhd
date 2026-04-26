@@ -99,6 +99,7 @@ architecture rtl of spictrl is
     constant metering_bits             : integer := rx_channel_meter_sig_i'length + rx_channel_meter_clip_i'length +tx_channel_meter_sig_i'length + tx_channel_meter_clip_i'length;
     constant metering_bytes           : integer := natural(ceil(real((RXCHANNELS / 8) * 2 + (TXCHANNELS / 8) * 2)));
     signal spi_data_to_host          : std_logic_vector(7 downto 0);
+    signal spi_data_to_host_reg          : std_logic_vector(7 downto 0);
     signal spi_data_from_host        : std_logic_vector(7 downto 0);
     signal spi_data_to_host_valid    : std_logic;
     signal spi_data_to_host_ready    : std_logic;
@@ -176,13 +177,13 @@ begin
         CS_N => spi_cs_n_i,
         MOSI => spi_di_i,
         MISO => spi_do_o,
-        DIN => spi_data_to_host,
+        DIN => spi_data_to_host_reg,
         DIN_VLD => spi_data_to_host_valid,
         DIN_RDY => spi_data_to_host_ready,
         DOUT => spi_data_from_host,
         DOUT_VLD => spi_data_from_host_valid
     );
-    
+    spi_data_to_host_reg <= rx_packet_ram_read_data_i when state_transaction_active = '1' and active_register = "0100010" else spi_data_to_host;
     cdc_proc : process (sys_clk_i, rst_n_i)
     begin
         if rst_n_i = '0' then
@@ -304,7 +305,13 @@ begin
                 if (state_writing = '1' and spi_data_from_host_valid = '1') then
                     transaction_byte_counter <= transaction_byte_counter + 1;
                 end if;
-                if (state_reading = '1' and
+                -- cs_n_reg = '0' filters the spurious slave_ready rising
+                -- edge that fires when CS goes high between ESP32 64-byte
+                -- bursts (slave_ready = (cs_n_reg and not shreg_busy) or
+                -- rx_data_vld). Without it, every burst boundary increments
+                -- the counter once without a byte actually being clocked,
+                -- skipping bytes in the read stream.
+                if (state_reading = '1' and spi_cs_n_reg = '0' and
                     spi_data_to_host_ready_z = '0' and spi_data_to_host_ready = '1') then
                     transaction_byte_counter <= transaction_byte_counter + 1;
                 end if;
@@ -447,7 +454,7 @@ begin
         elsif rising_edge(sys_clk_i) then
             packet_tog_z <= rx_packet_tog_i;
             if (packet_tog_z /= rx_packet_tog_i) then
-                if (packet_available = '1') then
+                if (packet_available = '1' or (state_transaction_active = '1' and active_register = "0100010")) then
                     rx_overflow <= '1';
                 else
                     rx_packet_length_latch <= rx_packet_length_i;
@@ -455,7 +462,7 @@ begin
                 end if;
 
             end if;
-            if (active_register = "0100010" and transaction_byte_counter = rx_packet_length_latch - 1) then
+            if (active_register = "0100010" and transaction_byte_counter > 3) then
                 packet_available <= '0';
             end if;
             if (active_register = "1010000" and transaction_done = '1') then
