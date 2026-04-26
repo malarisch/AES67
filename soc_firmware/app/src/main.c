@@ -9,7 +9,9 @@
 #include <zephyr/logging/log.h>
 #include <string.h>
 
+#ifdef CONFIG_SI5351A
 #include "../drivers/si5351a/si5351a.h"
+#endif
 #include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
@@ -239,6 +241,7 @@ int main(void)
 	}
 #endif
 
+#ifdef CONFIG_SI5351A
 	/* ---- Si5351A Clock Generator Setup ---- */
 	const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
 
@@ -261,6 +264,7 @@ int main(void)
 		LOG_INF("Waiting 200 ms for MCLK to stabilise...");
 		k_msleep(200);
 	}
+#endif
 
 	/* ---- Shared nRST: reset display controller + IO card hardware ---- */
 #ifdef CONFIG_DISPLAY_CTRL
@@ -275,6 +279,7 @@ int main(void)
 #endif
 #endif
 
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
 	/* ---- Analog I/O Card Autodetect ---- */
 	{
 		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
@@ -290,6 +295,7 @@ int main(void)
 			/* Individual result is logged by card_manager */
 		}
 	}
+#endif
 
 #ifdef CONFIG_DISPLAY_CTRL
 	/* ---- Display Controller (LEDs, Buttons, 7-Segment) Setup ---- */

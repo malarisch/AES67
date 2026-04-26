@@ -49,8 +49,10 @@ extern "C" {
 #define FPGA_SPI_REG_TX_STREAM    0x58 /* W  20           */
 #define FPGA_SPI_REG_RX_STREAM    0x59 /* W  18           */
 
-/* Max Ethernet payload carried over the SPI packet registers. */
-#define FPGA_SPI_ETH_MAX_PKT      1500
+/* Max Ethernet frame carried over the SPI packet registers (header +
+ * payload, no FCS). The on-FPGA spictrl bridge uses an 11-bit length
+ * field and a >1518-byte packet RAM, so a full 1518-byte frame fits. */
+#define FPGA_SPI_ETH_MAX_PKT      1518
 
 /* ---- Clocking status bits (read 0x50) ---- */
 #define FPGA_SPI_CLK_PPB_VALID     BIT(7)

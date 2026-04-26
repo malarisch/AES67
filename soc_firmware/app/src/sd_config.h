@@ -13,6 +13,7 @@
 
 #include <zephyr/kernel.h>
 #include <stdbool.h>
+#include <zephyr/autoconf.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,22 @@ enum sd_config_load_status {
 	SD_CONFIG_LOAD_NO_CARD,    /* SD card not mounted */
 	SD_CONFIG_LOAD_ERROR,      /* Error reading/parsing config */
 };
+
+#ifndef CONFIG_SD_CONFIG
+/* No SD card on this board: callers (sap_sdp shell, etc.) still link
+ * against these names, so provide harmless inline stubs. */
+static inline int  sd_config_init(void)        { return -ENODEV; }
+static inline bool sd_config_is_ready(void)    { return false; }
+static inline int  sd_config_load(void)        { return -ENODEV; }
+static inline int  sd_config_save(void)        { return -ENODEV; }
+static inline void sd_config_mark_dirty(void)  { }
+static inline int  sd_config_flush(void)       { return -ENODEV; }
+static inline int  sd_config_format(void)      { return -ENODEV; }
+static inline enum sd_config_load_status sd_config_get_load_status(void)
+{ return SD_CONFIG_NOT_LOADED; }
+static inline const char *sd_config_status_str(enum sd_config_load_status status)
+{ (void)status; return "disabled"; }
+#else /* CONFIG_SD_CONFIG */
 
 /**
  * @brief Initialize the SD card subsystem and mount the filesystem.
@@ -115,6 +132,8 @@ enum sd_config_load_status sd_config_get_load_status(void);
  * @return String description
  */
 const char *sd_config_status_str(enum sd_config_load_status status);
+
+#endif /* CONFIG_SD_CONFIG */
 
 #ifdef __cplusplus
 }

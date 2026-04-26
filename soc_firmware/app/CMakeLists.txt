@@ -61,12 +61,15 @@ project(app)
 add_subdirectory(drivers)
 
 # ---------- Application sources ----------
-# The full control plane (HTTP / mDNS / RTSP / SD / card manager) is gated
-# on the FPGA HAL backend: LiteX and FMC carry the whole app. The SPI
-# backend (external MCU, currently ESP32-S3) uses a much smaller bring-up
-# main that just programs defaults and polls status — while still getting
-# Zephyr networking + the eth_spi driver for DHCP/TCP.
-if(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC)
+# The full control plane (HTTP / mDNS / RTSP / SD / card manager) builds
+# for every HAL backend that has networking — LiteX, FMC, and SPI (ESP32).
+# Hardware that only exists on specific boards (Si5351A, analog cards,
+# display controller, SPI flash, SD card) is gated inside main.c on the
+# matching Kconfig symbols, so the SPI build simply leaves those out.
+# The legacy bring-up stub is still selectable via CONFIG_APP_SPI_BRINGUP.
+if(CONFIG_APP_SPI_BRINGUP)
+    target_sources(app PRIVATE src/main_spi_bringup.c)
+elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
     # HTTP server: register per-service resource linker sections.
     zephyr_linker_sources(SECTIONS sections-rom.ld)
     zephyr_linker_section(NAME http_resource_desc_aes67_http
@@ -100,7 +103,6 @@ if(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC)
     target_sources(app PRIVATE
       src/main.c
       src/fpga_regs.c
-      src/pll_ctrl.c
       src/fpga_poll.c
       src/ui_display.c
       src/ptp_bmc.c
@@ -109,8 +111,16 @@ if(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC)
       src/config_json.c
       src/aes67_sdp_utils.c
       src/webserver.c
-      src/card_manager.c
     )
+
+    # card_manager itself is portable — it only pulls in the per-card
+    # drivers (mi/lo/io) when those Kconfigs are set, so it's safe to
+    # always compile.
+    target_sources(app PRIVATE src/card_manager.c)
+    # Si5351A PI controller is only meaningful on boards that ship the
+    # clock generator. Boards without it (ESP32 SPI bring-up) skip the
+    # PPB feedback loop entirely; pll_ctrl is stubbed in pll_ctrl.h.
+    target_sources_ifdef(CONFIG_SI5351A    app PRIVATE src/pll_ctrl.c)
 
     target_sources_ifdef(CONFIG_SPI_FLASH_LITESPI app PRIVATE src/fw_update.c)
     target_sources_ifdef(CONFIG_RTSP              app PRIVATE src/rtsp.c)
@@ -119,9 +129,6 @@ if(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC)
     target_sources_ifdef(CONFIG_FLASH_CONFIG      app PRIVATE src/flash_config.c)
 
     add_dependencies(app web_assets)
-else()
-    # SPI-only build (external-MCU targets).
-    target_sources(app PRIVATE src/main_spi_bringup.c)
 endif()
 
 # ---------- Generate Flash Boot Image (.fbi) for LiteX targets ----------

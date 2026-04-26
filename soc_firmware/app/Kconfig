@@ -1,6 +1,17 @@
 
 rsource "drivers/Kconfig"
 
+config APP_SPI_BRINGUP
+	bool "Build the SPI bring-up stub instead of the full control plane"
+	default n
+	depends on FPGA_HAL_SPI
+	help
+	  When set, build the minimal main_spi_bringup.c that only programs
+	  default registers and polls status. Useful for bare SPI bring-up
+	  before the full networking stack is on the board. The full app
+	  (HTTP / RTSP / mDNS / PTP BMC) is the default for every HAL
+	  backend that has networking, including SPI.
+
 menu "RAVENNA RTSP Server/Client"
 
 config RTSP
