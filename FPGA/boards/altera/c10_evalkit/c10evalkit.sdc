@@ -125,7 +125,7 @@ set_false_path -from * -to [get_ports {arduino_io3}]
 source ../../../sdc/hyperram.sdc
 source ../../../sdc/ptp.sdc
 source ../../../sdc/litex_csr.sdc
-
+source ../../../sdc/spictrl.sdc
 #**************************************************************
 # Set Multicycle Path
 #**************************************************************

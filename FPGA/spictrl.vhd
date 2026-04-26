@@ -83,6 +83,7 @@ entity spictrl is
         tx_req_o : OUT STD_LOGIC;
         tx_en_o : OUT STD_LOGIC;
         tx_data_o : OUT STD_ULOGIC_VECTOR(7 downto 0);
+        
 
         mcu_irq_o : OUT STD_LOGIC;
 
@@ -157,19 +158,25 @@ architecture rtl of spictrl is
 	signal tx_packet_ram : t_packet_ram := (others => (others => '0'));
     signal tx_packet_length : UNSIGNED(10 downto 0);
     signal tx_packet_ready : std_logic := '0';
+    signal tx_packet_ready_sync : std_logic := '0';
+    signal tx_packet_ready_reg : std_logic := '0';
     signal tx_done : std_logic;
+    signal tx_done_sync : std_logic;
+    signal tx_done_reg : std_logic;
+    signal tx_done_ack : std_logic := '0';
     signal packet_tog_z : std_logic := '0';
     signal packet_available : std_logic := '0';
     signal rx_overflow : std_logic := '0';
     signal metering_shadow : std_logic_vector(metering_bits - 1 downto 0);
     signal rx_packet_length_latch : unsigned(10 downto 0);
+    
 
 begin
 
     SPI_SLAVE_inst: entity work.SPI_SLAVE
      generic map(
         WORD_SIZE => 8
-    )
+    ) 
      port map(
         CLK => sys_clk_i,
         RST => not rst_n_i,
@@ -191,6 +198,8 @@ begin
             spi_cs_n_reg  <= '1';
             spi_cs_n_reg_z <= '1';
             cs_rise_pulse <= '0';
+            tx_done_sync <= '0';
+            tx_done_reg <= '0';
         elsif rising_edge(sys_clk_i) then
             spi_cs_n_sync  <= spi_cs_n_i;
             spi_cs_n_reg   <= spi_cs_n_sync;
@@ -199,6 +208,8 @@ begin
             if spi_cs_n_reg = '1' and spi_cs_n_reg_z = '0' then
                 cs_rise_pulse <= '1';
             end if;
+            tx_done_sync <= tx_done;
+            tx_done_reg <= tx_done_sync;
         end if;
     end process;
 
@@ -482,8 +493,10 @@ begin
         elsif rising_edge(sys_clk_i) then
             if (tx_done = '1') then
             tx_packet_ready <= '0';
+            tx_done_ack <= '1';
             end if;
             if (state_transaction_active = '1' and state_writing = '1' and active_register = "0100000") then
+                tx_done_ack <= '0';
                 -- write received data to packet ram
                 if (spi_data_from_host_valid = '1') then
                     if (transaction_byte_counter = 0) then
@@ -504,7 +517,18 @@ begin
             end if;
         end if;
     end process;
-    tx_req_o <= tx_packet_ready;
+    tx_req_o <= tx_packet_ready_reg;
+
+    txclkcdc: process (tx_clk_i, rst_n_i)
+    begin
+        if (rst_n_i = '0') then
+            tx_packet_ready_sync <= '0';
+            tx_packet_ready_reg <= '0';
+        elsif (rising_edge(tx_clk_i)) then
+            tx_packet_ready_sync <= tx_packet_ready;
+            tx_packet_ready_reg <= tx_packet_ready_sync;
+        end if;
+    end process;
     packet_ram_port_b : process(tx_clk_i)
 	begin
 		if rising_edge(tx_clk_i) then
@@ -513,8 +537,10 @@ begin
 			else
 					tx_data_o <= std_ulogic_vector(tx_packet_ram(tx_packet_ram_addr));
 			end if;
-            tx_done <= '0';
-			if tx_packet_ready = '1' and tx_allow_i = '1' then
+            if (tx_done_ack = '1') then
+                tx_done <= '0';
+            end if;
+			if tx_packet_ready_reg = '1' and tx_allow_i = '1' then
 				tx_en_o <= '1';
 				if tx_packet_ram_addr < tx_packet_length -1  then
 				
@@ -545,7 +571,7 @@ begin
             ip_shadow   <= (others => '0');
             ptp_shadow  <= (others => '0');
             flag_shadow <= (others => '0');
-            stream_id_latched <= (others => '0');
+            stream_id_latched <= (others => '0'); 
         elsif rising_edge(sys_clk_i) then
             if (state_transaction_active = '1' and state_writing = '1'
                 and address_received = '1' and spi_data_from_host_valid = '1') then

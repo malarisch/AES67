@@ -2,6 +2,18 @@
 # Audio master clock from external PLL (48kHz * 512 = 24.576 MHz)
 create_clock -name {audio_mclk} -period 40.690 -waveform { 0.000 20.345 } [get_ports {pll_512fs_i}]
 
+# wallclock NCO MSB (nco_phase[31]) is a *data* register clocked by sys_clk_125m,
+# not a real clock. Quartus auto-detects it as a clock because it fans out into
+# logic that looks MCLK-shaped. The NCO output (wc_mclk) is only used when
+# USE_EXTERNAL_PLL = "false" — with the external Si5351 PLL it is dead silicon.
+# Quartus auto-detects nco_phase[31] as a base clock target because it fans
+# out into clock-shaped logic. Give it an explicit constraint so it stops
+# being "unconstrained", then group it asynchronously from everything else.
+# wc_mclk is unused with the external Si5351 PLL (USE_EXTERNAL_PLL = "true").
+create_clock -name {nco_mclk} -period 40.7 \
+    [get_registers {aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|nco_phase[31]}]
+
+set_clock_groups -asynchronous -group {nco_mclk}
 
 # cnt(0) -> clk_256fs / bclk_r : 12.288 MHz (audio_mclk / 2)
 create_generated_clock -name {clk_256fs} \
@@ -9,6 +21,8 @@ create_generated_clock -name {clk_256fs} \
     -divide_by 2 \
     -master_clock {audio_mclk} \
     [get_registers {aes67_top_inst|audioclocks_inst|cnt[0]}]
+
+
 
 # cnt(1) -> clk_128fs : 6.144 MHz (audio_mclk / 4)
 create_generated_clock -name {clk_128fs} \

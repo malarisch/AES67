@@ -75,7 +75,9 @@ static void dhcp_restart(void)
 		net_dhcpv4_stop(g_iface);
 		g_dhcp_running = false;
 	}
-
+	if (g_iface) {
+		fpga_write_mac_address(g_iface);
+	}
 	g_ip_valid = false;
 	net_dhcpv4_start(g_iface);
 	g_dhcp_running = true;
