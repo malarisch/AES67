@@ -6,7 +6,13 @@ Outputs Verilog to litex_soc/build/. Does NOT invoke synthesis or P&R.
 
 Usage:
     source soc_firmware/.venv/bin/activate
-    python litex_soc/generate.py [--sys-clk-freq 50e6] [--output-dir litex_soc/build]
+    python litex_soc/generate.py [--sys-clk-freq 75e6] [--output-dir litex_soc/build]
+
+The generated SoC has no internal PLL.  The top-level FPGA design must feed
+the SoC its clocks via these ports:
+    cyclone10:  clk_sys                (sys_clk_freq, typ. 75 MHz)
+    cyc1000:    clk_sys, clk_sys_ps    (90deg phase-shifted, for SDRAM)
+    gowin:      clk_sys, clk_sys2x     (2x, for DDR3)
 """
 
 import argparse
@@ -17,8 +23,6 @@ from migen import *
 
 from litex.gen import *
 
-from litex.soc.cores.clock import Cyclone10LPPLL
-from litex.soc.cores.clock.gowin_gw2a import GW2APLL
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.soc import SoCRegion
 from litex.soc.integration.builder import Builder
@@ -44,14 +48,14 @@ class AES67HyperRAM(HyperRAM):
     The resulting latency mismatch corrupts every access.
 
     The upstream CSR "rst" field uses pulse=True which asserts RST# for only
-    1 sys_clk cycle (12.5 ns at 80 MHz).  The IS66WVH16M8ALL/8M8ALL datasheet
+    1 sys_clk cycle (~13.3 ns at 75 MHz).  The IS66WVH16M8ALL/8M8ALL datasheet
     requires tRPH >= 200 ns.  The chip ignores the sub-spec pulse.
 
     Fix: this subclass overrides add_csr() to drive core.rst with:
       1) An automatic startup counter that holds RST# for 4096 sys_clk cycles
-         (~51 µs at 80 MHz) after every FPGA configuration.
+         (~55 µs at 75 MHz) after every FPGA configuration.
       2) A CSR-pulse stretcher that extends any software-triggered RST# to
-         32 sys_clk cycles (400 ns).
+         32 sys_clk cycles (~427 ns).
 
     After either reset, the chip returns to power-on defaults (6 CK latency,
     128 B wrapped burst, fixed latency mode).
@@ -285,7 +289,7 @@ _io_common = [
 
 # Target-specific I/O: clock + main RAM
 _io_cyclone10 = [
-    ("clk50", 0, Pins(1)),
+    ("clk_sys", 0, Pins(1)),
     ("hyperram", 0,
         Subsignal("clk",   Pins(1)),
         Subsignal("rst_n", Pins(1)),
@@ -296,7 +300,8 @@ _io_cyclone10 = [
 ] + _io_common
 
 _io_cyc1000 = [
-    ("clk12", 0, Pins(1)),
+    ("clk_sys",    0, Pins(1)),
+    ("clk_sys_ps", 0, Pins(1)),  # 90deg phase-shifted sys clock for SDRAM (from top-level PLL)
     ("sdram_clock", 0, Pins(1)),
     ("sdram", 0,
         Subsignal("a",     Pins(14)),
@@ -312,7 +317,8 @@ _io_cyc1000 = [
 ] + _io_common
 
 _io_gowin = [
-    ("clk27", 0, Pins(1)),
+    ("clk_sys",   0, Pins(1)),
+    ("clk_sys2x", 0, Pins(1)),  # 2x sys clock for DDR3 (from top-level PLL)
     ("ddram", 0,
         Subsignal("a",       Pins(14)),
         Subsignal("ba",      Pins(3)),
@@ -360,8 +366,8 @@ def _stub_build(platform, fragment, build_dir="build", build_name="litex_soc", r
 
 class Cyclone10StubPlatform(AlteraPlatform):
     """Altera-based platform stub for HDL-only generation (no synthesis)."""
-    default_clk_name   = "clk50"
-    default_clk_period = 1e9 / 50e6
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
 
     def __init__(self):
         AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_cyclone10, toolchain="quartus")
@@ -374,9 +380,9 @@ class Cyclone10StubPlatform(AlteraPlatform):
 
 
 class Cyc1000StubPlatform(AlteraPlatform):
-    """Altera-based platform stub for Trenz CYC1000 (12 MHz clk, SDRAM)."""
-    default_clk_name   = "clk12"
-    default_clk_period = 1e9 / 12e6
+    """Altera-based platform stub for Trenz CYC1000 (SDRAM)."""
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
 
     def __init__(self):
         # CYC1000 uses -C8 speed grade (commercial).
@@ -391,8 +397,8 @@ class Cyc1000StubPlatform(AlteraPlatform):
 
 class GowinStubPlatform(GowinPlatform):
     """Gowin-based platform stub for HDL-only generation (no synthesis)."""
-    default_clk_name   = "clk27"
-    default_clk_period = 1e9 / 27e6
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
 
     def __init__(self):
         GowinPlatform.__init__(self, "GW2A-LV18PG256C8/I7", _io_gowin,
@@ -405,99 +411,61 @@ class GowinStubPlatform(GowinPlatform):
         return _stub_build(self, fragment, **kwargs)
 
 
+# -- CRG helpers --------------------------------------------------------------
+#
+# All three CRGs now consume their clocks directly from external pads.  The
+# top-level FPGA design is expected to instantiate one PLL and feed the SoC
+# the required clock(s):
+#   - cyclone10: clk_sys (sys_clk_freq, typ. 80 MHz)
+#   - cyc1000:   clk_sys + clk_sys_ps (sys_clk_freq, 90deg shifted, for SDRAM)
+#   - gowin:     clk_sys + clk_sys2x (sys_clk_freq and 2x, for DDR3)
+#
+# This keeps the SoC portable: no target-specific PLL primitives are baked
+# into the generated SoC HDL, and a single top-level PLL can drive everything
+# (including non-SoC FPGA logic on the same clock).
+
+
+def _bind_mac_clocks(crg, platform):
+    """Wire mac_rx/mac_tx clock domains directly from the Ethernet MAC pads."""
+    crg.cd_mac_rx = ClockDomain(reset_less=True)
+    crg.cd_mac_tx = ClockDomain(reset_less=True)
+    crg.comb += [
+        crg.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
+        crg.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
+    ]
+
+
 # -- CRG (Clock Reset Generator) — Cyclone 10LP --------------------------------
 
 class _CRG_Cyclone10(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, with_sys2x=False):
+    def __init__(self, platform, sys_clk_freq):
         self.rst    = Signal()
         self.cd_sys = ClockDomain()
 
-        # Clk / Rst
-        clk50 = platform.request("clk50")
+        # System clock fed from external (top-level) PLL.
+        self.comb += self.cd_sys.clk.eq(platform.request("clk_sys"))
+        self.specials += AsyncResetSynchronizer(self.cd_sys, self.rst)
 
-        # PLL
-        # Note: 10CL025YU256I7G is Industrial temp with speed grade 7 (-I7)
-        self.pll = pll = Cyclone10LPPLL(speedgrade="-I7")
-
-        # Stretch the incoming rst pulse for reliable CDC capture.
-        #
-        # LiteX's SoCCore drives self.rst with a single sys_clk pulse
-        # (12.5 ns at 80 MHz) on soc_rst.  This pulse must cross a CDC
-        # boundary into the 50 MHz PLL input clock domain (via an 8-stage
-        # DFFE pipeline).  A 12.5 ns pulse can be missed by a 20 ns clock.
-        #
-        # We stretch it to 8 sys_clk cycles (~100 ns), guaranteeing at least
-        # 5 rising edges of clk50 see it high.
-        rst_stretch_cnt = Signal(4, reset=0)
-        rst_stretched   = Signal()
-        self.sync += [
-            If(self.rst,
-                rst_stretch_cnt.eq(8),
-            ).Elif(rst_stretch_cnt != 0,
-                rst_stretch_cnt.eq(rst_stretch_cnt - 1),
-            ),
-        ]
-        self.comb += rst_stretched.eq(self.rst | (rst_stretch_cnt != 0))
-        self.comb += pll.reset.eq(rst_stretched)
-        pll.register_clkin(clk50, 50e6)
-        pll.create_clkout(self.cd_sys, sys_clk_freq)
-
-        # HyperRAM 2:1 ratio requires sys2x clock domain
-        if with_sys2x:
-            self.cd_sys2x = ClockDomain()
-            pll.create_clkout(self.cd_sys2x, 2 * sys_clk_freq)
-
-        # MAC clock domains (directly fed from external FPGA Ethernet MAC).
-        # Used for the FPGA-side ports of dual-port RAMs in eth_buf.
-        self.cd_mac_rx = ClockDomain(reset_less=True)
-        self.cd_mac_tx = ClockDomain(reset_less=True)
-        self.comb += [
-            self.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
-            self.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
-        ]
+        _bind_mac_clocks(self, platform)
 
 
-# -- CRG (Clock Reset Generator) — Cyclone 10LP CYC1000 (12 MHz + SDRAM) -----
+# -- CRG (Clock Reset Generator) — Cyclone 10LP CYC1000 (SDRAM) ---------------
 
 class _CRG_Cyc1000(LiteXModule):
     def __init__(self, platform, sys_clk_freq):
         self.rst        = Signal()
         self.cd_sys     = ClockDomain()
-        self.cd_sys_ps  = ClockDomain()  # 90° phase-shifted for SDRAM
+        self.cd_sys_ps  = ClockDomain()  # 90deg phase-shifted for SDRAM
 
-        clk12 = platform.request("clk12")
-
-        # PLL — CYC1000 is -C8 (commercial speed grade 8)
-        self.pll = pll = Cyclone10LPPLL(speedgrade="-C8")
-
-        # Stretch the incoming rst pulse for reliable CDC capture (same
-        # reasoning as _CRG_Cyclone10 — LiteX's 1-cycle soc_rst pulse can be
-        # missed by the slower 12 MHz input clock domain).
-        rst_stretch_cnt = Signal(4, reset=0)
-        rst_stretched   = Signal()
-        self.sync += [
-            If(self.rst,
-                rst_stretch_cnt.eq(8),
-            ).Elif(rst_stretch_cnt != 0,
-                rst_stretch_cnt.eq(rst_stretch_cnt - 1),
-            ),
-        ]
-        self.comb += rst_stretched.eq(self.rst | (rst_stretch_cnt != 0))
-        self.comb += pll.reset.eq(rst_stretched)
-        pll.register_clkin(clk12, 12e6)
-        pll.create_clkout(self.cd_sys,    sys_clk_freq)
-        pll.create_clkout(self.cd_sys_ps, sys_clk_freq, phase=90)
+        # Both clocks fed from external (top-level) PLL.
+        self.comb += self.cd_sys.clk.eq(platform.request("clk_sys"))
+        self.comb += self.cd_sys_ps.clk.eq(platform.request("clk_sys_ps"))
+        self.specials += AsyncResetSynchronizer(self.cd_sys, self.rst)
 
         # SDRAM clock output pad (phase-shifted)
         self.comb += platform.request("sdram_clock").eq(self.cd_sys_ps.clk)
 
-        # MAC clock domains (directly fed from external FPGA Ethernet MAC).
-        self.cd_mac_rx = ClockDomain(reset_less=True)
-        self.cd_mac_tx = ClockDomain(reset_less=True)
-        self.comb += [
-            self.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
-            self.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
-        ]
+        _bind_mac_clocks(self, platform)
 
 
 # -- CRG (Clock Reset Generator) — Gowin GW2A (Tang Primer 20k) ---------------
@@ -518,23 +486,20 @@ class _CRG_Gowin(LiteXModule):
         self.stop  = Signal()
         self.reset = Signal()
 
-        # Clk
-        clk27 = platform.request("clk27")
+        # Both clocks fed from external (top-level) PLL.
+        clk_sys   = platform.request("clk_sys")
+        clk_sys2x = platform.request("clk_sys2x")
 
-        # Power on reset (the onboard POR is not aware of reprogramming)
+        # Power on reset (driven from sys clock — onboard POR is not aware
+        # of reprogramming).
         por_count = Signal(16, reset=2**16-1)
         por_done  = Signal()
-        self.comb += self.cd_por.clk.eq(clk27)
+        self.comb += self.cd_por.clk.eq(clk_sys)
         self.comb += por_done.eq(por_count == 0)
         self.sync.por += If(~por_done, por_count.eq(por_count - 1))
 
-        # PLL
-        self.pll = pll = GW2APLL(devicename=platform.devicename, device=platform.device)
-        self.comb += pll.reset.eq(~por_done)
-        pll.register_clkin(clk27, 27e6)
-
-        # 2:1 clock for DDR3: PLL → sys2x_i → DHCEN (gated) → sys2x → CLKDIV/2 → sys
-        pll.create_clkout(self.cd_sys2x_i, 2*sys_clk_freq)
+        # 2:1 clock for DDR3: clk_sys2x → DHCEN (gated) → sys2x → CLKDIV/2 → sys
+        self.comb += self.cd_sys2x_i.clk.eq(clk_sys2x)
         self.specials += [
             Instance("DHCEN",
                 i_CLKIN  = self.cd_sys2x_i.clk,
@@ -548,20 +513,13 @@ class _CRG_Gowin(LiteXModule):
                 o_CLKOUT   = self.cd_sys.clk),
         ]
 
-        # Init clock domain (raw 27 MHz, used by DDR3 init FSM)
-        self.comb += self.cd_init.clk.eq(clk27)
-        self.comb += self.cd_init.rst.eq(pll.reset)
+        # Init clock domain (raw sys clock, used by DDR3 init FSM)
+        self.comb += self.cd_init.clk.eq(clk_sys)
+        self.comb += self.cd_init.rst.eq(~por_done)
 
-        self.specials += AsyncResetSynchronizer(self.cd_sys, ~pll.locked | self.rst | self.reset)
+        self.specials += AsyncResetSynchronizer(self.cd_sys, ~por_done | self.rst | self.reset)
 
-        # MAC clock domains (directly fed from external FPGA Ethernet MAC).
-        # Used for the FPGA-side ports of dual-port RAMs in eth_buf.
-        self.cd_mac_rx = ClockDomain(reset_less=True)
-        self.cd_mac_tx = ClockDomain(reset_less=True)
-        self.comb += [
-            self.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
-            self.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
-        ]
+        _bind_mac_clocks(self, platform)
 
 
 # -- Custom CSRs -------------------------------------------------------------
@@ -770,7 +728,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         # -- Internal memories (true dual-port, independent clocks) --
         #
         # Each memory has two ports on different clock domains:
-        #   - "sys"    port: CPU side (Wishbone, 80 MHz SoC clock)
+        #   - "sys"    port: CPU side (Wishbone, sys_clk_freq SoC clock)
         #   - "mac_rx" port: RX buffer FPGA write port (MAC RX clock)
         #   - "mac_tx" port: TX buffer FPGA read port (MAC TX clock)
         #
@@ -945,7 +903,7 @@ class AES67SoC(SoCCore):
     })
 
     def __init__(self, platform, sys_clk_freq, target="cyclone10",
-                 with_hyperram=False, hyperram_clk_ratio="4:1",
+                 with_hyperram=False,
                  integrated_sram_size=4*1024, **kwargs):
 
         # Boot flow: CPU resets to SPI flash where a tiny boot stub copies
@@ -1019,7 +977,7 @@ class AES67SoC(SoCCore):
 
         # -- CRG and main RAM (target-specific) --------------------------------
         if target == "gowin":
-            # Gowin GW2A: GW2APLL (27 MHz) + DDR3
+            # Gowin GW2A: external clk_sys + clk_sys2x + DDR3
             self.crg = _CRG_Gowin(platform, sys_clk_freq)
 
             from litedram.phy import GW2DDRPHY
@@ -1039,7 +997,7 @@ class AES67SoC(SoCCore):
                 l2_cache_size = 8192,
             )
         elif target == "cyc1000":
-            # Trenz CYC1000: Cyclone10LPPLL (12 MHz in) + SDR SDRAM
+            # Trenz CYC1000: external clk_sys + clk_sys_ps + SDR SDRAM
             self.crg = _CRG_Cyc1000(platform, sys_clk_freq)
 
             from litedram.phy import GENSDRPHY
@@ -1053,15 +1011,14 @@ class AES67SoC(SoCCore):
                 l2_cache_size = 8192,
             )
         else:
-            # Cyclone 10LP: Cyclone10LPPLL (50 MHz) + HyperRAM
-            need_sys2x = with_hyperram and (hyperram_clk_ratio == "2:1")
-            self.crg = _CRG_Cyclone10(platform, sys_clk_freq, with_sys2x=need_sys2x)
+            # Cyclone 10LP: external clk_sys + HyperRAM (4:1 ratio).
+            self.crg = _CRG_Cyclone10(platform, sys_clk_freq)
 
             if with_hyperram:
                 self.hyperram = AES67HyperRAM(
                     pads         = platform.request("hyperram"),
                     sys_clk_freq = sys_clk_freq,
-                    clk_ratio    = hyperram_clk_ratio,
+                    clk_ratio    = "4:1",
                 )
                 self.bus.add_slave("main_ram", slave=self.hyperram.bus,
                     region=SoCRegion(origin=0x20000000, size=main_ram_size, mode="rwx"))
@@ -1233,7 +1190,10 @@ class AES67SoC(SoCCore):
 # -- Main ---------------------------------------------------------------------
 
 ALL_TARGETS = ["cyclone10", "cyc1000", "gowin"]
-DEFAULT_SYS_CLK_FREQ = {"cyclone10": 80e6, "cyc1000": 50e6, "gowin": 50e6}
+# Default sys clock frequency — must match what the top-level PLL feeds into clk_sys.
+# 75 MHz chosen because the Cyclone 10LP ALTPLL cannot cleanly divide common
+# crystal inputs to 80 MHz; 75 MHz gives clean ratios for all targets.
+DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6}
 
 
 def _build_target(target, args):
@@ -1263,7 +1223,6 @@ def _build_target(target, args):
             sys_clk_freq         = int(sys_clk_freq),
             target               = "cyclone10",
             with_hyperram        = args.with_hyperram,
-            hyperram_clk_ratio   = args.hyperram_clk_ratio,
             integrated_sram_size = args.sram_size * 1024,
         )
 
@@ -1275,7 +1234,7 @@ def _build_target(target, args):
         csr_csv          = os.path.join(output_dir, "csr.csv"),
         bios_console     = args.bios_console,
     )
-    builder.build(build_name="litex_soc", run=False)
+    builder.build(build_name="litex_soc_" + target, run=False)
 
     print(f"\nTarget:           {target}")
     print(f"HDL generated in: {output_dir}/gateware/")
@@ -1286,9 +1245,8 @@ def _build_target(target, args):
 def main():
     parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
     parser.add_argument("--target",             default=None, choices=ALL_TARGETS, help="Target FPGA platform (default: build all)")
-    parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 80 MHz (cyclone10), 50 MHz (cyc1000/gowin)")
+    parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 75 MHz for all targets (must match top-level PLL output).")
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
-    parser.add_argument("--hyperram-clk-ratio", default="4:1", choices=["4:1", "2:1"], help="HyperRAM clock ratio (cyclone10 only)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
     parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")

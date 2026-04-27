@@ -29,7 +29,7 @@ ENTITY aes67_top IS
 		enet_clk_i       :  IN  STD_LOGIC;
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
-		mac_resetn_i : IN STD_LOGIC;
+		mac_resetn_i : IN STD_LOGIC := '1';
 
 		
 
@@ -68,6 +68,7 @@ ENTITY aes67_top IS
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
+		wc_512fs_o : OUT STD_LOGIC;
 		pll_64fs_o : OUT STD_LOGIC;
 		pll_48k_fs_o : OUT STD_LOGIC;
 		pll_48k_fs_tdm_o : OUT STD_LOGIC;
@@ -201,7 +202,7 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
 	clk_512fs <= wc_mclk;
 end generate;
 
-
+wc_512fs_o <= clk_512fs;
 
 audioclocks_inst: entity work.audioclock_generator
 PORT MAP(mclk => clk_512fs,

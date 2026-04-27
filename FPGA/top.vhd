@@ -1,21 +1,22 @@
--- Cyclone 10 LP board top level
--- Instantiates aes67_top, litex_soc, litex_eth_buffer_bridge,
--- RGMII PHY interface, and board PLLs.
+
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
-ENTITY top_c10 IS
+ENTITY top IS
 	generic (
-		soctype : string := "spi"; -- spi or litex
-		USE_EXTERNAL_PLL : string := "false";
+		soctype : string := "spi"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
+		platform : string := "ALTERA";
+		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
+		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
+		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
         RXSTREAMS       : INTEGER := 8;
-        TXCHANNELS      : INTEGER := 8;
-        RXCHANNELS      : INTEGER := 8;
+        TXCHANNELS      : INTEGER := 16;
+        RXCHANNELS      : INTEGER := 16;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
@@ -23,62 +24,136 @@ ENTITY top_c10 IS
 	);
 	PORT
 	(
-		c10_resetn :  IN  STD_LOGIC;
-		c10_clk50m :  IN  STD_LOGIC;
-		enet_clk_125m :  IN  STD_LOGIC;
-		enet_rx_clk :  IN  STD_LOGIC;
-		enet_rx_dv :  IN  STD_LOGIC;
-		enet_resetn :  OUT  STD_LOGIC;
-		
-		enet_mdio :  INOUT  STD_LOGIC;
-		hbus_rwds :  INOUT  STD_LOGIC;
-		enet_rx_d :  IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
+		rst_n_i :  IN  STD_LOGIC;
+		clock_i :  IN  STD_LOGIC;
 
-		hbus_dq :  INOUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
-		enet_tx_clk :  OUT  STD_LOGIC;
-		enet_tx_en :  OUT  STD_LOGIC;
+		-- rgmii if (use when ethernet_type  = RGMII)
+		phy_rgmii_enet_clk_125m :  IN  STD_LOGIC := '0';
+		phy_rgmii_enet_rx_clk :  IN  STD_LOGIC  := '0';
+		phy_rgmii_enet_rx_dv :  IN  STD_LOGIC := '0';
+		phy_rgmii_enet_resetn :  OUT  STD_LOGIC := '0';
+		phy_rgmii_enet_rx_d :  IN  STD_LOGIC_VECTOR(3 DOWNTO 0)  := (others => '0');
+		phy_rgmii_enet_tx_clk :  OUT  STD_LOGIC  := '0';
+		phy_rgmii_enet_tx_en :  OUT  STD_LOGIC := '0';
+		phy_rgmii_enet_tx_d :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0) := (others => '0');
+
+		phy_rmii_ref_clk : IN  STD_LOGIC; -- pmod6
+		phy_rmii_crsdv   : IN  STD_LOGIC; -- pmod7
+		phy_rmii_rxer    : IN  STD_LOGIC; -- n/c
+		phy_rmii_rxd     : IN  STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 4,5
+		phy_rmii_txen    : OUT STD_LOGIC; -- pmod3
+		phy_rmii_txd     : OUT STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 1,0
+
+
 		enet_mdc :  OUT  STD_LOGIC;
-		hbus_rstn :  OUT  STD_LOGIC;
-		hbus_cs2n :  OUT  STD_LOGIC;
-		uart0_tx :  OUT  STD_LOGIC;
-		hbus_clk0_p :  OUT  STD_LOGIC;
-		hbus_clk0_n :  OUT  STD_LOGIC;
-		enet_tx_d :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
+		enet_mdio :  INOUT  STD_LOGIC;
+		
+		-- hyperram for litex hram target
+		hbus_rwds :  INOUT  STD_LOGIC := '0';
+		hbus_dq :  INOUT  STD_LOGIC_VECTOR(7 DOWNTO 0) := (others => '0') ;
+		hbus_rstn :  OUT  STD_LOGIC  := '0';
+		hbus_cs2n :  OUT  STD_LOGIC := '0';
+		hbus_clk0_p :  OUT  STD_LOGIC := '0';
+		hbus_clk0_n :  OUT  STD_LOGIC := '0';
+		
+		-- sdram for litex sdram target
+
+		sdram_a                             : OUT STD_LOGIC_VECTOR(13 DOWNTO 0) := (others => '0') ;
+		sdram_ba                            : OUT STD_LOGIC_VECTOR(1 DOWNTO 0) := (others => '0') ;
+		sdram_cas_n                         : OUT STD_LOGIC := '0';
+		sdram_cke                           : OUT STD_LOGIC := '0';
+		sdram_clock                         : OUT STD_LOGIC := '0';
+		sdram_cs_n                          : OUT STD_LOGIC := '0';
+		sdram_dm                            : OUT STD_LOGIC_VECTOR(1 DOWNTO 0) := ((others => '0') );
+		sdram_dq                            : INOUT STD_LOGIC_VECTOR(15 DOWNTO 0) := (others => '0');
+		sdram_ras_n                         : OUT STD_LOGIC := '0';
+		sdram_we_n                          : OUT STD_LOGIC := '0';
 
 
-		pll_256fs_rising : OUT STD_LOGIC;
-		uart0_rx :  IN  STD_LOGIC;
-		pll_512fs_i :  IN  STD_LOGIC; -- gpio 1
-		tdm8in_0_i :  IN  STD_LOGIC;
-		tdm8in_1_i :  IN  STD_LOGIC;
-		spiflash_miso :  IN  STD_LOGIC;
-		uart1_rx :  IN  STD_LOGIC;
-		i2c0_scl :  INOUT  STD_LOGIC;
-		i2c0_sda :  INOUT  STD_LOGIC;
-		i2c1_scl :  INOUT  STD_LOGIC;
-		i2c1_sda :  INOUT  STD_LOGIC;
-		lrclk1 :  OUT  STD_LOGIC;
-		lrclk0 :  OUT  STD_LOGIC;
-		pll_256fs_falling :  OUT  STD_LOGIC; -- gpio 12
+		-- litex console
+		uart0_tx :  OUT  STD_LOGIC  := '0';
+		uart0_rx :  IN  STD_LOGIC := '0';
+
+		-- litex uart interface for adda boards
+		uart1_rx :  IN  STD_LOGIC  := '0';
+		uart1_tx :  OUT  STD_LOGIC := '0';
+
+		-- litex i2c master
+		i2c0_scl :  INOUT  STD_LOGIC := '0';
+		i2c0_sda :  INOUT  STD_LOGIC := '0';
+		i2c1_scl :  INOUT  STD_LOGIC := '0';
+		i2c1_sda :  INOUT  STD_LOGIC := '0';
+
+
+		-- litex spi flash
+		spiflash_clk :  OUT  STD_LOGIC := '0';
+		spiflash_cs :  OUT  STD_LOGIC := '0';
+		spiflash_mosi :  OUT  STD_LOGIC := '0';
+		spiflash_miso :  IN  STD_LOGIC := '0';
+
+
+		-- audio clock in from external pll - only used when USE_EXTERNAL_PLL is true
+		pll_512fs_i :  IN  STD_LOGIC := '0'; -- gpio 1
+
+		-- audio clocks outputs
 		pll_512fs_o :  OUT  STD_LOGIC;
-		tdm8out_0_o :  OUT  STD_LOGIC;
-		tdm8out_1_o :  OUT  STD_LOGIC;
-		spiflash_clk :  OUT  STD_LOGIC;
-		spiflash_cs :  OUT  STD_LOGIC;
-		spiflash_mosi :  OUT  STD_LOGIC;
-		adda_nRST :  OUT  STD_LOGIC;
-		uart1_tx :  OUT  STD_LOGIC;
-		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
-		arduino_io0 : IN STD_LOGIC;
-		arduino_io1 : IN STD_LOGIC;
-		arduino_io2 : IN STD_LOGIC;
-		arduino_io3 : OUT STD_LOGIC;
-		arduino_io4 : OUT STD_LOGIC
-	);
-END top_c10;
+		pll_256fs_rising : OUT STD_LOGIC;
+		pll_256fs_falling :  OUT  STD_LOGIC; -- gpio 12
+		lrclk_o :  OUT  STD_LOGIC;
+		lrclk_tdm_o :  OUT  STD_LOGIC;
 
-ARCHITECTURE bdf_type OF top_c10 IS
-COMPONENT litex_soc
+		-- audio interface (TODO: MAKE THIS VECTORS!)
+		tdm8in_0_i :  IN  STD_LOGIC  := '0';
+		tdm8in_1_i :  IN  STD_LOGIC  := '0';
+		tdm8out_0_o :  OUT  STD_LOGIC  := '0';
+		tdm8out_1_o :  OUT  STD_LOGIC  := '0';
+
+		-- spictrl interface (only active if soc_type is spi)
+		spictrl_clk_i : IN STD_LOGIC  := '0';
+		spictrl_mosi_i : IN STD_LOGIC  := '0';
+		spictrl_cs_n_i : IN STD_LOGIC := '1';
+		spictrl_miso_o : OUT STD_LOGIC := '0';
+		spictrl_irq_n_o : OUT STD_LOGIC := '1';
+		
+		
+		
+		
+		
+		-- misc
+
+		adda_nRST :  OUT  STD_LOGIC;
+		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
+		
+	);
+END top;
+
+ARCHITECTURE bdf_type OF top IS
+
+COMPONENT rmii_phy_if
+	PORT (
+		rstn_async       : IN  STD_LOGIC;
+		mode_speed       : IN  STD_LOGIC;
+		mac_mii_crs      : OUT STD_LOGIC;
+		mac_mii_rxrst    : OUT STD_LOGIC;
+		mac_mii_rxc      : OUT STD_LOGIC;
+		mac_mii_rxdv     : OUT STD_LOGIC;
+		mac_mii_rxer     : OUT STD_LOGIC;
+		mac_mii_rxd      : OUT STD_LOGIC_VECTOR(3 DOWNTO 0);
+		mac_mii_txrst    : OUT STD_LOGIC;
+		mac_mii_txc      : OUT STD_LOGIC;
+		mac_mii_txen     : IN  STD_LOGIC;
+		mac_mii_txer     : IN  STD_LOGIC;
+		mac_mii_txd      : IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
+		phy_rmii_ref_clk : IN  STD_LOGIC;
+		phy_rmii_crsdv   : IN  STD_LOGIC;
+		phy_rmii_rxer    : IN  STD_LOGIC;
+		phy_rmii_rxd     : IN  STD_LOGIC_VECTOR(1 DOWNTO 0);
+		phy_rmii_txen    : OUT STD_LOGIC;
+		phy_rmii_txd     : OUT STD_LOGIC_VECTOR(1 DOWNTO 0)
+	);
+END COMPONENT;
+
+COMPONENT litex_soc_cyclone10
 	PORT(aes67_ctrl_eth_link_up : IN STD_LOGIC;
 		 aes67_ctrl_eth_rx_overflow : IN STD_LOGIC;
 		 aes67_ctrl_eth_tx_done : IN STD_LOGIC;
@@ -87,7 +162,7 @@ COMPONENT litex_soc
 		 aes67_ctrl_wallclock_configured : IN STD_LOGIC;
 		 aes67_ctrl_wallclock_locked : IN STD_LOGIC;
 		 aes67_ctrl_wallclock_phasejump : IN STD_LOGIC;
-		 clk50 : IN STD_LOGIC;
+		 clk_sys : IN STD_LOGIC;
 		 clk_mac_rx : IN STD_LOGIC;
 		 clk_mac_tx : IN STD_LOGIC;
 		 eth_buf_rx_valid : IN STD_LOGIC;
@@ -154,6 +229,96 @@ COMPONENT litex_soc
 		 tx_stream_cfg_wr_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 	);
 END COMPONENT;
+
+
+
+
+COMPONENT litex_soc_cyc1000
+	PORT
+	(
+		aes67_ctrl_adda_nrst		:	 OUT STD_LOGIC;
+		aes67_ctrl_eth_link_up		:	 IN STD_LOGIC;
+		aes67_ctrl_eth_rx_overflow		:	 IN STD_LOGIC;
+		aes67_ctrl_eth_speed		:	 IN STD_LOGIC_VECTOR(1 DOWNTO 0);
+		aes67_ctrl_eth_tx_done		:	 IN STD_LOGIC;
+		aes67_ctrl_eth_tx_request		:	 OUT STD_LOGIC;
+		aes67_ctrl_ip_addr		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_mac_addr		:	 OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
+		aes67_ctrl_meter_clear		:	 OUT STD_LOGIC;
+		aes67_ctrl_pll_ppb_pll_count		:	 IN STD_LOGIC_VECTOR(24 DOWNTO 0);
+		aes67_ctrl_pll_ppb_start		:	 OUT STD_LOGIC;
+		aes67_ctrl_pll_ppb_valid		:	 IN STD_LOGIC;
+		aes67_ctrl_pll_ppb_wc_count		:	 IN STD_LOGIC_VECTOR(24 DOWNTO 0);
+		aes67_ctrl_ptp_announce_msg_interval		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_gm_clock_accuracy		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_gm_clock_class		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_gm_priority1		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_gm_priority2		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_is_follower		:	 IN STD_LOGIC;
+		aes67_ctrl_ptp_is_leader		:	 IN STD_LOGIC;
+		aes67_ctrl_ptp_leader_id		:	 IN STD_LOGIC_VECTOR(63 DOWNTO 0);
+		aes67_ctrl_ptp_log_msg_interval		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_ptp_offset		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_ptp_path_delay		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_ptp_sync_lost		:	 IN STD_LOGIC;
+		aes67_ctrl_ptp_time_source		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_rx_meter_clip		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_rx_meter_signal		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_tx_meter_clip		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_tx_meter_signal		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_wallclock_configured		:	 IN STD_LOGIC;
+		aes67_ctrl_wallclock_locked		:	 IN STD_LOGIC;
+		aes67_ctrl_wallclock_phasejump		:	 IN STD_LOGIC;
+		clk_mac_rx		:	 IN STD_LOGIC;
+		clk_mac_tx		:	 IN STD_LOGIC;
+		clk_sys		:	 IN STD_LOGIC;
+		clk_sys_ps		:	 IN STD_LOGIC;
+		eth_buf_rx_ack		:	 OUT STD_LOGIC;
+		eth_buf_rx_addr		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		eth_buf_rx_data		:	 IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		eth_buf_rx_len		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		eth_buf_rx_valid		:	 IN STD_LOGIC;
+		eth_buf_rx_we		:	 IN STD_LOGIC;
+		eth_buf_tx_addr		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
+		eth_buf_tx_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		eth_buf_tx_len		:	 OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
+		i2c0_scl		:	 INOUT STD_LOGIC;
+		i2c0_sda		:	 INOUT STD_LOGIC;
+		i2c1_scl		:	 INOUT STD_LOGIC;
+		i2c1_sda		:	 INOUT STD_LOGIC;
+		rx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		rx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		rx_stream_cfg_wr_en		:	 OUT STD_LOGIC;
+		sdram_a		:	 OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
+		sdram_ba		:	 OUT STD_LOGIC_VECTOR(1 DOWNTO 0);
+		sdram_cas_n		:	 OUT STD_LOGIC;
+		sdram_cke		:	 OUT STD_LOGIC;
+		sdram_clock		:	 OUT STD_LOGIC;
+		sdram_cs_n		:	 OUT STD_LOGIC;
+		sdram_dm		:	 OUT STD_LOGIC_VECTOR(1 DOWNTO 0);
+		sdram_dq		:	 INOUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+		sdram_ras_n		:	 OUT STD_LOGIC;
+		sdram_we_n		:	 OUT STD_LOGIC;
+		serial1_rx		:	 IN STD_LOGIC;
+		serial1_tx		:	 OUT STD_LOGIC;
+		serial_rx		:	 IN STD_LOGIC;
+		serial_tx		:	 OUT STD_LOGIC;
+		spi_clk		:	 OUT STD_LOGIC;
+		spi_cs_n		:	 OUT STD_LOGIC;
+		spi_miso		:	 IN STD_LOGIC;
+		spi_mosi		:	 OUT STD_LOGIC;
+		spiflash_clk		:	 OUT STD_LOGIC;
+		spiflash_cs_n		:	 OUT STD_LOGIC;
+		spiflash_miso		:	 IN STD_LOGIC;
+		spiflash_mosi		:	 OUT STD_LOGIC;
+		sys_clk_out		:	 OUT STD_LOGIC;
+		tx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		tx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		tx_stream_cfg_wr_en		:	 OUT STD_LOGIC
+	);
+END COMPONENT;
+
+
 COMPONENT rgmii_phy_if
 GENERIC (CLOCK_INPUT_STYLE : STRING;
 			IODDR_STYLE : STRING;
@@ -185,7 +350,6 @@ GENERIC (CLOCK_INPUT_STYLE : STRING;
 END COMPONENT;
 
 -- board clocks
-signal clk50m        : STD_LOGIC;
 signal clk_125MHz    : STD_LOGIC;
 signal enet_clk      : STD_LOGIC;
 signal enet_clk_90   : STD_LOGIC;
@@ -280,19 +444,29 @@ signal rx_conf_wr_addr : STD_LOGIC_VECTOR(7 downto 0);
 signal pll_64fs        : STD_LOGIC;
 signal pll_48k_fs      : STD_LOGIC;
 signal pll_48k_fs_tdm  : STD_LOGIC;
+signal wc_512fs			: STD_LOGIC;
 
 -- litex_soc misc
+signal mcu_clk80m	 : STD_LOGIC;
+signal mcu_clk80m_ps	 : STD_LOGIC;
+signal mcu_clk2x	 : STD_LOGIC;
 signal mcu_clk       : STD_LOGIC;
 signal hram_clk      : STD_LOGIC;
 
 signal tdm8in : STD_LOGIC_VECTOR(3 downto 0);
 signal tdm8out : STD_LOGIC_VECTOR(3 downto 0);
 
+signal sys_clk_locked : std_logic := '0';
+signal rst_n : STD_LOGIC := '0';
+
+
+signal mii_txd : STD_LOGIC_VECTOR(3 downto 0);
+
 BEGIN
 
-clk50m <= c10_clk50m;
-enet_resetn <= c10_resetn;
-reset_p <= not c10_resetn;
+
+
+reset_p <= not rst_n;
 
 aes67_top_inst: entity work.aes67_top
 generic map(
@@ -311,8 +485,8 @@ generic map(
 	sys_clk_125MHz_i       => clk_125MHz,
 	enet_clk_i             => enet_clk,
 	clk_mcu_i              => mcu_clk,
-	rst_n                  => c10_resetn,
-	mac_resetn_i            => c10_resetn,
+	rst_n                  => rst_n,
+	mac_resetn_i            => rst_n,
 
 	-- GMII from RGMII converter
 	mii_rx_clock_i         => gmii_rx_clk,
@@ -347,6 +521,7 @@ generic map(
 
 	-- audio clocks
 	pll_512fs_i            => pll_512fs_i,
+	wc_512fs_o => wc_512fs,
 	pll_64fs_o             => pll_64fs,
 	pll_48k_fs_o           => pll_48k_fs,
 	pll_48k_fs_tdm_o       => pll_48k_fs_tdm,
@@ -401,18 +576,23 @@ generic map(
 	tdm8in_i                  => tdm8in
 );
 
-socgen: if (soctype = "litex") generate
+
+socgen: if (soctype /= "spi") generate
+
+
+	mcu_clk  	  <= mcu_clk80m;
+c10sochram: if (soctype = "litex_c10_hram") generate
 
 	hbus_clk0_p   <= hram_clk;
 	hbus_clk0_n   <= NOT hram_clk;
 
-litex_soc_inst: litex_soc
+	litex_soc_inst: litex_soc_cyclone10
 PORT MAP(
 	-- clocks
-	clk50                              => clk50m,
+	clk_sys                              => mcu_clk,
 	clk_mac_rx                         => mac_rx_clock,
 	clk_mac_tx                         => mac_tx_clock,
-	sys_clk_out                        => mcu_clk,
+	
 
 	-- aes67 control/status
 	aes67_ctrl_eth_link_up             => mac_linkup,
@@ -497,6 +677,111 @@ PORT MAP(
 	i2c1_scl                           => i2c1_scl, -- gpio23
 	i2c1_sda                           => i2c1_sda -- gpio24
 );
+end generate;
+
+c10socsdram: if (soctype = "litex_c10_sdram") generate
+
+	hbus_clk0_p   <= hram_clk;
+	hbus_clk0_n   <= NOT hram_clk;
+
+	litex_soc_inst: litex_soc_cyc1000
+PORT MAP(
+	-- clocks
+	clk_sys                              => mcu_clk,
+	clk_sys_ps 							=> mcu_clk80m_ps,
+	clk_mac_rx                         => mac_rx_clock,
+	clk_mac_tx                         => mac_tx_clock,
+	
+
+	-- aes67 control/status
+	aes67_ctrl_eth_link_up             => mac_linkup,
+	aes67_ctrl_eth_rx_overflow         => mcu_rx_overflow,
+	aes67_ctrl_eth_tx_done             => mcu_tx_done,
+	aes67_ctrl_eth_speed               => mac_speed,
+	aes67_ctrl_eth_tx_request          => mcu_tx_req_i,
+
+	aes67_ctrl_pll_ppb_valid           => pll_meas_valid,
+	aes67_ctrl_pll_ppb_pll_count       => std_logic_vector(pll_counter),
+	aes67_ctrl_pll_ppb_wc_count        => std_logic_vector(wc_counter),
+	aes67_ctrl_pll_ppb_start           => ppb_meter_start,
+
+	aes67_ctrl_ptp_sync_lost           => ptp_sync_lost,
+	aes67_ctrl_ptp_offset              => ptp_offset_from_master,
+	aes67_ctrl_ptp_path_delay          => ptp_mean_path_delay,
+	aes67_ctrl_wallclock_configured    => wallclock_configured,
+	aes67_ctrl_wallclock_locked        => wallclock_locked,
+	aes67_ctrl_wallclock_phasejump     => wallclock_phasejump,
+
+	aes67_ctrl_rx_meter_clip           => audio_meter_rx_clip,
+	aes67_ctrl_rx_meter_signal         => audio_meter_rx_signal,
+	aes67_ctrl_tx_meter_clip           => audio_meter_tx_clip,
+	aes67_ctrl_tx_meter_signal         => audio_meter_tx_signal,
+	aes67_ctrl_meter_clear             => audio_meter_clear,
+
+	aes67_ctrl_adda_nrst               => adda_nRST,
+	aes67_ctrl_ptp_is_follower         => ptp_is_follower,
+	aes67_ctrl_ptp_is_leader           => ptp_is_leader,
+
+	aes67_ctrl_ip_addr                 => ip_address,
+	aes67_ctrl_mac_addr                => mac_address,
+	aes67_ctrl_ptp_announce_msg_interval => ptp_announce_interval,
+	aes67_ctrl_ptp_gm_clock_accuracy   => ptp_clock_accuracy,
+	aes67_ctrl_ptp_gm_clock_class      => ptp_clock_class,
+	aes67_ctrl_ptp_gm_priority1        => ptp_gm_prioone,
+	aes67_ctrl_ptp_gm_priority2        => ptp_gm_priotwo,
+	aes67_ctrl_ptp_leader_id           => ptp_current_leader_id,
+	aes67_ctrl_ptp_log_msg_interval    => ptp_log_message_interval,
+	aes67_ctrl_ptp_time_source         => ptp_time_source,
+
+	-- ethernet buffer interface
+	eth_buf_rx_valid                   => buf_rx_valid,
+	eth_buf_rx_we                      => buf_rx_we,
+	eth_buf_rx_addr                    => std_logic_vector(buf_rx_addr),
+	eth_buf_rx_data                    => std_logic_vector(buf_rx_data),
+	eth_buf_rx_len                     => std_logic_vector(buf_rx_len),
+	eth_buf_rx_ack                     => buf_rx_ack,
+	eth_buf_tx_addr                    => std_logic_vector(buf_tx_addr),
+	eth_buf_tx_data                    => soc_tx_dat,
+	eth_buf_tx_len                     => soc_tx_len,
+
+	-- stream configuration
+	rx_stream_cfg_wr_en                => rx_conf_wr_en,
+	rx_stream_cfg_wr_addr              => rx_conf_wr_addr,
+	rx_stream_cfg_wr_data              => rx_conf_wr_data,
+	tx_stream_cfg_wr_en                => tx_wr_en,
+	tx_stream_cfg_wr_addr              => tx_wr_addr,
+	tx_stream_cfg_wr_data              => tx_wr_data,
+
+	-- peripherals
+	serial_rx                          => uart0_rx,
+	serial_tx                          => uart0_tx,
+	serial1_rx                         => uart1_rx,
+	serial1_tx                         => uart1_tx,
+	spi_miso                           => '0',
+	spiflash_miso                      => spiflash_miso,
+	spiflash_clk                       => spiflash_clk,
+	spiflash_cs_n                      => spiflash_cs,
+	spiflash_mosi                      => spiflash_mosi,
+
+	-- sdram
+	sdram_a                            => sdram_a,
+	sdram_ba                           => sdram_ba,
+	sdram_cas_n                        => sdram_cas_n,
+	sdram_cke                          => sdram_cke,
+	sdram_clock                        => sdram_clock,
+	sdram_cs_n                         => sdram_cs_n,
+	sdram_dm                           => sdram_dm,
+	sdram_dq                           => sdram_dq,
+	sdram_ras_n                        => sdram_ras_n,
+	sdram_we_n                         => sdram_we_n,
+
+	-- I2C
+	i2c0_scl                           => i2c0_scl, -- gpio26
+	i2c0_sda                           => i2c0_sda, -- gpio27
+	i2c1_scl                           => i2c1_scl, -- gpio23
+	i2c1_sda                           => i2c1_sda -- gpio24
+);
+end generate;
 
 
 litex_eth_inst: entity work.litex_eth_buffer_bridge
@@ -568,11 +853,11 @@ spigen: if (soctype = "spi") generate
 	)
 	 port map(
 		sys_clk_i => clk_125MHz,
-		rst_n_i => c10_resetn,
-		spi_clk_i => arduino_io0,
-		spi_cs_n_i => arduino_io1,
-		spi_do_o => arduino_io3,
-		spi_di_i => arduino_io2,
+		rst_n_i => rst_n,
+		spi_clk_i => spictrl_clk_i,
+		spi_cs_n_i => spictrl_cs_n_i,
+		spi_do_o => spictrl_miso_o,
+		spi_di_i => spictrl_mosi_i,
 
 		-- status inputs
 		ptp_path_delay_i => unsigned(ptp_mean_path_delay),
@@ -630,15 +915,20 @@ spigen: if (soctype = "spi") generate
 		rx_channel_meter_clip_i => audio_meter_rx_clip,
 		rx_channel_meter_sig_i => audio_meter_rx_signal,
 
-		mcu_irq_o => arduino_io4
+		mcu_irq_o => spictrl_irq_n_o
 	);
 end generate;
+
+rgmiigen: if (ethernet_type = "RGMII") generate
+
+
+phy_rgmii_enet_resetn <= rst_n;
 
 rgmii_if_inst: rgmii_phy_if
 GENERIC MAP(
 	CLOCK_INPUT_STYLE => "BUFG",
 	IODDR_STYLE       => "IODDR2",
-	TARGET             => "ALTERA",
+	TARGET             => platform,
 	USE_CLK90          => "TRUE"
 )
 PORT MAP(
@@ -647,36 +937,89 @@ PORT MAP(
 	rst                => reset_p,
 	mac_gmii_tx_en     => gmii_tx_en,
 	mac_gmii_tx_er     => gmii_tx_err,
-	phy_rgmii_rx_clk   => enet_rx_clk,
-	phy_rgmii_rx_ctl   => enet_rx_dv,
+	phy_rgmii_rx_clk   => phy_rgmii_enet_rx_clk,
+	phy_rgmii_rx_ctl   => phy_rgmii_enet_rx_dv,
 	mac_gmii_txd        => gmii_txd,
-	phy_rgmii_rxd       => enet_rx_d,
+	phy_rgmii_rxd       => phy_rgmii_enet_rx_d,
 	speed               => mac_speed,
 	mac_gmii_rx_clk     => gmii_rx_clk,
 	mac_gmii_rx_dv      => gmii_rx_dv,
 	mac_gmii_rx_er      => gmii_rx_err,
 	mac_gmii_tx_clk     => gmii_tx_clk,
-	phy_rgmii_tx_clk    => enet_tx_clk,
-	phy_rgmii_tx_ctl    => enet_tx_en,
+	phy_rgmii_tx_clk    => phy_rgmii_enet_tx_clk,
+	phy_rgmii_tx_ctl    => phy_rgmii_enet_tx_en,
 	mac_gmii_rxd         => gmii_rxd,
-	phy_rgmii_txd        => enet_tx_d
+	phy_rgmii_txd        => phy_rgmii_enet_tx_d
 );
 
 
 rgmiiclks_inst: entity work.ethernet_clks
 PORT MAP(
-	inclk0 => enet_clk_125m,
+	inclk0 => phy_rgmii_enet_clk_125m,
 	c0     => enet_clk,
 	c1     => enet_clk_90
 );
+end generate;
 
 
-sysclocks_inst: entity work.pll_systemclocks
-PORT MAP(
-	inclk0 => clk50m,
-	c0     => clk_125MHz
+rmiigen: if (ethernet_type = "RMII") generate
+
+	
+
+-- MII TX: MAC outputs 8 bits (GMII), only lower 4 bits are used for MII
+gmii_txd <= x"0" & mii_txd(3 downto 0);
+
+
+rmii_phy_if_inst: rmii_phy_if
+ port map(
+	mode_speed => '1',
+	rstn_async => rst_n,
+	mac_mii_rxc => gmii_rx_clk,
+	mac_mii_rxdv => gmii_rx_dv,
+	mac_mii_rxer => gmii_rx_err,
+	mac_mii_rxd => gmii_rxd(3 downto 0),
+	mac_mii_txc => gmii_tx_clk,
+	mac_mii_txen => gmii_tx_en,
+	mac_mii_txer => gmii_tx_err,
+	mac_mii_txd => mii_txd,
+	phy_rmii_ref_clk => phy_rmii_ref_clk,
+	phy_rmii_crsdv => phy_rmii_crsdv,
+	phy_rmii_rxer => phy_rmii_rxer,
+	phy_rmii_rxd => phy_rmii_rxd,
+	phy_rmii_txen => phy_rmii_txen,
+	phy_rmii_txd => phy_rmii_txd
 );
 
+
+
+end generate;
+
+
+-- system clocks
+sysclkgen50: if (platform = "ALTERA" and clk_in_speed = 50) generate
+sysclks_altpll_50m_in_inst : entity work.sysclks_altpll_50m_in PORT MAP (
+		areset	 => not rst_n_i,
+		inclk0	 => clock_i,
+		c0	 => clk_125MHz,
+		c1 	 => mcu_clk80m,
+		c2 	 => mcu_clk80m_ps,
+		locked	 => sys_clk_locked
+	);
+
+	rst_n <= rst_n_i and sys_clk_locked;
+end generate;
+sysclkgen12: if (platform = "ALTERA" and clk_in_speed = 12) generate
+sysclks_altpll_50m_in_inst : entity work.sysclks_altpll_12m_in PORT MAP (
+		areset	 => not rst_n_i,
+		inclk0	 => clock_i,
+		c0	 => clk_125MHz,
+		c1 	 => mcu_clk80m,
+		c2 	 => mcu_clk80m_ps,
+		locked	 => sys_clk_locked
+	);
+
+	rst_n <= rst_n_i and sys_clk_locked;
+end generate;
 
 -- GPIO / pin assignments
 
@@ -688,10 +1031,15 @@ tdm8in(0) <= tdm8in_0_i;
 tdm8in(1) <= tdm8in_1_i;
 
 
-lrclk1        <= pll_48k_fs_tdm; -- gpio13
-lrclk0        <= pll_48k_fs_tdm; -- gpio11
-pll_512fs_o        <= pll_512fs_i;-- gpio 11 <= gpio 1 pll_512fs passthrough
+lrclk_tdm_o        <= pll_48k_fs_tdm; -- gpio13
+lrclk_o        <= pll_48k_fs; -- gpio11
 
+pll_switch: if (USE_EXTERNAL_PLL = "true") generate
+pll_512fs_o        <= pll_512fs_i;-- gpio 11 <= gpio 1 pll_512fs passthrough
+end generate;
+wc_switch: if (USE_EXTERNAL_PLL /= "true") generate
+pll_512fs_o        <= wc_512fs; -- output nco generated mclk
+end generate;
 -- LEDs
 user_led(0)   <= wallclock_locked;
 user_led(1)   <= ptp_is_leader;

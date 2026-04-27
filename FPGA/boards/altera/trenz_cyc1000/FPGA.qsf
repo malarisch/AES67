@@ -46,72 +46,6 @@ set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 set_global_assignment -name SMART_RECOMPILE ON
 set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
-set_global_assignment -name VHDL_FILE ../../../ethernet_top.vhd
-set_global_assignment -name VHDL_FILE ../../../aes67_top.vhd
-set_global_assignment -name VHDL_FILE ../../../wallclock.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/audio_tx_module.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptp_module.vhd
-set_global_assignment -name VHDL_FILE ../../../audioclock_generator.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/tdm8_in.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_rx/tdm8_out.vhd
-set_global_assignment -name VHDL_FILE ../../../litex_eth_buffer_bridge.vhd
-set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/VexRiscv.v
-set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_sram.init
-set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_rom.init
-set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_mem.init
-set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc.v
-set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/rgmii_phy_if.v"
-set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/ssio_ddr_in.v"
-set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/oddr.v"
-set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/iddr.v"
-set_global_assignment -name VERILOG_FILE ../../../mii_rmii/RTL/rmii_phy_if.v
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser_no_min_filter.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_sender.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_servo.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_controller.vhd
-set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_bmc.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_rx/i2s_out.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_rx/rx_ringbuffer.vhd
-set_global_assignment -name VHDL_FILE ../../../eth_tx_arbiter.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/const_ch_output_debug.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_router.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_sample_buffer.vhd
-set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_transmitter.vhd
-set_global_assignment -name VHDL_FILE ../../../clock_ppb_meter.vhd
-set_global_assignment -name VHDL_FILE ../../../ethernet_timestamp.vhd
-set_global_assignment -name VHDL_FILE ../../../ethernet_packet_aggregator.vhd
-set_global_assignment -name BSF_FILE pll_systemclocks.bsf
-set_global_assignment -name VHDL_FILE ../../../I2S_IN.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/eth_ram.vhd
-set_global_assignment -name VHDL_FILE ../../../clk_by_x.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_speed.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/utility.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/single_signal_synchronizer.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/mii_gmii_io.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32_tb.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_control.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_receive.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_reset.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/detect_rising_edge.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_config.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/reverse_mac.vhd
-set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd
-set_global_assignment -name SDC_FILE c10evalkit.sdc
-set_global_assignment -name QIP_FILE pll_systemclocks.qip
-set_global_assignment -name QIP_FILE ethernet_clks.qip
 
 # Pin & Location Assignments
 # ==========================
@@ -192,7 +126,7 @@ set_location_assignment PIN_R13 -to i2c0_sda
 set_location_assignment PIN_T14 -to pll_512fs_o
 set_location_assignment PIN_P14 -to pll_256fs_falling
 set_location_assignment PIN_R14 -to pll_64fs_o
-set_location_assignment PIN_T15 -to lrclk0
+set_location_assignment PIN_T15 -to lrclk_tdm_o
 set_location_assignment PIN_R11 -to enet_mdc
 
 set_location_assignment PIN_N16 -to tdm8in_0_i
@@ -202,8 +136,8 @@ set_location_assignment PIN_K15 -to tdm8out_1_o
 set_location_assignment PIN_K16 -to D4
 set_location_assignment PIN_J14 -to D5
 set_location_assignment PIN_N2 -to i2c1_scl
-set_location_assignment PIN_N1 -to i2c1_sda 
-set_location_assignment PIN_P2 -to uart1_rx 
+set_location_assignment PIN_N1 -to i2c1_sda
+set_location_assignment PIN_P2 -to uart1_rx
 set_location_assignment PIN_J1 -to uart1_tx
 set_location_assignment PIN_J2 -to adda_nRST
 set_location_assignment PIN_K2 -to spiflash_cs
@@ -356,39 +290,10 @@ set_global_assignment -name OUTPUT_IO_TIMING_NEAR_END_VMEAS "HALF VCCIO" -fall
 set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -rise
 set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -fall
 
-set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/boards/altera/trenz_cyc1000/top_cyc1000.vhd
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_p
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_clk0_n
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[0]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[1]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[2]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[3]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[4]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[5]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[6]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_dq[7]
-set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to hbus_rwds
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[0]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[1]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[2]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[3]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[4]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[5]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[6]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_dq[7]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to hbus_rwds
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[0]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[1]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[2]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[3]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[4]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[5]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[6]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_dq[7]
-set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to hbus_rwds
+
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to PHY_MDIO
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[0]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to c10_clk50m
@@ -426,22 +331,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[3]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[4]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io4
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io3
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_intn
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rston
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[0]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[1]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[2]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[3]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[4]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[5]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[6]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_dq[7]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_cs2n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_cs1n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rstn
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_rwds
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_p
-set_instance_assignment -name IO_STANDARD "1.8 V" -to hbus_clk0_n
+
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio20
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio21
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio22
@@ -491,12 +381,84 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
-set_global_assignment -name SIGNALTAP_FILE output_files/stp1.stp
 set_global_assignment -name AUTO_RAM_TO_LCELL_CONVERSION ON
 set_global_assignment -name AUTO_RESOURCE_SHARING ON
 set_global_assignment -name DISABLE_REGISTER_MERGING_ACROSS_HIERARCHIES OFF
 set_global_assignment -name QII_AUTO_PACKED_REGISTERS "SPARSE AUTO"
 set_global_assignment -name PHYSICAL_SYNTHESIS_MAP_LOGIC_TO_MEMORY_FOR_AREA ON
 set_global_assignment -name ALM_REGISTER_PACKING_EFFORT HIGH
-set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_cyc1000.v
+set_global_assignment -name VHDL_FILE ../../../ethernet_top.vhd
+set_global_assignment -name VHDL_FILE ../../../aes67_top.vhd
+set_global_assignment -name VHDL_FILE ../../../wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/audio_tx_module.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptp_module.vhd
+set_global_assignment -name VHDL_FILE ../../../audioclock_generator.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tdm8_in.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/tdm8_out.vhd
+set_global_assignment -name VHDL_FILE ../../../litex_eth_buffer_bridge.vhd
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/VexRiscv.v
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_sram.init
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_rom.init
+set_global_assignment -name SOURCE_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_mem.init
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/rgmii_phy_if.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/ssio_ddr_in.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/oddr.v"
+set_global_assignment -name VERILOG_FILE "../../../../verilog-ethernet-mod/rtl/iddr.v"
+set_global_assignment -name VERILOG_FILE ../../../mii_rmii/RTL/rmii_phy_if.v
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser_no_min_filter.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_sender.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_parser.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_servo.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_controller.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_bmc.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/i2s_out.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_rx/rx_ringbuffer.vhd
+set_global_assignment -name VHDL_FILE ../../../eth_tx_arbiter.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/const_ch_output_debug.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_router.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_sample_buffer.vhd
+set_global_assignment -name VHDL_FILE ../../../audio_tx/tx_transmitter.vhd
+set_global_assignment -name VHDL_FILE ../../../clock_ppb_meter.vhd
+set_global_assignment -name VHDL_FILE ../../../ethernet_timestamp.vhd
+set_global_assignment -name VHDL_FILE ../../../ethernet_packet_aggregator.vhd
+set_global_assignment -name BSF_FILE pll_systemclocks.bsf
+set_global_assignment -name VHDL_FILE ../../../I2S_IN.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/eth_ram.vhd
+set_global_assignment -name VHDL_FILE ../../../clk_by_x.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_speed.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/utility.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/single_signal_synchronizer.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/intel/mii_gmii_io.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/reset_generator.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_types.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_registers.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim_control.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/miim.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/mii_gmii.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing_common.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/framing.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet_types.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/ethernet.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32_tb.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc32.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_mac/crc.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_control.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_receive.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_reset.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/detect_rising_edge.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/const_eth_config.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/reverse_mac.vhd
+set_global_assignment -name VHDL_FILE ../../../FPGA_Ethernet/FPGA/ethernet_packet_parser.vhd
+set_global_assignment -name SDC_FILE c10evalkit.sdc
+set_global_assignment -name QIP_FILE pll_systemclocks.qip
+set_global_assignment -name QIP_FILE ethernet_clks.qip
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/boards/altera/trenz_cyc1000/top_cyc1000.vhd
+set_global_assignment -name SIGNALTAP_FILE output_files/stp1.stp
+set_global_assignment -name QIP_FILE sysclks_altpll_12m_in.qip
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/top.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/spictrl.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/spi_slave.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/boards/altera/c10_evalkit/sysclks_altpll_50m_in.vhd
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
+set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

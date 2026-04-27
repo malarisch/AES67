@@ -26,11 +26,13 @@ set_time_format -unit ns -decimal_places 3
 #**************************************************************
 
 # Primary 50 MHz oscillator input to PLLs
-create_clock -name {c10_clk50m} -period 20.000 -waveform { 0.000 10.000 } [get_ports {c10_clk50m}]
+create_clock -name {clock_i} -period 20.000 -waveform { 0.000 10.000 } [get_ports {clock_i}]
 
 
 # RGMII 125 MHz reference clock from PHY
-create_clock -name {enet_clk_125m} -period 8.000 -waveform { 0.000 4.000 } [get_ports {enet_clk_125m}]
+create_clock -name {enet_clk_125m} -period 8.000 -waveform { 0.000 4.000 } [get_ports {phy_rgmii_enet_clk_125m}]
+# create_clock -name {enet_rxclk_125m} -period 8.000 -waveform { 0.000 4.000 } [get_ports {phy_rgmii_enet_rx_clk}]
+
 
 
 #**************************************************************
@@ -39,34 +41,17 @@ create_clock -name {enet_clk_125m} -period 8.000 -waveform { 0.000 4.000 } [get_
 
 # PLL sysclocks_inst output clk[0]: 125 MHz system clock (50 * 5 / 2)
 create_generated_clock -name {sys_clk_125m} \
-    -source [get_pins {sysclocks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
+    -source [get_pins {*\sysclkgen:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
     -duty_cycle 50.00 -multiply_by 5 -divide_by 2 \
-    -master_clock {c10_clk50m} \
-    [get_pins {sysclocks_inst|altpll_component|auto_generated|pll1|clk[0]}]
+    -master_clock {clock_i} \
+    [get_pins {*\sysclkgen:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}]
 
 # LiteX SoC PLL (litex_soc_inst) output: 80 MHz sys_clk (50 * 8 / 5)
 create_generated_clock -name {litex_sys_clk} \
-    -source [get_pins {litex_soc_inst|ALTPLL|auto_generated|pll1|inclk[0]}] \
-    -multiply_by 8 -divide_by 5 \
-    -master_clock {c10_clk50m} \
-    [get_pins {litex_soc_inst|ALTPLL|auto_generated|pll1|clk[0]}]
-
-# RGMII TX PLL (rgmiiclks_inst) output clk[0]: 125 MHz TX internal clock
-create_generated_clock -name {rgmii_rx_pll} \
-    -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
-    -duty_cycle 50.00 -multiply_by 1 -divide_by 1 \
-    -master_clock {enet_clk_125m} \
-    [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}]
-
-# RGMII TX PLL (rgmiiclks_inst) output clk[1]: 125 MHz with 90° phase shift (for DDR TX timing)
-create_generated_clock -name {rgmii_tx_pll} \
-    -source [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
-    -duty_cycle 50.00 -multiply_by 1 -divide_by 1 \
-    -phase 90.0 \
-    -master_clock {enet_clk_125m} \
-    [get_pins {rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1]}]
-
-
+    -source [get_pins {*litex_soc_inst|ALTPLL|auto_generated|pll1|inclk[0]}] \
+    -multiply_by 3 -divide_by 2 \
+    -master_clock {clock_i} \
+    [get_pins {*litex_soc_inst|ALTPLL|auto_generated|pll1|clk[0]}]
 
 
 source ../../../sdc/audioclocks.sdc
@@ -87,11 +72,11 @@ source ../../../sdc/audioclocks.sdc
 # so they are treated as asynchronous.
 
 set_clock_groups -asynchronous \
-    -group [get_clocks {c10_clk50m sys_clk_125m}] \
+    -group [get_clocks {clock_i sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmii_rx_pll rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[1] mac_tx_clock}] \
-    -group [get_clocks {enet_rx_clk_125m}]
+    -group [get_clocks {enet_clk_125m rgmii_tx_pll}] \
+    -group [get_clocks {enet_rxclk_125m rgmii_rx_pll}]
 
 
 #**************************************************************
@@ -109,17 +94,9 @@ set_false_path -from * -to [get_ports {enet_resetn}]
 set_false_path -from * -to [get_ports {user_led[*]}]
 
 # Reset input
-set_false_path -from [get_ports {c10_resetn}] -to *
+set_false_path -from [get_ports {rst_n_i}] -to *
 
-# --- SPI config slave (arduino_io0..3, spigen variant of top_c10) ---
-# SPI_SLAVE inside spictrl samples SCK/CS/MOSI with 2-FF synchronizers in the
-# sys_clk_125m domain, so these are proper async inputs. MISO is launched
-# from sys_clk_125m and read by the external master on its own SCK, also
-# async with respect to the FPGA timing analyzer.
-set_false_path -from [get_ports {arduino_io0}] -to *
-set_false_path -from [get_ports {arduino_io1}] -to *
-set_false_path -from [get_ports {arduino_io2}] -to *
-set_false_path -from * -to [get_ports {arduino_io3}]
+
 
 
 source ../../../sdc/hyperram.sdc
@@ -156,15 +133,15 @@ source ../../../sdc/rgmii_phy_if.sdc
 source ../../../sdc/rgmii_io.sdc
 
 # RGMII interface — these procs create enet_rx_clk_125m and enet_tx_clk_125m
-constrain_rgmii_input_pins "enet" "enet_rx_clk" "enet_rx_dv enet_rx_d*"
-constrain_rgmii_output_pins "enet" "rgmii_tx_pll" "enet_tx_clk" "enet_tx_en enet_tx_d*"
+constrain_rgmii_input_pins "enet" "phy_rgmii_enet_rx_clk" "phy_rgmii_enet_rx_dv phy_rgmii_enet_rx_d*"
+constrain_rgmii_output_pins "enet" "enet_clk_125m" "phy_rgmii_enet_tx_clk" "phy_rgmii_enet_tx_en phy_rgmii_enet_tx_d*"
 
 # Final clock group declaration — after derive_pll_clocks and rgmii_io.sdc procs,
 # so all clocks now exist. litex_sys_clk is the manually-defined name for the
 # LiteX SoC PLL output (derive_pll_clocks skips it because it already exists).
 set_clock_groups -asynchronous \
-    -group [get_clocks {c10_clk50m sys_clk_125m}] \
+    -group [get_clocks {clock_i sys_clk_125m}] \
     -group [get_clocks {litex_sys_clk}] \
     -group [get_clocks {audio_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
-    -group [get_clocks {enet_clk_125m rgmii_tx_pll mac_tx_clock}] \
-    -group [get_clocks {enet_rx_clk_125m rgmii_rx_pll}]
+    -group [get_clocks {phy_rgmii_enet_tx_clk enet_tx_clk_125m}] \
+    -group [get_clocks {phy_rgmii_enet_rx_clk phy_rgmii_enet_clk_125m enet_rx_clk_125m}]
