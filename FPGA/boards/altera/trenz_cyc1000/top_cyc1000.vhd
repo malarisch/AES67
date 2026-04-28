@@ -6,8 +6,11 @@ LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
+use work.miim_types.all;
+
 ENTITY top_cyc1000 IS
 	generic (
+		MIIM_PHY_ADDRESS      : t_phy_address := "00001"; --lan8720a is on 1
 		soctype : string := "litex_c10_sdram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		platform : string := "ALTERA";
 		clk_in_speed : natural := 12; -- input clock speed in mhz (for now only 12, 27, 50)
@@ -21,8 +24,8 @@ ENTITY top_cyc1000 IS
         RXCHANNELS      : INTEGER := 16;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8;
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 8
 	);
 	PORT
 	(
@@ -59,7 +62,6 @@ ENTITY top_cyc1000 IS
 		
 		phy_rmii_ref_clk : IN  STD_LOGIC; -- pmod6
 		phy_rmii_crsdv   : IN  STD_LOGIC; -- pmod7
-		phy_rmii_rxer    : IN  STD_LOGIC; -- n/c
 		phy_rmii_rxd     : IN  STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 4,5
 		phy_rmii_txen    : OUT STD_LOGIC; -- pmod3
 		phy_rmii_txd     : OUT STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 1,0
@@ -103,7 +105,8 @@ begin
 		BITDEPTH => BITDEPTH,
 		SAMPLERATE => SAMPLERATE,
 		TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
-		RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH
+		RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
+		MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS
 	)
 	 port map(
 		rst_n_i => '1',
@@ -118,7 +121,7 @@ begin
 		phy_rgmii_enet_tx_d => open,
 		phy_rmii_ref_clk => phy_rmii_ref_clk,
 		phy_rmii_crsdv => phy_rmii_crsdv,
-		phy_rmii_rxer => phy_rmii_rxer,
+		phy_rmii_rxer => '0',
 		phy_rmii_rxd => phy_rmii_rxd,
 		phy_rmii_txen => phy_rmii_txen,
 		phy_rmii_txd => phy_rmii_txd,

@@ -49,88 +49,14 @@ ENTITY audio_tx_module IS
 		tx_req_o :  OUT  STD_LOGIC;
 		metering_clip_o :  OUT  STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
 		metering_signal_o :  OUT  STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
-		tx_data_o :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0)
+		tx_data_o :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
+		mac_speed_i : IN STD_LOGIC_VECTOR(1 downto 0)
 	);
 END audio_tx_module;
 
 ARCHITECTURE bdf_type OF audio_tx_module IS 
 
-COMPONENT tx_router
-GENERIC (bytes_per_sample : INTEGER;
-			global_channel_count : INTEGER;
-			max_streams : INTEGER;
-			samples_per_channel_depth : INTEGER
-			);
-	PORT(sys_clk_i : IN STD_LOGIC;
-		 reset_n : IN STD_LOGIC;
-		 config_wr_en_i : IN STD_LOGIC;
-		 sample_ready_i : IN STD_LOGIC;
-		 tx_en_i : IN STD_LOGIC;
-		 tx_busy_i : IN STD_LOGIC;
-		 config_wr_clk_i : IN STD_LOGIC;
-		 config_wr_addr_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 config_wr_data_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 packet_time_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 sample_buffer_wr_ptr_i : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 audio_packet_tx_start_o : OUT STD_LOGIC;
-		 ch_ids_o : OUT STD_LOGIC_VECTOR(63 DOWNTO 0);
-		 channel_count_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 ip_addr_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 packet_time_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 sample_buffer_tx_start_addr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 samples_per_packet_per_channel_o : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 ssrc_o : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 sequence_id_o : OUT UNSIGNED(15 downto 0)
-	);
-END COMPONENT;
 
-COMPONENT tx_sample_buffer
-GENERIC (bytes_per_sample : INTEGER;
-			global_channel_count : INTEGER;
-			samples_per_channel_depth : INTEGER
-			);
-	PORT(sys_clk : IN STD_LOGIC;
-		 reset_n : IN STD_LOGIC;
-		 fs_clk_i : IN STD_LOGIC;
-		 metering_clear_i : IN STD_LOGIC;
-		 audio_in : in STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0);
-		 read0Addr : IN UNSIGNED(15 DOWNTO 0);
-		 wr_ready_o : OUT STD_LOGIC;
-		 data0_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 metering_clip_o : OUT STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
-		 metering_signal_o : OUT STD_LOGIC_VECTOR(global_channel_count - 1 DOWNTO 0);
-		 wr_ptr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
-	);
-END COMPONENT;
-
-COMPONENT tx_transmitter
-GENERIC (bytes_per_sample : INTEGER;
-			global_channel_count : INTEGER;
-			samples_per_channel_depth : INTEGER
-			);
-	PORT(sys_clk : IN STD_LOGIC;
-		 tx_clk : IN STD_LOGIC;
-		 tx_busy : IN STD_LOGIC;
-		 tx_byte_sent : IN STD_LOGIC;
-		 start_i : IN STD_LOGIC;
-		 tx_allow_i : IN STD_LOGIC;
-		 ch_ids_i : IN STD_LOGIC_VECTOR(63 DOWNTO 0);
-		 channel_count_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 dst_ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 sample_buffer_tx_start_addr_i : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 sample_counter : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 sample_ram_data_in_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 samples_per_packet_per_channel_i : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 src_ip_address : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 src_mac_address : IN STD_LOGIC_VECTOR(47 DOWNTO 0);
-		 ssrc_i : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		 tx_enable : OUT STD_LOGIC;
-		 tx_req_o : OUT STD_LOGIC;
-		 sample_ram_read_addr_o : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
-		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 sequence_id_in : IN UNSIGNED(15 downto 0)
-	);
-END COMPONENT;
 
 SIGNAL	audio_allow_req :  STD_LOGIC;
 SIGNAL	ch_ids :  STD_LOGIC_VECTOR(63 DOWNTO 0);
@@ -155,7 +81,7 @@ BEGIN
 
 
 
-b2v_tx_router : tx_router
+b2v_tx_router : entity work.tx_router
 GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			global_channel_count => global_channel_count,
 			samples_per_channel_depth => samples_per_channel_depth,
@@ -183,7 +109,7 @@ PORT MAP(sys_clk_i => sys_clk,
 		 sequence_id_o => sequence_id);
 
 
-b2v_tx_sample_buffer : tx_sample_buffer
+b2v_tx_sample_buffer : entity work.tx_sample_buffer
 GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			global_channel_count => global_channel_count,
 			samples_per_channel_depth => samples_per_channel_depth
@@ -201,14 +127,13 @@ PORT MAP(sys_clk => sys_clk,
 		 wr_ptr_o => sample_buffer_rd_ptr);
 
 
-b2v_tx_transmitter : tx_transmitter
+b2v_tx_transmitter : entity work.tx_transmitter
 GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			global_channel_count => global_channel_count,
 			samples_per_channel_depth => samples_per_channel_depth
 			)
 PORT MAP(sys_clk => sys_clk,
 		 tx_clk => mac_tx_clock,
-		 tx_busy => mac_tx_busy,
 		 tx_byte_sent => mac_tx_byte_sent,
 		 start_i => SYNTHESIZED_WIRE_0,
 		 tx_allow_i => mac_audio_allow_i,
@@ -226,7 +151,8 @@ PORT MAP(sys_clk => sys_clk,
 		 tx_req_o => audio_allow_req,
 		 sample_ram_read_addr_o => sample_ram_read_addr,
 		 tx_data => tx_data_audiotx,
-		 sequence_id_in => sequence_id);
+		 sequence_id_in => sequence_id,
+		 mac_speed_i => mac_speed_i);
 
 tx_en_o <= tx_en_audiotx;
 tx_req_o <= audio_allow_req;

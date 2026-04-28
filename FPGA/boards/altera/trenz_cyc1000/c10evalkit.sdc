@@ -39,33 +39,33 @@ create_clock -name {phy_rmii_ref_clk} -period 20.000 -waveform { 0.000 10.000 } 
 
 # PLL sysclocks_inst output clk[0]: 125 MHz system clock (50 * 5 / 2)
 create_generated_clock -name {sys_clk_125m} \
-    -source [get_pins {sysclocks_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
+    -source [get_pins {*top_inst|\sysclkgen12:sysclks_altpll_12m_in_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
     -duty_cycle 50.00 -multiply_by 125 -divide_by 12 \
     -master_clock {c10_clk12m} \
-    [get_pins {sysclocks_inst|altpll_component|auto_generated|pll1|clk[0]}]
+    [get_pins {*top_inst|\sysclkgen12:sysclks_altpll_12m_in_inst|altpll_component|auto_generated|pll1|clk[0]}]
 
 # LiteX SoC PLL (litex_soc_inst) output: 50 MHz sys_clk (50 * 8 / 5)
 create_generated_clock -name {litex_sys_clk} \
-    -source [get_pins {litex_soc_inst|ALTPLL|auto_generated|pll1|inclk[0]}] \
-    -multiply_by 25 -divide_by 6 \
+    -source [get_pins {*top_inst|\sysclkgen12:sysclks_altpll_12m_in_inst|altpll_component|auto_generated|pll1|inclk[0]}] \
+    -multiply_by 25 -divide_by 4 \
     -master_clock {c10_clk12m} \
-    [get_pins {litex_soc_inst|ALTPLL|auto_generated|pll1|clk[0]}]
+    [get_pins {top_inst|\sysclkgen12:sysclks_altpll_12m_in_inst|altpll_component|auto_generated|pll1|clk[1]}]
 
 # RMII-to-MII generated clocks (50 MHz / 2 = 25 MHz register-divided clocks)
 # mac_mii_rxc: MII RX clock used by MAC and aes67_top for receive path
 create_generated_clock -name {mac_mii_rxc} \
-    -source [get_ports {phy_rmii_ref_clk}] \
+    -source [get_ports {*phy_rmii_ref_clk*}] \
     -divide_by 2 \
-    [get_registers {rmii_phy_if_inst|mac_mii_rxc}]
+    [get_registers {*mac_mii_rxc*}]
 
 # mac_mii_txc: MII TX clock used by MAC and aes67_top for transmit path
 create_generated_clock -name {mac_mii_txc} \
-    -source [get_ports {phy_rmii_ref_clk}] \
+    -source [get_ports {*phy_rmii_ref_clk*}] \
     -divide_by 2 \
-    [get_registers {rmii_phy_if_inst|mac_mii_txc}]
+    [get_registers {*mac_mii_txc*}]
 
 
-source ../../../sdc/audioclocks.sdc
+#source ../../../sdc/audioclocks.sdc
 
 #**************************************************************
 # Set Clock Groups
@@ -167,30 +167,6 @@ set_false_path -from * -to [get_ports {i2c0_scl i2c0_sda}]
 set_false_path -from [get_ports {i2c0_scl i2c0_sda}] -to *
 set_false_path -from * -to [get_ports {i2c1_scl i2c1_sda}]
 set_false_path -from [get_ports {i2c1_scl i2c1_sda}] -to *
-
-# HyperRAM (LiteX SDR PHY, 4:1 ratio, all logic in litex_sys_clk domain)
-# Internal register-to-register timing is covered by litex_sys_clk (12.5ns).
-# I/O paths need max_delay constraints to ensure registers are placed in/near
-# I/O cells, preventing excessive routing delay that causes read data errors.
-#
-# Control signals (active before/after transfers, not timing-critical)
-set_false_path -from * -to [get_ports {hbus_rstn hbus_cs2n}]
-#
-# Clock output: must have minimal and matched skew between P/N
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_p}] 6.0
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_n}] 6.0
-#
-# DQ output: data must be stable before HyperRAM samples on hbus_clk edge
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_dq[*]}] 6.0
-#
-# DQ input: data from HyperRAM must meet setup to litex_sys_clk register
-set_max_delay -from [get_ports {hbus_dq[*]}] -to [get_clocks {litex_sys_clk}] 6.0
-#
-# RWDS output: strobe/mask timing during writes
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_rwds}] 6.0
-#
-# RWDS input: strobe edge detection must meet setup to litex_sys_clk
-set_max_delay -from [get_ports {hbus_rwds}] -to [get_clocks {litex_sys_clk}] 6.0
 
 # User LED
 set_false_path -from * -to [get_ports {user_led[*]}]

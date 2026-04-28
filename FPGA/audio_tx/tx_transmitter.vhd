@@ -24,7 +24,6 @@ entity tx_transmitter is
 		src_ip_address			: in std_logic_vector(31 downto 0);
 		dst_ip_address			: in std_logic_vector(31 downto 0);
 		tx_clk					: in std_logic;
-		tx_busy					: in std_logic;
 		tx_byte_sent			: in std_logic;
 		
 		
@@ -48,7 +47,8 @@ entity tx_transmitter is
         start_i : in std_logic := '0';
 		
 		tx_req_o				: out std_logic := '0';
-		tx_allow_i				: in std_logic := '0'
+		tx_allow_i				: in std_logic := '0';
+		mac_speed_i 			: in STD_LOGIC_VECTOR(1 downto 0)
 
 	);
 end entity;
@@ -223,16 +223,11 @@ architecture Behavioral of tx_transmitter is
 	signal asm_rd_addr		: integer range 0 to 1518 - 1 := 0;
 	signal asm_rd_data		: std_logic_vector(7 downto 0) := (others => '0'); -- RAM output register
 	signal asm_rd_data_r	: std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register for timing
-	signal tx_rd_addr		: integer range 0 to 1518 - 1 := 0;
-	signal tx_rd_data		: std_logic_vector(7 downto 0) := (others => '0');
 
 	signal s_SM_Ethernet	: t_SM_Ethernet := s_Idle;
 	signal frame_write_index	: integer range 0 to 1518 := 0;
 	signal audio_payload_index	: integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample := 0;
 	signal checksum_write_index	: integer range 0 to 4 := 0;
-	signal prime_wait		: integer range 0 to 2 := 0;
-	signal tx_bytes_remaining	: integer range 0 to 1518 := 0;
-	signal tx_read_pointer	: integer range 0 to 1518 := 0;
 
 	
 	signal ip_checksum_acc	: unsigned(31 downto 0) := (others => '0');
@@ -317,7 +312,7 @@ begin
 			end if;
 			if tx_ack = '1' and tx_allow_i = '1' then
 				tx_enable <= '1';
-				if read_addr < PACKET_LENGTH - 1  then
+				if (mac_speed_i = "10" and read_addr < PACKET_LENGTH - 1) or (mac_speed_i /= "10" and read_addr < PACKET_LENGTH) then
 					tx_done_reg <= '0';
 					if tx_byte_sent = '1' then
 						read_addr <= read_addr + 1;
@@ -340,7 +335,6 @@ begin
 		variable pseudo_header_sum	: unsigned(31 downto 0);
 		variable rd_offset		: integer;
 		variable raw_addr		: integer;
-		variable ch_id			: integer;
     begin
         if rising_edge(sys_clk) then
             packet_wr_en <= '0'; -- default: no write (overridden when needed)

@@ -3,10 +3,12 @@
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 use IEEE.NUMERIC_STD.all;
- 
+use work.miim_types.all;
+
 
 ENTITY aes67_top IS 
 	generic (
+		ETHERNET_TYPE : string := "RGMII";
 		TX_MAX_STREAMS : natural := 8;
 		RX_MAX_STREAMS : natural := 8;
 		RX_CHANNELS		: natural := 16;
@@ -17,6 +19,10 @@ ENTITY aes67_top IS
 		TX_SAMPLE_BUFFER_DEPTH : natural := 48;
 		  
     	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
+
+    	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
+		
+
 		AUDIO_INPUT_MODE : string := "tdm8";
 		AUDIO_OUTPUT_MODE : string := "tdm8";
 		USE_EXTERNAL_PLL : string := "true"
@@ -180,7 +186,10 @@ signal mac_tx_busy : STD_LOGIC;
 signal mac_rx_reset : STD_LOGIC;
 signal mac_sof_sent_tog : STD_LOGIC;
 signal mac_sof_recv_tog : STD_LOGIC;
+signal mac_speed : STD_LOGIC_VECTOR(1 downto 0);
 BEGIN 
+
+mac_speed_o <= mac_speed;
 
 pll_64fs_o <= pll_64fs;
 pll_48k_fs_o <= pll_48k_fs;
@@ -247,7 +256,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
  		 metering_clear_i => audio_meter_clear_i,
 		 metering_clip_o => audio_meter_tx_clip_o,
 		 metering_signal_o => audio_meter_tx_signal_o,
-		 tx_data_o => eth_tx_data_rtp);
+		 tx_data_o => eth_tx_data_rtp,
+		 mac_speed_i => mac_speed);
 
 
 
@@ -327,7 +337,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- generated clocks
 		 wc_mclk => wc_mclk,
 		 second_pulse_sys => second_pulse_sys,
-		 media_clock => media_clock
+		 media_clock => media_clock,
+		 mac_speed_i => mac_speed
 		 );
 		 
 
@@ -424,7 +435,9 @@ end generate;
 
 
 ethernet_top_inst: entity work.ethernet_top
- GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER)
+ GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
+ MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
+ ETHERNET_TYPE => ETHERNET_TYPE)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,
@@ -455,7 +468,7 @@ ethernet_top_inst: entity work.ethernet_top
 	eth_tx_allow_rtp_o => eth_tx_allow_rtp,
 	mac_reset_i => mac_reset,
 	mac_addr_i => mac_address_i,
-	mac_speed_o => mac_speed_o,
+	mac_speed_o => mac_speed,
 	mac_linkup_o => mac_linkup,
 	mac_tx_byte_sent_o => mac_tx_byte_sent,
 	mac_tx_reset_o => mac_tx_reset_o,

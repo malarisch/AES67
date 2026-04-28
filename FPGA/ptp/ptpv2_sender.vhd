@@ -12,6 +12,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
+use work.ethernet_types;
 
 entity ptpv2_sender is
 	port
@@ -44,7 +45,8 @@ entity ptpv2_sender is
 		ptp_prioone : std_logic_vector(7 downto 0);
 		ptp_priotwo : std_logic_vector(7 downto 0);
 		ptp_clockclass : std_logic_vector(7 downto 0);
-		ptp_clockaccuracy : std_logic_vector(7 downto 0)
+		ptp_clockaccuracy : std_logic_vector(7 downto 0);
+		mac_speed_i : in std_logic_vector(1 downto 0)
 		
 	);
 end entity;
@@ -747,14 +749,17 @@ begin
 			end if;
 			if tx_ack = '1' and tx_allow_i = '1' then
 				tx_enable <= '1';
-				if read_addr < cap_packet_length - 1  then
+				if (mac_speed_i = "10" and read_addr < cap_packet_length - 1) or (mac_speed_i /= "10" and read_addr < cap_packet_length) then
 					tx_done_reg <= '0';
 					if tx_byte_sent = '1' then
 						read_addr <= read_addr + 1;
 					end if;
-				else 
+				else
+					
 					tx_enable <= '0';
 					tx_done_reg <= '1';
+					
+						
 				end if;
 				
 			else

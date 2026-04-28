@@ -61,7 +61,8 @@ ENTITY ptp_module IS
 		ptp_mean_path_delay :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_offset_from_master :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_ram_addr :  OUT  STD_LOGIC_VECTOR(10 DOWNTO 0);
-		tx_data_ptpfu :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0)
+		tx_data_ptpfu :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
+		mac_speed_i : IN STD_LOGIC_VECTOR(1 downto 0)
 	);
 END ptp_module;
 
@@ -122,7 +123,8 @@ COMPONENT ptpv2_sender
 		 tx_ready_o : OUT STD_LOGIC;
 		 tx_allow_req_o : OUT STD_LOGIC;
 		 tx_data : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		 tx_done_sys_o : OUT STD_LOGIC
+		 tx_done_sys_o : OUT STD_LOGIC;
+		 mac_speed_i : IN STD_LOGIC_VECTOR(1 downto 0)
 	);
 END COMPONENT;
 
@@ -263,7 +265,6 @@ SIGNAL	ptp_calc_valid :  STD_LOGIC;
 SIGNAL	ptp_locked_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	ptp_mean_path_delay_ALTERA_SYNTHESIZED :  SIGNED(31 DOWNTO 0);
 SIGNAL	ptp_offset_from_master_ALTERA_SYNTHESIZED :  SIGNED(31 DOWNTO 0);
-SIGNAL	ptp_txready :  STD_LOGIC;
 SIGNAL	rx_follower_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	rx_send_delay_req :  STD_LOGIC;
 SIGNAL	rx_send_delay_resp :  STD_LOGIC;
@@ -390,7 +391,8 @@ PORT MAP(sys_clk => sys_clk,
 		 tx_enable => tx_en_ptpfu_ALTERA_SYNTHESIZED,
 		 tx_allow_req_o => ptp_allow_req,
 		 tx_data => tx_data_ptpfu,
-		 tx_done_sys_o => tx_done_sys);
+		 tx_done_sys_o => tx_done_sys,
+		 mac_speed_i => mac_speed_i);
 
 
 b2v_ptpparser : ptpv2_parser

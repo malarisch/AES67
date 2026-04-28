@@ -1,11 +1,14 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.all;
-
+use work.miim_types.all;
+use work.ethernet_types.all;
 
 entity ethernet_top is
   generic (
-    MIIM_CLOCK_DIVIDER : POSITIVE := 50
+    MIIM_CLOCK_DIVIDER : POSITIVE := 50;
+    MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
+    ETHERNET_TYPE : STRING := "RGMII"
   );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
@@ -83,7 +86,8 @@ entity ethernet_top is
 end ethernet_top;
 
 architecture rtl of ethernet_top is
-    SIGNAL mac_rx_frame : STD_LOGIC;
+    SIGNAL mac_speed_override : t_ethernet_speed := SPEED_UNSPECIFIED;
+        SIGNAL mac_rx_frame : STD_LOGIC;
     SIGNAL mac_rx_byte_received : STD_LOGIC;
     SIGNAL eth_frame_rdy : STD_LOGIC;
     SIGNAL mac_rx_data : STD_LOGIC_VECTOR(7 downto 0);
@@ -101,16 +105,19 @@ architecture rtl of ethernet_top is
 
     SIGNAL mac_rx_clock : STD_LOGIC;
     SIGNAL mac_tx_Clock : STD_LOGIC;
+    SIGNAL is_mcu_pkt_tog_receive : STD_LOGIC;
     SIGNAL is_ptp_pkt_tog_receive : STD_LOGIC;
     SIGNAL is_rtp_pkt_tog_receive : STD_LOGIC;
 
+    SIGNAL is_mcu_pkt_tog_done : STD_LOGIC;
     SIGNAL is_ptp_pkt_tog_done : STD_LOGIC;
     SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
     
 begin
-
+  mac_speed_override <= SPEED_100MBPS WHEN ETHERNET_TYPE = "RMII" else SPEED_UNSPECIFIED;
   is_ptp_pkt_tog_o <= is_ptp_pkt_tog_done when mac_speed = b"01" else is_ptp_pkt_tog_receive; -- send the packet toggles once the packet was fully received on 100mbits. otherwise we read too fast.
   is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
+  is_mcu_pkt_tog_o <= is_mcu_pkt_tog_done when mac_speed = b"01" else is_mcu_pkt_tog_receive;
 
   b2v_eth_rx : entity work.ethernet_receive
     generic map(
@@ -127,7 +134,7 @@ begin
       ram_addr         => eth_ram_wr_addr,
       ram_data         => eth_ram_wr_data,
       rx_byte_count    => received_packet_length_o,
-      is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
+      is_mcu_pkt_tog_o => is_mcu_pkt_tog_receive,
       is_ptp_pkt_tog_o => is_ptp_pkt_tog_receive,
       is_rtp_pkt_tog_o => is_rtp_pkt_tog_receive);
 
@@ -150,7 +157,7 @@ b2v_eth_buf : entity work.eth_ram
 
       dataOut_rxclk => eth_ram_data_rx_mcu_o,
 
-      --is_mcu_pkt_tog_o => parse_mcu_packet_tog,
+      is_mcu_pkt_tog_o => is_mcu_pkt_tog_done,
       is_ptp_pkt_tog_o => is_ptp_pkt_tog_done,
       is_rtp_pkt_tog_o => is_rtp_pkt_tog_done,
       sys_clk_i => sys_clk125MHz_i);
@@ -191,8 +198,8 @@ PORT MAP(mac_address_i => mac_addr_i,
 b2v_yol_mac : entity work.ethernet
 GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
 			MIIM_DISABLE => false,
-			MIIM_PHY_ADDRESS => "00000",
-			MIIM_POLL_WAIT_TICKS => 10000000,
+			MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
+			MIIM_POLL_WAIT_TICKS => 1000000,
 			MIIM_RESET_WAIT_TICKS => 1250000
 			)
 PORT MAP(clock_125_i => enet_clk_i,
@@ -233,7 +240,8 @@ PORT MAP(clock_125_i => enet_clk_i,
      tx_sof_delim_o => mac_sof_sent_pulse_o,
 		 
 		 rx_data_o => mac_rx_data_su,
-		 speed_o => mac_speed
+		 speed_o => mac_speed,
+     speed_override_i => mac_speed_override
          
          );
         mac_rx_clock_o <= mac_rx_clock;
