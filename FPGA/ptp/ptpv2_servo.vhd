@@ -29,8 +29,8 @@ entity ptpv2_servo is
     -- Effective Kp = KP_GAIN / 2^GAIN_SHIFT / 2^(-log_msg_interval)
     -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2) / 2^(-log_msg_interval)
     -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
-    KP_GAIN           : integer := 5; -- Proportional gain numerator 
-    KI_GAIN           : integer := 6; -- Integral gain numerator
+    KP_GAIN           : integer := 4; -- Proportional gain numerator 
+    KI_GAIN           : integer := 5; -- Integral gain numerator
     GAIN_SHIFT        : integer := 3; -- Base gain divisor (for 1 Hz sync rate)
     GAIN_SHIFT_LOCKED : integer := 0; -- ADDITIONAL shift when locked (none = original behavior)
 
@@ -44,7 +44,7 @@ entity ptpv2_servo is
 
     -- Warmup: collect N samples for frequency estimation before closing loop
     -- At 8 Hz sync, 8 samples = 1 second
-    WARMUP_SAMPLES : integer := 8;
+    WARMUP_SAMPLES : integer := 16;
 
     -- Lock thresholds
     LOCK_THRESHOLD_NS    : integer := 500;  -- Consider locked if offset < 500ns
@@ -69,6 +69,10 @@ entity ptpv2_servo is
     freq_correction_o  : out signed(31 downto 0); -- PPB correction (parts per billion)
     phase_jump_o       : out signed(31 downto 0); -- One-time ns adjustment
     phase_jump_valid_o : out std_logic;           -- Pulse to apply phase jump
+
+    -- Request a full clock reconfiguration (offset implausibly large)
+    -- Pulses for one cycle when |offset| > RECONFIGURE_THRESHOLD_NS.
+    request_clock_reconfigure_o : out std_logic;
 
     -- Status
     locked_o       : out std_logic;
@@ -117,16 +121,27 @@ architecture Behavioral of ptpv2_servo is
   constant MAX_VALID_OFFSET : signed(31 downto 0) := to_signed(500_000_000, 32);
 
   -- Phase jump threshold: if offset > this, do phase jump instead of frequency correction
-  constant PHASE_JUMP_THRESHOLD : signed(31 downto 0) := to_signed(500_000, 32); -- 1ms
+  constant PHASE_JUMP_THRESHOLD : signed(31 downto 0) := to_signed(200_000, 32); -- 1ms
+
+  -- Reconfigure threshold: if offset > 500us, the wallclock is too far gone for a
+  -- phase jump to be trustworthy (master may have stepped, or our clock drifted
+  -- catastrophically). Trigger a full clock reconfiguration via the parser.
+  constant RECONFIGURE_THRESHOLD : signed(31 downto 0) := to_signed(500_000, 32); -- 500us
 
   -- Phase jump output registers
   signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
   signal phase_jump_valid_reg : std_logic           := '0';
 
+  -- Reconfigure request register (pulsed)
+  signal request_reconfigure_reg : std_logic := '0';
+
   -- Pipelined PI controller
   type pi_state_t is (PI_IDLE, PI_MULT, PI_CLAMP, PI_SUM, PI_OUTPUT);
   signal pi_state   : pi_state_t := PI_IDLE;
   signal pi_trigger : std_logic  := '0';
+
+  -- Decision flag: this measurement requests a clock reconfiguration
+  signal inp_do_reconfigure : std_logic := '0';
 
   -- Pipeline registers for PI calculation
   signal pi_input        : signed(31 downto 0) := (others => '0');
@@ -167,6 +182,7 @@ begin
   phase_jump_o       <= phase_jump_reg;
   phase_jump_valid_o <= phase_jump_valid_reg;
   sync_timeout_o     <= sync_timeout;
+  request_clock_reconfigure_o <= request_reconfigure_reg;
 
   gain_scaler_proc : process (clk, reset_n)
   begin
@@ -290,7 +306,7 @@ begin
 
       first_lock_achieved <= '0';
     elsif rising_edge(clk) then
-      if (inp_do_phase_jump = '1') then
+      if (inp_do_phase_jump = '1' or inp_do_reconfigure = '1') then
         locked       <= '0';
         lock_counter <= 0;
       end if;
@@ -330,6 +346,7 @@ begin
       sync_timeout         <= '0';
       first_offset         <= (others => '0');
       pi_trigger           <= '0';
+      request_reconfigure_reg <= '0';
       -- Input processing pipeline reset
       input_state        <= INP_IDLE;
       inp_offset_abs     <= (others => '0');
@@ -338,12 +355,14 @@ begin
       inp_do_phase_jump  <= '0';
       inp_phase_jump_val <= (others => '0');
       inp_do_normal_op   <= '0';
+      inp_do_reconfigure <= '0';
 
     elsif rising_edge(clk) then
       -- Default: no phase jump this cycle, clear timeout pulse
       phase_jump_valid_reg <= '0';
       sync_timeout         <= '0';
       pi_trigger           <= '0';
+      request_reconfigure_reg <= '0';
 
       -- ============================================
       -- INPUT PROCESSING PIPELINE (SIMPLIFIED - NO MEDIAN)
@@ -365,8 +384,9 @@ begin
 
         when INP_DECIDE =>
           -- Determine action based on offset magnitude
-          inp_do_phase_jump <= '0';
-          inp_do_normal_op  <= '0';
+          inp_do_phase_jump  <= '0';
+          inp_do_normal_op   <= '0';
+          inp_do_reconfigure <= '0';
 
           -- Sanity check: reject obviously invalid measurements
           if inp_offset_abs < MAX_VALID_OFFSET then
@@ -374,8 +394,15 @@ begin
 
             -- Outlier rejection when locked: ignore spikes > UNLOCK_THRESHOLD
             -- These are likely measurement artifacts, not real offset changes
-            if locked = '1' and inp_offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32) then
+            if locked = '1' and inp_offset_abs > to_signed(UNLOCK_THRESHOLD_NS, 32)
+               and inp_offset_abs <= RECONFIGURE_THRESHOLD then
               inp_valid_meas <= '0';
+              -- Reconfigure decision: offset implausibly large -> redo clock set.
+              -- Takes priority over phase-jump path; bypasses outlier rejection
+              -- because at this magnitude the measurement is likely real (master
+              -- stepped, link flap, etc.) and a phase jump alone won't recover.
+            elsif inp_offset_abs > RECONFIGURE_THRESHOLD then
+              inp_do_reconfigure <= '1';
               -- Phase jump decision
             elsif inp_offset_abs > PHASE_JUMP_THRESHOLD and sample_count >= WARMUP_SAMPLES then
               inp_do_phase_jump <= '1';
@@ -404,7 +431,12 @@ begin
               sample_count    <= sample_count + 1;
             end if;
 
-            if inp_do_phase_jump = '1' then
+            if inp_do_reconfigure = '1' then
+              -- Offset implausibly large: ask parser to redo full clock set.
+              -- Drop lock state too; servo will re-acquire after reconfig.
+              request_reconfigure_reg <= '1';
+
+            elsif inp_do_phase_jump = '1' then
               -- Apply phase jump
               phase_jump_reg       <= inp_phase_jump_val;
               phase_jump_valid_reg <= '1';

@@ -3,12 +3,35 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 -- ============================================================
--- Ethernet RX Timestamp Latch
+-- Ethernet Timestamp latcher
 -- ============================================================
 
 entity ethernet_timestamp is
+    generic (
+        MAC_TO_PHY_NS_100M : integer := 0;
+        -- Measurements with LA:
+        -- RX:
+        -- MII to MAC: 2 RXCLK Cycles -> 10 sysclk cycles -> 80ns
+        -- RMII TO MII: 40 ns
+
+        -- TX: RMII TO MII 1 RXCLK Cycle => 40ns
+        -- MII to MAC: 4 RXCLK Cycles => 20 Sysclk Cycles -> 160ns
+
+        -- LAN8720A round trip with loopback: 86 sysclk periods = 688ns rtt
+        -- LAN8720A datasheet typical values:
+        --   TX (MII -> wire):  ~90ns  (scrambler + MLT-3 encode)
+        --   RX (wire -> MII): ~250ns  (descrambler + decode + elastic buffer)
+        -- Sum 90+250 = 340ns ~ measured 344ns one-way average. Asymmetry matters
+        -- for PTP since slave offset = (RTT/2) only if TX and RX are symmetric.
+        MAC_TO_PHY_NS_1G : integer := 0;
+        PHY_TX_TO_WIRE_NS : integer := 0;
+        PHY_WIRE_TO_RX_NS : integer := 0;
+        PATH : string := "TX"
+    );
     port(
         clk			: in std_logic; -- sys clock domain
+
+        mac_speed_i     : in std_logic_vector(1 downto 0);
         reset_n			: in std_logic;
         
         wallclock_seconds_i : in unsigned(47 downto 0);
@@ -32,12 +55,28 @@ architecture Behavioral of ethernet_timestamp is
     signal sof_tog_i_sync : std_logic := '0';
     signal sof_tog_i_prev : std_logic := '0';
 
-    
+    signal PHY_LATENCY : integer;
+    signal PIPELINE_LATENCY : integer;
+
 
     
-    
 begin
+
+    txphylat: if (PATH = "TX") generate
+    PHY_LATENCY <= (MAC_TO_PHY_NS_100M + PHY_TX_TO_WIRE_NS) when mac_speed_i = "01" else
+                   (MAC_TO_PHY_NS_1G   + PHY_TX_TO_WIRE_NS);
+    PIPELINE_LATENCY <= 0 when mac_speed_i = "10" else (-20 * 8);
+
+    end generate;
+
+    rxphylat: if (PATH = "RX") generate
+    PHY_LATENCY <= -(MAC_TO_PHY_NS_100M + PHY_WIRE_TO_RX_NS) when mac_speed_i = "01" else
+                   -(MAC_TO_PHY_NS_1G   + PHY_WIRE_TO_RX_NS);
+    PIPELINE_LATENCY <= 24 when mac_speed_i = "10" else -24;
+    end generate;
     process(clk, reset_n)
+        variable correction : integer;
+        variable adjusted   : integer;
     begin
         if reset_n = '0' then
             sof_tog_i_meta <= '0';
@@ -51,8 +90,19 @@ begin
 
 
             if (sof_tog_i_prev /= sof_tog_i_sync) then
-                timestamp_seconds_o <= wallclock_seconds_i;
-                timestamp_nanoseconds_o <= wallclock_nanoseconds_i;
+                correction := PHY_LATENCY - PIPELINE_LATENCY;
+                adjusted   := to_integer(wallclock_nanoseconds_i) + correction;
+
+                if adjusted >= 1000000000 then
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 32);
+                    timestamp_seconds_o     <= wallclock_seconds_i + 1;
+                elsif adjusted < 0 then
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 32);
+                    timestamp_seconds_o     <= wallclock_seconds_i - 1;
+                else
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 32);
+                    timestamp_seconds_o     <= wallclock_seconds_i;
+                end if;
             end if;
 
 

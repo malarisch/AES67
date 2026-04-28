@@ -6,7 +6,11 @@ entity ptpv2_parser is
     generic(
         -- Min filter depth for path delay measurements
         -- Higher values give more stable results but slower convergence
-        MIN_FILTER_DEPTH : integer := 8
+        MIN_FILTER_DEPTH : integer := 2;
+        -- Set to false to bypass the min filter entirely. Path delay and offset
+        -- are then computed directly from the latest delta_m2s / delta_s2m pair.
+        -- Saves the BRAM buffer and the multi-cycle min search state machine.
+        MIN_FILTER_ENABLE : boolean := false
     );
     port(
         clk                 : in std_logic;
@@ -50,6 +54,10 @@ entity ptpv2_parser is
         ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
         ptp_is_follower_i : in std_logic;
         ptp_locked_i : in std_logic;
+
+        -- Pulse from servo: offset implausibly large, redo full clock set
+        -- on the next Follow_Up.
+        clock_reconfigure_req_i : in std_logic;
         
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
@@ -123,7 +131,7 @@ architecture Behavioral of ptpv2_parser is
     signal current_min_abs  : unsigned(31 downto 0) := (others => '0');
     
     -- State machine
-    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Calc_Bypass, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
 
     type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply, s_ClockSet_Apply2);
@@ -281,12 +289,20 @@ begin
         elsif (rising_edge(clk)) then
             clock_set_o <= '0';
 
+            -- Servo asks for full reconfigure: drop the configured flag so the
+            -- next Follow_Up re-arms configureClock and we redo T1+elapsed set.
+            if (clock_reconfigure_req_i = '1') then
+                clock_configured <= '0';
+            end if;
+
             configure_wait_cycle <= configure_wait_cycle - 1;
             if (configure_wait_cycle = 0) then
             if (s_SM_ClockConfigurator = s_Idle) then
-                
+
                 if (configureClock = '1') then
-                    s_SM_ClockConfigurator <= s_ClockSet_Calc;    
+
+                    clock_configured <= '0';
+                    s_SM_ClockConfigurator <= s_ClockSet_Calc;
                 end if;
             elsif (s_SM_ClockConfigurator = s_ClockSet_Calc) then
                 -- Takt 1: Berechne lokal vergangene Zeit seit Sync-Empfang
@@ -643,10 +659,14 @@ begin
                     stored_t4_seconds, stored_t4_nanoseconds,
                     stored_t3_seconds, stored_t3_nanoseconds
                 );
-                
+
                 -- Initialize min search
                 min_search_state <= MS_IDLE;
-                s_SM_PtpParser <= s_Calc_MinFilter;
+                if MIN_FILTER_ENABLE then
+                    s_SM_PtpParser <= s_Calc_MinFilter;
+                else
+                    s_SM_PtpParser <= s_Calc_Bypass;
+                end if;
 
             elsif (s_SM_PtpParser = s_Calc_MinFilter) then
                 -- ============================================
@@ -768,6 +788,15 @@ begin
                         min_search_state <= MS_IDLE;
                         s_SM_PtpParser <= s_Done;
                 end case;
+
+            elsif (s_SM_PtpParser = s_Calc_Bypass) then
+                -- Min filter disabled: use raw deltas directly.
+                -- mean_path_delay = (delta_m2s + delta_s2m) / 2
+                -- offset          = (delta_m2s - delta_s2m) / 2
+                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg, 1);
+                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
+                ptp_calc_valid_o <= '1';
+                s_SM_PtpParser <= s_Done;
 
             elsif (s_SM_PtpParser = s_Done) then
                 
