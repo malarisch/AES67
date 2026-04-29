@@ -166,6 +166,29 @@ COMPONENT litex_soc_cyclone10
 		 aes67_ctrl_wallclock_configured : IN STD_LOGIC;
 		 aes67_ctrl_wallclock_locked : IN STD_LOGIC;
 		 aes67_ctrl_wallclock_phasejump : IN STD_LOGIC;
+
+		 -- PTP servo / parser tuning + monitoring
+		 aes67_ctrl_ptp_reset                       : OUT STD_LOGIC;
+		 aes67_ctrl_servo_kp_gain                   : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_servo_ki_gain                   : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_servo_gain_shift                : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		 aes67_ctrl_servo_gain_shift_locked         : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		 aes67_ctrl_servo_ki_extra_shift            : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		 aes67_ctrl_servo_filter_shift              : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		 aes67_ctrl_servo_warmup_samples            : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_servo_lock_threshold_ns         : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_unlock_threshold_ns       : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_lock_count_threshold      : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_parser_min_filter_enable        : OUT STD_LOGIC;
+		 aes67_ctrl_parser_min_filter_active_depth  : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_servo_mon_filtered_offset       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_mon_integral_sum          : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_mon_pi_proportional       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_mon_pi_sum_raw            : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		 aes67_ctrl_servo_mon_effective_gain_shift  : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_servo_mon_lock_counter          : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 aes67_ctrl_servo_mon_sample_count          : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		 aes67_ctrl_servo_mon_first_lock_achieved   : IN STD_LOGIC;
 		 clk_sys : IN STD_LOGIC;
 		 clk_mac_rx : IN STD_LOGIC;
 		 clk_mac_tx : IN STD_LOGIC;
@@ -273,6 +296,30 @@ COMPONENT litex_soc_cyc1000
 		aes67_ctrl_wallclock_configured		:	 IN STD_LOGIC;
 		aes67_ctrl_wallclock_locked		:	 IN STD_LOGIC;
 		aes67_ctrl_wallclock_phasejump		:	 IN STD_LOGIC;
+
+		-- PTP servo / parser tuning + monitoring
+		aes67_ctrl_ptp_reset                       : OUT STD_LOGIC;
+		aes67_ctrl_servo_kp_gain                   : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_servo_ki_gain                   : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_servo_gain_shift                : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		aes67_ctrl_servo_gain_shift_locked         : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		aes67_ctrl_servo_ki_extra_shift            : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		aes67_ctrl_servo_filter_shift              : OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
+		aes67_ctrl_servo_warmup_samples            : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_servo_lock_threshold_ns         : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_unlock_threshold_ns       : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_lock_count_threshold      : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_parser_min_filter_enable        : OUT STD_LOGIC;
+		aes67_ctrl_parser_min_filter_active_depth  : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_servo_mon_filtered_offset       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_mon_integral_sum          : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_mon_pi_proportional       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_mon_pi_sum_raw            : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+		aes67_ctrl_servo_mon_effective_gain_shift  : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_servo_mon_lock_counter          : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_servo_mon_sample_count          : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+		aes67_ctrl_servo_mon_first_lock_achieved   : IN STD_LOGIC;
+
 		clk_mac_rx		:	 IN STD_LOGIC;
 		clk_mac_tx		:	 IN STD_LOGIC;
 		clk_sys		:	 IN STD_LOGIC;
@@ -466,7 +513,39 @@ signal rst_n : STD_LOGIC := '0';
 
 signal mii_txd : STD_LOGIC_VECTOR(3 downto 0);
 
+-- PTP module reset (asserted by SoC and/or SPI). Both sources OR'd in
+-- the aes67_top tying.
+signal ptp_reset_litex : STD_LOGIC := '0';
+signal ptp_reset_spi   : STD_LOGIC := '0';
+signal ptp_reset       : STD_LOGIC;
+
+-- PTP servo / parser tuning (driven by whichever SoC backend is active).
+signal servo_kp_gain              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_ki_gain              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_gain_shift           : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_gain_shift_locked    : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_ki_extra_shift       : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_filter_shift         : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_warmup_samples       : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_lock_threshold_ns    : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_unlock_threshold_ns  : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_lock_count_threshold : STD_LOGIC_VECTOR(7 downto 0);
+signal parser_min_filter_enable        : STD_LOGIC;
+signal parser_min_filter_active_depth  : STD_LOGIC_VECTOR(7 downto 0);
+
+-- PTP servo monitoring (driven from aes67_top, consumed by both backends).
+signal servo_mon_filtered_offset      : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_mon_integral_sum         : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_mon_pi_proportional      : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_mon_pi_sum_raw           : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_mon_effective_gain_shift : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_mon_lock_counter         : STD_LOGIC_VECTOR(15 downto 0);
+signal servo_mon_sample_count         : STD_LOGIC_VECTOR(15 downto 0);
+signal servo_mon_first_lock_achieved  : STD_LOGIC;
+
 BEGIN
+
+ptp_reset <= ptp_reset_litex or ptp_reset_spi;
 
 
 
@@ -549,7 +628,6 @@ generic map(
 	ptp_is_leader_o             => ptp_is_leader,
 
 	-- status to SoC
-	ptp_sync_lost_o             => ptp_sync_lost,
 	ptp_mean_path_delay_o       => ptp_mean_path_delay,
 	ptp_offset_from_master_o    => ptp_offset_from_master,
 	wallclock_locked_o          => wallclock_locked,
@@ -579,7 +657,34 @@ generic map(
 
 	-- TDM audio I/O
 	tdm8out_o                 => tdm8out,
-	tdm8in_i                  => tdm8in
+	tdm8in_i                  => tdm8in,
+
+	-- PTP module reset (combined LiteX + SPI source)
+	ptp_reset_i                => ptp_reset,
+
+	-- PTP servo / parser tuning inputs
+	servo_kp_gain_i              => servo_kp_gain,
+	servo_ki_gain_i              => servo_ki_gain,
+	servo_gain_shift_i           => servo_gain_shift,
+	servo_gain_shift_locked_i    => servo_gain_shift_locked,
+	servo_ki_extra_shift_i       => servo_ki_extra_shift,
+	servo_filter_shift_i         => servo_filter_shift,
+	servo_warmup_samples_i       => servo_warmup_samples,
+	servo_lock_threshold_ns_i    => servo_lock_threshold_ns,
+	servo_unlock_threshold_ns_i  => servo_unlock_threshold_ns,
+	servo_lock_count_threshold_i => servo_lock_count_threshold,
+	parser_min_filter_enable_i        => parser_min_filter_enable,
+	parser_min_filter_active_depth_i  => parser_min_filter_active_depth,
+
+	-- PTP servo monitoring outputs
+	servo_mon_filtered_offset_o      => servo_mon_filtered_offset,
+	servo_mon_integral_sum_o         => servo_mon_integral_sum,
+	servo_mon_pi_proportional_o      => servo_mon_pi_proportional,
+	servo_mon_pi_sum_raw_o           => servo_mon_pi_sum_raw,
+	servo_mon_effective_gain_shift_o => servo_mon_effective_gain_shift,
+	servo_mon_lock_counter_o         => servo_mon_lock_counter,
+	servo_mon_sample_count_o         => servo_mon_sample_count,
+	servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved
 );
 
 
@@ -681,7 +786,30 @@ PORT MAP(
 	i2c0_scl                           => i2c0_scl, -- gpio26
 	i2c0_sda                           => i2c0_sda, -- gpio27
 	i2c1_scl                           => i2c1_scl, -- gpio23
-	i2c1_sda                           => i2c1_sda -- gpio24
+	i2c1_sda                           => i2c1_sda, -- gpio24
+
+	-- PTP servo / parser tuning + monitoring
+	aes67_ctrl_ptp_reset                       => ptp_reset_litex,
+	aes67_ctrl_servo_kp_gain                   => servo_kp_gain,
+	aes67_ctrl_servo_ki_gain                   => servo_ki_gain,
+	aes67_ctrl_servo_gain_shift                => servo_gain_shift,
+	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked,
+	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift,
+	aes67_ctrl_servo_filter_shift              => servo_filter_shift,
+	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples,
+	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns,
+	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns,
+	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold,
+	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable,
+	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth,
+	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
+	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
+	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
+	aes67_ctrl_servo_mon_pi_sum_raw            => servo_mon_pi_sum_raw,
+	aes67_ctrl_servo_mon_effective_gain_shift  => servo_mon_effective_gain_shift,
+	aes67_ctrl_servo_mon_lock_counter          => servo_mon_lock_counter,
+	aes67_ctrl_servo_mon_sample_count          => servo_mon_sample_count,
+	aes67_ctrl_servo_mon_first_lock_achieved   => servo_mon_first_lock_achieved
 );
 end generate;
 
@@ -785,7 +913,30 @@ PORT MAP(
 	i2c0_scl                           => i2c0_scl, -- gpio26
 	i2c0_sda                           => i2c0_sda, -- gpio27
 	i2c1_scl                           => i2c1_scl, -- gpio23
-	i2c1_sda                           => i2c1_sda -- gpio24
+	i2c1_sda                           => i2c1_sda, -- gpio24
+
+	-- PTP servo / parser tuning + monitoring
+	aes67_ctrl_ptp_reset                       => ptp_reset_litex,
+	aes67_ctrl_servo_kp_gain                   => servo_kp_gain,
+	aes67_ctrl_servo_ki_gain                   => servo_ki_gain,
+	aes67_ctrl_servo_gain_shift                => servo_gain_shift,
+	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked,
+	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift,
+	aes67_ctrl_servo_filter_shift              => servo_filter_shift,
+	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples,
+	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns,
+	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns,
+	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold,
+	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable,
+	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth,
+	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
+	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
+	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
+	aes67_ctrl_servo_mon_pi_sum_raw            => servo_mon_pi_sum_raw,
+	aes67_ctrl_servo_mon_effective_gain_shift  => servo_mon_effective_gain_shift,
+	aes67_ctrl_servo_mon_lock_counter          => servo_mon_lock_counter,
+	aes67_ctrl_servo_mon_sample_count          => servo_mon_sample_count,
+	aes67_ctrl_servo_mon_first_lock_achieved   => servo_mon_first_lock_achieved
 );
 end generate;
 
@@ -893,10 +1044,34 @@ spigen: if (soctype = "spi") generate
 		-- control flags
 		ppb_meter_start_o => ppb_meter_start,
 		wallclock_reset_o => open, -- TODO: wire when aes67_top exposes reset inputs
-		ptp_reset_o => open,
+		ptp_reset_o => ptp_reset_spi,
 		ethernet_reset_o => open,
 		meter_clear_o => audio_meter_clear,
 		adda_nrst_o => adda_nRST,
+
+		-- PTP servo / parser tuning outputs
+		servo_kp_gain_o              => servo_kp_gain,
+		servo_ki_gain_o              => servo_ki_gain,
+		servo_gain_shift_o           => servo_gain_shift,
+		servo_gain_shift_locked_o    => servo_gain_shift_locked,
+		servo_ki_extra_shift_o       => servo_ki_extra_shift,
+		servo_filter_shift_o         => servo_filter_shift,
+		servo_warmup_samples_o       => servo_warmup_samples,
+		servo_lock_threshold_ns_o    => servo_lock_threshold_ns,
+		servo_unlock_threshold_ns_o  => servo_unlock_threshold_ns,
+		servo_lock_count_threshold_o => servo_lock_count_threshold,
+		parser_min_filter_enable_o        => parser_min_filter_enable,
+		parser_min_filter_active_depth_o  => parser_min_filter_active_depth,
+
+		-- PTP servo monitoring inputs
+		servo_mon_filtered_offset_i      => servo_mon_filtered_offset,
+		servo_mon_integral_sum_i         => servo_mon_integral_sum,
+		servo_mon_pi_proportional_i      => servo_mon_pi_proportional,
+		servo_mon_pi_sum_raw_i           => servo_mon_pi_sum_raw,
+		servo_mon_effective_gain_shift_i => servo_mon_effective_gain_shift,
+		servo_mon_lock_counter_i         => servo_mon_lock_counter,
+		servo_mon_sample_count_i         => servo_mon_sample_count,
+		servo_mon_first_lock_achieved_i  => servo_mon_first_lock_achieved,
 
 		-- stream config RAM (byte-wise passthrough to aes67_top)
 		tx_cfg_wr_en_o => tx_wr_en,

@@ -10,6 +10,9 @@ Quad-Serial configuration device dummy clock cycle: 8
 
 Notes:
 
-- Data checksum for this conversion is 0x15CD36B2
+- Data checksum for this conversion is 0x15EDA482
 
 - All the addresses in this file are byte addresses
+
+- The following changes from default values for Advanced Options settings are in effect:
+	Disable EPCS ID check: ON

@@ -275,6 +275,95 @@ bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)
 	return eth_litex_read_ppb_counts(dev, wc_count, pll_count);
 }
 
+/* ---- PTP servo tuning + monitoring ---- */
+
+int fpga_hal_write_ptp_tuning(const struct fpga_hal_ptp_tuning *t)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+
+	struct eth_litex_ptp_tuning lt = {
+		.kp_gain                 = t->kp_gain,
+		.ki_gain                 = t->ki_gain,
+		.gain_shift              = t->gain_shift,
+		.gain_shift_locked       = t->gain_shift_locked,
+		.ki_extra_shift          = t->ki_extra_shift,
+		.filter_shift            = t->filter_shift,
+		.warmup_samples          = t->warmup_samples,
+		.lock_threshold_ns       = t->lock_threshold_ns,
+		.unlock_threshold_ns     = t->unlock_threshold_ns,
+		.lock_count_threshold    = t->lock_count_threshold,
+		.min_filter_enable       = t->min_filter_enable,
+		.min_filter_active_depth = t->min_filter_active_depth,
+	};
+	return eth_litex_write_ptp_tuning(dev, &lt);
+}
+
+void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev || !t) {
+		if (t) {
+			memset(t, 0, sizeof(*t));
+		}
+		return;
+	}
+
+	struct eth_litex_ptp_tuning lt;
+
+	eth_litex_read_ptp_tuning(dev, &lt);
+	t->kp_gain                 = lt.kp_gain;
+	t->ki_gain                 = lt.ki_gain;
+	t->gain_shift              = lt.gain_shift;
+	t->gain_shift_locked       = lt.gain_shift_locked;
+	t->ki_extra_shift          = lt.ki_extra_shift;
+	t->filter_shift            = lt.filter_shift;
+	t->warmup_samples          = lt.warmup_samples;
+	t->lock_threshold_ns       = lt.lock_threshold_ns;
+	t->unlock_threshold_ns     = lt.unlock_threshold_ns;
+	t->lock_count_threshold    = lt.lock_count_threshold;
+	t->min_filter_enable       = lt.min_filter_enable;
+	t->min_filter_active_depth = lt.min_filter_active_depth;
+}
+
+void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev || !m) {
+		if (m) {
+			memset(m, 0, sizeof(*m));
+		}
+		return;
+	}
+
+	struct eth_litex_ptp_monitor lm;
+
+	eth_litex_read_ptp_monitor(dev, &lm);
+	m->filtered_offset      = lm.filtered_offset;
+	m->integral_sum         = lm.integral_sum;
+	m->pi_proportional      = lm.pi_proportional;
+	m->pi_sum_raw           = lm.pi_sum_raw;
+	m->effective_gain_shift = lm.effective_gain_shift;
+	m->lock_counter         = lm.lock_counter;
+	m->sample_count         = lm.sample_count;
+	m->first_lock_achieved  = lm.first_lock_achieved;
+}
+
+int fpga_hal_set_ptp_reset(bool held_in_reset)
+{
+	const struct device *dev = fpga_hal_get_dev();
+
+	if (!dev) {
+		return -ENODEV;
+	}
+	return eth_litex_set_ptp_reset(dev, held_in_reset);
+}
+
 void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 			    uint16_t *tx_signal, uint16_t *tx_clip)
 {

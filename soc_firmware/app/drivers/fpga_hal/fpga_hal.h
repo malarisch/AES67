@@ -241,6 +241,41 @@ int32_t fpga_hal_read_ptp_offset(void);
 bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count);
 
 /* ========================================================================
+ * PTP servo / parser tuning + monitoring
+ * ======================================================================== */
+
+struct fpga_hal_ptp_tuning {
+	int8_t   kp_gain;
+	int8_t   ki_gain;
+	uint8_t  gain_shift;
+	uint8_t  gain_shift_locked;
+	uint8_t  ki_extra_shift;
+	uint8_t  filter_shift;
+	uint8_t  warmup_samples;
+	uint32_t lock_threshold_ns;
+	uint32_t unlock_threshold_ns;
+	uint8_t  lock_count_threshold;
+	bool     min_filter_enable;
+	uint8_t  min_filter_active_depth;
+};
+
+struct fpga_hal_ptp_monitor {
+	int32_t  filtered_offset;
+	int32_t  integral_sum;
+	int32_t  pi_proportional;
+	int32_t  pi_sum_raw;
+	uint8_t  effective_gain_shift;
+	uint16_t lock_counter;
+	uint16_t sample_count;
+	bool     first_lock_achieved;
+};
+
+int  fpga_hal_write_ptp_tuning(const struct fpga_hal_ptp_tuning *t);
+void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t);
+void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m);
+int  fpga_hal_set_ptp_reset(bool held_in_reset);
+
+/* ========================================================================
  * Audio metering
  * ======================================================================== */
 

@@ -105,6 +105,34 @@ ENTITY aes67_top IS
 		wallclock_configured_o : OUT STD_LOGIC;
 		wallclock_phasejump_o : OUT STD_LOGIC;
 
+		-- PTP module reset (active high, async). Combined with global rst_n
+		-- to reset everything time-related (servo, parser, wallclock).
+		ptp_reset_i : IN STD_LOGIC := '0';
+
+		-- PTP servo + parser tuning inputs (live-tunable from SoC)
+		servo_kp_gain_i              : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(5, 8));
+		servo_ki_gain_i              : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(3, 8));
+		servo_gain_shift_i           : IN STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(2, 5));
+		servo_gain_shift_locked_i    : IN STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
+		servo_ki_extra_shift_i       : IN STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(6, 5));
+		servo_filter_shift_i         : IN STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
+		servo_warmup_samples_i       : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(16, 8));
+		servo_lock_threshold_ns_i    : IN STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(500, 32));
+		servo_unlock_threshold_ns_i  : IN STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(5000, 32));
+		servo_lock_count_threshold_i : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(24, 8));
+		parser_min_filter_enable_i        : IN STD_LOGIC := '1';
+		parser_min_filter_active_depth_i  : IN STD_LOGIC_VECTOR(7 downto 0) := std_logic_vector(to_unsigned(3, 8));
+
+		-- PTP servo monitoring outputs (live PI internal state)
+		servo_mon_filtered_offset_o      : OUT STD_LOGIC_VECTOR(31 downto 0);
+		servo_mon_integral_sum_o         : OUT STD_LOGIC_VECTOR(31 downto 0);
+		servo_mon_pi_proportional_o      : OUT STD_LOGIC_VECTOR(31 downto 0);
+		servo_mon_pi_sum_raw_o           : OUT STD_LOGIC_VECTOR(31 downto 0);
+		servo_mon_effective_gain_shift_o : OUT STD_LOGIC_VECTOR(7 downto 0);
+		servo_mon_lock_counter_o         : OUT STD_LOGIC_VECTOR(15 downto 0);
+		servo_mon_sample_count_o         : OUT STD_LOGIC_VECTOR(15 downto 0);
+		servo_mon_first_lock_achieved_o  : OUT STD_LOGIC;
+
 		-- ppb meter for external pll
 		ppb_meter_start_i : IN STD_LOGIC;
 		pll_meas_valid_o : OUT STD_LOGIC;
@@ -186,7 +214,22 @@ signal mac_rx_reset : STD_LOGIC;
 signal mac_sof_sent_tog : STD_LOGIC;
 signal mac_sof_recv_tog : STD_LOGIC;
 signal mac_speed : STD_LOGIC_VECTOR(1 downto 0);
-BEGIN 
+
+-- PTP module reset: global rst_n AND NOT software-asserted ptp_reset_i.
+-- Resets servo, parser, wallclock — everything time-related.
+signal ptp_module_rst_n : STD_LOGIC;
+
+-- Servo monitoring (typed) signals between ptp_module and top-level pads
+signal servo_mon_filtered_offset_signed       : signed(31 downto 0);
+signal servo_mon_integral_sum_signed          : signed(31 downto 0);
+signal servo_mon_pi_proportional_signed       : signed(31 downto 0);
+signal servo_mon_pi_sum_raw_signed            : signed(31 downto 0);
+signal servo_mon_effective_gain_shift_unsigned: unsigned(7 downto 0);
+signal servo_mon_lock_counter_unsigned        : unsigned(15 downto 0);
+signal servo_mon_sample_count_unsigned        : unsigned(15 downto 0);
+BEGIN
+
+ptp_module_rst_n <= rst_n and not ptp_reset_i;
 
 mac_speed_o <= mac_speed;
 
@@ -290,7 +333,7 @@ mac_linkup_o <= mac_linkup;
 
 ptp_inst: entity work.ptp_module
 PORT MAP(sys_clk => sys_clk_125MHz_i,
-		 rst_n => rst_n,
+		 rst_n => ptp_module_rst_n,
 
 		 -- mac signals
 		 mac_link_up_i => mac_linkup,
@@ -336,8 +379,40 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 wc_mclk => wc_mclk,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
-		 mac_speed_i => mac_speed
+		 mac_speed_i => mac_speed,
+
+		 -- Servo / parser tuning inputs (live-tunable from SoC)
+		 servo_kp_gain_i              => signed(servo_kp_gain_i),
+		 servo_ki_gain_i              => signed(servo_ki_gain_i),
+		 servo_gain_shift_i           => unsigned(servo_gain_shift_i),
+		 servo_gain_shift_locked_i    => unsigned(servo_gain_shift_locked_i),
+		 servo_ki_extra_shift_i       => unsigned(servo_ki_extra_shift_i),
+		 servo_filter_shift_i         => unsigned(servo_filter_shift_i),
+		 servo_warmup_samples_i       => unsigned(servo_warmup_samples_i),
+		 servo_lock_threshold_ns_i    => unsigned(servo_lock_threshold_ns_i),
+		 servo_unlock_threshold_ns_i  => unsigned(servo_unlock_threshold_ns_i),
+		 servo_lock_count_threshold_i => unsigned(servo_lock_count_threshold_i),
+		 parser_min_filter_enable_i        => parser_min_filter_enable_i,
+		 parser_min_filter_active_depth_i  => unsigned(parser_min_filter_active_depth_i),
+
+		 -- Servo monitoring outputs to top-level
+		 servo_mon_filtered_offset_o      => servo_mon_filtered_offset_signed,
+		 servo_mon_integral_sum_o         => servo_mon_integral_sum_signed,
+		 servo_mon_pi_proportional_o      => servo_mon_pi_proportional_signed,
+		 servo_mon_pi_sum_raw_o           => servo_mon_pi_sum_raw_signed,
+		 servo_mon_effective_gain_shift_o => servo_mon_effective_gain_shift_unsigned,
+		 servo_mon_lock_counter_o         => servo_mon_lock_counter_unsigned,
+		 servo_mon_sample_count_o         => servo_mon_sample_count_unsigned,
+		 servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_o
 		 );
+
+servo_mon_filtered_offset_o      <= std_logic_vector(servo_mon_filtered_offset_signed);
+servo_mon_integral_sum_o         <= std_logic_vector(servo_mon_integral_sum_signed);
+servo_mon_pi_proportional_o      <= std_logic_vector(servo_mon_pi_proportional_signed);
+servo_mon_pi_sum_raw_o           <= std_logic_vector(servo_mon_pi_sum_raw_signed);
+servo_mon_effective_gain_shift_o <= std_logic_vector(servo_mon_effective_gain_shift_unsigned);
+servo_mon_lock_counter_o         <= std_logic_vector(servo_mon_lock_counter_unsigned);
+servo_mon_sample_count_o         <= std_logic_vector(servo_mon_sample_count_unsigned);
 		 
 
 

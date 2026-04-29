@@ -90,7 +90,36 @@ entity spictrl is
         rx_channel_meter_sig_i : IN STD_LOGIC_VECTOR(RXCHANNELS - 1 downto 0);
         rx_channel_meter_clip_i : IN STD_LOGIC_VECTOR(RXCHANNELS - 1 downto 0);
         tx_channel_meter_sig_i : IN STD_LOGIC_VECTOR(TXCHANNELS - 1 downto 0);
-        tx_channel_meter_clip_i : IN STD_LOGIC_VECTOR(TXCHANNELS - 1 downto 0)
+        tx_channel_meter_clip_i : IN STD_LOGIC_VECTOR(TXCHANNELS - 1 downto 0);
+
+        -- =============================================================
+        -- PTP servo / parser tuning (output, written via SPI register 0x60).
+        -- All values in one transaction so we save SPI addresses.
+        -- =============================================================
+        servo_kp_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(5, 8));
+        servo_ki_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(3, 8));
+        servo_gain_shift_o           : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(2, 5));
+        servo_gain_shift_locked_o    : OUT STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
+        servo_ki_extra_shift_o       : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(6, 5));
+        servo_filter_shift_o         : OUT STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
+        servo_warmup_samples_o       : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(16, 8));
+        servo_lock_threshold_ns_o    : OUT STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(500, 32));
+        servo_unlock_threshold_ns_o  : OUT STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(5000, 32));
+        servo_lock_count_threshold_o : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(24, 8));
+        parser_min_filter_enable_o        : OUT STD_LOGIC := '1';
+        parser_min_filter_active_depth_o  : OUT STD_LOGIC_VECTOR(7 downto 0) := std_logic_vector(to_unsigned(3, 8));
+
+        -- PTP servo monitoring inputs (read via SPI register 0x61).
+        -- Defaulted so legacy top-level files that don't drive these still
+        -- compile; the SPI register then just reads zero.
+        servo_mon_filtered_offset_i      : IN STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+        servo_mon_integral_sum_i         : IN STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+        servo_mon_pi_proportional_i      : IN STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+        servo_mon_pi_sum_raw_i           : IN STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+        servo_mon_effective_gain_shift_i : IN STD_LOGIC_VECTOR(7 downto 0)  := (others => '0');
+        servo_mon_lock_counter_i         : IN STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
+        servo_mon_sample_count_i         : IN STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
+        servo_mon_first_lock_achieved_i  : IN STD_LOGIC                     := '0'
     );
 end entity;
 
@@ -124,6 +153,23 @@ architecture rtl of spictrl is
     signal ip_shadow   : std_logic_vector(31 downto 0) := (others => '0');
     signal ptp_shadow  : std_logic_vector(7*8-1 downto 0) := (others => '0'); -- 0x55, 7 B
     signal flag_shadow : std_logic_vector(7 downto 0) := (others => '0'); -- 0x50
+
+    -- Shadow buffer for the 18-byte PTP tuning block (register 0x60)
+    type ptp_tuning_shadow_t is array(0 to 17) of std_logic_vector(7 downto 0);
+    signal ptp_tuning_shadow : ptp_tuning_shadow_t := (
+        0  => std_logic_vector(to_signed(5, 8)),
+        1  => std_logic_vector(to_signed(3, 8)),
+        2  => std_logic_vector(to_unsigned(2, 8)),
+        3  => (others => '0'),
+        4  => std_logic_vector(to_unsigned(6, 8)),
+        5  => (others => '0'),
+        6  => std_logic_vector(to_unsigned(16, 8)),
+        7  => x"F4", 8  => x"01", 9  => x"00", 10 => x"00",  -- lock thr 500
+        11 => x"88", 12 => x"13", 13 => x"00", 14 => x"00",  -- unlock thr 5000
+        15 => std_logic_vector(to_unsigned(24, 8)),
+        16 => std_logic_vector(to_unsigned(1, 8)),
+        17 => std_logic_vector(to_unsigned(3, 8))
+    );
 
     -- PPB-meter handshake: bit set by host, auto-cleared when measurement valid falls.
     -- Tracks previous pll_meas_valid to catch falling edge.
@@ -398,6 +444,32 @@ begin
                         when "1010101" => -- 0x55 GM id
                             spi_data_to_host <= ptp_gmid_i((transaction_byte_counter * 8) + 7
                                                            downto transaction_byte_counter * 8);
+                        when "1100001" => -- 0x61 PTP servo monitoring (22 B)
+                            case transaction_byte_counter is
+                                when 0  => spi_data_to_host <= servo_mon_filtered_offset_i(7 downto 0);
+                                when 1  => spi_data_to_host <= servo_mon_filtered_offset_i(15 downto 8);
+                                when 2  => spi_data_to_host <= servo_mon_filtered_offset_i(23 downto 16);
+                                when 3  => spi_data_to_host <= servo_mon_filtered_offset_i(31 downto 24);
+                                when 4  => spi_data_to_host <= servo_mon_integral_sum_i(7 downto 0);
+                                when 5  => spi_data_to_host <= servo_mon_integral_sum_i(15 downto 8);
+                                when 6  => spi_data_to_host <= servo_mon_integral_sum_i(23 downto 16);
+                                when 7  => spi_data_to_host <= servo_mon_integral_sum_i(31 downto 24);
+                                when 8  => spi_data_to_host <= servo_mon_pi_proportional_i(7 downto 0);
+                                when 9  => spi_data_to_host <= servo_mon_pi_proportional_i(15 downto 8);
+                                when 10 => spi_data_to_host <= servo_mon_pi_proportional_i(23 downto 16);
+                                when 11 => spi_data_to_host <= servo_mon_pi_proportional_i(31 downto 24);
+                                when 12 => spi_data_to_host <= servo_mon_pi_sum_raw_i(7 downto 0);
+                                when 13 => spi_data_to_host <= servo_mon_pi_sum_raw_i(15 downto 8);
+                                when 14 => spi_data_to_host <= servo_mon_pi_sum_raw_i(23 downto 16);
+                                when 15 => spi_data_to_host <= servo_mon_pi_sum_raw_i(31 downto 24);
+                                when 16 => spi_data_to_host <= servo_mon_effective_gain_shift_i;
+                                when 17 => spi_data_to_host <= servo_mon_lock_counter_i(7 downto 0);
+                                when 18 => spi_data_to_host <= servo_mon_lock_counter_i(15 downto 8);
+                                when 19 => spi_data_to_host <= servo_mon_sample_count_i(7 downto 0);
+                                when 20 => spi_data_to_host <= servo_mon_sample_count_i(15 downto 8);
+                                when 21 => spi_data_to_host <= "0000000" & servo_mon_first_lock_achieved_i;
+                                when others => spi_data_to_host <= x"00";
+                            end case;
                         when others =>
                             spi_data_to_host <= x"00";
                     end case;
@@ -424,6 +496,7 @@ begin
                     when "1010011" => read_bytes <= 4; -- 0x53 offset
                     when "1010100" => read_bytes <= 8; -- 0x54 ppb counters
                     when "1010101" => read_bytes <= 8; -- 0x55 gm id
+                    when "1100001" => read_bytes <= 22; -- 0x61 PTP servo monitoring
                     when others => read_bytes <= 0;
                 end case;
             end if;
@@ -448,6 +521,7 @@ begin
                     when "1010101" => write_bytes <= 7;  -- 0x55 PTP config
                     when "1011000" => write_bytes <= 20; -- 0x58 TX stream
                     when "1011001" => write_bytes <= 18; -- 0x59 RX stream
+                    when "1100000" => write_bytes <= 18; -- 0x60 PTP tuning block
                     when others    => write_bytes <= 0;
                 end case;
                 if (active_register = "0100000" and transaction_byte_counter >= 2) then
@@ -597,6 +671,10 @@ begin
                         if byte_idx = 0 then
                             stream_id_latched <= unsigned(spi_data_from_host(2 downto 0));
                         end if;
+                    when "1100000" => -- 0x60 PTP tuning block (18 bytes, byte 0 = first)
+                        if byte_idx < 18 then
+                            ptp_tuning_shadow(byte_idx) <= spi_data_from_host;
+                        end if;
                     when others => null;
                 end case;
             end if;
@@ -624,6 +702,20 @@ begin
             ethernet_reset_o            <= '0';
             adda_nrst_o                 <= '0';
             ppb_meas_valid_z            <= '0';
+
+            -- PTP tuning output defaults (match ptp_tuning_shadow init)
+            servo_kp_gain_o              <= std_logic_vector(to_signed(5, 8));
+            servo_ki_gain_o              <= std_logic_vector(to_signed(3, 8));
+            servo_gain_shift_o           <= std_logic_vector(to_unsigned(2, 5));
+            servo_gain_shift_locked_o    <= (others => '0');
+            servo_ki_extra_shift_o       <= std_logic_vector(to_unsigned(6, 5));
+            servo_filter_shift_o         <= (others => '0');
+            servo_warmup_samples_o       <= std_logic_vector(to_unsigned(16, 8));
+            servo_lock_threshold_ns_o    <= std_logic_vector(to_unsigned(500, 32));
+            servo_unlock_threshold_ns_o  <= std_logic_vector(to_unsigned(5000, 32));
+            servo_lock_count_threshold_o <= std_logic_vector(to_unsigned(24, 8));
+            parser_min_filter_enable_o        <= '1';
+            parser_min_filter_active_depth_o  <= std_logic_vector(to_unsigned(3, 8));
         elsif rising_edge(sys_clk_i) then
 
             -- PPB-meter auto-clear: drop ppb_meter_start_o when valid falls
@@ -655,6 +747,25 @@ begin
                         ptp_priority2_o             <= ptp_shadow(23 downto 16); -- byte 4
                         ptp_clock_class_o           <= ptp_shadow(15 downto 8);  -- byte 5
                         ptp_clock_accuracy_o        <= ptp_shadow(7 downto 0);   -- byte 6
+                    when "1100000" => -- 0x60 PTP tuning block (18 B)
+                        servo_kp_gain_o              <= ptp_tuning_shadow(0);
+                        servo_ki_gain_o              <= ptp_tuning_shadow(1);
+                        servo_gain_shift_o           <= ptp_tuning_shadow(2)(4 downto 0);
+                        servo_gain_shift_locked_o    <= ptp_tuning_shadow(3)(4 downto 0);
+                        servo_ki_extra_shift_o       <= ptp_tuning_shadow(4)(4 downto 0);
+                        servo_filter_shift_o         <= ptp_tuning_shadow(5)(4 downto 0);
+                        servo_warmup_samples_o       <= ptp_tuning_shadow(6);
+                        servo_lock_threshold_ns_o    <= ptp_tuning_shadow(10)
+                                                      & ptp_tuning_shadow(9)
+                                                      & ptp_tuning_shadow(8)
+                                                      & ptp_tuning_shadow(7);
+                        servo_unlock_threshold_ns_o  <= ptp_tuning_shadow(14)
+                                                      & ptp_tuning_shadow(13)
+                                                      & ptp_tuning_shadow(12)
+                                                      & ptp_tuning_shadow(11);
+                        servo_lock_count_threshold_o <= ptp_tuning_shadow(15);
+                        parser_min_filter_enable_o        <= ptp_tuning_shadow(16)(0);
+                        parser_min_filter_active_depth_o  <= ptp_tuning_shadow(17);
                     when others => null;
                 end case;
             end if;

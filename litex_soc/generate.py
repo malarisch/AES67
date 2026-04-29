@@ -249,6 +249,29 @@ _io_common = [
         Subsignal("ptp_gm_clock_accuracy", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
         Subsignal("adda_nrst",          Pins(1)),   # AD/DA card nRST (output, active-high release)
+        Subsignal("ptp_reset",          Pins(1)),   # SoC -> FPGA: reset PTP module + wallclock
+        # PTP servo / parser tuning (SoC -> FPGA)
+        Subsignal("servo_kp_gain",              Pins(8)),
+        Subsignal("servo_ki_gain",              Pins(8)),
+        Subsignal("servo_gain_shift",           Pins(5)),
+        Subsignal("servo_gain_shift_locked",    Pins(5)),
+        Subsignal("servo_ki_extra_shift",       Pins(5)),
+        Subsignal("servo_filter_shift",         Pins(5)),
+        Subsignal("servo_warmup_samples",       Pins(8)),
+        Subsignal("servo_lock_threshold_ns",    Pins(32)),
+        Subsignal("servo_unlock_threshold_ns",  Pins(32)),
+        Subsignal("servo_lock_count_threshold", Pins(8)),
+        Subsignal("parser_min_filter_enable",       Pins(1)),
+        Subsignal("parser_min_filter_active_depth", Pins(8)),
+        # PTP servo monitoring (FPGA -> SoC)
+        Subsignal("servo_mon_filtered_offset",      Pins(32)),
+        Subsignal("servo_mon_integral_sum",         Pins(32)),
+        Subsignal("servo_mon_pi_proportional",      Pins(32)),
+        Subsignal("servo_mon_pi_sum_raw",           Pins(32)),
+        Subsignal("servo_mon_effective_gain_shift", Pins(8)),
+        Subsignal("servo_mon_lock_counter",         Pins(16)),
+        Subsignal("servo_mon_sample_count",         Pins(16)),
+        Subsignal("servo_mon_first_lock_achieved",  Pins(1)),
         # Audio metering (from external FPGA logic -> SoC)
         Subsignal("rx_meter_signal",    Pins(16)),  # RX signal detect (1 bit per channel)
         Subsignal("rx_meter_clip",      Pins(16)),  # RX clip detect (1 bit per channel)
@@ -568,6 +591,31 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_eth_tx_request      = Signal()
         self.o_adda_nrst           = Signal()  # AD/DA card hardware reset (active-high → nRST pin)
         self.o_meter_clear         = Signal()  # Metering clear toggle (to FPGA)
+        self.o_ptp_reset           = Signal()  # PTP module reset (active high)
+
+        # PTP servo / parser tuning (SoC -> FPGA)
+        self.o_servo_kp_gain              = Signal(8)
+        self.o_servo_ki_gain              = Signal(8)
+        self.o_servo_gain_shift           = Signal(5)
+        self.o_servo_gain_shift_locked    = Signal(5)
+        self.o_servo_ki_extra_shift       = Signal(5)
+        self.o_servo_filter_shift         = Signal(5)
+        self.o_servo_warmup_samples       = Signal(8)
+        self.o_servo_lock_threshold_ns    = Signal(32)
+        self.o_servo_unlock_threshold_ns  = Signal(32)
+        self.o_servo_lock_count_threshold = Signal(8)
+        self.o_parser_min_filter_enable        = Signal()
+        self.o_parser_min_filter_active_depth  = Signal(8)
+
+        # PTP servo monitoring (FPGA -> SoC)
+        self.i_servo_mon_filtered_offset      = Signal(32)
+        self.i_servo_mon_integral_sum         = Signal(32)
+        self.i_servo_mon_pi_proportional      = Signal(32)
+        self.i_servo_mon_pi_sum_raw           = Signal(32)
+        self.i_servo_mon_effective_gain_shift = Signal(8)
+        self.i_servo_mon_lock_counter         = Signal(16)
+        self.i_servo_mon_sample_count         = Signal(16)
+        self.i_servo_mon_first_lock_achieved  = Signal()
 
         # =====================================================================
         # CSR: Status registers (RO) — directly sampled from input signals
@@ -632,6 +680,42 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.scratch = CSRStorage(32, description="Scratch register (read/write, no HW effect)")
 
         # =====================================================================
+        # PTP servo / parser tuning CSRs (RW) — one CSR per value as requested
+        # =====================================================================
+        self.servo_kp_gain              = CSRStorage(8,  reset=5,    description="Servo Kp gain (signed)")
+        self.servo_ki_gain              = CSRStorage(8,  reset=3,    description="Servo Ki gain (signed)")
+        self.servo_gain_shift           = CSRStorage(5,  reset=2,    description="Servo base gain shift")
+        self.servo_gain_shift_locked    = CSRStorage(5,  reset=0,    description="Servo extra gain shift when locked")
+        self.servo_ki_extra_shift       = CSRStorage(5,  reset=6,    description="Servo Ki extra shift relative to Kp")
+        self.servo_filter_shift         = CSRStorage(5,  reset=0,    description="Servo offset EMA filter shift (0=no filter)")
+        self.servo_warmup_samples       = CSRStorage(8,  reset=16,   description="Servo warmup sample count")
+        self.servo_lock_threshold_ns    = CSRStorage(32, reset=500,  description="Servo lock threshold (ns)")
+        self.servo_unlock_threshold_ns  = CSRStorage(32, reset=5000, description="Servo unlock threshold (ns)")
+        self.servo_lock_count_threshold = CSRStorage(8,  reset=24,   description="Servo consecutive samples needed to lock")
+
+        self.parser_min_filter = CSRStorage(32, reset=(3 << 8) | 1, fields=[
+            CSRField("enable",       size=1, offset=0,  description="Enable min filter"),
+            CSRField("active_depth", size=8, offset=8,  description="Active min filter depth (clamped to MIN_FILTER_DEPTH)"),
+        ])
+
+        # PTP module reset (RW pulse register: write 1 to assert, write 0 to release)
+        self.ptp_reset = CSRStorage(1, reset=0, description="PTP module reset (1 = held in reset)")
+
+        # =====================================================================
+        # PTP servo monitoring CSRs (RO)
+        # =====================================================================
+        self.servo_mon_filtered_offset      = CSRStatus(32, description="Servo: filtered offset (signed ns)")
+        self.servo_mon_integral_sum         = CSRStatus(32, description="Servo: PI integrator state (signed)")
+        self.servo_mon_pi_proportional      = CSRStatus(32, description="Servo: PI proportional term (signed)")
+        self.servo_mon_pi_sum_raw           = CSRStatus(32, description="Servo: PI raw sum pre-clamp (signed)")
+        self.servo_mon_status = CSRStatus(32, fields=[
+            CSRField("effective_gain_shift", size=8,  offset=0,  description="Effective gain shift"),
+            CSRField("lock_counter",         size=16, offset=8,  description="Lock counter"),
+            CSRField("first_lock_achieved",  size=1,  offset=24, description="First lock achieved"),
+        ])
+        self.servo_mon_sample_count = CSRStatus(16, description="Servo: warmup sample count")
+
+        # =====================================================================
         # Wiring: input signals -> CSR status fields
         # =====================================================================
         self.comb += [
@@ -682,6 +766,33 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_ptp_gm_priority2.eq(self.ptp_gm_priority2.storage),
             self.o_ptp_gm_clock_class.eq(self.ptp_gm_clock_class.storage),
             self.o_ptp_gm_clock_accuracy.eq(self.ptp_gm_clock_accuracy.storage),
+
+            # PTP module reset
+            self.o_ptp_reset.eq(self.ptp_reset.storage[0]),
+
+            # PTP servo / parser tuning -> output signals
+            self.o_servo_kp_gain.eq(self.servo_kp_gain.storage),
+            self.o_servo_ki_gain.eq(self.servo_ki_gain.storage),
+            self.o_servo_gain_shift.eq(self.servo_gain_shift.storage),
+            self.o_servo_gain_shift_locked.eq(self.servo_gain_shift_locked.storage),
+            self.o_servo_ki_extra_shift.eq(self.servo_ki_extra_shift.storage),
+            self.o_servo_filter_shift.eq(self.servo_filter_shift.storage),
+            self.o_servo_warmup_samples.eq(self.servo_warmup_samples.storage),
+            self.o_servo_lock_threshold_ns.eq(self.servo_lock_threshold_ns.storage),
+            self.o_servo_unlock_threshold_ns.eq(self.servo_unlock_threshold_ns.storage),
+            self.o_servo_lock_count_threshold.eq(self.servo_lock_count_threshold.storage),
+            self.o_parser_min_filter_enable.eq(self.parser_min_filter.fields.enable),
+            self.o_parser_min_filter_active_depth.eq(self.parser_min_filter.fields.active_depth),
+
+            # PTP servo monitoring inputs -> CSR status
+            self.servo_mon_filtered_offset.status.eq(self.i_servo_mon_filtered_offset),
+            self.servo_mon_integral_sum.status.eq(self.i_servo_mon_integral_sum),
+            self.servo_mon_pi_proportional.status.eq(self.i_servo_mon_pi_proportional),
+            self.servo_mon_pi_sum_raw.status.eq(self.i_servo_mon_pi_sum_raw),
+            self.servo_mon_status.fields.effective_gain_shift.eq(self.i_servo_mon_effective_gain_shift),
+            self.servo_mon_status.fields.lock_counter.eq(self.i_servo_mon_lock_counter),
+            self.servo_mon_status.fields.first_lock_achieved.eq(self.i_servo_mon_first_lock_achieved),
+            self.servo_mon_sample_count.status.eq(self.i_servo_mon_sample_count),
         ]
 
 
@@ -1134,6 +1245,33 @@ class AES67SoC(SoCCore):
             aes67_pads.eth_tx_request.eq(self.aes67_csr.o_eth_tx_request),
             aes67_pads.adda_nrst.eq(self.aes67_csr.o_adda_nrst),
             aes67_pads.meter_clear.eq(self.aes67_csr.o_meter_clear),
+
+            # PTP module reset
+            aes67_pads.ptp_reset.eq(self.aes67_csr.o_ptp_reset),
+
+            # PTP servo / parser tuning (SoC -> FPGA)
+            aes67_pads.servo_kp_gain.eq(self.aes67_csr.o_servo_kp_gain),
+            aes67_pads.servo_ki_gain.eq(self.aes67_csr.o_servo_ki_gain),
+            aes67_pads.servo_gain_shift.eq(self.aes67_csr.o_servo_gain_shift),
+            aes67_pads.servo_gain_shift_locked.eq(self.aes67_csr.o_servo_gain_shift_locked),
+            aes67_pads.servo_ki_extra_shift.eq(self.aes67_csr.o_servo_ki_extra_shift),
+            aes67_pads.servo_filter_shift.eq(self.aes67_csr.o_servo_filter_shift),
+            aes67_pads.servo_warmup_samples.eq(self.aes67_csr.o_servo_warmup_samples),
+            aes67_pads.servo_lock_threshold_ns.eq(self.aes67_csr.o_servo_lock_threshold_ns),
+            aes67_pads.servo_unlock_threshold_ns.eq(self.aes67_csr.o_servo_unlock_threshold_ns),
+            aes67_pads.servo_lock_count_threshold.eq(self.aes67_csr.o_servo_lock_count_threshold),
+            aes67_pads.parser_min_filter_enable.eq(self.aes67_csr.o_parser_min_filter_enable),
+            aes67_pads.parser_min_filter_active_depth.eq(self.aes67_csr.o_parser_min_filter_active_depth),
+
+            # PTP servo monitoring (FPGA -> SoC)
+            self.aes67_csr.i_servo_mon_filtered_offset.eq(aes67_pads.servo_mon_filtered_offset),
+            self.aes67_csr.i_servo_mon_integral_sum.eq(aes67_pads.servo_mon_integral_sum),
+            self.aes67_csr.i_servo_mon_pi_proportional.eq(aes67_pads.servo_mon_pi_proportional),
+            self.aes67_csr.i_servo_mon_pi_sum_raw.eq(aes67_pads.servo_mon_pi_sum_raw),
+            self.aes67_csr.i_servo_mon_effective_gain_shift.eq(aes67_pads.servo_mon_effective_gain_shift),
+            self.aes67_csr.i_servo_mon_lock_counter.eq(aes67_pads.servo_mon_lock_counter),
+            self.aes67_csr.i_servo_mon_sample_count.eq(aes67_pads.servo_mon_sample_count),
+            self.aes67_csr.i_servo_mon_first_lock_achieved.eq(aes67_pads.servo_mon_first_lock_achieved),
         ]
 
         # -- Ethernet Packet Buffers -------------------------------------------

@@ -42,7 +42,36 @@ ENTITY ptp_module IS
 		ptp_offset_from_master :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_ram_addr :  OUT  STD_LOGIC_VECTOR(10 DOWNTO 0);
 		tx_data_ptpfu :  OUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
-		mac_speed_i : IN STD_LOGIC_VECTOR(1 downto 0)
+		mac_speed_i : IN STD_LOGIC_VECTOR(1 downto 0);
+
+		-- ============================================================
+		-- Servo + parser tuning inputs (live-tunable from SoC)
+		-- ============================================================
+		servo_kp_gain_i              : IN signed(7 downto 0)  := to_signed(5, 8);
+		servo_ki_gain_i              : IN signed(7 downto 0)  := to_signed(3, 8);
+		servo_gain_shift_i           : IN unsigned(4 downto 0):= to_unsigned(2, 5);
+		servo_gain_shift_locked_i    : IN unsigned(4 downto 0):= to_unsigned(0, 5);
+		servo_ki_extra_shift_i       : IN unsigned(4 downto 0):= to_unsigned(6, 5);
+		servo_filter_shift_i         : IN unsigned(4 downto 0):= to_unsigned(0, 5);
+		servo_warmup_samples_i       : IN unsigned(7 downto 0):= to_unsigned(16, 8);
+		servo_lock_threshold_ns_i    : IN unsigned(31 downto 0):= to_unsigned(500, 32);
+		servo_unlock_threshold_ns_i  : IN unsigned(31 downto 0):= to_unsigned(5000, 32);
+		servo_lock_count_threshold_i : IN unsigned(7 downto 0):= to_unsigned(24, 8);
+
+		parser_min_filter_enable_i        : IN STD_LOGIC := '1';
+		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0) := to_unsigned(3, 8);
+
+		-- ============================================================
+		-- Servo monitoring outputs (live PI internal state)
+		-- ============================================================
+		servo_mon_filtered_offset_o      : OUT signed(31 downto 0);
+		servo_mon_integral_sum_o         : OUT signed(31 downto 0);
+		servo_mon_pi_proportional_o      : OUT signed(31 downto 0);
+		servo_mon_pi_sum_raw_o           : OUT signed(31 downto 0);
+		servo_mon_effective_gain_shift_o : OUT unsigned(7 downto 0);
+		servo_mon_lock_counter_o         : OUT unsigned(15 downto 0);
+		servo_mon_sample_count_o         : OUT unsigned(15 downto 0);
+		servo_mon_first_lock_achieved_o  : OUT STD_LOGIC
 	);
 END ptp_module;
 
@@ -195,7 +224,7 @@ PORT MAP(sys_clk => sys_clk,
 
 
 b2v_ptpparser :  entity work.ptpv2_parser
-GENERIC MAP(MIN_FILTER_DEPTH => 6
+GENERIC MAP(MIN_FILTER_DEPTH => 8
 			)
 PORT MAP(clk => sys_clk,
 		 parse_ptp_packet_tog => parse_ptp_packet_tog,
@@ -206,6 +235,8 @@ PORT MAP(clk => sys_clk,
 		 ptp_locked_i => ptp_locked_ALTERA_SYNTHESIZED,
 		 ptp_current_leader_id_i => eff_current_leader_id,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
+		 min_filter_enable_i => parser_min_filter_enable_i,
+		 min_filter_active_depth_i => parser_min_filter_active_depth_i,
 		 ram_data => mac_ram_data,
 		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
 		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
@@ -309,7 +340,27 @@ PORT MAP(clk => sys_clk,
 		 locked_o => ptp_locked_ALTERA_SYNTHESIZED,
 		 freq_correction_o => freq_correction,
 		 phase_jump_o => phase_jump,
-		 request_clock_reconfigure_o => servo_request_clock_reconfigure);
+		 request_clock_reconfigure_o => servo_request_clock_reconfigure,
+		 -- Live-tuning inputs from top-level
+		 kp_gain_i              => servo_kp_gain_i,
+		 ki_gain_i              => servo_ki_gain_i,
+		 gain_shift_i           => servo_gain_shift_i,
+		 gain_shift_locked_i    => servo_gain_shift_locked_i,
+		 ki_extra_shift_i       => servo_ki_extra_shift_i,
+		 filter_shift_i         => servo_filter_shift_i,
+		 warmup_samples_i       => servo_warmup_samples_i,
+		 lock_threshold_ns_i    => servo_lock_threshold_ns_i,
+		 unlock_threshold_ns_i  => servo_unlock_threshold_ns_i,
+		 lock_count_threshold_i => servo_lock_count_threshold_i,
+		 -- Monitoring outputs to top-level
+		 mon_filtered_offset_o      => servo_mon_filtered_offset_o,
+		 mon_integral_sum_o         => servo_mon_integral_sum_o,
+		 mon_pi_proportional_o      => servo_mon_pi_proportional_o,
+		 mon_pi_sum_raw_o           => servo_mon_pi_sum_raw_o,
+		 mon_effective_gain_shift_o => servo_mon_effective_gain_shift_o,
+		 mon_lock_counter_o         => servo_mon_lock_counter_o,
+		 mon_sample_count_o         => servo_mon_sample_count_o,
+		 mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_o);
 
 
 b2v_wallclock :  entity work.wallclock

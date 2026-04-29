@@ -321,3 +321,31 @@ bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)
 	}
 	return (status & ETH_FMC_CLK_PPB_VALID) != 0;
 }
+
+/* ---- PTP servo tuning + monitoring (not implemented on FMC backend) ---- */
+
+int fpga_hal_write_ptp_tuning(const struct fpga_hal_ptp_tuning *t)
+{
+	ARG_UNUSED(t);
+	return -ENOTSUP;
+}
+
+void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t)
+{
+	if (t) {
+		memset(t, 0, sizeof(*t));
+	}
+}
+
+void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m)
+{
+	if (m) {
+		memset(m, 0, sizeof(*m));
+	}
+}
+
+int fpga_hal_set_ptp_reset(bool held_in_reset)
+{
+	ARG_UNUSED(held_in_reset);
+	return -ENOTSUP;
+}

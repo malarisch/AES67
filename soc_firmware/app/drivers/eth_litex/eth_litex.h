@@ -174,6 +174,44 @@ int eth_litex_write_tx_stream_config(const struct device *dev,
 				     uint8_t num_ch_ids,
 				     uint32_t ssrc);
 
+/* ========================================================================
+ * PTP servo / parser tuning + monitoring
+ * ======================================================================== */
+
+struct eth_litex_ptp_tuning {
+	int8_t   kp_gain;
+	int8_t   ki_gain;
+	uint8_t  gain_shift;
+	uint8_t  gain_shift_locked;
+	uint8_t  ki_extra_shift;
+	uint8_t  filter_shift;
+	uint8_t  warmup_samples;
+	uint32_t lock_threshold_ns;
+	uint32_t unlock_threshold_ns;
+	uint8_t  lock_count_threshold;
+	bool     min_filter_enable;
+	uint8_t  min_filter_active_depth;
+};
+
+struct eth_litex_ptp_monitor {
+	int32_t  filtered_offset;
+	int32_t  integral_sum;
+	int32_t  pi_proportional;
+	int32_t  pi_sum_raw;
+	uint8_t  effective_gain_shift;
+	uint16_t lock_counter;
+	uint16_t sample_count;
+	bool     first_lock_achieved;
+};
+
+int  eth_litex_write_ptp_tuning(const struct device *dev,
+				const struct eth_litex_ptp_tuning *t);
+void eth_litex_read_ptp_tuning(const struct device *dev,
+				struct eth_litex_ptp_tuning *t);
+void eth_litex_read_ptp_monitor(const struct device *dev,
+				struct eth_litex_ptp_monitor *m);
+int  eth_litex_set_ptp_reset(const struct device *dev, bool held_in_reset);
+
 /**
  * @brief Write RX stream configuration to the stream config RAM.
  *

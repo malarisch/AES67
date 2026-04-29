@@ -4,13 +4,10 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity ptpv2_parser is
     generic(
-        -- Min filter depth for path delay measurements
-        -- Higher values give more stable results but slower convergence
-        MIN_FILTER_DEPTH : integer := 2;
-        -- Set to false to bypass the min filter entirely. Path delay and offset
-        -- are then computed directly from the latest delta_m2s / delta_s2m pair.
-        -- Saves the BRAM buffer and the multi-cycle min search state machine.
-        MIN_FILTER_ENABLE : boolean := false
+        -- Maximum min-filter depth (sets the BRAM buffer size).
+        -- The actual operating depth is min_filter_active_depth_i (clamped to
+        -- this max), and enable is min_filter_enable_i.
+        MIN_FILTER_DEPTH : integer := 8
     );
     port(
         clk                 : in std_logic;
@@ -58,6 +55,11 @@ entity ptpv2_parser is
         -- Pulse from servo: offset implausibly large, redo full clock set
         -- on the next Follow_Up.
         clock_reconfigure_req_i : in std_logic;
+
+        -- Min filter live-tuning inputs (replace former generic).
+        -- min_filter_active_depth_i is clamped internally to MIN_FILTER_DEPTH.
+        min_filter_enable_i        : in std_logic := '1';
+        min_filter_active_depth_i  : in unsigned(7 downto 0) := to_unsigned(3, 8);
         
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
@@ -111,6 +113,10 @@ architecture Behavioral of ptpv2_parser is
     signal m2s_fill_count   : integer range 0 to MIN_FILTER_DEPTH := 0;
     signal s2m_write_idx    : integer range 0 to MIN_FILTER_DEPTH-1 := 0;
     signal s2m_fill_count   : integer range 0 to MIN_FILTER_DEPTH := 0;
+
+    -- Effective min-filter depth: clamp the runtime input against MIN_FILTER_DEPTH
+    -- (which sets the BRAM size). 0 is treated as 1.
+    signal eff_min_filter_depth : integer range 1 to MIN_FILTER_DEPTH := 1;
 
     -- Min search state machine
     -- RAM has 1-cycle read latency, so we need an extra FETCH stage before ABS:
@@ -662,7 +668,15 @@ begin
 
                 -- Initialize min search
                 min_search_state <= MS_IDLE;
-                if MIN_FILTER_ENABLE then
+                -- Latch the active depth on entry, clamped against MIN_FILTER_DEPTH
+                if to_integer(min_filter_active_depth_i) = 0 then
+                    eff_min_filter_depth <= 1;
+                elsif to_integer(min_filter_active_depth_i) > MIN_FILTER_DEPTH then
+                    eff_min_filter_depth <= MIN_FILTER_DEPTH;
+                else
+                    eff_min_filter_depth <= to_integer(min_filter_active_depth_i);
+                end if;
+                if min_filter_enable_i = '1' then
                     s_SM_PtpParser <= s_Calc_MinFilter;
                 else
                     s_SM_PtpParser <= s_Calc_Bypass;
@@ -679,15 +693,15 @@ begin
                         -- Write new m2s sample (address range 0..DEPTH-1)
                         delay_buffer(m2s_write_idx) <= delta_m2s_reg;
 
-                        -- Update write index (circular)
-                        if m2s_write_idx = MIN_FILTER_DEPTH - 1 then
+                        -- Update write index (circular within active depth)
+                        if m2s_write_idx >= eff_min_filter_depth - 1 then
                             m2s_write_idx <= 0;
                         else
                             m2s_write_idx <= m2s_write_idx + 1;
                         end if;
 
-                        -- Update fill count
-                        if m2s_fill_count < MIN_FILTER_DEPTH then
+                        -- Update fill count (cap at active depth)
+                        if m2s_fill_count < eff_min_filter_depth then
                             m2s_fill_count <= m2s_fill_count + 1;
                         end if;
 
@@ -719,7 +733,7 @@ begin
                             current_min_abs <= fetched_abs;
                         end if;
 
-                        if search_idx = MIN_FILTER_DEPTH - 1 then
+                        if search_idx >= eff_min_filter_depth - 1 then
                             min_search_state <= MS_S2M_CALC;
                         else
                             search_idx <= search_idx + 1;
@@ -731,13 +745,13 @@ begin
                         -- Write new s2m sample (address range DEPTH..2*DEPTH-1)
                         delay_buffer(MIN_FILTER_DEPTH + s2m_write_idx) <= delta_s2m_reg;
 
-                        if s2m_write_idx = MIN_FILTER_DEPTH - 1 then
+                        if s2m_write_idx >= eff_min_filter_depth - 1 then
                             s2m_write_idx <= 0;
                         else
                             s2m_write_idx <= s2m_write_idx + 1;
                         end if;
 
-                        if s2m_fill_count < MIN_FILTER_DEPTH then
+                        if s2m_fill_count < eff_min_filter_depth then
                             s2m_fill_count <= s2m_fill_count + 1;
                         end if;
 
@@ -766,7 +780,7 @@ begin
                             current_min_abs <= fetched_abs;
                         end if;
 
-                        if search_idx = MIN_FILTER_DEPTH - 1 then
+                        if search_idx >= eff_min_filter_depth - 1 then
                             min_search_state <= MS_OUTPUT;
                         else
                             search_idx <= search_idx + 1;

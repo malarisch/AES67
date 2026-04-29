@@ -381,6 +381,124 @@ static int build_status_fpga(char *buf, size_t sz)
 	return p;
 }
 
+static int build_ptp_tuning(char *buf, size_t sz)
+{
+	struct fpga_hal_ptp_tuning t;
+	struct fpga_hal_ptp_monitor m;
+
+	fpga_hal_read_ptp_tuning(&t);
+	fpga_hal_read_ptp_monitor(&m);
+
+	int p = json_start_object(buf, sz);
+
+	/* Tuning (current values read back from FPGA) */
+	p = json_add_key(buf, sz, p, "tuning");
+	p += snprintf(buf + p, sz - p, "{");
+	p = json_add_int(buf, sz, p, "kp_gain",                 t.kp_gain);
+	p = json_add_int(buf, sz, p, "ki_gain",                 t.ki_gain);
+	p = json_add_uint(buf, sz, p, "gain_shift",             t.gain_shift);
+	p = json_add_uint(buf, sz, p, "gain_shift_locked",      t.gain_shift_locked);
+	p = json_add_uint(buf, sz, p, "ki_extra_shift",         t.ki_extra_shift);
+	p = json_add_uint(buf, sz, p, "filter_shift",           t.filter_shift);
+	p = json_add_uint(buf, sz, p, "warmup_samples",         t.warmup_samples);
+	p = json_add_uint(buf, sz, p, "lock_threshold_ns",      t.lock_threshold_ns);
+	p = json_add_uint(buf, sz, p, "unlock_threshold_ns",    t.unlock_threshold_ns);
+	p = json_add_uint(buf, sz, p, "lock_count_threshold",   t.lock_count_threshold);
+	p = json_add_bool(buf, sz, p, "min_filter_enable",      t.min_filter_enable);
+	p = json_add_uint(buf, sz, p, "min_filter_active_depth", t.min_filter_active_depth);
+	if (p > 1 && buf[p - 1] == ',') p--;
+	p += snprintf(buf + p, sz - p, "},");
+
+	/* Monitoring (live PI internal state) */
+	p = json_add_key(buf, sz, p, "monitor");
+	p += snprintf(buf + p, sz - p, "{");
+	p = json_add_int(buf, sz, p, "filtered_offset",      m.filtered_offset);
+	p = json_add_int(buf, sz, p, "integral_sum",         m.integral_sum);
+	p = json_add_int(buf, sz, p, "pi_proportional",      m.pi_proportional);
+	p = json_add_int(buf, sz, p, "pi_sum_raw",           m.pi_sum_raw);
+	p = json_add_uint(buf, sz, p, "effective_gain_shift", m.effective_gain_shift);
+	p = json_add_uint(buf, sz, p, "lock_counter",        m.lock_counter);
+	p = json_add_uint(buf, sz, p, "sample_count",        m.sample_count);
+	p = json_add_bool(buf, sz, p, "first_lock_achieved", m.first_lock_achieved);
+	if (p > 1 && buf[p - 1] == ',') p--;
+	p += snprintf(buf + p, sz - p, "},");
+
+	p = json_end_object(buf, sz, p);
+	return p;
+}
+
+/* Forward declarations — definitions appear later in the file. */
+static bool json_find_int(const char *json, size_t json_len,
+			   const char *key, int32_t *out);
+static bool json_find_bool(const char *json, size_t json_len,
+			    const char *key, bool *out);
+
+static int apply_ptp_tuning_json(const char *json, size_t len)
+{
+	struct fpga_hal_ptp_tuning t;
+	int32_t val;
+	bool bval;
+
+	/* Read current state, then patch only fields present in the request */
+	fpga_hal_read_ptp_tuning(&t);
+
+	if (json_find_int(json, len, "kp_gain", &val)) {
+		t.kp_gain = (int8_t)val;
+	}
+	if (json_find_int(json, len, "ki_gain", &val)) {
+		t.ki_gain = (int8_t)val;
+	}
+	if (json_find_int(json, len, "gain_shift", &val)) {
+		t.gain_shift = (uint8_t)val;
+	}
+	if (json_find_int(json, len, "gain_shift_locked", &val)) {
+		t.gain_shift_locked = (uint8_t)val;
+	}
+	if (json_find_int(json, len, "ki_extra_shift", &val)) {
+		t.ki_extra_shift = (uint8_t)val;
+	}
+	if (json_find_int(json, len, "filter_shift", &val)) {
+		t.filter_shift = (uint8_t)val;
+	}
+	if (json_find_int(json, len, "warmup_samples", &val)) {
+		t.warmup_samples = (uint8_t)val;
+	}
+	if (json_find_int(json, len, "lock_threshold_ns", &val)) {
+		t.lock_threshold_ns = (uint32_t)val;
+	}
+	if (json_find_int(json, len, "unlock_threshold_ns", &val)) {
+		t.unlock_threshold_ns = (uint32_t)val;
+	}
+	if (json_find_int(json, len, "lock_count_threshold", &val)) {
+		t.lock_count_threshold = (uint8_t)val;
+	}
+	if (json_find_bool(json, len, "min_filter_enable", &bval)) {
+		t.min_filter_enable = bval;
+	}
+	if (json_find_int(json, len, "min_filter_active_depth", &val)) {
+		t.min_filter_active_depth = (uint8_t)val;
+	}
+
+	return fpga_hal_write_ptp_tuning(&t);
+}
+
+static int apply_ptp_reset_json(const char *json, size_t len)
+{
+	bool bval = true;
+
+	/* Optional "held" key: if absent, do a quick pulse (assert + release). */
+	if (json_find_bool(json, len, "held", &bval)) {
+		return fpga_hal_set_ptp_reset(bval);
+	}
+
+	int ret = fpga_hal_set_ptp_reset(true);
+	if (ret < 0) {
+		return ret;
+	}
+	k_msleep(10);
+	return fpga_hal_set_ptp_reset(false);
+}
+
 static int build_status_streams(char *buf, size_t sz)
 {
 	int p = json_start_object(buf, sz);
@@ -1639,6 +1757,8 @@ static int api_handler(struct http_client_ctx *client,
 		} else if (strcmp(url, "/api/status/streams") == 0) {
 			json_len = build_status_streams(json_buf,
 							JSON_BUF_SIZE);
+		} else if (strcmp(url, "/api/ptp/tuning") == 0) {
+			json_len = build_ptp_tuning(json_buf, JSON_BUF_SIZE);
 		} else if (strcmp(url, "/api/config") == 0) {
 			json_len = build_config_json(json_buf, JSON_BUF_SIZE);
 #ifdef CONFIG_MI_CARD
@@ -1751,6 +1871,17 @@ static int api_handler(struct http_client_ctx *client,
 #ifdef CONFIG_FLASH_CONFIG
 				flash_config_save();
 #endif
+			}
+		} else if (strcmp(url, "/api/ptp/tuning") == 0) {
+			ret = apply_ptp_tuning_json(post_body, post_body_len);
+			if (ret == 0) {
+				json_len = build_ptp_tuning(json_buf, JSON_BUF_SIZE);
+			}
+		} else if (strcmp(url, "/api/ptp/reset") == 0) {
+			ret = apply_ptp_reset_json(post_body, post_body_len);
+			if (ret == 0) {
+				json_len = snprintf(json_buf, JSON_BUF_SIZE,
+						    "{\"ok\":true}");
 			}
 		} else if (strcmp(url, "/api/streams/tx") == 0) {
 			ret = apply_tx_stream_json(post_body, post_body_len);

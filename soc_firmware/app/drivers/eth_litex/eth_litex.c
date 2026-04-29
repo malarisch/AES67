@@ -329,6 +329,89 @@ int eth_litex_write_rx_stream_config(const struct device *dev,
 	return 0;
 }
 
+/* ---- PTP servo / parser tuning + monitoring ---- */
+
+int eth_litex_write_ptp_tuning(const struct device *dev,
+			       const struct eth_litex_ptp_tuning *t)
+{
+	ARG_UNUSED(dev);
+
+	if (!t) {
+		return -EINVAL;
+	}
+
+	litex_csr_write(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR, (uint8_t)t->kp_gain);
+	litex_csr_write(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR, (uint8_t)t->ki_gain);
+	litex_csr_write(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR, t->gain_shift & 0x1F);
+	litex_csr_write(CSR_AES67_CSR_SERVO_GAIN_SHIFT_LOCKED_ADDR, t->gain_shift_locked & 0x1F);
+	litex_csr_write(CSR_AES67_CSR_SERVO_KI_EXTRA_SHIFT_ADDR, t->ki_extra_shift & 0x1F);
+	litex_csr_write(CSR_AES67_CSR_SERVO_FILTER_SHIFT_ADDR, t->filter_shift & 0x1F);
+	litex_csr_write(CSR_AES67_CSR_SERVO_WARMUP_SAMPLES_ADDR, t->warmup_samples);
+	litex_csr_write(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR, t->lock_threshold_ns);
+	litex_csr_write(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR, t->unlock_threshold_ns);
+	litex_csr_write(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR, t->lock_count_threshold);
+
+	uint32_t mf = (t->min_filter_enable ? 1u : 0u) |
+		      ((uint32_t)t->min_filter_active_depth << 8);
+	litex_csr_write(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR, mf);
+
+	return 0;
+}
+
+void eth_litex_read_ptp_tuning(const struct device *dev,
+			       struct eth_litex_ptp_tuning *t)
+{
+	ARG_UNUSED(dev);
+
+	if (!t) {
+		return;
+	}
+
+	t->kp_gain              = (int8_t)litex_csr_read(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR);
+	t->ki_gain              = (int8_t)litex_csr_read(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR);
+	t->gain_shift           = (uint8_t)(litex_csr_read(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR) & 0x1F);
+	t->gain_shift_locked    = (uint8_t)(litex_csr_read(CSR_AES67_CSR_SERVO_GAIN_SHIFT_LOCKED_ADDR) & 0x1F);
+	t->ki_extra_shift       = (uint8_t)(litex_csr_read(CSR_AES67_CSR_SERVO_KI_EXTRA_SHIFT_ADDR) & 0x1F);
+	t->filter_shift         = (uint8_t)(litex_csr_read(CSR_AES67_CSR_SERVO_FILTER_SHIFT_ADDR) & 0x1F);
+	t->warmup_samples       = (uint8_t)litex_csr_read(CSR_AES67_CSR_SERVO_WARMUP_SAMPLES_ADDR);
+	t->lock_threshold_ns    = litex_csr_read(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR);
+	t->unlock_threshold_ns  = litex_csr_read(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR);
+	t->lock_count_threshold = (uint8_t)litex_csr_read(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR);
+
+	uint32_t mf = litex_csr_read(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR);
+	t->min_filter_enable       = (mf & 0x1) != 0;
+	t->min_filter_active_depth = (uint8_t)((mf >> 8) & 0xFF);
+}
+
+void eth_litex_read_ptp_monitor(const struct device *dev,
+				struct eth_litex_ptp_monitor *m)
+{
+	ARG_UNUSED(dev);
+
+	if (!m) {
+		return;
+	}
+
+	m->filtered_offset = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_FILTERED_OFFSET_ADDR);
+	m->integral_sum    = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_INTEGRAL_SUM_ADDR);
+	m->pi_proportional = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_PI_PROPORTIONAL_ADDR);
+	m->pi_sum_raw      = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_PI_SUM_RAW_ADDR);
+
+	uint32_t status = litex_csr_read(CSR_AES67_CSR_SERVO_MON_STATUS_ADDR);
+	m->effective_gain_shift = (uint8_t)(status & 0xFF);
+	m->lock_counter         = (uint16_t)((status >> 8) & 0xFFFF);
+	m->first_lock_achieved  = ((status >> 24) & 0x1) != 0;
+
+	m->sample_count = (uint16_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_SAMPLE_COUNT_ADDR);
+}
+
+int eth_litex_set_ptp_reset(const struct device *dev, bool held_in_reset)
+{
+	ARG_UNUSED(dev);
+	litex_csr_write(CSR_AES67_CSR_PTP_RESET_ADDR, held_in_reset ? 1 : 0);
+	return 0;
+}
+
 /* ---- Packet buffer access ----
  *
  * The EthPacketBuffer is Wishbone-mapped with 1 byte per 32-bit word
