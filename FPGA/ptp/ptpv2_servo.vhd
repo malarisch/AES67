@@ -30,13 +30,13 @@ entity ptpv2_servo is
     -- Effective Ki = KI_GAIN / 2^(GAIN_SHIFT + 2) / 2^(-log_msg_interval)
     -- CRITICAL: At 1 Hz sample rate, Kp must be < 0.5 for stability!
     KP_GAIN           : integer := 4; -- Proportional gain numerator 
-    KI_GAIN           : integer := 5; -- Integral gain numerator
+    KI_GAIN           : integer := 4; -- Integral gain numerator
     GAIN_SHIFT        : integer := 3; -- Base gain divisor (for 1 Hz sync rate)
     GAIN_SHIFT_LOCKED : integer := 0; -- ADDITIONAL shift when locked (none = original behavior)
 
     -- Ki extra shift relative to Kp (Ki denominator = 2^(GAIN_SHIFT + KI_EXTRA_SHIFT))
     -- Higher value = better damping but slower integral convergence
-    KI_EXTRA_SHIFT : integer := 2;
+    KI_EXTRA_SHIFT : integer :=3;
 
     -- Filter coefficient for offset (exponential moving average)
     -- alpha = 1/2^FILTER_SHIFT. 0=no filter, 1=50%, 2=25%
@@ -49,10 +49,8 @@ entity ptpv2_servo is
     -- Lock thresholds
     LOCK_THRESHOLD_NS    : integer := 500;  -- Consider locked if offset < 500ns
     UNLOCK_THRESHOLD_NS  : integer := 5000; -- Unlock if offset > 5µs
-    LOCK_COUNT_THRESHOLD : integer := 16;   -- Consecutive good measurements for lock (~2s at 8 Hz)
+    LOCK_COUNT_THRESHOLD : integer := 16   -- Consecutive good measurements for lock (~2s at 8 Hz)
 
-    -- Sync timeout multiplier (timeout = 3 * sync_interval)
-    CLOCK_FREQ_HZ : integer := 125_000_000
   );
   port (
     clk     : in std_logic;
@@ -60,7 +58,6 @@ entity ptpv2_servo is
 
     -- Input from ptpv2_parser
     offset_from_master_i     : in signed(31 downto 0); -- Nanoseconds
-    mean_path_delay_i        : in signed(31 downto 0); -- Nanoseconds
     calc_valid_i             : in std_logic;
     log_msg_interval_i       : in signed(7 downto 0); -- PTP logMessageInterval (signed!)
     log_msg_interval_valid_i : in std_logic;          -- Pulse when interval is updated
@@ -75,8 +72,7 @@ entity ptpv2_servo is
     request_clock_reconfigure_o : out std_logic;
 
     -- Status
-    locked_o       : out std_logic;
-    sync_timeout_o : out std_logic -- Pulses when no sync received for too long
+    locked_o       : out std_logic
   );
 end entity;
 
@@ -96,10 +92,6 @@ architecture Behavioral of ptpv2_servo is
   -- Sample counter for warmup
   signal sample_count : integer range 0 to WARMUP_SAMPLES + 1 := 0;
 
-  -- Sync timeout counter
-  signal timeout_counter : unsigned(31 downto 0) := (others => '0');
-  signal timeout_limit   : unsigned(31 downto 0) := to_unsigned(CLOCK_FREQ_HZ * 4, 32);
-  signal sync_timeout    : std_logic             := '0';
 
   -- Message interval tracking
   signal current_log_interval : signed(7 downto 0) := (others => '0');
@@ -181,7 +173,6 @@ begin
   locked_o           <= locked;
   phase_jump_o       <= phase_jump_reg;
   phase_jump_valid_o <= phase_jump_valid_reg;
-  sync_timeout_o     <= sync_timeout;
   request_clock_reconfigure_o <= request_reconfigure_reg;
 
   gain_scaler_proc : process (clk, reset_n)
@@ -341,9 +332,6 @@ begin
       sample_count         <= 0;
       phase_jump_reg       <= (others => '0');
       phase_jump_valid_reg <= '0';
-      timeout_counter      <= (others => '0');
-      timeout_limit        <= to_unsigned(CLOCK_FREQ_HZ * 4, 32);
-      sync_timeout         <= '0';
       first_offset         <= (others => '0');
       pi_trigger           <= '0';
       request_reconfigure_reg <= '0';
@@ -360,7 +348,6 @@ begin
     elsif rising_edge(clk) then
       -- Default: no phase jump this cycle, clear timeout pulse
       phase_jump_valid_reg <= '0';
-      sync_timeout         <= '0';
       pi_trigger           <= '0';
       request_reconfigure_reg <= '0';
 

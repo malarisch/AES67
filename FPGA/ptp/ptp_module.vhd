@@ -1,22 +1,3 @@
--- Copyright (C) 2025  Altera Corporation. All rights reserved.
--- Your use of Altera Corporation's design tools, logic functions 
--- and other software and tools, and any partner logic 
--- functions, and any output files from any of the foregoing 
--- (including device programming or simulation files), and any 
--- associated documentation or information are expressly subject 
--- to the terms and conditions of the Altera Program License 
--- Subscription Agreement, the Altera Quartus Prime License Agreement,
--- the Altera IP License Agreement, or other applicable license
--- agreement, including, without limitation, that your use is for
--- the sole purpose of programming logic devices manufactured by
--- Altera and sold by Altera or its authorized distributors.  Please
--- refer to the Altera Software License Subscription Agreements 
--- on the Quartus Prime software download page.
-
--- PROGRAM		"Quartus Prime"
--- VERSION		"Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition"
--- CREATED		"Sat Apr  4 16:30:01 2026"
-
 LIBRARY ieee;
 USE ieee.std_logic_1164.all; 
 USE ieee.numeric_std.all;
@@ -51,7 +32,6 @@ ENTITY ptp_module IS
 		tx_en_ptpfu :  OUT  STD_LOGIC;
 		ptp_allow_req :  OUT  STD_LOGIC;
 		ptp_locked :  OUT  STD_LOGIC;
-		ptp_sync_lost :  OUT  STD_LOGIC;
 		wallclock_locked :  OUT  STD_LOGIC;
 		wallclock_configured :  OUT  STD_LOGIC;
 		wc_mclk :  OUT  STD_LOGIC;
@@ -324,11 +304,9 @@ PORT MAP(clk => sys_clk,
 		 calc_valid_i => ptp_calc_valid,
 		 log_msg_interval_valid_i => log_msg_interval_valid,
 		 log_msg_interval_i => log_msg_interval,
-		 mean_path_delay_i => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
 		 offset_from_master_i => ptp_offset_from_master_ALTERA_SYNTHESIZED,
 		 phase_jump_valid_o => wallclock_phasejump_ALTERA_SYNTHESIZED,
 		 locked_o => ptp_locked_ALTERA_SYNTHESIZED,
-		 sync_timeout_o => ptp_sync_lost,
 		 freq_correction_o => freq_correction,
 		 phase_jump_o => phase_jump,
 		 request_clock_reconfigure_o => servo_request_clock_reconfigure);
