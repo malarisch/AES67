@@ -58,8 +58,8 @@ entity ptpv2_parser is
 
         -- Min filter live-tuning inputs (replace former generic).
         -- min_filter_active_depth_i is clamped internally to MIN_FILTER_DEPTH.
-        min_filter_enable_i        : in std_logic := '1';
-        min_filter_active_depth_i  : in unsigned(7 downto 0) := to_unsigned(3, 8);
+        min_filter_enable_i        : in std_logic := '0';
+        min_filter_active_depth_i  : in unsigned(7 downto 0) := to_unsigned(2, 8);
         
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed

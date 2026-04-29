@@ -39,11 +39,11 @@ entity ptpv2_servo is
 
     -- Live-tuning inputs (replace former generics)
     -- All defaults match the previous generic defaults.
-    kp_gain_i              : in signed(7 downto 0)  := to_signed(5, 8);
-    ki_gain_i              : in signed(7 downto 0)  := to_signed(3, 8);
-    gain_shift_i           : in unsigned(4 downto 0):= to_unsigned(2, 5);
+    kp_gain_i              : in signed(7 downto 0)  := to_signed(40, 8);
+    ki_gain_i              : in signed(7 downto 0)  := to_signed(5, 8);
+    gain_shift_i           : in unsigned(4 downto 0):= to_unsigned(3, 5);
     gain_shift_locked_i    : in unsigned(4 downto 0):= to_unsigned(0, 5);
-    ki_extra_shift_i       : in unsigned(4 downto 0):= to_unsigned(6, 5);
+    ki_extra_shift_i       : in unsigned(4 downto 0):= to_unsigned(3, 5);
     filter_shift_i         : in unsigned(4 downto 0):= to_unsigned(0, 5);
     warmup_samples_i       : in unsigned(7 downto 0):= to_unsigned(16, 8);
     lock_threshold_ns_i    : in unsigned(31 downto 0):= to_unsigned(500, 32);

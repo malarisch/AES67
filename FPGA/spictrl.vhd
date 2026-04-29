@@ -96,18 +96,18 @@ entity spictrl is
         -- PTP servo / parser tuning (output, written via SPI register 0x60).
         -- All values in one transaction so we save SPI addresses.
         -- =============================================================
-        servo_kp_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(5, 8));
-        servo_ki_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(3, 8));
-        servo_gain_shift_o           : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(2, 5));
+        servo_kp_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(40, 8));
+        servo_ki_gain_o              : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(5, 8));
+        servo_gain_shift_o           : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(3, 5));
         servo_gain_shift_locked_o    : OUT STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
-        servo_ki_extra_shift_o       : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(6, 5));
+        servo_ki_extra_shift_o       : OUT STD_LOGIC_VECTOR(4 downto 0)  := std_logic_vector(to_unsigned(3, 5));
         servo_filter_shift_o         : OUT STD_LOGIC_VECTOR(4 downto 0)  := (others => '0');
         servo_warmup_samples_o       : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(16, 8));
         servo_lock_threshold_ns_o    : OUT STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(500, 32));
         servo_unlock_threshold_ns_o  : OUT STD_LOGIC_VECTOR(31 downto 0) := std_logic_vector(to_unsigned(5000, 32));
         servo_lock_count_threshold_o : OUT STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(24, 8));
-        parser_min_filter_enable_o        : OUT STD_LOGIC := '1';
-        parser_min_filter_active_depth_o  : OUT STD_LOGIC_VECTOR(7 downto 0) := std_logic_vector(to_unsigned(3, 8));
+        parser_min_filter_enable_o        : OUT STD_LOGIC := '0';
+        parser_min_filter_active_depth_o  : OUT STD_LOGIC_VECTOR(7 downto 0) := std_logic_vector(to_unsigned(2, 8));
 
         -- PTP servo monitoring inputs (read via SPI register 0x61).
         -- Defaulted so legacy top-level files that don't drive these still
@@ -157,18 +157,18 @@ architecture rtl of spictrl is
     -- Shadow buffer for the 18-byte PTP tuning block (register 0x60)
     type ptp_tuning_shadow_t is array(0 to 17) of std_logic_vector(7 downto 0);
     signal ptp_tuning_shadow : ptp_tuning_shadow_t := (
-        0  => std_logic_vector(to_signed(5, 8)),
-        1  => std_logic_vector(to_signed(3, 8)),
-        2  => std_logic_vector(to_unsigned(2, 8)),
+        0  => std_logic_vector(to_signed(40, 8)),
+        1  => std_logic_vector(to_signed(5, 8)),
+        2  => std_logic_vector(to_unsigned(3, 8)),
         3  => (others => '0'),
-        4  => std_logic_vector(to_unsigned(6, 8)),
+        4  => std_logic_vector(to_unsigned(3, 8)),
         5  => (others => '0'),
         6  => std_logic_vector(to_unsigned(16, 8)),
         7  => x"F4", 8  => x"01", 9  => x"00", 10 => x"00",  -- lock thr 500
         11 => x"88", 12 => x"13", 13 => x"00", 14 => x"00",  -- unlock thr 5000
         15 => std_logic_vector(to_unsigned(24, 8)),
-        16 => std_logic_vector(to_unsigned(1, 8)),
-        17 => std_logic_vector(to_unsigned(3, 8))
+        16 => (others => '0'),
+        17 => std_logic_vector(to_unsigned(2, 8))
     );
 
     -- PPB-meter handshake: bit set by host, auto-cleared when measurement valid falls.
@@ -704,18 +704,18 @@ begin
             ppb_meas_valid_z            <= '0';
 
             -- PTP tuning output defaults (match ptp_tuning_shadow init)
-            servo_kp_gain_o              <= std_logic_vector(to_signed(5, 8));
-            servo_ki_gain_o              <= std_logic_vector(to_signed(3, 8));
-            servo_gain_shift_o           <= std_logic_vector(to_unsigned(2, 5));
+            servo_kp_gain_o              <= std_logic_vector(to_signed(40, 8));
+            servo_ki_gain_o              <= std_logic_vector(to_signed(5, 8));
+            servo_gain_shift_o           <= std_logic_vector(to_unsigned(3, 5));
             servo_gain_shift_locked_o    <= (others => '0');
-            servo_ki_extra_shift_o       <= std_logic_vector(to_unsigned(6, 5));
+            servo_ki_extra_shift_o       <= std_logic_vector(to_unsigned(3, 5));
             servo_filter_shift_o         <= (others => '0');
             servo_warmup_samples_o       <= std_logic_vector(to_unsigned(16, 8));
             servo_lock_threshold_ns_o    <= std_logic_vector(to_unsigned(500, 32));
             servo_unlock_threshold_ns_o  <= std_logic_vector(to_unsigned(5000, 32));
             servo_lock_count_threshold_o <= std_logic_vector(to_unsigned(24, 8));
-            parser_min_filter_enable_o        <= '1';
-            parser_min_filter_active_depth_o  <= std_logic_vector(to_unsigned(3, 8));
+            parser_min_filter_enable_o        <= '0';
+            parser_min_filter_active_depth_o  <= std_logic_vector(to_unsigned(2, 8));
         elsif rising_edge(sys_clk_i) then
 
             -- PPB-meter auto-clear: drop ppb_meter_start_o when valid falls

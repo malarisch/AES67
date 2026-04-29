@@ -1,0 +1,33 @@
+-series GW2A
+-device GW2A-55
+-device_version C
+-package PBGA484
+-part_number GW2A-LV55PG484C8/I7
+
+
+-mod_name Gowin_rPLL
+-file_name gowin_pll_27i_125o
+-path /home/wolff/AES67/FPGA/gowin/fpga_project/src/gowin_pll_27i_125o/
+-type PLL
+-rPll true
+-file_type vhdl
+-dev_type GW2A-55C
+-dyn_idiv_sel false
+-idiv_sel 8
+-dyn_fbdiv_sel false
+-fbdiv_sel 37
+-dyn_odiv_sel false
+-odiv_sel 8
+-dyn_da_en true
+-rst_sig true
+-rst_sig_p false
+-fclkin 27
+-clkfb_sel 0
+-en_lock false
+-clkout_bypass false
+-clkout_ft_dir 1
+-en_clkoutp false
+-clkoutp_bypass false
+-en_clkoutd false
+-clkoutd_bypass false
+-en_clkoutd3 false

@@ -9,7 +9,7 @@ ENTITY top IS
 	generic (
 		soctype : string := "spi"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		
-		platform : string := "ALTERA";
+		platform : string := "ALTERA"; -- "ALTERA" or "TANG_PRIMER_20k"
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
@@ -1205,6 +1205,16 @@ sysclks_altpll_12m_in_inst : entity work.sysclks_altpll_12m_in PORT MAP (
 		locked	 => sys_clk_locked
 	);
 
+	rst_n <= rst_n_i and sys_clk_locked;
+end generate;
+sysclkgen27: if (platform = "TANG_PRIMER_20k" and clk_in_speed = 27) generate
+gowin_pll_27i_125o_inst: entity work.gowin_pll_27i_125o
+ port map(
+	clkout => clk_125MHz,
+	reset => not rst_n_i,
+	clkin => clock_i,
+	lock_o => sys_clk_locked
+);
 	rst_n <= rst_n_i and sys_clk_locked;
 end generate;
 

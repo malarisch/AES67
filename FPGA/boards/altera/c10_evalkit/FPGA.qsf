@@ -570,3 +570,5 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk_tdm_o
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/boards/altera/trenz_cyc1000/sysclks_altpll_12m_in.vhd
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/gowin/fpga_project/src/gowin_pll_27i_125o/gowin_pll_27i_125o.vhd
+set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/gowin/fpga_project/src/top_tang_primer_20k.vhd

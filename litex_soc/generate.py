@@ -682,18 +682,18 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # =====================================================================
         # PTP servo / parser tuning CSRs (RW) — one CSR per value as requested
         # =====================================================================
-        self.servo_kp_gain              = CSRStorage(8,  reset=5,    description="Servo Kp gain (signed)")
-        self.servo_ki_gain              = CSRStorage(8,  reset=3,    description="Servo Ki gain (signed)")
-        self.servo_gain_shift           = CSRStorage(5,  reset=2,    description="Servo base gain shift")
+        self.servo_kp_gain              = CSRStorage(8,  reset=40,   description="Servo Kp gain (signed)")
+        self.servo_ki_gain              = CSRStorage(8,  reset=5,    description="Servo Ki gain (signed)")
+        self.servo_gain_shift           = CSRStorage(5,  reset=3,    description="Servo base gain shift")
         self.servo_gain_shift_locked    = CSRStorage(5,  reset=0,    description="Servo extra gain shift when locked")
-        self.servo_ki_extra_shift       = CSRStorage(5,  reset=6,    description="Servo Ki extra shift relative to Kp")
+        self.servo_ki_extra_shift       = CSRStorage(5,  reset=3,    description="Servo Ki extra shift relative to Kp")
         self.servo_filter_shift         = CSRStorage(5,  reset=0,    description="Servo offset EMA filter shift (0=no filter)")
         self.servo_warmup_samples       = CSRStorage(8,  reset=16,   description="Servo warmup sample count")
         self.servo_lock_threshold_ns    = CSRStorage(32, reset=500,  description="Servo lock threshold (ns)")
         self.servo_unlock_threshold_ns  = CSRStorage(32, reset=5000, description="Servo unlock threshold (ns)")
         self.servo_lock_count_threshold = CSRStorage(8,  reset=24,   description="Servo consecutive samples needed to lock")
 
-        self.parser_min_filter = CSRStorage(32, reset=(3 << 8) | 1, fields=[
+        self.parser_min_filter = CSRStorage(32, reset=(2 << 8), fields=[
             CSRField("enable",       size=1, offset=0,  description="Enable min filter"),
             CSRField("active_depth", size=8, offset=8,  description="Active min filter depth (clamped to MIN_FILTER_DEPTH)"),
         ])

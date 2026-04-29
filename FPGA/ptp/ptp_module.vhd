@@ -47,19 +47,19 @@ ENTITY ptp_module IS
 		-- ============================================================
 		-- Servo + parser tuning inputs (live-tunable from SoC)
 		-- ============================================================
-		servo_kp_gain_i              : IN signed(7 downto 0)  := to_signed(5, 8);
-		servo_ki_gain_i              : IN signed(7 downto 0)  := to_signed(3, 8);
-		servo_gain_shift_i           : IN unsigned(4 downto 0):= to_unsigned(2, 5);
+		servo_kp_gain_i              : IN signed(7 downto 0)  := to_signed(40, 8);
+		servo_ki_gain_i              : IN signed(7 downto 0)  := to_signed(5, 8);
+		servo_gain_shift_i           : IN unsigned(4 downto 0):= to_unsigned(3, 5);
 		servo_gain_shift_locked_i    : IN unsigned(4 downto 0):= to_unsigned(0, 5);
-		servo_ki_extra_shift_i       : IN unsigned(4 downto 0):= to_unsigned(6, 5);
+		servo_ki_extra_shift_i       : IN unsigned(4 downto 0):= to_unsigned(3, 5);
 		servo_filter_shift_i         : IN unsigned(4 downto 0):= to_unsigned(0, 5);
 		servo_warmup_samples_i       : IN unsigned(7 downto 0):= to_unsigned(16, 8);
 		servo_lock_threshold_ns_i    : IN unsigned(31 downto 0):= to_unsigned(500, 32);
 		servo_unlock_threshold_ns_i  : IN unsigned(31 downto 0):= to_unsigned(5000, 32);
 		servo_lock_count_threshold_i : IN unsigned(7 downto 0):= to_unsigned(24, 8);
 
-		parser_min_filter_enable_i        : IN STD_LOGIC := '1';
-		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0) := to_unsigned(3, 8);
+		parser_min_filter_enable_i        : IN STD_LOGIC := '0';
+		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0) := to_unsigned(2, 8);
 
 		-- ============================================================
 		-- Servo monitoring outputs (live PI internal state)
