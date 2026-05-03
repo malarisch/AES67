@@ -22,7 +22,7 @@ entity static_ptp_conf is
 end entity;
 
 architecture rtl of static_ptp_conf is
-
+ 
 begin
 
     

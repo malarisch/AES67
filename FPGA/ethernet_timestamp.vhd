@@ -58,8 +58,9 @@ architecture Behavioral of ethernet_timestamp is
     signal PHY_LATENCY : integer;
     signal PIPELINE_LATENCY : integer;
 
-
-    
+    signal s_reg : UNSIGNED(47 downto 0);
+    signal stamp_valid : std_logic := '0';
+    signal adjusted : integer;
 begin
 
     txphylat: if (PATH = "TX") generate
@@ -76,37 +77,43 @@ begin
     end generate;
     process(clk, reset_n)
         variable correction : integer;
-        variable adjusted   : integer;
     begin
         if reset_n = '0' then
             sof_tog_i_meta <= '0';
             sof_tog_i_sync <= '0';
             sof_tog_i_prev <= '0';
+            stamp_valid <= '0';
         elsif rising_edge(clk) then
             -- Synchronize timestamp_set_i into clk domain
             sof_tog_i_meta <= sof_tog_i;
             sof_tog_i_sync <= sof_tog_i_meta;
             sof_tog_i_prev <= sof_tog_i_sync;
 
-
+            stamp_valid <= '0';
             if (sof_tog_i_prev /= sof_tog_i_sync) then
                 correction := PHY_LATENCY - PIPELINE_LATENCY;
-                adjusted   := to_integer(wallclock_nanoseconds_i) + correction;
-
-                if adjusted >= 1000000000 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 32);
-                    timestamp_seconds_o     <= wallclock_seconds_i + 1;
-                elsif adjusted < 0 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 32);
-                    timestamp_seconds_o     <= wallclock_seconds_i - 1;
-                else
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 32);
-                    timestamp_seconds_o     <= wallclock_seconds_i;
-                end if;
+                adjusted   <= to_integer(wallclock_nanoseconds_i) + correction;
+                s_reg <= wallclock_seconds_i;
+                stamp_valid <= '1';
             end if;
 
 
         end if;
     end process;
-    
+    output_proc: process (clk) begin
+        if rising_edge(clk) then
+            if (stamp_valid = '1') then
+                if adjusted >= 1000000000 then
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 32);
+                    timestamp_seconds_o     <= s_reg + 1;
+                elsif adjusted < 0 then
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 32);
+                    timestamp_seconds_o     <= s_reg - 1;
+                else
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 32);
+                    timestamp_seconds_o     <= s_reg;
+                end if;
+            end if;
+        end if;
+    end process;
 end Behavioral;

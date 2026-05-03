@@ -1183,7 +1183,7 @@ static_ptp_conf_inst: entity work.static_ptp_conf
 );
 
 
-end generate;
+end generate; 
 
 ptp_conf_gen_dynamic: if (static_ptp_conf /= "TRUE") generate
 	servo_kp_gain_i              <= servo_kp_gain_o;
