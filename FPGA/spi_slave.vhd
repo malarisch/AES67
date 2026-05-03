@@ -9,7 +9,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
-use IEEE.MATH_REAL.ALL;
 
 -- THE SPI SLAVE MODULE SUPPORT ONLY SPI MODE 0 (CPOL=0, CPHA=0)!!!
 
@@ -35,8 +34,19 @@ entity SPI_SLAVE is
 end entity;
 
 architecture RTL of SPI_SLAVE is
+    -- clog function because gowin somehow does not know  ieee.math_real
+    function clog2(n : natural) return natural is
+        variable v : natural := n - 1;
+        variable r : natural := 0;
+    begin
+        while v > 0 loop
+            v := v / 2;
+            r := r + 1;
+        end loop;
+        return r;
+    end function;
 
-    constant BIT_CNT_WIDTH : natural := natural(ceil(log2(real(WORD_SIZE))));
+    constant BIT_CNT_WIDTH : natural := clog2(WORD_SIZE);
 
     --signal sclk_meta          : std_logic;
     signal cs_n_meta          : std_logic;

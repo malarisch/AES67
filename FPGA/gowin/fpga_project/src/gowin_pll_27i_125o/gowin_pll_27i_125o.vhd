@@ -7,7 +7,7 @@ entity gowin_pll_27i_125o is
         clkout: out std_logic;
         reset: in std_logic;
         clkin: in std_logic;
-        lock_o: std_logic
+        lock_o: out std_logic
     );
 end gowin_pll_27i_125o;
 
@@ -82,7 +82,7 @@ begin
     rpll_inst: rPLL
         generic map (
             FCLKIN => "27",
-            DEVICE => "GW2A-55C",
+            DEVICE => "GW2A-18",
             DYN_IDIV_SEL => "false",
             IDIV_SEL => 7,
             DYN_FBDIV_SEL => "false",

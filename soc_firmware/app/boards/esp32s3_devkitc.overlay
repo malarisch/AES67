@@ -39,6 +39,7 @@
 	pinctrl-0 = <&spim2_fpga>;
 	pinctrl-names = "default";
 	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+	cs-setup-time = <10>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 

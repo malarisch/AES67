@@ -9,7 +9,8 @@ ENTITY top IS
 	generic (
 		soctype : string := "spi"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		
-		platform : string := "ALTERA"; -- "ALTERA" or "TANG_PRIMER_20k"
+		platform : string := "ALTERA"; -- "ALTERA" or "GOWIN"
+		board : string := "C10EVALKIT";
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
@@ -23,7 +24,7 @@ ENTITY top IS
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-
+		STATIC_PTP_CONF : 		string := "TRUE";
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0')
 	);
 	PORT
@@ -126,7 +127,10 @@ ENTITY top IS
 		-- misc
 
 		adda_nRST :  OUT  STD_LOGIC;
-		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0)
+		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
+
+		debug_mac_tx_clk_o: OUT STD_LOGIC;
+		debug_mac_tx_byte_sent_o: OUT std_logic
 		
 	);
 END top;
@@ -400,6 +404,48 @@ GENERIC (CLOCK_INPUT_STYLE : STRING;
 	);
 END COMPONENT;
 
+component mii_to_rmii_gowin
+	port (
+		refclk: in std_logic;
+		rstn: in std_logic;
+		speedis_100: in std_logic;
+		rmii_rx_crs_dv: in std_logic;
+		rmii_rx_er: in std_logic;
+		rmii_rxd: in std_logic_vector(1 downto 0);
+		rmii_tx_en: out std_logic;
+		rmii_txd: out std_logic_vector(1 downto 0);
+		mii_rx_clk: out std_logic;
+		mii_rx_dv: out std_logic;
+		mii_rx_er: out std_logic;
+		mii_rxd: out std_logic_vector(3 downto 0);
+		mii_tx_clk: out std_logic;
+		mii_tx_en: in std_logic;
+		mii_tx_er: in std_logic;
+		mii_txd: in std_logic_vector(3 downto 0);
+		mii_col: out std_logic;
+		mii_crs: out std_logic
+	);
+end component;
+component gowin_pll_50i is
+    port (
+        clkin: in std_logic;
+        clkout0: out std_logic;
+        clkout1: out std_logic;
+        lock: out std_logic;
+        mdclk: in std_logic
+    );
+end component;
+-- Gowin global clock buffer; forces a net onto a dedicated GCLK route so
+-- the synthesizer cannot merge two derived clocks together.
+component BUFG
+    port (
+        I : in  std_logic;
+        O : out std_logic
+    );
+end component;
+attribute syn_black_box : boolean;
+attribute syn_black_box of BUFG : component is true;
+
 -- board clocks
 signal clk_125MHz    : STD_LOGIC;
 signal enet_clk      : STD_LOGIC;
@@ -520,18 +566,31 @@ signal ptp_reset_spi   : STD_LOGIC := '0';
 signal ptp_reset       : STD_LOGIC;
 
 -- PTP servo / parser tuning (driven by whichever SoC backend is active).
-signal servo_kp_gain              : STD_LOGIC_VECTOR(7 downto 0);
-signal servo_ki_gain              : STD_LOGIC_VECTOR(7 downto 0);
-signal servo_gain_shift           : STD_LOGIC_VECTOR(4 downto 0);
-signal servo_gain_shift_locked    : STD_LOGIC_VECTOR(4 downto 0);
-signal servo_ki_extra_shift       : STD_LOGIC_VECTOR(4 downto 0);
-signal servo_filter_shift         : STD_LOGIC_VECTOR(4 downto 0);
-signal servo_warmup_samples       : STD_LOGIC_VECTOR(7 downto 0);
-signal servo_lock_threshold_ns    : STD_LOGIC_VECTOR(31 downto 0);
-signal servo_unlock_threshold_ns  : STD_LOGIC_VECTOR(31 downto 0);
-signal servo_lock_count_threshold : STD_LOGIC_VECTOR(7 downto 0);
-signal parser_min_filter_enable        : STD_LOGIC;
-signal parser_min_filter_active_depth  : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_kp_gain_i              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_ki_gain_i              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_gain_shift_i           : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_gain_shift_locked_i    : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_ki_extra_shift_i       : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_filter_shift_i         : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_warmup_samples_i       : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_lock_threshold_ns_i    : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_unlock_threshold_ns_i  : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_lock_count_threshold_i : STD_LOGIC_VECTOR(7 downto 0);
+signal parser_min_filter_enable_i        : STD_LOGIC;
+signal parser_min_filter_active_depth_i  : STD_LOGIC_VECTOR(7 downto 0);
+-- PTP servo / parser tuning (driven by whichever SoC backend is active).
+signal servo_kp_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_ki_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_gain_shift_o           : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_gain_shift_locked_o    : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_ki_extra_shift_o       : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_filter_shift_o         : STD_LOGIC_VECTOR(4 downto 0);
+signal servo_warmup_samples_o       : STD_LOGIC_VECTOR(7 downto 0);
+signal servo_lock_threshold_ns_o    : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_unlock_threshold_ns_o  : STD_LOGIC_VECTOR(31 downto 0);
+signal servo_lock_count_threshold_o : STD_LOGIC_VECTOR(7 downto 0);
+signal parser_min_filter_enable_o        : STD_LOGIC;
+signal parser_min_filter_active_depth_o  : STD_LOGIC_VECTOR(7 downto 0);
 
 -- PTP servo monitoring (driven from aes67_top, consumed by both backends).
 signal servo_mon_filtered_offset      : STD_LOGIC_VECTOR(31 downto 0);
@@ -550,6 +609,9 @@ ptp_reset <= ptp_reset_litex or ptp_reset_spi;
 
 
 reset_p <= not rst_n;
+
+debug_mac_tx_clk_o <= mac_tx_clock;
+debug_mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
 aes67_top_inst: entity work.aes67_top
 generic map(
@@ -663,18 +725,18 @@ generic map(
 	ptp_reset_i                => ptp_reset,
 
 	-- PTP servo / parser tuning inputs
-	servo_kp_gain_i              => servo_kp_gain,
-	servo_ki_gain_i              => servo_ki_gain,
-	servo_gain_shift_i           => servo_gain_shift,
-	servo_gain_shift_locked_i    => servo_gain_shift_locked,
-	servo_ki_extra_shift_i       => servo_ki_extra_shift,
-	servo_filter_shift_i         => servo_filter_shift,
-	servo_warmup_samples_i       => servo_warmup_samples,
-	servo_lock_threshold_ns_i    => servo_lock_threshold_ns,
-	servo_unlock_threshold_ns_i  => servo_unlock_threshold_ns,
-	servo_lock_count_threshold_i => servo_lock_count_threshold,
-	parser_min_filter_enable_i        => parser_min_filter_enable,
-	parser_min_filter_active_depth_i  => parser_min_filter_active_depth,
+	servo_kp_gain_i              => servo_kp_gain_o,
+	servo_ki_gain_i              => servo_ki_gain_o,
+	servo_gain_shift_i           => servo_gain_shift_o,
+	servo_gain_shift_locked_i    => servo_gain_shift_locked_o,
+	servo_ki_extra_shift_i       => servo_ki_extra_shift_o,
+	servo_filter_shift_i         => servo_filter_shift_o,
+	servo_warmup_samples_i       => servo_warmup_samples_o,
+	servo_lock_threshold_ns_i    => servo_lock_threshold_ns_o,
+	servo_unlock_threshold_ns_i  => servo_unlock_threshold_ns_o,
+	servo_lock_count_threshold_i => servo_lock_count_threshold_o,
+	parser_min_filter_enable_i        => parser_min_filter_enable_o,
+	parser_min_filter_active_depth_i  => parser_min_filter_active_depth_o,
 
 	-- PTP servo monitoring outputs
 	servo_mon_filtered_offset_o      => servo_mon_filtered_offset,
@@ -790,18 +852,18 @@ PORT MAP(
 
 	-- PTP servo / parser tuning + monitoring
 	aes67_ctrl_ptp_reset                       => ptp_reset_litex,
-	aes67_ctrl_servo_kp_gain                   => servo_kp_gain,
-	aes67_ctrl_servo_ki_gain                   => servo_ki_gain,
-	aes67_ctrl_servo_gain_shift                => servo_gain_shift,
-	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked,
-	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift,
-	aes67_ctrl_servo_filter_shift              => servo_filter_shift,
-	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples,
-	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns,
-	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns,
-	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold,
-	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable,
-	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth,
+	aes67_ctrl_servo_kp_gain                   => servo_kp_gain_i,
+	aes67_ctrl_servo_ki_gain                   => servo_ki_gain_i,
+	aes67_ctrl_servo_gain_shift                => servo_gain_shift_i,
+	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked_i,
+	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift_i,
+	aes67_ctrl_servo_filter_shift              => servo_filter_shift_i,
+	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples_i,
+	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns_i,
+	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns_i,
+	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
+	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
+	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -917,18 +979,18 @@ PORT MAP(
 
 	-- PTP servo / parser tuning + monitoring
 	aes67_ctrl_ptp_reset                       => ptp_reset_litex,
-	aes67_ctrl_servo_kp_gain                   => servo_kp_gain,
-	aes67_ctrl_servo_ki_gain                   => servo_ki_gain,
-	aes67_ctrl_servo_gain_shift                => servo_gain_shift,
-	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked,
-	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift,
-	aes67_ctrl_servo_filter_shift              => servo_filter_shift,
-	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples,
-	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns,
-	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns,
-	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold,
-	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable,
-	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth,
+	aes67_ctrl_servo_kp_gain                   => servo_kp_gain_i,
+	aes67_ctrl_servo_ki_gain                   => servo_ki_gain_i,
+	aes67_ctrl_servo_gain_shift                => servo_gain_shift_i,
+	aes67_ctrl_servo_gain_shift_locked         => servo_gain_shift_locked_i,
+	aes67_ctrl_servo_ki_extra_shift            => servo_ki_extra_shift_i,
+	aes67_ctrl_servo_filter_shift              => servo_filter_shift_i,
+	aes67_ctrl_servo_warmup_samples            => servo_warmup_samples_i,
+	aes67_ctrl_servo_lock_threshold_ns         => servo_lock_threshold_ns_i,
+	aes67_ctrl_servo_unlock_threshold_ns       => servo_unlock_threshold_ns_i,
+	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
+	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
+	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -1050,18 +1112,18 @@ spigen: if (soctype = "spi") generate
 		adda_nrst_o => adda_nRST,
 
 		-- PTP servo / parser tuning outputs
-		servo_kp_gain_o              => servo_kp_gain,
-		servo_ki_gain_o              => servo_ki_gain,
-		servo_gain_shift_o           => servo_gain_shift,
-		servo_gain_shift_locked_o    => servo_gain_shift_locked,
-		servo_ki_extra_shift_o       => servo_ki_extra_shift,
-		servo_filter_shift_o         => servo_filter_shift,
-		servo_warmup_samples_o       => servo_warmup_samples,
-		servo_lock_threshold_ns_o    => servo_lock_threshold_ns,
-		servo_unlock_threshold_ns_o  => servo_unlock_threshold_ns,
-		servo_lock_count_threshold_o => servo_lock_count_threshold,
-		parser_min_filter_enable_o        => parser_min_filter_enable,
-		parser_min_filter_active_depth_o  => parser_min_filter_active_depth,
+		servo_kp_gain_o              => servo_kp_gain_i,
+		servo_ki_gain_o              => servo_ki_gain_i,
+		servo_gain_shift_o           => servo_gain_shift_i,
+		servo_gain_shift_locked_o    => servo_gain_shift_locked_i,
+		servo_ki_extra_shift_o       => servo_ki_extra_shift_i,
+		servo_filter_shift_o         => servo_filter_shift_i,
+		servo_warmup_samples_o       => servo_warmup_samples_i,
+		servo_lock_threshold_ns_o    => servo_lock_threshold_ns_i,
+		servo_unlock_threshold_ns_o  => servo_unlock_threshold_ns_i,
+		servo_lock_count_threshold_o => servo_lock_count_threshold_i,
+		parser_min_filter_enable_o        => parser_min_filter_enable_i,
+		parser_min_filter_active_depth_o  => parser_min_filter_active_depth_i,
 
 		-- PTP servo monitoring inputs
 		servo_mon_filtered_offset_i      => servo_mon_filtered_offset,
@@ -1099,6 +1161,46 @@ spigen: if (soctype = "spi") generate
 		mcu_irq_o => spictrl_irq_n_o
 	);
 end generate;
+
+
+
+ptp_conf_gen_static: if (static_ptp_conf = "TRUE") generate
+
+static_ptp_conf_inst: entity work.static_ptp_conf
+ port map(
+	servo_kp_gain_o => servo_kp_gain_o,
+	servo_ki_gain_o => servo_ki_gain_o,
+	servo_gain_shift_o => servo_gain_shift_o,
+	servo_gain_shift_locked_o => servo_gain_shift_locked_o,
+	servo_ki_extra_shift_o => servo_ki_extra_shift_o,
+	servo_filter_shift_o => servo_filter_shift_o,
+	servo_warmup_samples_o => servo_warmup_samples_o,
+	servo_lock_threshold_ns_o => servo_lock_threshold_ns_o,
+	servo_unlock_threshold_ns_o => servo_unlock_threshold_ns_o,
+	servo_lock_count_threshold_o => servo_lock_count_threshold_o,
+	parser_min_filter_enable_o => parser_min_filter_enable_o,
+	parser_min_filter_active_depth_o => parser_min_filter_active_depth_o
+);
+
+
+end generate;
+
+ptp_conf_gen_dynamic: if (static_ptp_conf /= "TRUE") generate
+	servo_kp_gain_i              <= servo_kp_gain_o;
+	servo_ki_gain_i              <= servo_ki_gain_o;
+	servo_gain_shift_i           <= servo_gain_shift_o;
+	servo_gain_shift_locked_i    <= servo_gain_shift_locked_o;
+	servo_ki_extra_shift_i       <= servo_ki_extra_shift_o;
+	servo_filter_shift_i         <= servo_filter_shift_o;
+	servo_warmup_samples_i       <= servo_warmup_samples_o;
+	servo_lock_threshold_ns_i    <= servo_lock_threshold_ns_o;
+	servo_unlock_threshold_ns_i  <= servo_unlock_threshold_ns_o;
+	servo_lock_count_threshold_i <= servo_lock_count_threshold_o;
+	parser_min_filter_enable_i        <= parser_min_filter_enable_o;
+	parser_min_filter_active_depth_i  <= parser_min_filter_active_depth_o;
+
+end generate;
+
 
 rgmiigen: if (ethernet_type = "RGMII") generate
 
@@ -1143,7 +1245,7 @@ PORT MAP(
 end generate;
 
 
-rmiigen: if (ethernet_type = "RMII") generate
+rmiigen: if (ethernet_type = "RMII" and platform = "ALTERA") generate
 
 
 
@@ -1182,6 +1284,49 @@ rmii_phy_if_inst: rmii_phy_if
 end generate;
 
 
+rmiigen_gowin: if (ethernet_type = "RMII" and platform = "GOWIN") generate
+
+-- Use Gowin MII/RMII IP. The IP outputs two separate derived clocks
+-- (mii_rx_clk and mii_tx_clk), but Gowin's synthesizer aggressively
+-- merges them since they share a source — which collapses the MAC's
+-- TX and RX clock domains into one and corrupts the TX datapath
+-- (each transmitted byte ends up duplicated on the wire).
+--
+-- Force each clock onto its own dedicated global clock route by
+-- inserting an explicit BUFG and tagging the IP-output net with
+-- syn_preserve so optimization cannot collapse the two domains.
+
+begin
+
+-- MII TX: MAC outputs 8 bits (GMII), only lower 4 bits are used for MII
+mii_txd <= gmii_txd(3 downto 0);
+-- MII RX: gowin IP drives only the lower nibble; tie off upper nibble
+gmii_rxd(7 downto 4) <= (others => '0');
+enet_clk <= gmii_tx_clk;
+gmii_rx_clk <= gmii_tx_clk;
+rmii_phy_if_inst_gowin: mii_to_rmii_gowin
+	port map (
+		refclk => phy_rmii_ref_clk,
+		rstn => rst_n,
+		speedis_100 => '1',
+		rmii_rx_crs_dv => phy_rmii_crsdv,
+		rmii_rx_er => '0',
+		rmii_rxd => phy_rmii_rxd,
+		rmii_tx_en => phy_rmii_txen,
+		rmii_txd => phy_rmii_txd,
+		mii_rx_dv => gmii_rx_dv,
+		mii_rx_er => gmii_rx_err,
+		mii_rxd => gmii_rxd(3 downto 0),
+		mii_tx_clk => gmii_tx_clk,
+		mii_tx_en => gmii_tx_en,
+		mii_tx_er => gmii_tx_err,
+		mii_txd => mii_txd
+	);
+
+end generate;
+
+
+
 -- system clocks
 sysclkgen50: if (platform = "ALTERA" and clk_in_speed = 50) generate
 sysclks_altpll_50m_in_inst : entity work.sysclks_altpll_50m_in PORT MAP (
@@ -1207,7 +1352,7 @@ sysclks_altpll_12m_in_inst : entity work.sysclks_altpll_12m_in PORT MAP (
 
 	rst_n <= rst_n_i and sys_clk_locked;
 end generate;
-sysclkgen27: if (platform = "TANG_PRIMER_20k" and clk_in_speed = 27) generate
+sysclkgen27: if (platform = "GOWIN" and board = "TANG_PRIMER_20k" and clk_in_speed = 27) generate
 gowin_pll_27i_125o_inst: entity work.gowin_pll_27i_125o
  port map(
 	clkout => clk_125MHz,
@@ -1218,6 +1363,17 @@ gowin_pll_27i_125o_inst: entity work.gowin_pll_27i_125o
 	rst_n <= rst_n_i and sys_clk_locked;
 end generate;
 
+
+sysclkgen50_gw: if (platform = "GOWIN" and board = "TANG_PRIMER_25k" and clk_in_speed = 50) generate
+	gowin_pll_50i_inst: gowin_pll_50i
+	 port map(
+		clkin => clock_i,
+		clkout0 => clk_125MHz,
+		lock => sys_clk_locked,
+		mdclk => clock_i
+	);
+	rst_n <= rst_n_i and sys_clk_locked;
+end generate;
 -- GPIO / pin assignments
 
 

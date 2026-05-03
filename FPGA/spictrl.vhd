@@ -18,7 +18,8 @@ entity spictrl is
         -- therefore keep the transaction open across short CS-high
         -- gaps and only tear it down once CS has been high for longer
         -- than PACKET_CS_GAP_TIMEOUT sys_clk cycles (genuine abort).
-        PACKET_CS_GAP_TIMEOUT : integer := 2048
+        PACKET_CS_GAP_TIMEOUT : integer := 2048;
+        STATIC_PTP_CONF : string := "TRUE"
     );
     port(
         sys_clk_i : IN STD_LOGIC;
@@ -127,7 +128,7 @@ end entity;
 architecture rtl of spictrl is
 
     constant metering_bits             : integer := rx_channel_meter_sig_i'length + rx_channel_meter_clip_i'length +tx_channel_meter_sig_i'length + tx_channel_meter_clip_i'length;
-    constant metering_bytes           : integer := natural(ceil(real((RXCHANNELS / 8) * 2 + (TXCHANNELS / 8) * 2)));
+    constant metering_bytes           : integer := (RXCHANNELS / 8) * 2 + (TXCHANNELS / 8) * 2;
     signal spi_data_to_host          : std_logic_vector(7 downto 0);
     signal spi_data_to_host_reg          : std_logic_vector(7 downto 0);
     signal spi_data_from_host        : std_logic_vector(7 downto 0);
@@ -444,7 +445,9 @@ begin
                         when "1010101" => -- 0x55 GM id
                             spi_data_to_host <= ptp_gmid_i((transaction_byte_counter * 8) + 7
                                                            downto transaction_byte_counter * 8);
+                        
                         when "1100001" => -- 0x61 PTP servo monitoring (22 B)
+                            if (STATIC_PTP_CONF /= "TRUE") then
                             case transaction_byte_counter is
                                 when 0  => spi_data_to_host <= servo_mon_filtered_offset_i(7 downto 0);
                                 when 1  => spi_data_to_host <= servo_mon_filtered_offset_i(15 downto 8);
@@ -469,7 +472,9 @@ begin
                                 when 20 => spi_data_to_host <= servo_mon_sample_count_i(15 downto 8);
                                 when 21 => spi_data_to_host <= "0000000" & servo_mon_first_lock_achieved_i;
                                 when others => spi_data_to_host <= x"00";
+                            
                             end case;
+                        end if;
                         when others =>
                             spi_data_to_host <= x"00";
                     end case;
@@ -748,6 +753,7 @@ begin
                         ptp_clock_class_o           <= ptp_shadow(15 downto 8);  -- byte 5
                         ptp_clock_accuracy_o        <= ptp_shadow(7 downto 0);   -- byte 6
                     when "1100000" => -- 0x60 PTP tuning block (18 B)
+                        if (STATIC_PTP_CONF /= "TRUE") then
                         servo_kp_gain_o              <= ptp_tuning_shadow(0);
                         servo_ki_gain_o              <= ptp_tuning_shadow(1);
                         servo_gain_shift_o           <= ptp_tuning_shadow(2)(4 downto 0);
@@ -766,6 +772,7 @@ begin
                         servo_lock_count_threshold_o <= ptp_tuning_shadow(15);
                         parser_min_filter_enable_o        <= ptp_tuning_shadow(16)(0);
                         parser_min_filter_active_depth_o  <= ptp_tuning_shadow(17);
+                        end if;
                     when others => null;
                 end case;
             end if;

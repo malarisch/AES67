@@ -380,6 +380,7 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
+set_global_assignment -name VHDL_FILE ../../../gowin/fpga_project/src/gowin_pll_27i_125o/gowin_pll_27i_125o.vhd
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyc1000/gateware/litex_soc_cyc1000.v
 set_global_assignment -name VHDL_FILE ../../../ethernet_top.vhd
 set_global_assignment -name VHDL_FILE ../../../aes67_top.vhd

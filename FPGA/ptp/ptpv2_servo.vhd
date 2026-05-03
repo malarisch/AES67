@@ -176,7 +176,7 @@ architecture Behavioral of ptpv2_servo is
   signal inp_do_phase_jump  : std_logic           := '0';
   signal inp_phase_jump_val : signed(31 downto 0) := (others => '0');
   signal inp_do_normal_op   : std_logic           := '0';
-  signal pi_wait_state      : std_logic           := '0';
+  signal pi_wait_state      : unsigned(1 downto 0)          := (others => '0');
 begin
 
   -- Concurrent gain shift calculation, now sourced entirely from input ports.
@@ -241,7 +241,7 @@ begin
 
       integral_sum    <= (others => '0');
       freq_correction <= (others => '0');
-      pi_wait_state   <= '0';
+      pi_wait_state   <= (others => '0');
     elsif rising_edge(clk) then
 
       -- Frequency pre-seed: when servo_proc has computed freq_seed_ppb at the
@@ -254,8 +254,7 @@ begin
         freq_correction <= freq_seed_ppb;
       end if;
 
-      if (pi_wait_state = '0') then
-        pi_wait_state <= '1';
+      if (pi_wait_state = 3) then
         case pi_state is
           when PI_IDLE =>
             if pi_trigger = '1' then
@@ -299,9 +298,9 @@ begin
 
             pi_state <= PI_IDLE;
         end case;
-      else
-        pi_wait_state <= '0';
       end if;
+      pi_wait_state <= pi_wait_state + 1;
+      
     end if;
 
   end process;

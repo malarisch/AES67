@@ -137,7 +137,7 @@ architecture Behavioral of ptpv2_parser is
     signal current_min_abs  : unsigned(31 downto 0) := (others => '0');
     
     -- State machine
-    type t_SM_PtpParser is (s_Idle, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Calc_Bypass, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_Prefetch, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Calc_MinFilter, s_Calc_Bypass, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
 
     type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply, s_ClockSet_Apply2);
@@ -316,11 +316,11 @@ begin
                 elapsed_ns <= unsigned(timestamp_diff_ns(
                     latched_rx_timestamp_seconds(3 downto 0), latched_rx_timestamp_nanoseconds,
                     stored_t2_seconds, stored_t2_nanoseconds
-                ))(31 downto 0);
+                ));
                 s_SM_ClockConfigurator <= s_ClockSet_Calc2;
-                
+
             elsif (s_SM_ClockConfigurator = s_ClockSet_Calc2) then
-                ns_sum <= unsigned(unsigned(stored_t1_nanoseconds) + elapsed_ns)(31 downto 0);
+                ns_sum <= unsigned(stored_t1_nanoseconds) + elapsed_ns;
                 s_SM_ClockConfigurator <= s_ClockSet_Apply;
                 
             elsif (s_SM_ClockConfigurator = s_ClockSet_Apply) then
@@ -438,7 +438,7 @@ begin
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
             log_msg_interval_valid_o <= '0';
-            if (clock_configured) then
+            if (clock_configured = '1') then
             configureClock <= '0';
             end if;
             announce_valid_o <= '0';
@@ -448,14 +448,16 @@ begin
             if (s_SM_PtpParser = s_Idle) then
                 if (parse_ptp_packet_prev /= parse_ptp_packet_sync) then
                     byte_counter <= 0;
-                    ram_read_address <= to_unsigned(0, 11);
-                    s_SM_PtpParser <= s_ReadHeader;
+                    ram_read_address <= to_unsigned(1, 11);
+                    s_SM_PtpParser <= s_Prefetch;
                     message_length := 85;
                     
                     latched_rx_timestamp_seconds <= rx_timestamp_seconds_i;
                     latched_rx_timestamp_nanoseconds <= rx_timestamp_nanoseconds_i;
                 end if;
-
+            elsif (s_SM_PtpParser = s_Prefetch) then
+                    ram_read_address <= to_unsigned(2, 11);
+                    s_SM_PtpParser <= s_ReadHeader;
             elsif (s_SM_PtpParser = s_ReadHeader) then
                 -- read PTPv2 header fields based on byte_counter
                 case byte_counter is
@@ -549,7 +551,7 @@ begin
                 end if;
                 
                 byte_counter <= byte_counter + 1;
-                ram_read_address <= to_unsigned(byte_counter + 1, 11);
+                ram_read_address <= to_unsigned(byte_counter + 2, 11);
 
                 if byte_counter = message_length then
                     s_SM_PtpParser <= s_Interpret_Packet;

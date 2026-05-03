@@ -2,9 +2,9 @@
 library IEEE;
 use IEEE.std_logic_1164.all;
 
-entity top_tang_primer_20k is
+entity top_tang_primer_25k is
     port (
-		clk_27m :  IN  STD_LOGIC;
+		clk_50m :  IN  STD_LOGIC;
 		-- RMII PHY interface
 		rmii_ref_clk :  IN  STD_LOGIC;          -- 50 MHz reference clock from PHY
 		rmii_crsdv :  IN  STD_LOGIC;
@@ -59,15 +59,15 @@ entity top_tang_primer_20k is
         spictrl_irq_n_o : OUT STD_LOGIC;
 		-- Misc
 		--adda_nrst :  OUT  STD_LOGIC;
-		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
+		--user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
 		debug_mac_tx_clk_o : OUT STD_LOGIC;
 		debug_mac_tx_byte_sent_o: OUT STD_LOGIC;
 		debug_rmii_clk_o : OUT STD_LOGIC
         
     );
-end entity top_tang_primer_20k;
+end entity top_tang_primer_25k;
 
-architecture rtl of top_tang_primer_20k is
+architecture rtl of top_tang_primer_25k is
 
 
     
@@ -77,8 +77,8 @@ begin
      generic map(
         soctype => "spi",
         platform => "GOWIN",
-		board => "TANG_PRIMER_20k",
-        clk_in_speed => 27,
+		board => "TANG_PRIMER_25k",
+        clk_in_speed => 50,
         ethernet_type => "RMII",
         USE_EXTERNAL_PLL => "false",
         FPGAVERSIONMSB => 13,
@@ -95,7 +95,7 @@ begin
     )
      port map(
         rst_n_i => '1',
-        clock_i => clk_27m,
+        clock_i => clk_50m,
         phy_rmii_ref_clk => rmii_ref_clk,
         phy_rmii_crsdv => rmii_crsdv,
         phy_rmii_rxer => rmii_rxer,
@@ -117,7 +117,7 @@ begin
         spictrl_miso_o => spictrl_miso_o,
         spictrl_irq_n_o => spictrl_irq_n_o,
         --adda_nRST => adda_nRST,
-        user_led => user_led,
+--        user_led => user_led,
 		debug_mac_tx_byte_sent_o => debug_mac_tx_byte_sent_o,
 		debug_mac_tx_clk_o => debug_mac_tx_clk_o
     );

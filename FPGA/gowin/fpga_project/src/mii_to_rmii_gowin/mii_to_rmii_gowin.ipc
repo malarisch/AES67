@@ -1,0 +1,11 @@
+[General]
+file=mii_to_rmii_gowin
+ipc_version=4
+module=mii_to_rmii_gowin
+target_device=gw2a18-002
+type=mii_to_rmii
+version=1.0
+
+[Config]
+LANG=1
+Synthesis_tool=GowinSynthesis

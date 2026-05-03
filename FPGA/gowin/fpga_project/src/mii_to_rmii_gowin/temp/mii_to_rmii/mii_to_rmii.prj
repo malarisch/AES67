@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gowin-synthesis-project>
+<Project>
+    <Version>beta</Version>
+    <Device id="GW2A-18" package="PBGA256" speed="8" partNumber="GW2A-LV18PG256C8/I7"/>
+    <FileList>
+        <File path="/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v" type="verilog"/>
+        <File path="/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v" type="verilog"/>
+    </FileList>
+    <OptionList>
+        <Option type="disable_insert_pad" value="1"/>
+        <Option type="include_path" value="/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data"/>
+        <Option type="include_path" value="/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii"/>
+        <Option type="output_file" value="mii_to_rmii_gowin.vg"/>
+        <Option type="output_template" value="mii_to_rmii_gowin_tmp.vhd"/>
+        <Option type="output_vhdl_file" value="mii_to_rmii_gowin.vhg"/>
+        <Option type="ram_balance" value="1"/>
+        <Option type="ram_rw_check" value="1"/>
+        <Option type="vcc" value="1.0"/>
+        <Option type="vccx" value="3.3"/>
+        <Option type="verilog_language" value="sysv-2017"/>
+    </OptionList>
+</Project>

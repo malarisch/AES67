@@ -1,0 +1,671 @@
+//Copyright (C)2014-2025 Gowin Semiconductor Corporation.
+//All rights reserved.
+//File Title: Post-PnR Verilog Simulation Model file
+//Tool Version: V1.9.12
+//Created Time: Thu Apr 30 12:00:58 2026
+
+`timescale 100 ps/100 ps
+module mii_to_rmii_gowin(
+	refclk,
+	rstn,
+	speedis_100,
+	rmii_rx_crs_dv,
+	rmii_rx_er,
+	rmii_rxd,
+	mii_tx_en,
+	mii_tx_er,
+	mii_txd,
+	rmii_tx_en,
+	rmii_txd,
+	mii_rx_clk,
+	mii_rx_dv,
+	mii_rx_er,
+	mii_rxd,
+	mii_tx_clk,
+	mii_col,
+	mii_crs
+);
+input refclk;
+input rstn;
+input speedis_100;
+input rmii_rx_crs_dv;
+input rmii_rx_er;
+input [1:0] rmii_rxd;
+input mii_tx_en;
+input mii_tx_er;
+input [3:0] mii_txd;
+output rmii_tx_en;
+output [1:0] rmii_txd;
+output mii_rx_clk;
+output mii_rx_dv;
+output mii_rx_er;
+output [3:0] mii_rxd;
+output mii_tx_clk;
+output mii_col;
+output mii_crs;
+wire GND;
+wire VCC;
+wire mii_col;
+wire mii_crs;
+wire mii_rx_clk;
+wire mii_rx_dv;
+wire mii_rx_er;
+wire [3:0] mii_rxd;
+wire mii_tx_clk;
+wire mii_tx_en;
+wire mii_tx_er;
+wire [3:0] mii_txd;
+wire refclk;
+wire rmii_rx_crs_dv;
+wire rmii_rx_er;
+wire [1:0] rmii_rxd;
+wire rmii_tx_en;
+wire [1:0] rmii_txd;
+wire rstn;
+wire speedis_100;
+wire \u_rmii_txrx/clk_div_fall ;
+wire \u_rmii_txrx/clk_div_rise ;
+wire \u_rmii_txrx/u_clk_gen/n37_5 ;
+wire \u_rmii_txrx/u_clk_gen/n47_3 ;
+wire \u_rmii_txrx/u_clk_gen/n55_4 ;
+wire \u_rmii_txrx/u_clk_gen/clk_div_7 ;
+wire \u_rmii_txrx/u_clk_gen/n17_6 ;
+wire \u_rmii_txrx/u_clk_gen/n19_6 ;
+wire \u_rmii_txrx/u_clk_gen/n20_6 ;
+wire \u_rmii_txrx/u_clk_gen/n37_6 ;
+wire \u_rmii_txrx/u_clk_gen/n47_4 ;
+wire \u_rmii_txrx/u_clk_gen/clk_div_8 ;
+wire \u_rmii_txrx/u_clk_gen/n17_7 ;
+wire \u_rmii_txrx/u_clk_gen/n18_8 ;
+wire \u_rmii_txrx/u_clk_gen/n6_6 ;
+wire \u_rmii_txrx/u_clk_gen/n21_8 ;
+wire [4:0] \u_rmii_txrx/u_clk_gen/clk_cnt ;
+wire \u_rmii_txrx/u_rmii_tx/n32_4 ;
+wire \u_rmii_txrx/u_rmii_tx/n33_3 ;
+wire \u_rmii_txrx/u_rmii_tx/rmii_txd_1_7 ;
+wire \u_rmii_txrx/u_rmii_tx/clk_div_rise_d1 ;
+wire \u_rmii_txrx/u_rmii_tx/mii_tx_en_tmp ;
+wire \u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 ;
+wire \u_rmii_txrx/u_rmii_tx/n11_6 ;
+wire [3:0] \u_rmii_txrx/u_rmii_tx/mii_txd_tmp ;
+wire \u_rmii_txrx/u_rmii_rx/n14_4 ;
+wire \u_rmii_txrx/u_rmii_rx/n79_12 ;
+wire \u_rmii_txrx/u_rmii_rx/n80_12 ;
+wire \u_rmii_txrx/u_rmii_rx/n81_12 ;
+wire \u_rmii_txrx/u_rmii_rx/n82_12 ;
+wire \u_rmii_txrx/u_rmii_rx/n100_12 ;
+wire \u_rmii_txrx/u_rmii_rx/n47_6 ;
+wire \u_rmii_txrx/u_rmii_rx/n46_5 ;
+wire \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 ;
+wire \u_rmii_txrx/u_rmii_rx/di_bits_first_7 ;
+wire \u_rmii_txrx/u_rmii_rx/n100_13 ;
+wire \u_rmii_txrx/u_rmii_rx/n47_7 ;
+wire \u_rmii_txrx/u_rmii_rx/di_bits_first_9 ;
+wire \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_9 ;
+wire \u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1 ;
+wire \u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1 ;
+wire \u_rmii_txrx/u_rmii_rx/di_bits_first ;
+wire \u_rmii_txrx/u_rmii_rx/n6_6 ;
+wire \u_rmii_txrx/u_rmii_rx/n107_5 ;
+wire [1:0] \u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 ;
+wire [1:0] \u_rmii_txrx/u_rmii_rx/di_bits_cnt ;
+wire [3:0] \u_rmii_txrx/u_rmii_rx/di_bits_data ;
+wire [1:0] \u_rmii_txrx/u_rmii_rx/di_bits_er ;
+VCC VCC_cZ (
+  .V(VCC)
+);
+GND GND_cZ (
+  .G(GND)
+);
+GSR GSR (
+	.GSRI(VCC)
+);
+OBUF gowin_buf_0 (
+	.I(mii_rx_clk),
+	.O(mii_tx_clk)
+);
+LUT2 \u_rmii_txrx/mii_col_d_s  (
+	.I0(mii_rx_dv),
+	.I1(mii_tx_en),
+	.F(mii_col)
+);
+defparam \u_rmii_txrx/mii_col_d_s .INIT=4'h8;
+LUT2 \u_rmii_txrx/mii_crs_d_s  (
+	.I0(mii_rx_dv),
+	.I1(mii_tx_en),
+	.F(mii_crs)
+);
+defparam \u_rmii_txrx/mii_crs_d_s .INIT=4'hE;
+LUT3 \u_rmii_txrx/u_clk_gen/n37_s1  (
+	.I0(\u_rmii_txrx/u_clk_gen/n37_6 ),
+	.I1(speedis_100),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.F(\u_rmii_txrx/u_clk_gen/n37_5 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n37_s1 .INIT=8'hE0;
+LUT3 \u_rmii_txrx/u_clk_gen/n47_s0  (
+	.I0(\u_rmii_txrx/u_clk_gen/n47_4 ),
+	.I1(speedis_100),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.F(\u_rmii_txrx/u_clk_gen/n47_3 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n47_s0 .INIT=8'hC2;
+LUT3 \u_rmii_txrx/u_clk_gen/n55_s1  (
+	.I0(\u_rmii_txrx/u_clk_gen/n37_6 ),
+	.I1(speedis_100),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.F(\u_rmii_txrx/u_clk_gen/n55_4 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n55_s1 .INIT=8'h0E;
+LUT3 \u_rmii_txrx/u_clk_gen/clk_div_s5  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_div_8 ),
+	.I2(speedis_100),
+	.F(\u_rmii_txrx/u_clk_gen/clk_div_7 )
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_div_s5 .INIT=8'hF8;
+LUT4 \u_rmii_txrx/u_clk_gen/n17_s2  (
+	.I0(\u_rmii_txrx/u_clk_gen/n17_7 ),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.I3(\u_rmii_txrx/u_clk_gen/clk_cnt [4]),
+	.F(\u_rmii_txrx/u_clk_gen/n17_6 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n17_s2 .INIT=16'h7D80;
+LUT4 \u_rmii_txrx/u_clk_gen/n19_s2  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [4]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I3(\u_rmii_txrx/u_clk_gen/n17_7 ),
+	.F(\u_rmii_txrx/u_clk_gen/n19_6 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n19_s2 .INIT=16'h0DF0;
+LUT2 \u_rmii_txrx/u_clk_gen/n20_s2  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.F(\u_rmii_txrx/u_clk_gen/n20_6 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n20_s2 .INIT=4'h6;
+LUT4 \u_rmii_txrx/u_clk_gen/n37_s2  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.I3(\u_rmii_txrx/u_clk_gen/clk_cnt [4]),
+	.F(\u_rmii_txrx/u_clk_gen/n37_6 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n37_s2 .INIT=16'h0001;
+LUT4 \u_rmii_txrx/u_clk_gen/n47_s1  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [4]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.I3(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.F(\u_rmii_txrx/u_clk_gen/n47_4 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n47_s1 .INIT=16'h1000;
+LUT4 \u_rmii_txrx/u_clk_gen/clk_div_s6  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [4]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.I3(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.F(\u_rmii_txrx/u_clk_gen/clk_div_8 )
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_div_s6 .INIT=16'h1001;
+LUT2 \u_rmii_txrx/u_clk_gen/n17_s3  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.F(\u_rmii_txrx/u_clk_gen/n17_7 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n17_s3 .INIT=4'h8;
+LUT4 \u_rmii_txrx/u_clk_gen/n18_s3  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [2]),
+	.I1(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.I2(\u_rmii_txrx/u_clk_gen/clk_cnt [1]),
+	.I3(\u_rmii_txrx/u_clk_gen/clk_cnt [3]),
+	.F(\u_rmii_txrx/u_clk_gen/n18_8 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n18_s3 .INIT=16'h7F80;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_cnt_3_s0  (
+	.D(\u_rmii_txrx/u_clk_gen/n18_8 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/u_clk_gen/clk_cnt [3])
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_cnt_3_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_cnt_2_s0  (
+	.D(\u_rmii_txrx/u_clk_gen/n19_6 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/u_clk_gen/clk_cnt [2])
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_cnt_2_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_cnt_1_s0  (
+	.D(\u_rmii_txrx/u_clk_gen/n20_6 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/u_clk_gen/clk_cnt [1])
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_cnt_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_cnt_0_s0  (
+	.D(\u_rmii_txrx/u_clk_gen/n21_8 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/u_clk_gen/clk_cnt [0])
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_cnt_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_div_fall_s2  (
+	.D(\u_rmii_txrx/u_clk_gen/n47_3 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/clk_div_fall )
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_div_fall_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_div_rise_s2  (
+	.D(\u_rmii_txrx/u_clk_gen/n55_4 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/clk_div_rise )
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_div_rise_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_cnt_4_s0  (
+	.D(\u_rmii_txrx/u_clk_gen/n17_6 ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(\u_rmii_txrx/u_clk_gen/clk_cnt [4])
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_cnt_4_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_clk_gen/clk_div_s3  (
+	.D(\u_rmii_txrx/u_clk_gen/n37_5 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_clk_gen/clk_div_7 ),
+	.CLEAR(\u_rmii_txrx/u_clk_gen/n6_6 ),
+	.Q(mii_rx_clk)
+);
+defparam \u_rmii_txrx/u_clk_gen/clk_div_s3 .INIT=1'b0;
+INV \u_rmii_txrx/u_clk_gen/n6_s2  (
+	.I(rstn),
+	.O(\u_rmii_txrx/u_clk_gen/n6_6 )
+);
+LUT1 \u_rmii_txrx/u_clk_gen/n21_s4  (
+	.I0(\u_rmii_txrx/u_clk_gen/clk_cnt [0]),
+	.F(\u_rmii_txrx/u_clk_gen/n21_8 )
+);
+defparam \u_rmii_txrx/u_clk_gen/n21_s4 .INIT=2'h1;
+LUT3 \u_rmii_txrx/u_rmii_tx/n32_s0  (
+	.I0(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [1]),
+	.I1(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [3]),
+	.I2(\u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 ),
+	.F(\u_rmii_txrx/u_rmii_tx/n32_4 )
+);
+defparam \u_rmii_txrx/u_rmii_tx/n32_s0 .INIT=8'hAC;
+LUT3 \u_rmii_txrx/u_rmii_tx/n33_s0  (
+	.I0(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [2]),
+	.I1(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [0]),
+	.I2(\u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 ),
+	.F(\u_rmii_txrx/u_rmii_tx/n33_3 )
+);
+defparam \u_rmii_txrx/u_rmii_tx/n33_s0 .INIT=8'hCA;
+LUT2 \u_rmii_txrx/u_rmii_tx/rmii_txd_1_s5  (
+	.I0(\u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 ),
+	.I1(\u_rmii_txrx/u_rmii_tx/clk_div_rise_d1 ),
+	.F(\u_rmii_txrx/u_rmii_tx/rmii_txd_1_7 )
+);
+defparam \u_rmii_txrx/u_rmii_tx/rmii_txd_1_s5 .INIT=4'hE;
+DFFCE \u_rmii_txrx/u_rmii_tx/clk_div_rise_d1_s0  (
+	.D(\u_rmii_txrx/clk_div_rise ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/clk_div_rise_d1 )
+);
+defparam \u_rmii_txrx/u_rmii_tx/clk_div_rise_d1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/mii_tx_en_tmp_s0  (
+	.D(mii_tx_en),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/mii_tx_en_tmp )
+);
+defparam \u_rmii_txrx/u_rmii_tx/mii_tx_en_tmp_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_3_s0  (
+	.D(mii_txd[3]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [3])
+);
+defparam \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_3_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_2_s0  (
+	.D(mii_txd[2]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [2])
+);
+defparam \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_2_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_1_s0  (
+	.D(mii_txd[1]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [1])
+);
+defparam \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_0_s0  (
+	.D(mii_txd[0]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/mii_txd_tmp [0])
+);
+defparam \u_rmii_txrx/u_rmii_tx/mii_txd_tmp_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/rmii_tx_en_s2  (
+	.D(\u_rmii_txrx/u_rmii_tx/mii_tx_en_tmp ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(rmii_tx_en)
+);
+defparam \u_rmii_txrx/u_rmii_tx/rmii_tx_en_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/clk_div_fall_d1_s0  (
+	.D(\u_rmii_txrx/clk_div_fall ),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(\u_rmii_txrx/u_rmii_tx/clk_div_fall_d1 )
+);
+defparam \u_rmii_txrx/u_rmii_tx/clk_div_fall_d1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/rmii_txd_1_s3  (
+	.D(\u_rmii_txrx/u_rmii_tx/n32_4 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_tx/rmii_txd_1_7 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(rmii_txd[1])
+);
+defparam \u_rmii_txrx/u_rmii_tx/rmii_txd_1_s3 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_tx/rmii_txd_0_s2  (
+	.D(\u_rmii_txrx/u_rmii_tx/n33_3 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_tx/rmii_txd_1_7 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_tx/n11_6 ),
+	.Q(rmii_txd[0])
+);
+defparam \u_rmii_txrx/u_rmii_tx/rmii_txd_0_s2 .INIT=1'b0;
+INV \u_rmii_txrx/u_rmii_tx/n11_s2  (
+	.I(rstn),
+	.O(\u_rmii_txrx/u_rmii_tx/n11_6 )
+);
+LUT2 \u_rmii_txrx/u_rmii_rx/n14_s0  (
+	.I0(\u_rmii_txrx/clk_div_fall ),
+	.I1(\u_rmii_txrx/clk_div_rise ),
+	.F(\u_rmii_txrx/u_rmii_rx/n14_4 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n14_s0 .INIT=4'hE;
+LUT4 \u_rmii_txrx/u_rmii_rx/n79_s7  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_data [3]),
+	.I1(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [1]),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n79_12 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n79_s7 .INIT=16'h0C0A;
+LUT4 \u_rmii_txrx/u_rmii_rx/n80_s7  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_data [2]),
+	.I1(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [0]),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n80_12 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n80_s7 .INIT=16'h0C0A;
+LUT4 \u_rmii_txrx/u_rmii_rx/n81_s7  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_data [1]),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_data [3]),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n81_12 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n81_s7 .INIT=16'h0C0A;
+LUT4 \u_rmii_txrx/u_rmii_rx/n82_s7  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_data [0]),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_data [2]),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n82_12 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n82_s7 .INIT=16'h0C0A;
+LUT2 \u_rmii_txrx/u_rmii_rx/n100_s7  (
+	.I0(\u_rmii_txrx/u_rmii_rx/n100_13 ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.F(\u_rmii_txrx/u_rmii_rx/n100_12 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n100_s7 .INIT=4'h1;
+LUT3 \u_rmii_txrx/u_rmii_rx/n47_s2  (
+	.I0(\u_rmii_txrx/u_rmii_rx/n47_7 ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 ),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n47_6 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n47_s2 .INIT=8'h0E;
+LUT4 \u_rmii_txrx/u_rmii_rx/n46_s1  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [1]),
+	.F(\u_rmii_txrx/u_rmii_rx/n46_5 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n46_s1 .INIT=16'h0BB0;
+LUT4 \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s3  (
+	.I0(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [1]),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I2(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [0]),
+	.I3(\u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1 ),
+	.F(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s3 .INIT=16'h4000;
+LUT4 \u_rmii_txrx/u_rmii_rx/di_bits_first_s3  (
+	.I0(\u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1 ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [1]),
+	.F(\u_rmii_txrx/u_rmii_rx/di_bits_first_7 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_first_s3 .INIT=16'h0001;
+LUT4 \u_rmii_txrx/u_rmii_rx/n100_s8  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_er [0]),
+	.I1(\u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1 ),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_er [1]),
+	.I3(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0]),
+	.F(\u_rmii_txrx/u_rmii_rx/n100_13 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n100_s8 .INIT=16'h0305;
+LUT3 \u_rmii_txrx/u_rmii_rx/n47_s3  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [1]),
+	.I1(\u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1 ),
+	.I2(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.F(\u_rmii_txrx/u_rmii_rx/n47_7 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n47_s3 .INIT=8'h0E;
+LUT4 \u_rmii_txrx/u_rmii_rx/di_bits_first_s4  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_first_7 ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 ),
+	.I2(\u_rmii_txrx/clk_div_fall ),
+	.I3(\u_rmii_txrx/clk_div_rise ),
+	.F(\u_rmii_txrx/u_rmii_rx/di_bits_first_9 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_first_s4 .INIT=16'hEEE0;
+LUT4 \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s4  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.I1(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_7 ),
+	.I2(\u_rmii_txrx/clk_div_fall ),
+	.I3(\u_rmii_txrx/clk_div_rise ),
+	.F(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_9 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s4 .INIT=16'hDDD0;
+DFFCE \u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1_s0  (
+	.D(rmii_rx_er),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/rmii_rxd_d1_1_s0  (
+	.D(rmii_rxd[1]),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [1])
+);
+defparam \u_rmii_txrx/u_rmii_rx/rmii_rxd_d1_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/rmii_rxd_d1_0_s0  (
+	.D(rmii_rxd[0]),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [0])
+);
+defparam \u_rmii_txrx/u_rmii_rx/rmii_rxd_d1_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/n46_5 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_9 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [1])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_cnt_0_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/n47_6 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/di_bits_cnt_1_9 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_cnt [0])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_cnt_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_data_3_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [1]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_data [3])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_data_3_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_data_2_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/rmii_rxd_d1 [0]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_data [2])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_data_2_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_data_1_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/di_bits_data [3]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_data [1])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_data_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_data_0_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/di_bits_data [2]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_data [0])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_data_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_er_1_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/rmii_rx_er_d1 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_er [1])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_er_1_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/di_bits_er_0_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/di_bits_er [1]),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/n14_4 ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_er [0])
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_er_0_s0 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rxd_3_s2  (
+	.D(\u_rmii_txrx/u_rmii_rx/n79_12 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rxd[3])
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rxd_3_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rxd_2_s1  (
+	.D(\u_rmii_txrx/u_rmii_rx/n80_12 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rxd[2])
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rxd_2_s1 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rxd_1_s1  (
+	.D(\u_rmii_txrx/u_rmii_rx/n81_12 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rxd[1])
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rxd_1_s1 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rxd_0_s1  (
+	.D(\u_rmii_txrx/u_rmii_rx/n82_12 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rxd[0])
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rxd_0_s1 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rx_er_s2  (
+	.D(\u_rmii_txrx/u_rmii_rx/n100_12 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rx_er)
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rx_er_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/mii_rx_dv_s2  (
+	.D(\u_rmii_txrx/u_rmii_rx/n107_5 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/clk_div_fall ),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(mii_rx_dv)
+);
+defparam \u_rmii_txrx/u_rmii_rx/mii_rx_dv_s2 .INIT=1'b0;
+DFFCE \u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1_s0  (
+	.D(rmii_rx_crs_dv),
+	.CLK(refclk),
+	.CE(VCC),
+	.CLEAR(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/rmii_rx_crs_dv_d1_s0 .INIT=1'b0;
+DFFPE \u_rmii_txrx/u_rmii_rx/di_bits_first_s0  (
+	.D(\u_rmii_txrx/u_rmii_rx/n107_5 ),
+	.CLK(refclk),
+	.CE(\u_rmii_txrx/u_rmii_rx/di_bits_first_9 ),
+	.PRESET(\u_rmii_txrx/u_rmii_rx/n6_6 ),
+	.Q(\u_rmii_txrx/u_rmii_rx/di_bits_first )
+);
+defparam \u_rmii_txrx/u_rmii_rx/di_bits_first_s0 .INIT=1'b1;
+INV \u_rmii_txrx/u_rmii_rx/n6_s2  (
+	.I(rstn),
+	.O(\u_rmii_txrx/u_rmii_rx/n6_6 )
+);
+LUT1 \u_rmii_txrx/u_rmii_rx/n107_s2  (
+	.I0(\u_rmii_txrx/u_rmii_rx/di_bits_first ),
+	.F(\u_rmii_txrx/u_rmii_rx/n107_5 )
+);
+defparam \u_rmii_txrx/u_rmii_rx/n107_s2 .INIT=2'h1;
+endmodule

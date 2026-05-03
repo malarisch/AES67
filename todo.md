@@ -1,13 +1,13 @@
 # Todo
 
 ## Akut
- - 100 MBIT ETHERNET TESTEN!!!!!!!
+ 
  - RESET STRUKTUR ÜBERARBEITEN !!!!
  - Alle State machines vernünftig recovern lassen!
  - Komplette FPGA Generic Konfiguration am Control Plane Interface Exposen
+ - 100 Mbit Eth auf Gigabit Phy fixen
  - std_logic vs std_ulogic mess überarbeiten
  - ungenutze register entfernen
- - eth_ram überarbeiten, Gowin EDA hat Probleme den RAM korrekt zu inferieren!
  - Timing für TX Packet Buffer RAMs machen Probleme (manchmal, je nachdem wie sich quartus fühlt)
  - PTP RX Packet buffer abschaffen, einfach direkt von der Wire lesen. Ist sowieso alles sequenziell.
  - Modulresets für die einzelenen FPGA Module
@@ -40,7 +40,7 @@
     - LPF für Sample interpolation!
   - weitere samplerates
   - Prüfsummen für externes MCU Interface
-
+  - Gowin weiter debuggen - irgendwo macht die Gowin EDA den Ethernet Clock tree kaputt
 ---
 
 ## Nice to have

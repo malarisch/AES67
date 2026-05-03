@@ -6,7 +6,7 @@ use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 
 
-ENTITY aes67_top IS 
+ENTITY aes67_top IS  
 	generic (
 		ETHERNET_TYPE : string := "RGMII";
 		TX_MAX_STREAMS : natural := 8;

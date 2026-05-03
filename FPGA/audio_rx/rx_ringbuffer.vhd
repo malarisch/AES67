@@ -59,7 +59,7 @@ architecture Behavioral of rx_ringbuffer is
     constant SAMPLE_SHIFT   : integer := clog2(SAMPLE_STRIDE); -- log2(SAMPLE_STRIDE) for address computation
     constant SAMPLE_IDX_BITS : integer := ADDR_BITS - SAMPLE_SHIFT; -- bits of sample index within buffer (= clog2(audio_buffer_sample_depth))
 
-    type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData, s_End);
+    type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData_wait, s_readSampleData, s_End);
     signal packetParserState : t_s_parsePacket := s_Idle;
 
     type t_sample_ram is array (0 to AUDIO_BUFFER_LENGTH - 1) of std_logic_vector(7 downto 0);
@@ -182,56 +182,47 @@ begin
                     if packet_ready_i_sync2 /= packet_ready_i_sync3 then
                         media_clock_latch <= media_clock_i;
                         packetParserState <= s_readHeader;
-                        packet_read_index <= 16;
-                        eth_read_addr_o <= to_unsigned(16, 11);
+                        packet_read_index <= 13;
+                        eth_read_addr_o <= to_unsigned(15, 11);
                     end if;
 
                 when s_readHeader =>
+                    packet_read_index <= packet_read_index + 1;
+                    eth_read_addr_o <= to_unsigned(packet_read_index + 2, 11);
                     case packet_read_index is
                         when 16 =>
                             current_packet_length(15 downto 8) <= eth_read_data_i;
-                            packet_read_index <= 17;
-                            eth_read_addr_o <= to_unsigned(17, 11);
+                            --eth_read_addr_o <= to_unsigned(17, 11);
                         when 17 =>
                             current_packet_length(7 downto 0) <= eth_read_data_i;
-                            packet_read_index <= 30;
-                            eth_read_addr_o <= to_unsigned(30, 11);
+                            --eth_read_addr_o <= to_unsigned(30, 11);
                         when 30 =>
                             current_packet_dst_ip(31 downto 24) <= eth_read_data_i;
-                            packet_read_index <= 31;
-                            eth_read_addr_o <= to_unsigned(31, 11);
+                            --eth_read_addr_o <= to_unsigned(31, 11);
                         when 31 =>
                             current_packet_dst_ip(23 downto 16) <= eth_read_data_i;
-                            packet_read_index <= 32;
-                            eth_read_addr_o <= to_unsigned(32, 11);
+                            --eth_read_addr_o <= to_unsigned(32, 11);
                         when 32 =>
                             current_packet_dst_ip(15 downto 8) <= eth_read_data_i;
-                            packet_read_index <= 33;
-                            eth_read_addr_o <= to_unsigned(33, 11);
+                            --eth_read_addr_o <= to_unsigned(33, 11);
                         when 33 =>
                             current_packet_dst_ip(7 downto 0) <= eth_read_data_i;
-                            packet_read_index <= 36;
-                            eth_read_addr_o <= to_unsigned(36, 11);
+                            --eth_read_addr_o <= to_unsigned(36, 11);
                         when 36 =>
                             current_packet_dst_port(15 downto 8) <= eth_read_data_i;
-                            packet_read_index <= 37;
-                            eth_read_addr_o <= to_unsigned(37, 11);
+                            --eth_read_addr_o <= to_unsigned(37, 11);
                         when 37 =>
                             current_packet_dst_port(7 downto 0) <= eth_read_data_i;
-                            packet_read_index <= 46;
-                            eth_read_addr_o <= to_unsigned(46, 11);
+                            --eth_read_addr_o <= to_unsigned(46, 11);
                         when 46 =>
                             current_packet_media_clock(31 downto 24) <= eth_read_data_i;
-                            packet_read_index <= 47;
-                            eth_read_addr_o <= to_unsigned(47, 11);
+                            --eth_read_addr_o <= to_unsigned(47, 11);
                         when 47 =>
                             current_packet_media_clock(23 downto 16) <= eth_read_data_i;
-                            packet_read_index <= 48;
-                            eth_read_addr_o <= to_unsigned(48, 11);
+                            --eth_read_addr_o <= to_unsigned(48, 11);
                         when 48 =>
                             current_packet_media_clock(15 downto 8) <= eth_read_data_i;
-                            packet_read_index <= 49;
-                            eth_read_addr_o <= to_unsigned(49, 11);
+                            --eth_read_addr_o <= to_unsigned(49, 11);
                         when 49 =>
                             current_packet_media_clock(7 downto 0) <= eth_read_data_i;
                             packetParserState <= s_prepare;
@@ -382,7 +373,12 @@ begin
                         when others =>
                             packetParserState <= s_Idle;
                     end case;
-
+                 when s_readSampleData_wait =>
+                    -- Pipeline fill for 2-cycle eth_ram read latency:
+                    -- addr from prepare_step 11 is being registered now,
+                    -- pre-request next address so data arrives back-to-back.
+                    eth_read_addr_o <= to_unsigned(packet_read_index + 1, 11);
+                    packetParserState <= s_readSampleData;
                 when s_readSampleData =>
                     if packet_read_index >= to_integer(unsigned(current_packet_length)) + 14 then
                         packetParserState <= s_End;

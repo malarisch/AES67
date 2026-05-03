@@ -1,0 +1,234 @@
+<?xml version="1" encoding="UTF-8"?>
+<GAO_CONFIG>
+    <Version>3.0</Version>
+    <Mode>Standard</Mode>
+    <AoCore index="0" sample_clock="top_inst/aes67_top_inst/sys_clk_125MHz_i" trig_type="0" storage_depth="4096" window_num="1" capture_amount="4096" implementation="0" trigger_pos="300" module_name="top_tang_primer_20k" force_trigger_by_falling_edge="false" capture_init_data_enabled="false">
+        <SignalList>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_enable</Signal>
+            <Bus capture_enable="true" name="rmii_rxd[1:0]">
+                <Signal>rmii_rxd[1]</Signal>
+                <Signal>rmii_rxd[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="rmii_txd[1:0]">
+                <Signal>rmii_txd[1]</Signal>
+                <Signal>rmii_txd[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/phy_rgmii_enet_rx_d[3:0]">
+                <Signal>top_inst/phy_rgmii_enet_rx_d[3]</Signal>
+                <Signal>top_inst/phy_rgmii_enet_rx_d[2]</Signal>
+                <Signal>top_inst/phy_rgmii_enet_rx_d[1]</Signal>
+                <Signal>top_inst/phy_rgmii_enet_rx_d[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ptp_inst/mac_speed_i[1:0]">
+                <Signal>top_inst/aes67_top_inst/ptp_inst/mac_speed_i[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/mac_speed_i[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ptp_inst/tx_seq_id[15:0]">
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[15]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[14]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[13]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[12]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[11]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[10]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[9]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[8]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ptp_inst/tx_seq_id[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_data[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_data[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_rxd_i[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_o[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state[15:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_idle</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble2</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble3</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble4</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble5</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble6</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_preamble7</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_start_frame_delimiter</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_client_data_wait_source_address</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_source_address</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_client_data</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_pad</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_frame_check_sequence2</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_frame_check_sequence3</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_frame_check_sequence4</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_state.tx_interpacket_gap</Signal>
+            </Bus>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_rx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_tx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_tx_en_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_tx_err_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_rx_dv_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mii_rx_err_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_frame</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_byte_received</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/eth_frame_rdy</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_reset_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_linkup_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_byte_sent_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/rst_n</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/enet_clk_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/tx_enable_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/tx_reset_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/tx_busy_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/tx_byte_sent_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_tx_enable</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_tx_byte_sent</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_tx_gap</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_rx_frame</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_rx_byte_received</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mac_rx_error</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_tx_en</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_rx_er</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_rx_dv</Signal>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mii_txd_int[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[7:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[7]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[6]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[5]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[4]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[3]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[2]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/int_mii_txd[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/tx_state[1:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/tx_state[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/tx_state[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/speed_select_i[1:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/speed_select_i[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/speed_select_i[0]</Signal>
+            </Bus>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_rx_clock_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_clock_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_Clock</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/reset</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/rx_reset</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/tx_reset</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/sync_tx_reset_inst/clock_target_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/sync_tx_reset_inst/preset_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/sync_tx_reset_inst/signal_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/sync_tx_reset_inst/signal_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/sync_tx_reset_inst/signal_tmp</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/reset_generator_inst/reset_o</Signal>
+            <Signal capture_enable="true">rmii_ref_clk</Signal>
+            <Signal capture_enable="true">rmii_txen</Signal>
+            <Bus capture_enable="true" name="top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/speed_select_i[1:0]">
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/speed_select_i[1]</Signal>
+                <Signal>top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/speed_select_i[0]</Signal>
+            </Bus>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/tx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/rgmii_rx_ctl_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_inst/rx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/rx_clock_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/tx_reset_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/framing_inst/rx_reset_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/clock_125_i</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/clock_rx_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/clock_tx_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/gmii_gtx_clk_o</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/clock_tx</Signal>
+            <Signal capture_enable="true">top_inst/aes67_top_inst/ethernet_top_inst/b2v_yol_mac/mii_gmii_io_inst/clock_rx</Signal>
+        </SignalList>
+        <Triggers>
+            <Trigger index="0">
+                <SignalList>
+                    <Signal>top_inst/aes67_top_inst/ethernet_top_inst/mac_tx_enable</Signal>
+                </SignalList>
+            </Trigger>
+            <Trigger index="1"/>
+            <Trigger index="2"/>
+            <Trigger index="3"/>
+            <Trigger index="4"/>
+            <Trigger index="5"/>
+            <Trigger index="6"/>
+            <Trigger index="7"/>
+            <Trigger index="8"/>
+            <Trigger index="9"/>
+            <Trigger index="10"/>
+            <Trigger index="11"/>
+            <Trigger index="12"/>
+            <Trigger index="13"/>
+            <Trigger index="14"/>
+            <Trigger index="15"/>
+        </Triggers>
+        <MatchUnits>
+            <MatchUnit index="0" enabled="1" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="1" value1="0" trigger="0"/>
+            <MatchUnit index="1" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="2" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="3" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="4" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="5" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="6" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="7" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="8" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="9" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="10" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="11" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="12" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="13" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="14" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="15" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+        </MatchUnits>
+        <Expressions type="Static">
+            <Expression>M0</Expression>
+        </Expressions>
+    </AoCore>
+    <GAO_ID>1011101000000001</GAO_ID>
+</GAO_CONFIG>

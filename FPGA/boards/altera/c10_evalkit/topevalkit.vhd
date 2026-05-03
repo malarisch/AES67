@@ -6,6 +6,7 @@ ENTITY topevalkit IS
 	generic (
 		soctype : string := "spi"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		platform : string := "ALTERA";
+        board : string := "C10EVALKIT";
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs

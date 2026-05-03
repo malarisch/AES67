@@ -1,0 +1,38 @@
+GowinSynthesis start
+Running parser ...
+Analyzing Verilog file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v'
+Analyzing included file 'define.vh'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":1)
+Back to file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":1)
+Analyzing included file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/static_macro_define.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":2)
+Back to file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":2)
+Analyzing Verilog file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v'
+Analyzing included file 'define.vh'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v":257)
+Back to file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v":257)
+Analyzing included file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/static_macro_define.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v":257)
+Back to file '/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v":257)
+Compiling module 'mii_to_rmii_gowin'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":4)
+Compiling module '**'("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii.v":257)
+NOTE  (EX0101) : Current top module is "mii_to_rmii_gowin"
+[5%] Running netlist conversion ...
+WARN  (CV0016) : Input mii_tx_er is unused("/home/wolff/Gowin_V1.9.12_linux/IDE/ipcore/MII_to_RMII/data/mii_to_rmii_wrap.v":22)
+Running device independent optimization ...
+[10%] Optimizing Phase 0 completed
+[15%] Optimizing Phase 1 completed
+[25%] Optimizing Phase 2 completed
+Running inference ...
+[30%] Inferring Phase 0 completed
+[40%] Inferring Phase 1 completed
+[50%] Inferring Phase 2 completed
+[55%] Inferring Phase 3 completed
+Running technical mapping ...
+[60%] Tech-Mapping Phase 0 completed
+[65%] Tech-Mapping Phase 1 completed
+[75%] Tech-Mapping Phase 2 completed
+[80%] Tech-Mapping Phase 3 completed
+[90%] Tech-Mapping Phase 4 completed
+[95%] Generate netlist file "/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii/mii_to_rmii_gowin.vg" completed
+[98%] Generate netlist file "/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii/mii_to_rmii_gowin.vhg" completed
+Generate netlist file "/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii/mii_to_rmii_gowin.vho" completed
+Generate template file "/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii/mii_to_rmii_gowin_tmp.vhd" completed
+[100%] Generate report file "/home/wolff/AES67/FPGA/gowin/fpga_project/src/mii_to_rmii_gowin/temp/mii_to_rmii/mii_to_rmii_gowin_syn.rpt.html" completed
+GowinSynthesis finish
