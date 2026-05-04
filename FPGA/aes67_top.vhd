@@ -261,7 +261,7 @@ wc_512fs_o <= clk_512fs;
 
 audioclocks_inst: entity work.audioclock_generator
 PORT MAP(mclk => clk_512fs,
-		 rst_n => rst_n,
+		 rst_n => ptp_module_rst_n,
 		 clk_64fs => pll_64fs,
 		 fs => pll_48k_fs,
 		 bclk_r => pll_256fs_rising,

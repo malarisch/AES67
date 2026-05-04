@@ -84,8 +84,9 @@ architecture Behavioral of wallclock is
 
     -- PPB scaling: how much to adjust NCO increment per PPB of correction.
     -- adj = NCO_BASE_INC * ppb / 1e9 ≈ (ppb * NCO_PPB_SCALE) >> 16
-    constant NCO_PPB_SCALE : signed(15 downto 0) :=
-        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0 / 1.0e9 * 65536.0), 16);
+    -- Width must hold ~55340 for fs=48k @ 125 MHz; 18 bits leaves headroom.
+    constant NCO_PPB_SCALE : signed(17 downto 0) :=
+        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0 / 1.0e9 * 65536.0), 18);
     
     signal nco_phase      : unsigned(31 downto 0) := (others => '0');
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
@@ -281,8 +282,16 @@ begin
             wallclock_set_i_reg <= '0';
         elsif rising_edge(clk) then
             -- ===== Pipeline: always running for wallclock_set resync =====
-            -- Stage 0: register nsec
-            media_nsec_reg <= unsigned(nsec_reg);
+            -- Stage 0: register nsec. On wallclock_set the main process writes
+            -- nsec_reg <= wallclock_nanoseconds_i in the same cycle, so we have
+            -- to inject the input value here directly — otherwise the pipeline
+            -- captures the stale nsec_reg from before the set, producing a
+            -- media_clock that jumps slightly off the new epoch every reset.
+            if wallclock_set_i = '1' then
+                media_nsec_reg <= wallclock_nanoseconds_i;
+            else
+                media_nsec_reg <= unsigned(nsec_reg);
+            end if;
             -- Stage 1: multiply (32×18 = 50 bits)
             media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
             wallclock_set_i_reg <= wallclock_set_i;
@@ -350,9 +359,10 @@ begin
 
             -- ===== STAGE 1: Pre-compute multiply (always, independent) =====
             -- freq_correction changes at PTP rate — 1 cycle delay invisible.
-            -- 12-bit × 20-bit = 32-bit; fits easily in one cycle (~5ns).
-            frac_increment_reg <= to_signed(increment_interval, 12)
-                                  * freq_correction_ppb_i(19 downto 0);
+            -- Use resize() to preserve sign; raw slicing of a signed vector
+            -- drops the sign bit and corrupts negative corrections.
+            frac_increment_reg <= resize(to_signed(increment_interval, 12)
+                                         * resize(freq_correction_ppb_i, 20), 32);
 
             -- ===== STAGE 4: Apply delayed seconds rollover =====
             -- sec_adj_pipe was written by Stage 3b in the PREVIOUS cycle.

@@ -177,6 +177,14 @@ architecture Behavioral of ptpv2_servo is
   signal inp_phase_jump_val : signed(31 downto 0) := (others => '0');
   signal inp_do_normal_op   : std_logic           := '0';
   signal pi_wait_state      : unsigned(1 downto 0)          := (others => '0');
+
+  -- pi_trigger is set by servo_proc as a 1-cycle pulse, but the PI state
+  -- machine only evaluates every 4th cycle (pi_wait_state = 3), so the pulse
+  -- is normally missed. pi_trigger_ack is pulsed by pi_controller_proc when it
+  -- accepts the trigger; servo_proc keeps pi_trigger high until that ack
+  -- arrives. Without this latch, pi_trigger lined up with pi_wait_state /= 3
+  -- on most syncs (causing one in ~8 to be processed and the others dropped).
+  signal pi_trigger_ack : std_logic := '0';
 begin
 
   -- Concurrent gain shift calculation, now sourced entirely from input ports.
@@ -242,7 +250,9 @@ begin
       integral_sum    <= (others => '0');
       freq_correction <= (others => '0');
       pi_wait_state   <= (others => '0');
+      pi_trigger_ack  <= '0';
     elsif rising_edge(clk) then
+      pi_trigger_ack <= '0';
 
       -- Frequency pre-seed: when servo_proc has computed freq_seed_ppb at the
       -- end of warmup, latch it into both the integral and freq_correction so
@@ -260,6 +270,7 @@ begin
             if pi_trigger = '1' then
               pi_input <= filtered_offset;
               pi_state <= PI_MULT;
+              pi_trigger_ack <= '1';
             end if;
 
           when PI_MULT =>
@@ -318,7 +329,9 @@ begin
         lock_counter <= 0;
       end if;
 
-      if (pi_trigger = '1') then
+      -- Use pi_trigger_ack (a 1-cycle pulse) instead of pi_trigger (now
+      -- sticky) so lock_counter advances exactly once per PI step.
+      if (pi_trigger_ack = '1') then
         if inp_offset_abs < signed('0' & std_logic_vector(lock_threshold_ns_i)) then
           if lock_counter < to_integer(lock_count_threshold_i) and
              lock_counter < MAX_LOCK_COUNT then
@@ -367,7 +380,11 @@ begin
 
     elsif rising_edge(clk) then
       phase_jump_valid_reg <= '0';
-      pi_trigger           <= '0';
+      -- pi_trigger stays sticky until pi_controller_proc acknowledges it.
+      -- Only clear it on ack; setting happens below in INP_ACTION.
+      if pi_trigger_ack = '1' then
+        pi_trigger <= '0';
+      end if;
       request_reconfigure_reg <= '0';
       freq_seed_pulse      <= '0';
 
