@@ -14,8 +14,8 @@ entity ptpv2_controller is
         wallclock_nanoseconds_i : in  unsigned(31 downto 0);
         timestamp_seconds_o         : out unsigned(47 downto 0);
         timestamp_nanoseconds_o     : out unsigned(31 downto 0);
-        rx_timestamp_seconds_i     : in  unsigned(47 downto 0);
-        tx_timestamp_seconds_i     : in  unsigned(47 downto 0);
+        rx_timestamp_seconds_i     : in  unsigned(3 downto 0);
+        tx_timestamp_seconds_i     : in  unsigned(3 downto 0);
         rx_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
         tx_timestamp_nanoseconds_i      : in unsigned(31 downto 0);
 
@@ -75,7 +75,7 @@ entity ptpv2_controller is
     signal request_port_identity_i_latched : std_logic_vector(79 downto 0) := (others => '0');
     signal send_delay_resp : std_logic := '0';
     signal timestamp_nanoseconds_i_latched : unsigned(31 downto 0) := (others => '0');
-    signal timestamp_seconds_i_latched : unsigned(47 downto 0) := (others => '0');
+    signal timestamp_seconds_i_latched : unsigned(3 downto 0) := (others => '0');
 
 
     signal send_delay_req_i_reg : std_logic := '0';  -- Edge detection for same clock domain
@@ -321,7 +321,7 @@ begin
                     when s_Wait_for_Sync_Done =>
                         -- Copy dedicated sync TX timestamp to output
                         timestamp_nanoseconds_o <= tx_timestamp_nanoseconds_i;
-                        timestamp_seconds_o <= tx_timestamp_seconds_i;
+                        timestamp_seconds_o <= wallclock_seconds_i(47 downto 4) & tx_timestamp_seconds_i;
                         leader_state <= s_Latch_Sync_Timestamp;
 
                     when s_Latch_Sync_Timestamp =>
@@ -388,7 +388,7 @@ begin
                         tx_message_type_o <= x"9";
 						ptp_log_interval_o <= ptp_log_message_interval_i;
                         timestamp_nanoseconds_o <= timestamp_nanoseconds_i_latched;
-                        timestamp_seconds_o <= timestamp_seconds_i_latched;
+                        timestamp_seconds_o <= wallclock_seconds_i(47 downto 4) & timestamp_seconds_i_latched;
                         frame_start_o <= '1';
                         tx_started <= '0';
                         leader_state <= s_Wait_for_Delay_Resp_Ack;
@@ -457,7 +457,7 @@ begin
                         -- Latch T3 
                         if (tx_started = '1') then
                             timestamp_nanoseconds_o <= tx_timestamp_nanoseconds_i;
-                            timestamp_seconds_o <= tx_timestamp_seconds_i;
+                            timestamp_seconds_o <= wallclock_seconds_i(47 downto 4) & tx_timestamp_seconds_i;
                         end if;
                         -- Wait for TX to finish
                         if (tx_started = '1' and tx_done_sys_i = '1') then
@@ -466,7 +466,6 @@ begin
                         end if;
 
                     when f_Wait_for_Delay_Req_Done =>
-                        -- Extra cycle for CDC timestamp to settle
                         follower_state <= f_Idle;
                         t3_valid_o <= '1';
 

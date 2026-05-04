@@ -11,15 +11,18 @@ entity ptpv2_parser is
     );
     port(
         clk                 : in std_logic;
-        ram_data            : in std_logic_vector(7 downto 0);
-        ram_read_address    : out unsigned(10 downto 0);
-        parse_ptp_packet_tog    : in std_logic;
+        rx_clk_i            : in std_logic;
+        rx_data_i           : in STD_LOGIC_VECTOR(7 downto 0);
+        rx_byte_received_i  : in std_logic;
+        rx_byte_receive_index_i : in unsigned(7 downto 0); -- max length is 105 for ptpv2
+        rx_ptp_frame_i      : in std_logic;
+        
         is_leader           : in std_logic; -- '1' if this node is PTP leader; will answer to delay_req
 
-        rx_timestamp_seconds_i     : in std_logic_vector(47 downto 0);
+        rx_timestamp_seconds_i     : in std_logic_vector(3 downto 0);
         rx_timestamp_nanoseconds_i : in std_logic_vector(31 downto 0);
 
-        rx_timestamp_seconds_o     : out std_logic_vector(47 downto 0);
+        rx_timestamp_seconds_o     : out std_logic_vector(3 downto 0);
         rx_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0);
         rx_follower_identity_o      : out std_logic_vector(79 downto 0);
 
@@ -31,7 +34,7 @@ entity ptpv2_parser is
 
         send_delay_req_o         : out std_logic;
 
-        tx_timestamp_seconds_i     : in std_logic_vector(47 downto 0);
+        tx_timestamp_seconds_i     : in std_logic_vector(3 downto 0);
         tx_timestamp_nanoseconds_i : in std_logic_vector(31 downto 0);
         t3_valid_i                 : in std_logic;
 
@@ -147,8 +150,11 @@ architecture Behavioral of ptpv2_parser is
 
     -- Elapsed local time since Sync RX, for initial clock set compensation
     signal elapsed_ns : unsigned(31 downto 0) := (others => '0');
-    signal byte_counter   : integer range 0 to 1500 := 0;
 
+    signal ptp_regs_valid : STD_LOGIC := '0';
+    signal ptp_regs_valid_sync : STD_LOGIC := '0';
+    signal ptp_regs_valid_reg : STD_LOGIC := '0';
+    signal ptp_regs_valid_reg_z : STD_LOGIC := '0';
 
     -- ============================================================
     -- PIPELINED PTP Calculation Registers
@@ -191,55 +197,7 @@ architecture Behavioral of ptpv2_parser is
         return result;
     end function;
 
-    -- CDC Synchronizers
-    signal parse_ptp_packet_meta : std_logic := '0';
-    signal parse_ptp_packet_sync : std_logic := '0';
-    signal parse_ptp_packet_prev : std_logic := '0';
-
-
-    signal clock_configured: std_logic := '0';
-
-    signal udp_port: std_logic_vector(15 downto 0);
-    signal udp_length: std_logic_vector(15 downto 0);
-    signal ptp_message_type: std_logic_vector(7 downto 0);
-    signal ptp_message_length: std_logic_vector(15 downto 0);
-    signal ptp_domain_number: std_logic_vector(7 downto 0);
-    signal ptp_flag_field: std_logic_vector(15 downto 0);
-    signal ptp_correction_field: std_logic_vector(63 downto 0);
-    signal ptp_source_port_identity: std_logic_vector(63 downto 0);
-    signal ptp_source_port_port_number: std_logic_vector(15 downto 0);
-    signal ptp_sequence_id: std_logic_vector(15 downto 0);
-    signal ptp_control_field: std_logic_vector(7 downto 0);
-    signal ptp_log_msg_interval: std_logic_vector(7 downto 0);
-    signal ptp_version: std_logic_vector(3 downto 0);
-    signal ptp_origin_timestamp_seconds: std_logic_vector(47 downto 0);
-    signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
-
-    signal ptp_announce_current_utc_offset: std_logic_vector(15 downto 0);
-    signal ptp_announce_grandmaster_priority1: std_logic_vector(7 downto 0);
-    signal ptp_announce_grandmaster_priority2: std_logic_vector(7 downto 0);
-    signal ptp_announce_grandmaster_clockClass: std_logic_vector(7 downto 0);
-    signal ptp_announce_grandmaster_clockAccuracy: std_logic_vector(7 downto 0);
-    signal ptp_announce_grandmaster_offset_scaled_log_variance: std_logic_vector(15 downto 0);
-    signal ptp_announce_steps_removed: std_logic_vector(15 downto 0);
-    signal ptp_announce_time_source: std_logic_vector(7 downto 0);
-    signal ptp_clock_identity: std_logic_vector(63 downto 0);
-    
-    -- PTP Timestamp Storage
-    signal stored_t1_seconds     : std_logic_vector(47 downto 0) := (others => '0');
-    signal stored_t1_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t2_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t2_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t3_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t3_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t4_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t4_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    
-    signal latched_rx_timestamp_seconds     : std_logic_vector(47 downto 0) := (others => '0');
-    signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal configure_wait_cycle: unsigned (2 downto 0) := (others => '0') ;
-    
-    type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up);
+    type t_packet_type is (t_Sync, t_Delay_Req, t_Follow_Up, t_Delay_Resp, t_Announce, t_Pdelay_Req, t_Pdelay_Resp, t_Pdelay_Follow_Up, t_Signaling, t_Managment);
     
     function get_message_type(message_type : std_logic_vector(3 downto 0)) return t_packet_type is
     begin
@@ -252,9 +210,53 @@ architecture Behavioral of ptpv2_parser is
             when x"9" => return t_Delay_Resp;
             when x"A" => return t_Pdelay_Follow_Up;
             when x"B" => return t_Announce;
+            when x"C" => return t_Signaling;
+            when x"D" => return t_Managment;
             when others => return t_Sync;
         end case;
     end function;
+
+
+    signal clock_configured: std_logic := '0';
+
+    signal rx_packet_length : UNSIGNED(7 downto 0);
+
+    signal ptp_message_type: t_packet_type;
+    signal ptp_domain_number: std_logic_vector(7 downto 0);
+    signal ptp_flag_field: std_logic_vector(15 downto 0);
+    signal ptp_correction_field: std_logic_vector(63 downto 0);
+    signal ptp_source_port_identity: std_logic_vector(63 downto 0);
+    signal ptp_source_port_port_number: std_logic_vector(15 downto 0);
+    signal ptp_sequence_id: std_logic_vector(15 downto 0);
+    signal ptp_control_field: std_logic_vector(7 downto 0);
+    signal ptp_log_msg_interval: std_logic_vector(7 downto 0);
+    signal ptp_version: std_logic_vector(3 downto 0);
+    signal ptp_origin_timestamp_seconds: std_logic_vector(47 downto 0);
+    signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
+    signal ptp_requesting_port_identity : STD_LOGIC_VECTOR(79 downto 0);
+    signal active_sequence_id: STD_LOGIC_VECTOR(15 downto 0);
+ 
+    signal ptp_announce_valid : STD_LOGIC;
+    signal ptp_announce_valid_sync : STD_LOGIC;
+    signal ptp_announce_valid_reg : STD_LOGIC;
+    signal ptp_announce_valid_reg_z : STD_LOGIC;
+
+    
+    -- PTP Timestamp Storage
+    signal stored_t1_seconds     : std_logic_vector(47 downto 0) := (others => '0');
+    signal stored_t1_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal stored_t2_seconds     : std_logic_vector(3 downto 0) := (others => '0');
+    signal stored_t2_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal stored_t3_seconds     : std_logic_vector(3 downto 0) := (others => '0');
+    signal stored_t3_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal stored_t4_seconds     : std_logic_vector(3 downto 0) := (others => '0');
+    signal stored_t4_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    
+    signal latched_rx_timestamp_seconds     : std_logic_vector(3 downto 0) := (others => '0');
+    signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal configure_wait_cycle: unsigned (2 downto 0) := (others => '0') ;
+    
+    
 
 begin
     
@@ -267,19 +269,7 @@ begin
 
     clock_configured_o <= clock_configured;
     
-    -- CDC Synchronization Process
-    cdc_sync_proc: process(clk, reset_n)
-    begin
-        if reset_n = '0' then
-            parse_ptp_packet_meta <= '0';
-            parse_ptp_packet_sync <= '0';
-            parse_ptp_packet_prev <= '0';
-        elsif rising_edge(clk) then
-            parse_ptp_packet_meta <= parse_ptp_packet_tog;
-            parse_ptp_packet_sync <= parse_ptp_packet_meta;
-            parse_ptp_packet_prev <= parse_ptp_packet_sync;
-        end if;
-    end process cdc_sync_proc;
+
 
 
 
@@ -378,34 +368,144 @@ begin
 
     end process;
     -- Main State Machine Process
+
+    rx_packet_length <= x"5F" when ptp_message_type = t_Delay_Resp else x"69" when ptp_message_type = t_Announce else x"55";
+
+    receive_process : process (rx_clk_i, rx_ptp_frame_i)
+    begin
+        if rising_edge(rx_clk_i) and rx_ptp_frame_i = '1' then
+            latched_rx_timestamp_seconds <= rx_timestamp_seconds_i;
+            latched_rx_timestamp_nanoseconds <= rx_timestamp_nanoseconds_i;
+            if (rx_byte_received_i = '1') then
+                case to_integer(rx_byte_receive_index_i) is
+                    when 42 =>
+                        ptp_message_type <= get_message_type(rx_data_i(3 downto 0));
+                        ptp_regs_valid <= '0';
+                    when 43 => ptp_version <= rx_data_i(3 downto 0);
+                    when 46 => ptp_domain_number(7 downto 0) <= rx_data_i;
+                    when 48 => ptp_flag_field(15 downto 8) <= rx_data_i;
+                    when 49 => ptp_flag_field(7 downto 0) <= rx_data_i;
+                    when 50 => ptp_correction_field(63 downto 56) <= rx_data_i;
+                    when 51 => ptp_correction_field(55 downto 48) <= rx_data_i;
+                    when 52 => ptp_correction_field(47 downto 40) <= rx_data_i;
+                    when 53 => ptp_correction_field(39 downto 32) <= rx_data_i;
+                    when 54 => ptp_correction_field(31 downto 24) <= rx_data_i;
+                    when 55 => ptp_correction_field(23 downto 16) <= rx_data_i;
+                    when 56 => ptp_correction_field(15 downto 8) <= rx_data_i;
+                    when 57 => ptp_correction_field(7 downto 0) <= rx_data_i;
+                    when 62 => ptp_source_port_identity(63 downto 56) <= rx_data_i;
+                    when 63 => ptp_source_port_identity(55 downto 48) <= rx_data_i;
+                    when 64 => ptp_source_port_identity(47 downto 40) <= rx_data_i;
+                    when 65 => ptp_source_port_identity(39 downto 32) <= rx_data_i;
+                    when 66 => ptp_source_port_identity(31 downto 24) <= rx_data_i;
+                    when 67 => ptp_source_port_identity(23 downto 16) <= rx_data_i;
+                    when 68 => ptp_source_port_identity(15 downto 8) <= rx_data_i;
+                    when 69 => ptp_source_port_identity(7 downto 0) <= rx_data_i;
+                    when 70 => ptp_source_port_port_number(15 downto 8) <= rx_data_i;
+                    when 71 => ptp_source_port_port_number(7 downto 0) <= rx_data_i;
+                    when 72 => ptp_sequence_id(15 downto 8) <= rx_data_i;
+                    when 73 => ptp_sequence_id(7 downto 0) <= rx_data_i;
+                    when 74 => ptp_control_field(7 downto 0) <= rx_data_i;
+                    when 75 => ptp_log_msg_interval(7 downto 0) <= rx_data_i;
+                    when 76 => ptp_origin_timestamp_seconds(47 downto 40) <= rx_data_i;
+                    when 77 => ptp_origin_timestamp_seconds(39 downto 32) <= rx_data_i;
+                    when 78 => ptp_origin_timestamp_seconds(31 downto 24) <= rx_data_i;
+                    when 79 => ptp_origin_timestamp_seconds(23 downto 16) <= rx_data_i;
+                    when 80 => ptp_origin_timestamp_seconds(15 downto 8) <= rx_data_i;
+                    when 81 => ptp_origin_timestamp_seconds(7 downto 0) <= rx_data_i;
+                    when 82 => ptp_origin_timestamp_nanoseconds(31 downto 24) <= rx_data_i;
+                    when 83 => ptp_origin_timestamp_nanoseconds(23 downto 16) <= rx_data_i;
+                    when 84 => ptp_origin_timestamp_nanoseconds(15 downto 8) <= rx_data_i;
+                    when 85 => 
+                        ptp_origin_timestamp_nanoseconds(7 downto 0) <= rx_data_i;
+                        
+                    when others => null;
+                end case;
+                
+                if (ptp_message_type = t_Delay_Resp) then
+                    case to_integer(rx_byte_receive_index_i) is
+                        when 86 => ptp_requesting_port_identity(79 downto 72) <= rx_data_i;
+                        when 87 => ptp_requesting_port_identity(71 downto 64) <= rx_data_i;
+                        when 88 => ptp_requesting_port_identity(63 downto 56) <= rx_data_i;
+                        when 89 => ptp_requesting_port_identity(55 downto 48) <= rx_data_i;
+                        when 90 => ptp_requesting_port_identity(47 downto 40) <= rx_data_i;
+                        when 91 => ptp_requesting_port_identity(39 downto 32) <= rx_data_i;
+                        when 92=> ptp_requesting_port_identity(31 downto 24) <= rx_data_i;
+                        when 93 => ptp_requesting_port_identity(23 downto 16) <= rx_data_i;
+                        when 94 => ptp_requesting_port_identity(15 downto 8) <= rx_data_i;
+                        when 95 => ptp_requesting_port_identity(7 downto 0) <= rx_data_i;
+                            
+                        when others => null;
+                    end case;
+                end if;
+                
+                if (ptp_message_type = t_Announce) then
+                    announce_log_msg_interval_o      <= ptp_log_msg_interval;
+                    case to_integer(rx_byte_receive_index_i) is
+                        --when d"86" => ptp_announce_current_utc_offset(15 downto 8) <= rx_data_i; -- nnot impl
+                        --when d"87" => ptp_announce_current_utc_offset(7 downto 0) <= rx_data_i; -- not impl
+                        when 89 => announce_priority1_o(7 downto 0) <= rx_data_i;
+                        when 90 => announce_clock_class_o(7 downto 0) <= rx_data_i;
+                        when 91 => announce_clock_accuracy_o(7 downto 0) <= rx_data_i;
+                        when 92 => announce_offset_scaled_log_var_o(15 downto 8) <= rx_data_i;
+                        when 93 => announce_offset_scaled_log_var_o(7 downto 0) <= rx_data_i;
+                        when 94 => announce_priority2_o(7 downto 0) <= rx_data_i;
+                        when 95 => announce_clock_identity_o(63 downto 56) <= rx_data_i;
+                        when 96 => announce_clock_identity_o(55 downto 48) <= rx_data_i;
+                        when 97 => announce_clock_identity_o(47 downto 40) <= rx_data_i;
+                        when 98 => announce_clock_identity_o(39 downto 32) <= rx_data_i;
+                        when 99 => announce_clock_identity_o(31 downto 24) <= rx_data_i;
+                        when 100 => announce_clock_identity_o(23 downto 16) <= rx_data_i;
+                        when 101 => announce_clock_identity_o(15 downto 8) <= rx_data_i;
+                        when 102 => announce_clock_identity_o(7 downto 0) <= rx_data_i;
+                        when 103 => announce_steps_removed_o(15 downto 8) <= rx_data_i;
+                        when 104 => announce_steps_removed_o(7 downto 0) <= rx_data_i;
+                        when 105 => 
+                            announce_time_source_o(7 downto 0) <= rx_data_i;
+                            ptp_announce_valid <= not ptp_announce_valid;
+                        when others => null;
+                    end case;
+                end if;
+                if rx_byte_receive_index_i = rx_packet_length then
+                    ptp_regs_valid <= '1';
+                end if;
+            end if;
+        end if;
+    end process;
+
+    ptp_reg_valid_cdc: process(clk, reset_n) begin
+
+        if (reset_n = '0') then
+            ptp_regs_valid_reg <= '0';
+            ptp_regs_valid_sync <= '0';
+            ptp_regs_valid_reg_z <= '0';
+            ptp_announce_valid_reg <= '0';
+            ptp_announce_valid_sync <= '0';
+        elsif rising_edge(clk) then
+            ptp_regs_valid_sync <= ptp_regs_valid;
+            ptp_regs_valid_reg <= ptp_regs_valid_sync;
+            ptp_regs_valid_reg_z <= ptp_regs_valid_reg;
+            ptp_announce_valid_sync <= ptp_announce_valid;
+            ptp_announce_valid_reg <= ptp_announce_valid_sync;
+            ptp_announce_valid_reg_z <= ptp_announce_valid_reg;
+        end if;
+
+    end process;
+    announce_valid_o <= ptp_announce_valid_reg xor ptp_announce_valid_reg_z;
+
     main_proc: process(clk, reset_n)
-        variable active_sequence_id: std_logic_vector(15 downto 0);
-        variable requesting_port_identity: std_logic_vector(79 downto 0);
-        variable message_length: integer := 85;
+
     begin
         if reset_n = '0' then
             s_SM_PtpParser <= s_Idle;
-            byte_counter <= 0;
             send_delay_resp_o <= '0';
             send_delay_req_o <= '0';
-            ram_read_address <= (others => '0');
             ptp_calc_valid_o <= '0';
             mean_path_delay_ns_o <= (others => '0');
             offset_from_master_ns_o <= (others => '0');
             log_msg_interval_o <= (others => '0');
             log_msg_interval_valid_o <= '0';
-            announce_valid_o <= '0';
-            announce_clock_identity_o <= (others => '0');
-            announce_priority1_o <= (others => '0');
-            announce_clock_class_o <= (others => '0');
-            announce_clock_accuracy_o <= (others => '0');
-            announce_offset_scaled_log_var_o <= (others => '0');
-            announce_priority2_o <= (others => '0');
-            announce_steps_removed_o <= (others => '0');
-            announce_time_source_o <= (others => '0');
-            announce_log_msg_interval_o <= (others => '0');
 
-            active_sequence_id := (others => '0');
             stored_t1_seconds <= (others => '0');
             stored_t1_nanoseconds <= (others => '0');
             stored_t2_seconds <= (others => '0');
@@ -441,119 +541,12 @@ begin
             if (clock_configured = '1') then
             configureClock <= '0';
             end if;
-            announce_valid_o <= '0';
+            
             
             
 
             if (s_SM_PtpParser = s_Idle) then
-                if (parse_ptp_packet_prev /= parse_ptp_packet_sync) then
-                    byte_counter <= 0;
-                    ram_read_address <= to_unsigned(1, 11);
-                    s_SM_PtpParser <= s_Prefetch;
-                    message_length := 85;
-                    
-                    latched_rx_timestamp_seconds <= rx_timestamp_seconds_i;
-                    latched_rx_timestamp_nanoseconds <= rx_timestamp_nanoseconds_i;
-                end if;
-            elsif (s_SM_PtpParser = s_Prefetch) then
-                    ram_read_address <= to_unsigned(2, 11);
-                    s_SM_PtpParser <= s_ReadHeader;
-            elsif (s_SM_PtpParser = s_ReadHeader) then
-                -- read PTPv2 header fields based on byte_counter
-                case byte_counter is
-                    when 36 => udp_port(15 downto 8) <= ram_data;
-                    when 37 => udp_port(7 downto 0) <= ram_data;
-                    when 38 => udp_length(15 downto 8) <= ram_data;
-                    when 39 => udp_length(7 downto 0) <= ram_data;
-                    when 42 => ptp_message_type(7 downto 0) <= ram_data;
-                    when 43 => ptp_version <= ram_data(3 downto 0);
-                    when 44 => ptp_message_length(15 downto 8) <= ram_data;
-                    when 45 => ptp_message_length(7 downto 0) <= ram_data;
-                    when 46 => ptp_domain_number(7 downto 0) <= ram_data;
-                    when 48 => ptp_flag_field(15 downto 8) <= ram_data;
-                    when 49 => ptp_flag_field(7 downto 0) <= ram_data;
-                    when 50 => ptp_correction_field(63 downto 56) <= ram_data;
-                    when 51 => ptp_correction_field(55 downto 48) <= ram_data;
-                    when 52 => ptp_correction_field(47 downto 40) <= ram_data;
-                    when 53 => ptp_correction_field(39 downto 32) <= ram_data;
-                    when 54 => ptp_correction_field(31 downto 24) <= ram_data;
-                    when 55 => ptp_correction_field(23 downto 16) <= ram_data;
-                    when 56 => ptp_correction_field(15 downto 8) <= ram_data;
-                    when 57 => ptp_correction_field(7 downto 0) <= ram_data;
-                    when 62 => ptp_source_port_identity(63 downto 56) <= ram_data;
-                    when 63 => ptp_source_port_identity(55 downto 48) <= ram_data;
-                    when 64 => ptp_source_port_identity(47 downto 40) <= ram_data;
-                    when 65 => ptp_source_port_identity(39 downto 32) <= ram_data;
-                    when 66 => ptp_source_port_identity(31 downto 24) <= ram_data;
-                    when 67 => ptp_source_port_identity(23 downto 16) <= ram_data;
-                    when 68 => ptp_source_port_identity(15 downto 8) <= ram_data;
-                    when 69 => ptp_source_port_identity(7 downto 0) <= ram_data;
-                    when 70 => ptp_source_port_port_number(15 downto 8) <= ram_data;
-                    when 71 => ptp_source_port_port_number(7 downto 0) <= ram_data;
-                    when 72 => ptp_sequence_id(15 downto 8) <= ram_data;
-                    when 73 => ptp_sequence_id(7 downto 0) <= ram_data;
-                    when 74 => ptp_control_field(7 downto 0) <= ram_data;
-                    when 75 => ptp_log_msg_interval(7 downto 0) <= ram_data;
-                    when 76 => ptp_origin_timestamp_seconds(47 downto 40) <= ram_data;
-                    when 77 => ptp_origin_timestamp_seconds(39 downto 32) <= ram_data;
-                    when 78 => ptp_origin_timestamp_seconds(31 downto 24) <= ram_data;
-                    when 79 => ptp_origin_timestamp_seconds(23 downto 16) <= ram_data;
-                    when 80 => ptp_origin_timestamp_seconds(15 downto 8) <= ram_data;
-                    when 81 => ptp_origin_timestamp_seconds(7 downto 0) <= ram_data;
-                    when 82 => ptp_origin_timestamp_nanoseconds(31 downto 24) <= ram_data;
-                    when 83 => ptp_origin_timestamp_nanoseconds(23 downto 16) <= ram_data;
-                    when 84 => ptp_origin_timestamp_nanoseconds(15 downto 8) <= ram_data;
-                    when 85 => ptp_origin_timestamp_nanoseconds(7 downto 0) <= ram_data;
-                    when others => null;
-                end case;
-                
-                if (get_message_type(ptp_message_type(3 downto 0)) = t_Delay_Resp) then
-                    message_length := 95;
-                    case byte_counter is
-                        when 86 => requesting_port_identity(79 downto 72) := ram_data;
-                        when 87 => requesting_port_identity(71 downto 64) := ram_data;
-                        when 88 => requesting_port_identity(63 downto 56) := ram_data;
-                        when 89 => requesting_port_identity(55 downto 48) := ram_data;
-                        when 90 => requesting_port_identity(47 downto 40) := ram_data;
-                        when 91 => requesting_port_identity(39 downto 32) := ram_data;
-                        when 92 => requesting_port_identity(31 downto 24) := ram_data;
-                        when 93 => requesting_port_identity(23 downto 16) := ram_data;
-                        when 94 => requesting_port_identity(15 downto 8) := ram_data;
-                        when 95 => requesting_port_identity(7 downto 0) := ram_data;
-                        when others => null;
-                    end case;
-                end if;
-                
-                if (get_message_type(ptp_message_type(3 downto 0)) = t_Announce) then
-                    message_length := 105;
-                    case byte_counter is
-                        when 86 => ptp_announce_current_utc_offset(15 downto 8) <= ram_data;
-                        when 87 => ptp_announce_current_utc_offset(7 downto 0) <= ram_data;
-                        when 89 => ptp_announce_grandmaster_priority1(7 downto 0) <= ram_data;
-                        when 90 => ptp_announce_grandmaster_clockClass(7 downto 0) <= ram_data;
-                        when 91 => ptp_announce_grandmaster_clockAccuracy(7 downto 0) <= ram_data;
-                        when 92 => ptp_announce_grandmaster_offset_scaled_log_variance(15 downto 8) <= ram_data;
-                        when 93 => ptp_announce_grandmaster_offset_scaled_log_variance(7 downto 0) <= ram_data;
-                        when 94 => ptp_announce_grandmaster_priority2(7 downto 0) <= ram_data;
-                        when 95 => ptp_clock_identity(63 downto 56) <= ram_data;
-                        when 96 => ptp_clock_identity(55 downto 48) <= ram_data;
-                        when 97 => ptp_clock_identity(47 downto 40) <= ram_data;
-                        when 98 => ptp_clock_identity(39 downto 32) <= ram_data;
-                        when 99 => ptp_clock_identity(31 downto 24) <= ram_data;
-                        when 100 => ptp_clock_identity(23 downto 16) <= ram_data;
-                        when 101 => ptp_clock_identity(15 downto 8) <= ram_data;
-                        when 102 => ptp_clock_identity(7 downto 0) <= ram_data;
-                        when 103 => ptp_announce_steps_removed(15 downto 8) <= ram_data;
-                        when 104 => ptp_announce_steps_removed(7 downto 0) <= ram_data;
-                        when 105 => ptp_announce_time_source(7 downto 0) <= ram_data;
-                        when others => null;
-                    end case;
-                end if;
-                
-                byte_counter <= byte_counter + 1;
-                ram_read_address <= to_unsigned(byte_counter + 2, 11);
-
-                if byte_counter = message_length then
+                if (ptp_regs_valid_reg_z = '0' and ptp_regs_valid_reg = '1') then
                     s_SM_PtpParser <= s_Interpret_Packet;
                 end if;
 
@@ -563,20 +556,20 @@ begin
                 if ptp_version /= x"2" or
                    (ptp_source_port_identity /= ptp_current_leader_id_i
                     and is_leader = '0' and ptp_is_follower_i = '1'
-                    and ptp_message_type(3 downto 0) /= x"B") then
+                    and ptp_message_type /= t_Announce) then
                     s_SM_PtpParser <= s_Done;
                 else
-                    case ptp_message_type(3 downto 0) is
-                        when x"0" =>
+                    case ptp_message_type is
+                        when t_Sync =>
                             -- Sync Message
                             if (is_leader = '0' and ptp_is_follower_i = '1') then
-                                active_sequence_id := ptp_sequence_id;
+                                active_sequence_id <= ptp_sequence_id;
                                 stored_t2_seconds <= latched_rx_timestamp_seconds(3 downto 0);
                                 stored_t2_nanoseconds <= latched_rx_timestamp_nanoseconds;
                             end if;
                             s_SM_PtpParser <= s_Done;
                             
-                        when x"1" =>
+                        when t_Delay_Req =>
                             -- Delay_Req Message
                             if is_leader = '1' and ptp_is_follower_i = '0' then
                                 rx_follower_identity_o <= ptp_source_port_identity & ptp_source_port_port_number;
@@ -587,10 +580,10 @@ begin
                             end if;
                             s_SM_PtpParser <= s_Done;
                             
-                        when x"2" => s_SM_PtpParser <= s_Done;  -- Pdelay_Req
-                        when x"3" => s_SM_PtpParser <= s_Done;  -- Pdelay_Resp
+                        when t_Pdelay_Req => s_SM_PtpParser <= s_Done;  -- Pdelay_Req
+                        when t_Pdelay_Resp => s_SM_PtpParser <= s_Done;  -- Pdelay_Resp
                             
-                        when x"8" =>
+                        when t_Follow_Up =>
                             -- Follow_Up Message
                             if (is_leader = '0' and ptp_is_follower_i = '1') then
                                 log_msg_interval_o <= signed(ptp_log_msg_interval);
@@ -616,10 +609,10 @@ begin
                                 s_SM_PtpParser <= s_Done;
                             end if;
                             
-                        when x"9" =>
+                        when t_Delay_Resp =>
                             -- Delay_resp Message
                             if (is_leader = '0' and ptp_is_follower_i = '1') then
-                                if ptp_sequence_id = active_sequence_id and requesting_port_identity = my_clock_id then
+                                if ptp_sequence_id = active_sequence_id and ptp_requesting_port_identity = my_clock_id then
                                     stored_t4_seconds <= ptp_origin_timestamp_seconds(3 downto 0);
                                     stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
                                     s_SM_PtpParser <= s_Calc_Stage1;
@@ -630,22 +623,9 @@ begin
                                 s_SM_PtpParser <= s_Done;
                             end if;
                             
-                        when x"A" => s_SM_PtpParser <= s_Done;  -- Pdelay_Resp_Follow_Up
-                        when x"B" =>
-                            -- Announce: publish dataset to BMC
-                            announce_clock_identity_o        <= ptp_clock_identity;
-                            announce_priority1_o             <= ptp_announce_grandmaster_priority1;
-                            announce_clock_class_o           <= ptp_announce_grandmaster_clockClass;
-                            announce_clock_accuracy_o        <= ptp_announce_grandmaster_clockAccuracy;
-                            announce_offset_scaled_log_var_o <= ptp_announce_grandmaster_offset_scaled_log_variance;
-                            announce_priority2_o             <= ptp_announce_grandmaster_priority2;
-                            announce_steps_removed_o         <= ptp_announce_steps_removed;
-                            announce_time_source_o           <= ptp_announce_time_source;
-                            announce_log_msg_interval_o      <= ptp_log_msg_interval;
-                            announce_valid_o                 <= '1';
-                            s_SM_PtpParser <= s_Done;
-                        when x"C" => s_SM_PtpParser <= s_Done;  -- Signaling
-                        when x"D" => s_SM_PtpParser <= s_Done;  -- Management
+                        when t_Pdelay_Follow_Up => s_SM_PtpParser <= s_Done;  -- Pdelay_Resp_Follow_Up
+                        --when x"C" => s_SM_PtpParser <= s_Done;  -- Signaling
+                        --when x"D" => s_SM_PtpParser <= s_Done;  -- Management
                         when others => s_SM_PtpParser <= s_Done;
                     end case;
                 end if;
@@ -820,7 +800,6 @@ begin
                 
             else
                 s_SM_PtpParser <= s_Idle;
-                byte_counter <= 0;
             end if;
         end if;
     end process main_proc;

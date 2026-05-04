@@ -190,15 +190,17 @@ signal tx_sample_register : STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS -
 
 
 signal mac_tx_clock : STD_LOGIC;
+signal mac_rx_clock : STD_LOGIC;
+signal mac_rx_data: STD_LOGIC_VECTOR(7 downto 0);
+signal mac_rx_byte_received : STD_LOGIC;
+signal mac_rx_byte_receive_index : unsigned(10 downto 0);
+signal mac_is_ptp_frame : std_logic;
 
 -- ethernet_top signals
 
 signal is_rtp_pkt_tog : STD_LOGIC;
-signal is_ptp_pkt_tog : STD_LOGIC;
-signal ptp_ram_addr : STD_LOGIC_VECTOR(10 downto 0);
 signal rtp_ram_addr : unsigned(10 downto 0);
 signal eth_ram_data_sys_rtp : STD_LOGIC_VECTOR(7 downto 0);
-signal eth_ram_data_sys_ptp : STD_LOGIC_VECTOR(7 downto 0);
 signal eth_tx_en_ptp : STD_LOGIC;
 signal eth_tx_en_rtp : STD_LOGIC;
 signal eth_tx_data_ptp : STD_LOGIC_VECTOR(7 downto 0);
@@ -241,6 +243,8 @@ pll_256fs_falling_o <= pll_256fs_falling;
 
 mac_tx_clock_o <= mac_tx_clock;
 mac_reset <= not mac_resetn_i;
+
+mac_rx_clock_o <= mac_rx_clock;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
@@ -341,15 +345,20 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
 		 mac_tx_allow_i => eth_tx_allow_ptp,
+
+
+		rx_clk_i => mac_rx_clock,
+		rx_data_i => mac_rx_data,
+		rx_byte_receive_index_i => mac_rx_byte_receive_index(7 downto 0),
+		rx_byte_received_i => mac_rx_byte_received,
+		rx_ptp_frame_i => mac_is_ptp_frame,
+
 		sof_recv_tog_i => mac_sof_recv_tog,
 		sof_sent_tog_i => mac_sof_sent_tog,
-		parse_ptp_packet_tog => is_ptp_pkt_tog,
 		tx_data_ptpfu => eth_tx_data_ptp,
-		mac_ram_data => eth_ram_data_sys_ptp,
 		
 		tx_en_ptpfu => eth_tx_en_ptp,
 		 ptp_allow_req => eth_tx_req_ptp,
-		ptp_ram_addr => ptp_ram_addr,
 		
 		 
 		-- configuration registers 
@@ -514,18 +523,20 @@ ethernet_top_inst: entity work.ethernet_top
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,
-	mac_rx_clock_o => mac_rx_clock_o,
+	mac_rx_clock_o => mac_rx_clock,
 	mac_tx_clock_o => mac_tx_clock,
 	rst_n => rst_n,
 	received_packet_length_o => mac_received_packet_length_o,
+	is_ptp_frame_o => mac_is_ptp_frame,
+	mac_rx_data_o => mac_rx_data,
+	mac_rx_byte_received_o => mac_rx_byte_received,
+	mac_rx_byte_receive_index_o => mac_rx_byte_receive_index,
+
 	is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
 	is_rtp_pkt_tog_o => is_rtp_pkt_tog,
-	is_ptp_pkt_tog_o => is_ptp_pkt_tog,
-	ptp_ram_addr_i => unsigned(ptp_ram_addr),
 	rtp_ram_addr_i => rtp_ram_addr,
 	mcu_ram_addr_i => mcu_ram_addr_i,
 	eth_ram_data_sys_rtp_o => eth_ram_data_sys_rtp,
-	eth_ram_data_sys_ptp_o => eth_ram_data_sys_ptp,
 	eth_ram_data_rx_mcu_o => eth_ram_data_rx_mcu_o,
 	eth_tx_en_mcu_i => eth_tx_en_mcu_i,
 	eth_tx_en_ptp_i => eth_tx_en_ptp,

@@ -34,9 +34,9 @@ entity ethernet_timestamp is
         mac_speed_i     : in std_logic_vector(1 downto 0);
         reset_n			: in std_logic;
         
-        wallclock_seconds_i : in unsigned(47 downto 0);
+        wallclock_seconds_i : in unsigned(3 downto 0);
         wallclock_nanoseconds_i : in unsigned(31 downto 0);
-        timestamp_seconds_o	: out unsigned(47 downto 0);
+        timestamp_seconds_o	: out unsigned(3 downto 0);
         timestamp_nanoseconds_o : out unsigned(31 downto 0);
         
 
@@ -58,7 +58,7 @@ architecture Behavioral of ethernet_timestamp is
     signal PHY_LATENCY : integer;
     signal PIPELINE_LATENCY : integer;
 
-    signal s_reg : UNSIGNED(47 downto 0);
+    signal s_reg : UNSIGNED(3 downto 0);
     signal stamp_valid : std_logic := '0';
     signal adjusted : integer;
 begin

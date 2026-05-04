@@ -23,14 +23,12 @@ entity ethernet_top is
     
     is_mcu_pkt_tog_o : OUT STD_LOGIC;
     is_rtp_pkt_tog_o : OUT STD_LOGIC;
-    is_ptp_pkt_tog_o : OUT STD_LOGIC;
+    is_ptp_frame_o : OUT STD_LOGIC;
 
-    ptp_ram_addr_i : IN unsigned(10 downto 0);
     rtp_ram_addr_i : IN unsigned(10 downto 0);
     mcu_ram_addr_i : IN unsigned(10 downto 0);
 
     eth_ram_data_sys_rtp_o : OUT STD_LOGIC_VECTOR(7 downto 0);
-    eth_ram_data_sys_ptp_o : OUT STD_LOGIC_VECTOR(7 downto 0);
     eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
 
 
@@ -66,6 +64,10 @@ entity ethernet_top is
     mac_sof_sent_pulse_o : out STD_LOGIC;
     mac_sof_recv_tog_o : out STD_LOGIC;
 
+
+    mac_rx_data_o : out STD_LOGIC_VECTOR(7 downto 0);
+    mac_rx_byte_received_o : out std_logic;
+    mac_rx_byte_receive_index_o : out unsigned(10 downto 0);
 
     -- mii interface
 
@@ -106,19 +108,20 @@ architecture rtl of ethernet_top is
     SIGNAL mac_rx_clock : STD_LOGIC;
     SIGNAL mac_tx_Clock : STD_LOGIC;
     SIGNAL is_mcu_pkt_tog_receive : STD_LOGIC;
-    SIGNAL is_ptp_pkt_tog_receive : STD_LOGIC;
     SIGNAL is_rtp_pkt_tog_receive : STD_LOGIC;
 
     SIGNAL is_mcu_pkt_tog_done : STD_LOGIC;
-    SIGNAL is_ptp_pkt_tog_done : STD_LOGIC;
     SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
     
 begin
   mac_speed_override <= SPEED_100MBPS WHEN ETHERNET_TYPE = "RMII" else SPEED_UNSPECIFIED;
-  is_ptp_pkt_tog_o <= is_ptp_pkt_tog_done when mac_speed = b"01" else is_ptp_pkt_tog_receive; -- send the packet toggles once the packet was fully received on 100mbits. otherwise we read too fast.
   is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
   is_mcu_pkt_tog_o <= is_mcu_pkt_tog_done when mac_speed = b"01" else is_mcu_pkt_tog_receive;
 
+  mac_rx_clock_o <= mac_rx_clock;
+  mac_rx_byte_receive_index_o <= eth_ram_wr_addr;
+  mac_rx_byte_received_o <= mac_rx_byte_received;
+  mac_rx_data_o <= eth_ram_wr_data;
   b2v_eth_rx : entity work.ethernet_receive
     generic map(
       lastRamAddress => 1532
@@ -131,11 +134,11 @@ begin
       rx_error         => mac_rx_error,
       rx_data          => mac_rx_data,
       frame_rdy        => eth_frame_rdy,
-      ram_addr         => eth_ram_wr_addr,
-      ram_data         => eth_ram_wr_data,
+      receive_byte_index         => eth_ram_wr_addr,
+      received_byte         => eth_ram_wr_data,
       rx_byte_count    => received_packet_length_o,
       is_mcu_pkt_tog_o => is_mcu_pkt_tog_receive,
-      is_ptp_pkt_tog_o => is_ptp_pkt_tog_receive,
+      is_ptp_frame_o => is_ptp_frame_o,
       is_rtp_pkt_tog_o => is_rtp_pkt_tog_receive);
 
 
@@ -148,17 +151,14 @@ b2v_eth_buf : entity work.eth_ram
       rx_clk             => mac_rx_clock,
       sync_in            => eth_frame_rdy,
       data_in            => eth_ram_wr_data,
-      readAddrPTP        => ptp_ram_addr_i,
       readAddrRTP        => rtp_ram_addr_i,
       readAddrMCU        => mcu_ram_addr_i,
       writeAddr          => eth_ram_wr_addr,
       dataOut_sysclk_rtp => eth_ram_data_sys_rtp_o,
-      dataOut_sysclk_ptp => eth_ram_data_sys_ptp_o,
 
       dataOut_rxclk => eth_ram_data_rx_mcu_o,
 
       is_mcu_pkt_tog_o => is_mcu_pkt_tog_done,
-      is_ptp_pkt_tog_o => is_ptp_pkt_tog_done,
       is_rtp_pkt_tog_o => is_rtp_pkt_tog_done,
       sys_clk_i => sys_clk125MHz_i);
 

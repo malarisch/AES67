@@ -12,7 +12,13 @@ ENTITY ptp_module IS
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
 		mac_tx_byte_sent :  IN  STD_LOGIC;
-		parse_ptp_packet_tog :  IN  STD_LOGIC;
+
+		rx_clk_i            : in std_logic;
+        rx_data_i           : in STD_LOGIC_VECTOR(7 downto 0);
+        rx_byte_received_i  : in std_logic;
+        rx_byte_receive_index_i : in unsigned(7 downto 0); -- max length is 105 for ptpv2
+        rx_ptp_frame_i      : in std_logic;
+
 		ptp_is_leader_o :  OUT  STD_LOGIC;
 		ptp_is_follower_o :  OUT  STD_LOGIC;
 		sof_recv_tog_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
@@ -20,7 +26,6 @@ ENTITY ptp_module IS
 		sof_sent_tog_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
 		ip_address :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_address :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
-		mac_ram_data :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_announce_interval :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_clock_accuracy :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		ptp_clock_class :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -47,19 +52,19 @@ ENTITY ptp_module IS
 		-- ============================================================
 		-- Servo + parser tuning inputs (live-tunable from SoC)
 		-- ============================================================
-		servo_kp_gain_i              : IN signed(7 downto 0)  := to_signed(40, 8);
-		servo_ki_gain_i              : IN signed(7 downto 0)  := to_signed(5, 8);
-		servo_gain_shift_i           : IN unsigned(4 downto 0):= to_unsigned(3, 5);
-		servo_gain_shift_locked_i    : IN unsigned(4 downto 0):= to_unsigned(0, 5);
-		servo_ki_extra_shift_i       : IN unsigned(4 downto 0):= to_unsigned(3, 5);
-		servo_filter_shift_i         : IN unsigned(4 downto 0):= to_unsigned(0, 5);
-		servo_warmup_samples_i       : IN unsigned(7 downto 0):= to_unsigned(16, 8);
-		servo_lock_threshold_ns_i    : IN unsigned(31 downto 0):= to_unsigned(500, 32);
-		servo_unlock_threshold_ns_i  : IN unsigned(31 downto 0):= to_unsigned(5000, 32);
-		servo_lock_count_threshold_i : IN unsigned(7 downto 0):= to_unsigned(24, 8);
+		servo_kp_gain_i              : IN signed(7 downto 0);
+		servo_ki_gain_i              : IN signed(7 downto 0);
+		servo_gain_shift_i           : IN unsigned(4 downto 0);
+		servo_gain_shift_locked_i    : IN unsigned(4 downto 0);
+		servo_ki_extra_shift_i       : IN unsigned(4 downto 0);
+		servo_filter_shift_i         : IN unsigned(4 downto 0);
+		servo_warmup_samples_i       : IN unsigned(7 downto 0);
+		servo_lock_threshold_ns_i    : IN unsigned(31 downto 0);
+		servo_unlock_threshold_ns_i  : IN unsigned(31 downto 0);
+		servo_lock_count_threshold_i : IN unsigned(7 downto 0);
 
 		parser_min_filter_enable_i        : IN STD_LOGIC := '0';
-		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0) := to_unsigned(2, 8);
+		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0);
 
 		-- ============================================================
 		-- Servo monitoring outputs (live PI internal state)
@@ -94,9 +99,9 @@ SIGNAL	rx_send_delay_req :  STD_LOGIC;
 SIGNAL	rx_send_delay_resp :  STD_LOGIC;
 SIGNAL	rx_sequence_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	rx_timestamp_ns :  UNSIGNED(31 DOWNTO 0);
-SIGNAL	rx_timestamp_s :  UNSIGNED(47 DOWNTO 0);
+SIGNAL	rx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
 SIGNAL	rx_ts_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	rx_ts_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	rx_ts_s :  STD_LOGIC_VECTOR(3 DOWNTO 0);
 SIGNAL	second_pulse_sys_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	tx_en_ptpfu_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	tx_frame_start :  STD_LOGIC;
@@ -106,7 +111,7 @@ SIGNAL	tx_req_port_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	tx_seq_id :  UNSIGNED(15 DOWNTO 0);
 SIGNAL	tx_t3_valid :  STD_LOGIC;
 SIGNAL	tx_timestamp_ns :  UNSIGNED(31 DOWNTO 0);
-SIGNAL	tx_timestamp_s :  UNSIGNED(47 DOWNTO 0);
+SIGNAL	tx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
 SIGNAL	timestamp_ns :  UNSIGNED(31 DOWNTO 0);
 SIGNAL	timestamp_s :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_nanoseconds :  UNSIGNED(31 DOWNTO 0);
@@ -227,7 +232,6 @@ b2v_ptpparser :  entity work.ptpv2_parser
 GENERIC MAP(MIN_FILTER_DEPTH => 8
 			)
 PORT MAP(clk => sys_clk,
-		 parse_ptp_packet_tog => parse_ptp_packet_tog,
 		 is_leader => eff_is_leader,
 		 reset_n => powerGood,
 		 t3_valid_i => tx_t3_valid,
@@ -237,7 +241,6 @@ PORT MAP(clk => sys_clk,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
 		 min_filter_enable_i => parser_min_filter_enable_i,
 		 min_filter_active_depth_i => parser_min_filter_active_depth_i,
-		 ram_data => mac_ram_data,
 		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
 		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
 		 src_mac_address => mac_address,
@@ -254,7 +257,6 @@ PORT MAP(clk => sys_clk,
 		 log_msg_interval_o => log_msg_interval,
 		 mean_path_delay_ns_o => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
 		 offset_from_master_ns_o => ptp_offset_from_master_ALTERA_SYNTHESIZED,
-		 ram_read_address => ptp_ram_addr_u,
 		 rx_follower_identity_o => rx_follower_identity,
 		 rx_timestamp_nanoseconds_o => rx_ts_ns,
 		 rx_timestamp_seconds_o => rx_ts_s,
@@ -268,7 +270,14 @@ PORT MAP(clk => sys_clk,
 		 announce_priority2_o => ann_priority2,
 		 announce_steps_removed_o => ann_steps_removed,
 		 announce_time_source_o => ann_time_source,
-		 announce_log_msg_interval_o => ann_log_msg_interval);
+		 announce_log_msg_interval_o => ann_log_msg_interval,
+		 
+		 rx_clk_i => rx_clk_i,
+		 rx_data_i => rx_data_i,
+		 rx_byte_receive_index_i => rx_byte_receive_index_i,
+		 rx_byte_received_i => rx_byte_received_i,
+		 rx_ptp_frame_i => rx_ptp_frame_i
+		 );
 
 
 b2v_bmc :  entity work.ptpv2_bmc
@@ -308,7 +317,7 @@ PORT MAP(clk => sys_clk,
 		 mac_speed_i => mac_speed_i,
 		 sof_tog_i => sof_recv_tog_i,
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
-		 wallclock_seconds_i => wallclock_seconds,
+		 wallclock_seconds_i => wallclock_seconds(3 downto 0),
 		 timestamp_nanoseconds_o => rx_timestamp_ns,
 		 timestamp_seconds_o => rx_timestamp_s);
 b2v_tx_tsu :  entity work.ethernet_timestamp
@@ -324,7 +333,7 @@ PORT MAP(clk => sys_clk,
 		 mac_speed_i => mac_speed_i,
 		 sof_tog_i => sof_sent_tog_i,
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
-		 wallclock_seconds_i => wallclock_seconds,
+		 wallclock_seconds_i => wallclock_seconds(3 downto 0),
 		 timestamp_nanoseconds_o => tx_timestamp_ns,
 		 timestamp_seconds_o => tx_timestamp_s);
 
