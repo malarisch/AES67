@@ -23,7 +23,7 @@
 
 #include "eth_litex.h"
 
-LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_DBG);
 
 /* ---- Driver data structures ---- */
 
@@ -623,7 +623,7 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 
 		/* Read packet data from RX buffer */
 		eth_buf_read_packet(data->rx_buf, pkt_len);
-
+		LOG_HEXDUMP_DBG(data->rx_buf, pkt_len, "RX frame");
 		/* Debug: log ethertype and dst port for TCP packets */
 		{
 			uint16_t ethertype = ((uint16_t)data->rx_buf[12] << 8) |
