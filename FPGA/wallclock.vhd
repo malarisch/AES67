@@ -138,6 +138,9 @@ architecture Behavioral of wallclock is
     signal mclk_cnt      : unsigned(8 downto 0) := (others => '0');
     signal sample_pulse_int : std_logic := '0';
 
+    signal   nco_resync_pending : std_logic := '0';
+    signal   sample_in_sec_prev : unsigned(15 downto 0) := (others => '0');
+
     -- Millisecond tick: count audio_fs/1000 sample pulses per ms.
     constant MS_DIVIDER    : natural := audio_fs / 1000;
     signal ms_cnt          : unsigned(15 downto 0) := (others => '0');
@@ -242,13 +245,17 @@ begin
         end if;
     end process;
     nco_proc: process(clk, reset_n)
+        variable v_sample_in_sec : unsigned(15 downto 0);
+        variable v_boundary_hit  : boolean;
     begin
         if reset_n = '0' then
-            nco_phase        <= (others => '0');
-            nco_phase_prev   <= '0';
-            nco_increment    <= NCO_BASE_INC_48;
-            mclk_cnt         <= (others => '0');
-            sample_pulse_int <= '0';
+            nco_phase          <= (others => '0');
+            nco_phase_prev     <= '0';
+            nco_increment      <= NCO_BASE_INC_48;
+            mclk_cnt           <= (others => '0');
+            sample_pulse_int   <= '0';
+            nco_resync_pending <= '0';
+            sample_in_sec_prev <= (others => '0');
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
 
@@ -256,17 +263,45 @@ begin
             if (nco_ppb_adj_wait = '0') then
                 nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg;
             end if;
-            -- Advance NCO phase accumulator
-            nco_phase <= unsigned(signed(nco_phase) + nco_increment);
-            nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
 
-            -- Detect rising edge of MCLK (NCO MSB 0→1): count 512 per sample
-            if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
-                if mclk_cnt = 511 then
-                    mclk_cnt         <= (others => '0');
-                    sample_pulse_int <= '1';  -- One sys_clk pulse at sample boundary
-                else
-                    mclk_cnt <= mclk_cnt + 1;
+            -- ===== Resync trigger =====
+            -- A wallclock_set_i or phase_jump_valid_i pulse arms a one-shot
+            -- pending flag. The actual realignment fires on the next sample
+            -- boundary in the wallclock — i.e. when sample_in_sec (= upper
+            -- 16 bits of media_mult_reg) increments. The master generates
+            -- its own fs pulses on the same boundaries, so this realigns
+            -- the slave epoch to the master without any mod arithmetic.
+            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+                nco_resync_pending <= '1';
+            end if;
+
+            -- Track sample_in_sec from the media_proc multiplier output.
+            -- This is updated 2 cycles after a wallclock change (pipeline
+            -- latency in media_proc), so any resync that follows a
+            -- wallclock_set sees the post-set boundaries.
+            v_sample_in_sec := media_mult_reg(47 downto 32);
+            sample_in_sec_prev <= v_sample_in_sec;
+            v_boundary_hit := v_sample_in_sec /= sample_in_sec_prev;
+
+            if v_boundary_hit and nco_resync_pending = '1' then
+                -- Wallclock crossed a sample boundary while a resync is
+                -- pending: realign NCO to phase 0 and emit fs pulse.
+                nco_phase          <= (others => '0');
+                nco_phase_prev     <= '0';
+                mclk_cnt           <= (others => '0');
+                sample_pulse_int   <= '1';
+                nco_resync_pending <= '0';
+            else
+                -- Normal NCO advance
+                nco_phase <= unsigned(signed(nco_phase) + nco_increment);
+                nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
+                if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
+                    if mclk_cnt = 511 then
+                        mclk_cnt         <= (others => '0');
+                        sample_pulse_int <= '1';
+                    else
+                        mclk_cnt <= mclk_cnt + 1;
+                    end if;
                 end if;
             end if;
         end if;

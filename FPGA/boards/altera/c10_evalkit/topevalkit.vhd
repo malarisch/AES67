@@ -2,7 +2,7 @@ LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
-ENTITY topevalkit IS
+ENTITY topevalkit IS 
 	generic (
 		soctype : string := "litex_c10_hram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		platform : string := "ALTERA";
@@ -22,7 +22,7 @@ ENTITY topevalkit IS
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-				STATIC_PTP_CONF : 		string := "FALSE"
+				STATIC_PTP_CONF : 		string := "TRUE"
 	);
 	PORT
 	(
