@@ -30,7 +30,7 @@ ENTITY top_cyc1000 IS
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 8
 	);
-	PORT
+	PORT 
 	(
 		c10_resetn :  IN  STD_LOGIC := '1';
 		c10_clk12m :  IN  STD_LOGIC;

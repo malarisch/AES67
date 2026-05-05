@@ -62,9 +62,25 @@ architecture Behavioral of wallclock is
     -- Range limited to ±2^31 to prevent runaway
     signal frac_ns_accum : signed(31 downto 0) := (others => '0');
     
-    -- Constants for overflow detection (use 2^30 as threshold)
-    constant FRAC_OVERFLOW  : signed(31 downto 0) := to_signed(2**30, 32);
-    constant FRAC_UNDERFLOW : signed(31 downto 0) := to_signed(-(2**30), 32);
+    -- Fractional accumulator overflow threshold.
+    --
+    -- Per cycle we add (increment_interval * ppb) = 8 * ppb to frac_ns_accum.
+    -- Per real second there are sys_clk_hz cycles (1.25e8 @ 125 MHz). For
+    -- 1 ppb to translate into exactly 1 ns/s of correction (the definition
+    -- of ppb), we need: (sys_clk_hz * 8 * 1) / FRAC_OVERFLOW = 1 ns/s
+    --   → FRAC_OVERFLOW = sys_clk_hz * increment_interval = 1e9.
+    --
+    -- The previous threshold of 2^30 was off by 2^30/1e9 ≈ 1.0737, i.e. the
+    -- wallclock interpreted 1 ppb as ~0.93 ns/s. The PI servo locked the
+    -- wallclock anyway (by overshooting the ppb output by ~7.4 %), but the
+    -- NCO uses NCO_PPB_SCALE = NCO_BASE_INC_48 / 1e9 (correct ppb scaling),
+    -- so it received the *overshot* value at face value and ran 7.4 % of
+    -- the XO drift fast/slow relative to the master — visible as a constant
+    -- audio fs drift even with PTP "locked".
+    constant FRAC_OVERFLOW  : signed(31 downto 0) :=
+        to_signed(sys_clk_hz * increment_interval, 32);
+    constant FRAC_UNDERFLOW : signed(31 downto 0) :=
+        to_signed(-(sys_clk_hz * increment_interval), 32);
     
     -- Internal second pulse (usable by other processes)
     signal second_pulse_int : std_logic := '0';
@@ -72,30 +88,50 @@ architecture Behavioral of wallclock is
     -- ============================================================
     -- NCO for direct master clock generation (MCLK = fs * 512)
     -- ============================================================
-    -- Phase accumulator: 32-bit, MSB toggles at NCO frequency.
-    -- NCO freq = fs * 512 = 24.576 MHz (for 48 kHz).
-    -- Increment per 125 MHz tick: 24576000/125e6 * 2^32 = 844,424,930
-    -- Jitter: ±8ns (1 sys_clk period). At MCLK period ~40ns → ~20%.
-    -- Intended for use as reference into an external PLL/PPB meter,
-    -- not as a direct codec MCLK.
+    -- 48-bit phase accumulator: 32 integer bits + 16 fractional bits.
+    -- Bit 47 (= old MSB) toggles at NCO frequency.
+    -- Increment per 125 MHz tick (in 48-bit units):
+    --   24576000/125e6 * 2^48 = NCO_BASE_INC_48 ≈ 5.534e13
+    --
+    -- The fractional bits avoid the lossy >>16 quantisation that the
+    -- previous design applied to the ppb correction. Without them, the
+    -- ppb-to-increment conversion truncated towards −∞ (signed ASR),
+    -- biasing the NCO frequency slightly below the wallclock-disciplined
+    -- target and causing the audio fs to drift even with PTP locked.
     -- ============================================================
-    constant NCO_BASE_INC : signed(31 downto 0) :=
+    constant NCO_PHASE_BITS : natural := 48;
+    constant NCO_FRAC_BITS  : natural := 16;  -- 48 - 32
+
+    -- The original 32-bit NCO base increment fits in a VHDL integer.
+    -- The 48-bit increment is just (this << NCO_FRAC_BITS), so we build it
+    -- without ever needing a >32-bit integer literal (VHDL's integer is
+    -- typically 32-bit on synthesisers).
+    constant NCO_BASE_INC_32 : signed(31 downto 0) :=
         to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0), 32);
 
-    -- PPB scaling: how much to adjust NCO increment per PPB of correction.
-    -- adj = NCO_BASE_INC * ppb / 1e9 ≈ (ppb * NCO_PPB_SCALE) >> 16
-    -- Width must hold ~55340 for fs=48k @ 125 MHz; 18 bits leaves headroom.
+    constant NCO_BASE_INC_48 : signed(NCO_PHASE_BITS - 1 downto 0) :=
+        shift_left(resize(NCO_BASE_INC_32, NCO_PHASE_BITS), NCO_FRAC_BITS);
+
+    -- ppb correction multiplier: NCO_BASE_INC_48 / 1e9 (rounded to integer).
+    -- 1 ppb of frequency correction = NCO_PPB_SCALE units of 48-bit increment.
+    -- Width holds ~55340 for fs=48k @125MHz; 18 bits leaves headroom.
+    -- Note: this is the OLD constant (used to be paired with >>16); now it's
+    -- consumed at full precision because the 48-bit accumulator absorbs the
+    -- extra 16 fractional bits.
     constant NCO_PPB_SCALE : signed(17 downto 0) :=
-        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0 / 1.0e9 * 65536.0), 18);
-    
-    signal nco_phase      : unsigned(31 downto 0) := (others => '0');
+        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz)
+                          * 4294967296.0 / 1.0e9 * 65536.0),
+                  18);
+
+    signal nco_phase      : unsigned(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
-    signal nco_increment  : signed(31 downto 0) := NCO_BASE_INC;
-    
+    signal nco_increment  : signed(NCO_PHASE_BITS - 1 downto 0) := NCO_BASE_INC_48;
+
     -- Pipeline register to break freq_correction → nco_increment critical path
     -- Original: 32×16 multiply + shift + add (~10ns combined)
-    -- Split: Stage 1 (multiply+shift) → Stage 2 (add)
-    signal ppb_adj_reg    : signed(31 downto 0) := (others => '0');
+    -- Split: Stage 1 (multiply) → Stage 2 (add). No shift now — the result
+    -- is consumed at full 48-bit precision.
+    signal ppb_adj_reg    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     
     -- Sample divider: count 512 MCLK rising edges → 1 sample period.
     -- MCLK MSB rising edge = one MCLK cycle. 512 cycles = 1 fs period.
@@ -171,7 +207,7 @@ begin
     wallclock_nanoseconds_o <= unsigned(nsec_reg);
     wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
-    audio_mclk_o            <= std_logic(nco_phase(31));  -- NCO MSB = MCLK at ~24.576 MHz
+    audio_mclk_o            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
     media_clock_o           <= media_clock_reg;
     sample_pulse_o          <= sample_pulse_int;
     ms_pulse_o              <= ms_pulse_int;
@@ -183,8 +219,8 @@ begin
     -- Both are PTP-disciplined via freq_correction_ppb.
     --
     -- Pipeline (to meet timing):
-    --   Stage 1: ppb_adj_reg <= (freq_correction * NCO_PPB_SCALE) >> 16
-    --   Stage 2: nco_increment <= NCO_BASE_INC + ppb_adj_reg
+    --   Stage 1: ppb_adj_reg <= freq_correction * NCO_PPB_SCALE  (full width)
+    --   Stage 2: nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg
     -- ============================================================
 
     nco_ppb_adj_proc: process(clk, reset_n)
@@ -195,9 +231,11 @@ begin
         elsif rising_edge(clk) then
             if (nco_ppb_adj_wait = '0') then
                 nco_ppb_adj_wait <= '1';
-            ppb_adj_reg <= resize(
-                shift_right(freq_correction_ppb_i * NCO_PPB_SCALE, 16), 32);
-                
+                -- Full-width product fits in 32+18 = 50 bits; resize to 48
+                -- (the integer overflow margin only matters for ppb beyond
+                -- ±2^31/NCO_PPB_SCALE ≈ ±38 ppm, well outside servo range).
+                ppb_adj_reg <= resize(freq_correction_ppb_i * NCO_PPB_SCALE,
+                                      NCO_PHASE_BITS);
             else
                 nco_ppb_adj_wait <= '0';
             end if;
@@ -208,7 +246,7 @@ begin
         if reset_n = '0' then
             nco_phase        <= (others => '0');
             nco_phase_prev   <= '0';
-            nco_increment    <= NCO_BASE_INC;
+            nco_increment    <= NCO_BASE_INC_48;
             mclk_cnt         <= (others => '0');
             sample_pulse_int <= '0';
         elsif rising_edge(clk) then
@@ -216,14 +254,14 @@ begin
 
             -- latch in when calc stable
             if (nco_ppb_adj_wait = '0') then
-                nco_increment <= NCO_BASE_INC + ppb_adj_reg;
+                nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg;
             end if;
             -- Advance NCO phase accumulator
             nco_phase <= unsigned(signed(nco_phase) + nco_increment);
-            nco_phase_prev <= std_logic(nco_phase(31));
+            nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
 
             -- Detect rising edge of MCLK (NCO MSB 0→1): count 512 per sample
-            if nco_phase_prev = '0' and nco_phase(31) = '1' then
+            if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
                 if mclk_cnt = 511 then
                     mclk_cnt         <= (others => '0');
                     sample_pulse_int <= '1';  -- One sys_clk pulse at sample boundary

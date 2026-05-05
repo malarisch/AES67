@@ -60,25 +60,24 @@ rmii_sof_gen: if MII_WIDTH = 2 generate -- rmii
             if (mii_en_in = '0') then
                 rmii_sm <= s_Idle;
             end if;
+            -- Preamble dibits (LSB-first of 0x55) = "01" repeated.
+            -- SFD (0xD5) LSB-first = dibits "01","01","01","11".
+            -- The "11" dibit ends the SFD and marks the SOF; the next mii_clk
+            -- edge after this case-evaluation is the start of the first byte
+            -- of frame data, so toggling here marks the SOF precisely.
             case rmii_sm is
                 when s_Idle =>
                     if (mii_en_prev = '0' and mii_en_in = '1') then
                         rmii_sm <= s_Wait1;
                     end if;
                 when s_Wait1 =>
-                    if mii_in = "01" then
-                        rmii_sm <= s_Wait2;
-                    end if;
-                when s_Wait2 =>
+                    -- Wait until we see the SFD's terminating "11" dibit
+                    -- following a preamble "01" dibit.
                     if (mii_in = "11" and mii_data_prev = "01") then
-                        rmii_sm <= s_Wait3;
-                    end if;
-                when s_Wait3 =>
-                    if (mii_in = "01" and mii_data_prev = "10") then
                         sof_tog <= not sof_tog;
                         rmii_sm <= s_Idle;
                     end if;
-                when others => 
+                when others =>
                     rmii_sm <= s_Idle;
             end case;
 
