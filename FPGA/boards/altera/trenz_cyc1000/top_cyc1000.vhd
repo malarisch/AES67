@@ -15,7 +15,9 @@ ENTITY top_cyc1000 IS
 		platform : string := "ALTERA";
 		clk_in_speed : natural := 12; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RMII"; -- RMII; RGMII
-		USE_EXTERNAL_PLL : string := "true"; -- when disabled it will use the nco-generated clocks on the outputs
+		MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii or mii, 8 gmii
+		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
+		USE_EXTERNAL_PLL : string := "FALSE"; -- when disabled it will use the nco-generated clocks on the outputs
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
@@ -107,7 +109,9 @@ begin
 		SAMPLERATE => SAMPLERATE,
 		TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
 		RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
-		MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS
+		MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
+		MII_WIDTH => MII_WIDTH,
+		MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
 	)
 	 port map(
 		rst_n_i => '1',

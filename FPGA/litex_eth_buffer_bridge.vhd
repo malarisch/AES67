@@ -56,7 +56,7 @@ entity litex_eth_buffer_bridge is
     mac_tx_byte_sent_i : in  std_ulogic;
     mac_tx_busy_i      : in  std_ulogic;
     mac_tx_dat_o    : out STD_ULOGIC_VECTOR(7 downto 0);
-    mac_sof_sent_pulse_i : in std_logic;
+    mac_start_prefetch_i : in std_logic;
     mac_speed_in        : in STD_LOGIC_VECTOR(1 downto 0);
 
     -- TX arbitration
@@ -175,7 +175,7 @@ begin
       tx_req_sync   <= tx_req_meta;
       tx_req_sync_d <= tx_req_sync;
 
-      tx_zsof <= mac_sof_sent_pulse_i;
+      tx_zsof <= mac_start_prefetch_i;
       -- Only drive data during active TX, otherwise hold at 0x00
       -- to avoid OR-mux corruption in ethernet_packet_aggregator
       case sm_tx is
@@ -208,10 +208,10 @@ begin
 
               end if;
         when TX_PRIME_PREFETCH => 
-            if ((mac_sof_sent_pulse_i = '1' and tx_zsof = '0') or (mac_sof_sent_pulse_i = '0' and tx_zsof = '1')) then
+            if ((mac_start_prefetch_i = '1' and tx_zsof = '0') or (mac_start_prefetch_i = '0' and tx_zsof = '1')) then
                 mac_tx_dat_o <= buf_tx_dat_i; -- output byte 0
                 buf_tx_addr <= buf_tx_addr + 1;
-                if (mac_sof_sent_pulse_i = '0' and tx_zsof = '1') then
+                if (mac_start_prefetch_i = '0' and tx_zsof = '1') then
                 sm_tx <= TX_TRANSMIT;
 
                 end if;

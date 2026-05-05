@@ -43,17 +43,18 @@ derive_clock_uncertainty
 # generate-statement label as "\<label>:" in the netlist; the backslash is
 # part of the identifier, not a Tcl escape, so it stays literal in {braces}.
 set sys_pll_clk0      {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}
+set sys_pll_clk1      {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
 set rgmii_pll_clk0    {top_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
 
 #**************************************************************
 # 3. Per-feature sub-SDCs (after derive_pll_clocks)
 #**************************************************************
 
-source ../../../sdc/audioclocks.sdc
+#source ../../../sdc/audioclocks.sdc
 source ../../../sdc/hyperram.sdc
 source ../../../sdc/ptp.sdc
 source ../../../sdc/litex_csr.sdc
-source ../../../sdc/spictrl.sdc
+#source ../../../sdc/spictrl.sdc
 
 #**************************************************************
 # 4. RGMII timing
@@ -106,8 +107,8 @@ set_false_path -from * -to [get_ports {spictrl_irq_n_o}]
 # tdm8out_0_o / tdm8out_1_o             : serial audio out
 # tdm8in_0_i  / tdm8in_1_i              : serial audio in
 
-set_false_path -from * -to [get_ports {pll_256fs_rising pll_256fs_falling pll_512fs_o lrclk_o lrclk_tdm_o tdm8out_0_o tdm8out_1_o}]
-set_false_path -from [get_ports {tdm8in_0_i tdm8in_1_i}] -to *
+#set_false_path -from * -to [get_ports {pll_256fs_rising pll_256fs_falling pll_512fs_o lrclk_o lrclk_tdm_o tdm8out_0_o tdm8out_1_o}]
+#set_false_path -from [get_ports {tdm8in_0_i tdm8in_1_i}] -to *
 
 #**************************************************************
 # 5c. False paths — slow / async pins
@@ -145,7 +146,7 @@ set_false_path -from [get_ports {rst_n_i}] -to *
 
 set_clock_groups -asynchronous \
     -group [get_clocks [list clock_i $sys_pll_clk0]] \
-    -group [get_clocks {audio_mclk nco_mclk clk_256fs clk_128fs clk_64fs fs bclk_f}] \
+	 -group [get_clocks [list $sys_pll_clk1]] \
     -group [get_clocks [list phy_rgmii_enet_tx_clk $rgmii_pll_clk0 enet_tx_clk_125m]] \
     -group [get_clocks {enet_clk_125m enet_rx_clk_125m virt_enet_rx_clk_125m phy_rgmii_enet_rx_clk}] \
     -group [get_clocks {spictrl_clk}]

@@ -8,6 +8,16 @@ menuconfig ETH_LITEX
 
 if ETH_LITEX
 
+config ETH_LITEX_MAC_ADDR
+	string "MAC address (XX:XX:XX:XX:XX:XX)"
+	default "02:1C:23:17:AC:AB"
+	help
+	  Locally-administered MAC address used by the LiteX Ethernet
+	  driver. Override per board in the board .conf file when
+	  running multiple units on the same network — duplicate MACs
+	  cause ARP/IGMP havoc. Bit 1 of the first byte should be set
+	  to mark the address as locally administered.
+
 config ETH_LITEX_POLL_INTERVAL_MS
 	int "RX poll interval (ms)"
 	default 100

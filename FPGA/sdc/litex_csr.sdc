@@ -56,8 +56,8 @@ set_false_path -from [get_registers {*eth_buf_rx_ack*storage*}]
 
 # --- I/O port false paths (directly driven by LiteX SoC, no FPGA-side timing) ---
 # Serial UARTs
-set_false_path -from * -to [get_ports {arduino_io2}]
-set_false_path -from [get_ports {arduino_io1}] -to *
+set_false_path -from * -to [get_ports {uart0_tx}]
+set_false_path -from [get_ports {uart0_rx}] -to *
 #set_false_path -from * -to [get_ports {gpio4}]
 #set_false_path -from [get_ports {arduino_io3}] -to *
 
@@ -66,3 +66,38 @@ set_false_path -from * -to [get_ports {i2c0_scl i2c0_sda}]
 set_false_path -from [get_ports {i2c0_scl i2c0_sda}] -to *
 set_false_path -from * -to [get_ports {i2c1_scl i2c1_sda}]
 set_false_path -from [get_ports {i2c1_scl i2c1_sda}] -to *
+
+
+# --- PTP is_leader/is_follower: litex_sys_clk -> sys_clk_125m ---
+# Slow-changing configuration signals from LiteX SoC CSR to PTP modules
+set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_controller|*}]
+set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}] -to [get_registers {*ptp_inst|b2v_ptpparser|*}]
+
+# --- tx_router shadow register CDC ---
+# samples_per_packet_shadow and threshold_shadow no longer have separate _sync
+# registers (CDC removed from tx_router). Shadow registers are written from
+# config_wr_clk domain and read in sys_clk — covered by stream_cfg false_path below.
+
+#- LiteX SoC reset signals - static during normal operation ---
+set_false_path -from [get_registers {*aes67soc_reset_storage*}] -to *
+set_false_path -from [get_registers {*aes67soc_reset_re*}] -to *
+
+# --- LiteX SoC CSR registers crossing to FPGA logic domains ---
+# All aes67_csr_* storage registers live in litex_sys_clk (80 MHz) and
+# drive signals consumed in sys_clk_125m, enet_rx_clk, or audio_mclk domains.
+# CDC is handled by 2-FF synchronizers in the FPGA logic.
+
+# Control register (pll_ppb_start, ptp_is_leader, ptp_is_follower, eth_tx_request)
+set_false_path -from [get_registers {*aes67_csr_ctrl_storage*}]
+
+# Static configuration registers
+set_false_path -from [get_registers {*aes67_csr*}]
+set_false_path -from [get_registers {*aes67_csr_mac_addr*storage*}]
+set_false_path -from [get_registers {*aes67_csr_ip_addr*storage*}]
+set_false_path -from [get_registers {*aes67_csr_ptp_leader_id*storage*}]
+set_false_path -from [get_registers {*aes67_csr_ptp_announce*storage*}]
+set_false_path -from [get_registers {*aes67_csr_ptp_log*storage*}]
+set_false_path -from [get_registers {*aes67_csr_ptp_time_source*storage*}]
+
+# ADDA board reset (async output to external board)
+set_false_path -from * -to [get_ports {adda_nRST}]

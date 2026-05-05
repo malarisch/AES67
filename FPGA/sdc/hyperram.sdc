@@ -9,17 +9,17 @@
 set_false_path -from * -to [get_ports {hbus_rstn hbus_cs2n}]
 #
 # Clock output: must have minimal and matched skew between P/N
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_p}] 6.0
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_clk0_n}] 6.0
+set_max_delay -from [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] -to [get_ports {hbus_clk0_p}] 6.0
+set_max_delay -from [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] -to [get_ports {hbus_clk0_n}] 6.0
 #
 # DQ output: data must be stable before HyperRAM samples on hbus_clk edge
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_dq[*]}] 6.0
+set_max_delay -from [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] -to [get_ports {hbus_dq[*]}] 6.0
 #
 # DQ input: data from HyperRAM must meet setup to litex_sys_clk register
-set_max_delay -from [get_ports {hbus_dq[*]}] -to [get_clocks {litex_sys_clk}] 6.0
+set_max_delay -from [get_ports {hbus_dq[*]}] -to [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] 6.0
 #
 # RWDS output: strobe/mask timing during writes
-set_max_delay -from [get_clocks {litex_sys_clk}] -to [get_ports {hbus_rwds}] 6.0
+set_max_delay -from [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] -to [get_ports {hbus_rwds}] 6.0
 #
 # RWDS input: strobe edge detection must meet setup to litex_sys_clk
-set_max_delay -from [get_ports {hbus_rwds}] -to [get_clocks {litex_sys_clk}] 6.0
+set_max_delay -from [get_ports {hbus_rwds}] -to [get_clocks {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}] 6.0

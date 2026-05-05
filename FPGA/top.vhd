@@ -13,6 +13,8 @@ ENTITY top IS
 		board : string := "C10EVALKIT";
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
+		MII_WIDTH : integer := 4;
+		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
 		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
@@ -484,7 +486,7 @@ signal mac_tx_reset : std_logic;
 signal mcu_tx_req_i    : STD_LOGIC;
 signal mcu_tx_done     : STD_ULOGIC;
 signal mcu_rx_overflow : STD_ULOGIC;
-signal mac_sof_sent_pulse : STD_LOGIC;
+signal mac_tx_start_prefetch : STD_LOGIC;
 -- litex_soc <-> litex_eth_buffer_bridge (buffer interface)
 -- bridge-side signals (matching litex_eth_buffer_bridge types)
 signal buf_rx_data    : STD_ULOGIC_VECTOR(7 downto 0);
@@ -601,12 +603,19 @@ signal servo_mon_effective_gain_shift : STD_LOGIC_VECTOR(7 downto 0);
 signal servo_mon_lock_counter         : STD_LOGIC_VECTOR(15 downto 0);
 signal servo_mon_sample_count         : STD_LOGIC_VECTOR(15 downto 0);
 signal servo_mon_first_lock_achieved  : STD_LOGIC;
+signal phy_rx_clk : std_logic;
+signal phy_tx_clk : std_logic;
+signal phy_tx_data : STD_LOGIC_VECTOR(7 downto 0);
+signal phy_rx_data : STD_LOGIC_VECTOR(7 downto 0);
+signal phy_rx_en : STD_LOGIC;
+signal phy_tx_en : std_logic;
 
 BEGIN
 
 ptp_reset <= ptp_reset_litex or ptp_reset_spi;
 
 
+	
 
 reset_p <= not rst_n;
 
@@ -615,6 +624,9 @@ debug_mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
 aes67_top_inst: entity work.aes67_top
 generic map(
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => 8,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
 	MIIM_CLOCK_DIVIDER => 15,
 	ETHERNET_TYPE => ethernet_type,
 	MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
@@ -663,7 +675,7 @@ generic map(
 	mac_tx_byte_sent_o     => mac_tx_byte_sent,
 	mac_speed_o            => mac_speed,
 	mac_linkup_o           => mac_linkup,
-	mac_sof_sent_pulse_o => mac_sof_sent_pulse,
+	mac_tx_start_prefetch_o => mac_tx_start_prefetch,
 	
 
 	-- audio clocks
@@ -746,7 +758,14 @@ generic map(
 	servo_mon_effective_gain_shift_o => servo_mon_effective_gain_shift,
 	servo_mon_lock_counter_o         => servo_mon_lock_counter,
 	servo_mon_sample_count_o         => servo_mon_sample_count,
-	servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved
+	servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved,
+	phy_mii_rx_clk_in => phy_rx_clk,
+	phy_mii_tx_clk_in => phy_tx_clk,
+	phy_mii_tx_en_i => phy_tx_en,
+	phy_mii_rx_en_i => phy_rx_en,
+	phy_mii_rx_data_in => phy_rx_data(MII_WIDTH - 1 downto 0),
+	phy_mii_tx_data_in => phy_tx_data(MII_WIDTH - 1 downto 0)
+
 );
 
 
@@ -786,10 +805,10 @@ PORT MAP(
 	aes67_ctrl_wallclock_locked        => wallclock_locked,
 	aes67_ctrl_wallclock_phasejump     => wallclock_phasejump,
 
-	aes67_ctrl_rx_meter_clip           => audio_meter_rx_clip,
-	aes67_ctrl_rx_meter_signal         => audio_meter_rx_signal,
-	aes67_ctrl_tx_meter_clip           => audio_meter_tx_clip,
-	aes67_ctrl_tx_meter_signal         => audio_meter_tx_signal,
+	aes67_ctrl_rx_meter_clip           => x"00" & audio_meter_rx_clip,
+	aes67_ctrl_rx_meter_signal         => x"00" & audio_meter_rx_signal,
+	aes67_ctrl_tx_meter_clip           => x"00" & audio_meter_tx_clip,
+	aes67_ctrl_tx_meter_signal         => x"00" & audio_meter_tx_signal,
 	aes67_ctrl_meter_clear             => audio_meter_clear,
 
 	aes67_ctrl_adda_nrst               => adda_nRST,
@@ -1033,7 +1052,7 @@ PORT MAP(
 	mac_tx_byte_sent_i     => mac_tx_byte_sent,
 	mac_tx_busy_i          => mac_tx_busy,
 	mac_tx_dat_o           => eth_tx_data_mcu,
-	mac_sof_sent_pulse_i	=> mac_sof_sent_pulse,
+	mac_start_prefetch_i	=> mac_tx_start_prefetch,
 	mac_speed_in			=> mac_speed,
 
 	tx_allow_req_o         => eth_tx_allow_req_mcu,
@@ -1203,7 +1222,12 @@ end generate;
 
 
 rgmiigen: if (ethernet_type = "RGMII") generate
-
+phy_rx_clk <= gmii_rx_clk;
+phy_tx_clk <= gmii_tx_clk;
+phy_tx_data <= gmii_txd;
+phy_rx_data <= gmii_rxd;
+phy_tx_en <= gmii_tx_en;
+phy_rx_en <= gmii_rx_dv;
 
 phy_rgmii_enet_resetn <= rst_n;
 
@@ -1244,7 +1268,15 @@ PORT MAP(
 );
 end generate;
 
+rmii_tsu_routing_gen : if (ethernet_type = "RMII") generate
+	phy_rx_clk <= phy_rmii_ref_clk;
+	phy_tx_clk <= phy_rmii_ref_clk;
+	phy_tx_data(1 downto 0) <= phy_rmii_txd;
+	phy_rx_data(1 downto 0) <= phy_rmii_rxd;
+	phy_tx_en <= phy_rmii_txen;
+	phy_rx_en <= phy_rmii_crsdv;
 
+end generate;
 rmiigen: if (ethernet_type = "RMII" and platform = "ALTERA") generate
 
 

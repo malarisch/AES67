@@ -8,7 +8,10 @@ use work.miim_types.all;
 
 ENTITY aes67_top IS  
 	generic (
-		ETHERNET_TYPE : string := "RGMII";
+		MII_WIDTH : integer := 2;
+		ETHERNET_TYPE : string := "RMII";
+		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
+        MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		TX_MAX_STREAMS : natural := 8;
 		RX_MAX_STREAMS : natural := 8;
 		RX_CHANNELS		: natural := 16;
@@ -36,7 +39,12 @@ ENTITY aes67_top IS
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
 		mac_resetn_i : IN STD_LOGIC := '1';
-
+		phy_mii_rx_clk_in : IN STD_LOGIC;
+		phy_mii_tx_clk_in : IN STD_LOGIC;
+		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_tx_en_i : IN STD_LOGIC;
+		phy_mii_rx_en_i : IN STD_LOGIC;
 		
 
     	mii_rx_clock_i : IN STD_LOGIC;
@@ -70,7 +78,7 @@ ENTITY aes67_top IS
 		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
 		mac_linkup_o : OUT STD_LOGIC;
 		mac_received_packet_length_o : OUT UNSIGNED(10 downto 0);
-		mac_sof_sent_pulse_o: OUT STD_LOGIC;
+		mac_tx_start_prefetch_o: OUT STD_LOGIC;
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
@@ -251,22 +259,37 @@ mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
 mclk_switch_extern: if USE_EXTERNAL_PLL = "true" generate
 	clk_512fs <= pll_512fs_i;
-end generate;
-
-mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
-	clk_512fs <= wc_mclk;
-end generate;
-
-wc_512fs_o <= clk_512fs;
-
-audioclocks_inst: entity work.audioclock_generator
-PORT MAP(mclk => clk_512fs,
+	audioclocks_inst: entity work.audioclock_generator
+	PORT MAP(mclk => clk_512fs,
 		 rst_n => ptp_module_rst_n,
 		 clk_64fs => pll_64fs,
 		 fs => pll_48k_fs,
 		 bclk_r => pll_256fs_rising,
 		 bclk_f => pll_256fs_falling,
 		 fs_pulse => pll_48k_fs_tdm);
+end generate;
+
+mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
+	clk_512fs <= wc_mclk;
+	audioclocks_inst: entity work.audioclock_generator_sysclk
+	 port map(
+		sys_clk => sys_clk_125MHz_i,
+		rst_n => ptp_module_rst_n,
+		mclk_ref => wc_mclk,
+		--clk_256fs => clk_256fs,
+		--clk_128fs => clk_128fs,
+		clk_64fs => pll_64fs,
+		fs => pll_48k_fs,
+		bclk_r => pll_256fs_falling,
+		bclk_f => pll_256fs_rising,
+		--fs_pulse => fs_pulse,
+		fs_tdm_pulse => pll_48k_fs_tdm
+	);
+end generate;
+
+wc_512fs_o <= clk_512fs;
+
+
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -336,6 +359,11 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 mac_linkup_o <= mac_linkup;
 
 ptp_inst: entity work.ptp_module
+generic map (
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
+)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,
 
@@ -353,8 +381,6 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		rx_byte_received_i => mac_rx_byte_received,
 		rx_ptp_frame_i => mac_is_ptp_frame,
 
-		sof_recv_tog_i => mac_sof_recv_tog,
-		sof_sent_tog_i => mac_sof_sent_tog,
 		tx_data_ptpfu => eth_tx_data_ptp,
 		
 		tx_en_ptpfu => eth_tx_en_ptp,
@@ -412,7 +438,14 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 servo_mon_effective_gain_shift_o => servo_mon_effective_gain_shift_unsigned,
 		 servo_mon_lock_counter_o         => servo_mon_lock_counter_unsigned,
 		 servo_mon_sample_count_o         => servo_mon_sample_count_unsigned,
-		 servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_o
+		 servo_mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_o,
+
+		 phy_mii_rx_clk_in => phy_mii_rx_clk_in,
+		 phy_mii_tx_clk_in => phy_mii_tx_clk_in,
+		 phy_mii_rx_data_in => phy_mii_rx_data_in,
+		 phy_mii_tx_data_in => phy_mii_tx_data_in,
+		 phy_mii_tx_en_i => phy_mii_tx_en_i,
+		 phy_mii_rx_en_i => phy_mii_rx_en_i
 		 );
 
 servo_mon_filtered_offset_o      <= std_logic_vector(servo_mon_filtered_offset_signed);
@@ -559,7 +592,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_tx_busy_o => mac_tx_busy,
 	mac_rx_reset_o => mac_rx_reset,
 	mac_sof_sent_tog_o => mac_sof_sent_tog,
-	mac_sof_sent_pulse_o => mac_sof_sent_pulse_o,
+	mac_tx_start_prefetch_o => mac_tx_start_prefetch_o,
 	mac_sof_recv_tog_o => mac_sof_recv_tog,
 	mii_rx_clock_i => mii_rx_clock_i,
 	mii_tx_clock_i => mii_tx_clock_i,

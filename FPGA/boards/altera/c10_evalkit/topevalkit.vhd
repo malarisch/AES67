@@ -4,9 +4,11 @@ USE ieee.numeric_std.all;
 
 ENTITY topevalkit IS
 	generic (
-		soctype : string := "spi"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
+		soctype : string := "litex_c10_hram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		platform : string := "ALTERA";
         board : string := "C10EVALKIT";
+        MII_WIDTH : integer := 8; -- 2 for rmii, 8 gmii/rgmii
+		MII_CLK_NS_PER_TICK : integer := 8; -- 20 for rmii, 40 mii, 8 rgmii/gmii
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
@@ -24,7 +26,7 @@ ENTITY topevalkit IS
 	PORT
 	(
 		rst_n_i :  IN  STD_LOGIC;
-		clock_i :  IN  STD_LOGIC;
+		clock_i :  IN  STD_LOGIC; 
 
 		-- rgmii if (use when ethernet_type  = RGMII)
 		phy_rgmii_enet_clk_125m :  IN  STD_LOGIC;
@@ -134,7 +136,9 @@ begin
         BITDEPTH => BITDEPTH,
         SAMPLERATE => SAMPLERATE,
         TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
-        RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH
+        RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
+		MII_WIDTH => MII_WIDTH,
+		MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
     )
      port map(
         rst_n_i => rst_n_i,

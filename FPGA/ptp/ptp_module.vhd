@@ -4,10 +4,21 @@ USE ieee.numeric_std.all;
 
 
 ENTITY ptp_module IS 
+	generic (
+        MII_WIDTH : integer := 2;
+        SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
+        MII_CLK_NS_PER_TICK : integer := 20 -- 50 MHz
+	);
 	PORT
 	(
 		sys_clk :  IN  STD_LOGIC;
 		rst_n :  IN  STD_LOGIC;
+		phy_mii_rx_clk_in : IN STD_LOGIC;
+		phy_mii_tx_clk_in : IN STD_LOGIC;
+		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_tx_en_i : IN STD_LOGIC;
+		phy_mii_rx_en_i : IN STD_LOGIC;
 		mac_link_up_i :  IN  STD_LOGIC;
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
@@ -21,9 +32,7 @@ ENTITY ptp_module IS
 
 		ptp_is_leader_o :  OUT  STD_LOGIC;
 		ptp_is_follower_o :  OUT  STD_LOGIC;
-		sof_recv_tog_i :  IN  STD_LOGIC; -- signal at sof rx delimiter
 		mac_tx_allow_i :  IN  STD_LOGIC;
-		sof_sent_tog_i :  IN  STD_LOGIC; -- signal at sof tx delimiter
 		ip_address :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_address :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
 		ptp_announce_interval :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -171,6 +180,7 @@ b2v_controller : entity work.ptpv2_controller
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 send_delay_resp_in => rx_send_delay_resp,
+		 wait_amount_i => unsigned(mac_address(6 downto 3)), -- just use some lower bits of the mac adress for wait timer since it's different for every device
 		 ms_pulse_i => ms_pulse_sys,
 		 is_leader_i => eff_is_leader,
 		 is_follower_i => eff_is_follower,
@@ -304,38 +314,44 @@ PORT MAP(clk => sys_clk,
 		 current_leader_id_o => bmc_current_leader_id);
 
 
-b2v_rx_tsu :  entity work.ethernet_timestamp
-generic map (
+rx_tsu: entity work.ethernet_timestamp_mii
+ generic map(
 	PATH => "RX",
-	MAC_TO_PHY_NS_100M => 163,
-	MAC_TO_PHY_NS_1G => 20,
-	PHY_TX_TO_WIRE_NS => 0,
-   PHY_WIRE_TO_RX_NS => 0
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
 )
-PORT MAP(clk => sys_clk,
-		 reset_n => powerGood,
-		 mac_speed_i => mac_speed_i,
-		 sof_tog_i => sof_recv_tog_i,
-		 wallclock_nanoseconds_i => wallclock_nanoseconds,
-		 wallclock_seconds_i => wallclock_seconds(3 downto 0),
-		 timestamp_nanoseconds_o => rx_timestamp_ns,
-		 timestamp_seconds_o => rx_timestamp_s);
-b2v_tx_tsu :  entity work.ethernet_timestamp
-generic map (
+ port map(
+	sys_clk_i => sys_clk,
+	mii_clk_i => phy_mii_rx_clk_in,
+	reset_n => powerGood,
+	wallclock_seconds_i => wallclock_seconds(3 downto 0),
+	wallclock_nanoseconds_i => wallclock_nanoseconds,
+	timestamp_seconds_o => rx_timestamp_s,
+	timestamp_nanoseconds_o => rx_timestamp_ns,
+	mii_in => phy_mii_rx_data_in,
+	mii_en_in => phy_mii_rx_en_i
+);
+
+tx_tsu: entity work.ethernet_timestamp_mii
+ generic map(
 	PATH => "TX",
-	MAC_TO_PHY_NS_100M => 200,
-	MAC_TO_PHY_NS_1G => 20,
-	PHY_TX_TO_WIRE_NS => 0,
-   PHY_WIRE_TO_RX_NS => 0
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
 )
-PORT MAP(clk => sys_clk,
-		 reset_n => powerGood,
-		 mac_speed_i => mac_speed_i,
-		 sof_tog_i => sof_sent_tog_i,
-		 wallclock_nanoseconds_i => wallclock_nanoseconds,
-		 wallclock_seconds_i => wallclock_seconds(3 downto 0),
-		 timestamp_nanoseconds_o => tx_timestamp_ns,
-		 timestamp_seconds_o => tx_timestamp_s);
+ port map(
+	sys_clk_i => sys_clk,
+	mii_clk_i => phy_mii_tx_clk_in,
+	reset_n => powerGood,
+	wallclock_seconds_i => wallclock_seconds(3 downto 0),
+	wallclock_nanoseconds_i => wallclock_nanoseconds,
+	timestamp_seconds_o => tx_timestamp_s,
+	timestamp_nanoseconds_o => tx_timestamp_ns,
+	mii_in => phy_mii_tx_data_in,
+	mii_en_in => phy_mii_tx_en_i
+);
+
 
 
 b2v_servo :  entity work.ptpv2_servo

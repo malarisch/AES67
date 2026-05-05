@@ -18,7 +18,7 @@ entity ptpv2_controller is
         tx_timestamp_seconds_i     : in  unsigned(3 downto 0);
         rx_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
         tx_timestamp_nanoseconds_i      : in unsigned(31 downto 0);
-
+        wait_amount_i               : in unsigned(3 downto 0);
 
         sequence_id_i         : in  unsigned(15 downto 0);
         send_delay_resp_in        : in std_logic;
@@ -49,7 +49,7 @@ entity ptpv2_controller is
                             s_Send_Delay_Resp, s_Wait_for_Delay_Resp_Ack, s_Wait_for_Delay_Resp_Done);
 
     type t_state_follower is (f_Idle,
-
+                                f_WaitABit,
                               f_Send_Delay_Req, f_Wait_for_Delay_Req_Ack, f_Wait_for_Delay_Req_Done);
 
     type t_state_p2p_delay is (p2p_Idle,
@@ -127,6 +127,7 @@ entity ptpv2_controller is
     signal ptp_ann_log_msg_int_r : std_logic_vector(7 downto 0) := (others => '0');
 
     signal interval_decode_step : std_logic := '0';
+
     end entity;
 architecture Behavioral of ptpv2_controller is
 
@@ -435,11 +436,17 @@ begin
                     when f_Idle =>
                         -- Check for delay_req request
                         if (send_delay_req_i_reg = '0' and send_delay_req_i = '1') then
-                            follower_state <= f_Send_Delay_Req;
+                            follower_state <= f_WaitABit;
                         else
                             send_delay_req_i_reg <= send_delay_req_i;
                         end if;
+                    when f_WaitABit =>
+                        if (ms_counter(3 downto 0) = wait_amount_i) then 
+                            -- we need to wait a bit here since ptp4l does not like when two followers send delay requests at exactly
+                            -- the same time - one of them will not get answered and ptp4l logs an error about receiving a packet without a timestamp (probably a linux driver bug? idk)
+                            follower_state <= f_Send_Delay_Req;
 
+                        end if;
                     when f_Send_Delay_Req =>
                         tx_message_type_o <= "0001";
                         ptp_log_interval_o <= parser_log_msg_interval_i;

@@ -63,7 +63,8 @@ entity ethernet_top is
     mac_sof_sent_tog_o : out STD_LOGIC;
     mac_sof_sent_pulse_o : out STD_LOGIC;
     mac_sof_recv_tog_o : out STD_LOGIC;
-
+    mac_tx_start_prefetch_o : out STD_LOGIC;
+    mac_tx_start_prefetch_tog_o : out STD_LOGIC;
 
     mac_rx_data_o : out STD_LOGIC_VECTOR(7 downto 0);
     mac_rx_byte_received_o : out std_logic;
@@ -238,6 +239,8 @@ PORT MAP(clock_125_i => enet_clk_i,
 		 tx_sof_delim_tog_o => mac_sof_sent_tog_o,
 		 rx_sof_delim_tog_o => mac_sof_recv_tog_o,
      tx_sof_delim_o => mac_sof_sent_pulse_o,
+     tx_start_prefetch_o => mac_tx_start_prefetch_o,
+     tx_start_prefetch_tog_o => mac_tx_start_prefetch_tog_o,
 		 
 		 rx_data_o => mac_rx_data_su,
 		 speed_o => mac_speed,

@@ -23,7 +23,7 @@
 
 #include "eth_litex.h"
 
-LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(eth_litex, LOG_LEVEL_INF);
 
 /* ---- Driver data structures ---- */
 
@@ -721,13 +721,21 @@ static void eth_litex_iface_init(struct net_if *iface)
 	data->iface = iface;
 	ethernet_init(iface);
 
-	/* Static locally administered MAC */
-	data->mac_addr[0] = 0x02;
-	data->mac_addr[1] = 0x1C;
-	data->mac_addr[2] = 0x23;
-	data->mac_addr[3] = 0x17;
-	data->mac_addr[4] = 0xAC;
-	data->mac_addr[5] = 0xAB;
+	/* MAC from Kconfig — override per board in the board .conf
+	 * (CONFIG_ETH_LITEX_MAC_ADDR) so multiple units on one network
+	 * don't collide. */
+	if (net_bytes_from_str(data->mac_addr, sizeof(data->mac_addr),
+			       CONFIG_ETH_LITEX_MAC_ADDR) < 0) {
+		LOG_ERR("Invalid CONFIG_ETH_LITEX_MAC_ADDR \"%s\", "
+			"falling back to 02:1C:23:17:AC:AB",
+			CONFIG_ETH_LITEX_MAC_ADDR);
+		data->mac_addr[0] = 0x02;
+		data->mac_addr[1] = 0x1C;
+		data->mac_addr[2] = 0x23;
+		data->mac_addr[3] = 0x17;
+		data->mac_addr[4] = 0xAC;
+		data->mac_addr[5] = 0xAB;
+	}
 
 	net_if_set_link_addr(iface, data->mac_addr, sizeof(data->mac_addr),
 			     NET_LINK_ETHERNET);
