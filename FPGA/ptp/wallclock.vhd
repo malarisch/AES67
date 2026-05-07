@@ -56,7 +56,8 @@ entity wallclock is
         fs_o                    : out std_logic;  -- fs       (= LRCK, 50 % duty)
         bclk_r_o                : out std_logic;  -- 256fs sampled on NCO rising  edge
         bclk_f_o                : out std_logic;  -- 256fs sampled on NCO falling edge
-        fs_tdm_pulse_o          : out std_logic   -- fs frame sync, 1 BCLK wide
+        fs_tdm_pulse_o          : out std_logic;   -- fs frame sync, 1 BCLK wide
+        phase_locked_o : out std_logic
     );
 end wallclock;
 
@@ -162,8 +163,6 @@ architecture Behavioral of wallclock is
     signal nco_rising_tick  : std_logic;
     signal nco_falling_tick : std_logic;
 
-    signal   nco_resync_pending : std_logic := '0';
-    signal   sample_in_sec_prev : unsigned(15 downto 0) := (others => '0');
 
     -- Millisecond tick: count audio_fs/1000 sample pulses per ms.
     constant MS_DIVIDER    : natural := audio_fs / 1000;
@@ -187,8 +186,32 @@ architecture Behavioral of wallclock is
     signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');
     signal media_base       : unsigned(31 downto 0) := (others => '0');
 
-    -- Resync counter: 0 = idle, 1..3 = pipeline flushing after wallclock_set
-    signal media_resync_cnt : unsigned(1 downto 0) := (others => '0');
+    -- ============================================================
+    -- NCO phase-pull loop
+    --
+    -- The wallclock-derived media_clock_reg(0) toggles at the
+    -- *PTP-aligned* sample boundary (bit-exact across all locked
+    -- boards). On its rising edge we compare the NCO's mclk_cnt
+    -- against 0 (= the NCO's own sample boundary) and apply a tiny
+    -- one-shot tweak to the NCO increment to nudge it back into
+    -- alignment. The frequency is already correct (ppb servo), so a
+    -- proportional kick — not a PI loop — is enough.
+    --
+    -- Sign convention:
+    --   mclk_cnt small (1, 2)   → NCO already passed boundary → AHEAD → slow it down
+    --   mclk_cnt near 511 (510) → NCO not yet at boundary    → BEHIND → speed it up
+    -- ============================================================
+    signal media_clk_lsb_prev : std_logic := '0';
+    signal media_edge_tick    : std_logic;
+
+    -- One-shot bias added to nco_increment for a single cycle when a
+    -- phase error is detected. The kick adds KICK to nco_phase exactly
+    -- once. The NCO MSB period is 2^48 phase units = 512 mclk_cnt ticks,
+    -- so each kick shifts nco_phase by KICK/2^39 mclk-ticks.
+    constant NCO_PHASE_KICK : signed(NCO_PHASE_BITS - 1 downto 0) :=
+        shift_left(to_signed(1, NCO_PHASE_BITS), 33);
+
+    signal nco_phase_bias : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     
     -- ============================================================
     -- Pipeline registers to break freq_correction → sec_reg critical path.
@@ -223,8 +246,7 @@ architecture Behavioral of wallclock is
     signal phase_jump_pending : std_logic := '0';
     signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
     signal nco_ppb_adj_wait : std_logic := '0';
-    signal wallclock_set_i_reg : std_logic;
-    
+
 begin
 
     -- Output assignments
@@ -280,10 +302,38 @@ begin
             end if;
         end if;
     end process;
+    -- ===== Phase-pull edge detector =====
+    -- media_clock_reg(0) toggles at the wallclock-derived (PTP-aligned)
+    -- sample boundary. Detect its rising edge in sys_clk: that's the
+    -- moment we sample the NCO's mclk_cnt for the phase-error decision.
+    media_edge_tick <= '1' when (media_clock_reg(0) = '1'
+                                 and media_clk_lsb_prev = '0') else '0';
+
+
+    nco_bias_proc: process (clk)
+    begin
+        if rising_edge(clk) then
+            nco_phase_bias <= (others => '0');
+            if media_edge_tick = '1' then
+                phase_locked_o <= '0';
+                if mclk_cnt >= to_unsigned(3, 9)
+                   and mclk_cnt <= to_unsigned(255, 9) then
+                    nco_phase_bias <= NCO_PHASE_KICK;
+                    
+                elsif mclk_cnt >= to_unsigned(256, 9)
+                      and mclk_cnt <= to_unsigned(508, 9) then
+                    nco_phase_bias <= -NCO_PHASE_KICK;
+                      else 
+                        phase_locked_o <= '1';
+                end if;
+            end if;
+
+        end if;
+    end process;
+
+
     nco_proc: process(clk, reset_n)
-        variable v_sample_in_sec : unsigned(15 downto 0);
-        variable v_boundary_hit  : boolean;
-        variable v_new_cnt       : unsigned(8 downto 0);
+        variable v_new_cnt : unsigned(8 downto 0);
     begin
         if reset_n = '0' then
             nco_phase          <= (others => '0');
@@ -291,8 +341,7 @@ begin
             nco_increment      <= NCO_BASE_INC_48;
             mclk_cnt           <= (others => '0');
             sample_pulse_int   <= '0';
-            nco_resync_pending <= '0';
-            sample_in_sec_prev <= (others => '0');
+            media_clk_lsb_prev <= '0';
             clk_256fs_r        <= '0';
             clk_128fs_r        <= '0';
             clk_64fs_r         <= '0';
@@ -302,52 +351,42 @@ begin
             fs_tdm_cnt         <= (others => '0');
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
+            media_clk_lsb_prev <= media_clock_reg(0);
 
-            -- latch in when calc stable
+            -- ===== Phase-pull bias =====
+            -- Default: no bias. On a wallclock-fs edge, look at where
+            -- the NCO sits inside its own sample period and apply a
+            -- one-shot kick if it's far from the boundary.
+            --
+            -- mclk_cnt at the wallclock edge:
+            --   0, 1, 2, 509, 510, 511     → within ±2 ticks → ALIGNED, dead band
+            --   [3 .. 255]   (lower half)  → NCO just rolled over, not far
+            --                                 enough yet — wallclock got
+            --                                 there first → NCO BEHIND
+            --                                 → speed up (+KICK)
+            --   [256 .. 508] (upper half)  → NCO already past mid-frame,
+            --                                 wallclock arrived late →
+            --                                 NCO AHEAD → slow down (−KICK)
+            
+            -- nco_increment = base + ppb-correction + phase-pull-bias.
+            -- ppb_adj_reg latches every other cycle (nco_ppb_adj_wait
+            -- toggles), so we only refresh when it's stable.
             if (nco_ppb_adj_wait = '0') then
-                nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg;
-            end if;
-
-            -- ===== Resync trigger =====
-            -- A wallclock_set_i or phase_jump_valid_i pulse arms a one-shot
-            -- pending flag. The actual realignment fires on the next sample
-            -- boundary in the wallclock — i.e. when sample_in_sec (= upper
-            -- 16 bits of media_mult_reg) increments. The master generates
-            -- its own fs pulses on the same boundaries, so this realigns
-            -- the slave epoch to the master without any mod arithmetic.
-            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
-                nco_resync_pending <= '1';
-            end if;
-
-            -- Track sample_in_sec from the media_proc multiplier output.
-            -- This is updated 2 cycles after a wallclock change (pipeline
-            -- latency in media_proc), so any resync that follows a
-            -- wallclock_set sees the post-set boundaries.
-            v_sample_in_sec := media_mult_reg(47 downto 32);
-            sample_in_sec_prev <= v_sample_in_sec;
-            v_boundary_hit := v_sample_in_sec /= sample_in_sec_prev;
-
-            if v_boundary_hit and nco_resync_pending = '1' then
-                -- Wallclock crossed a sample boundary while a resync is
-                -- pending: realign NCO to phase 0 and emit fs pulse.
-                nco_phase          <= (others => '0');
-                nco_phase_prev     <= '0';
-                mclk_cnt           <= (others => '0');
-                sample_pulse_int   <= '1';
-                nco_resync_pending <= '0';
-
-                -- Sub-clocks track cnt=0: all divider bits low; fs high
-                -- (frame just started, cnt < 256). TDM frame sync arms
-                -- for 2 NCO rising edges (= 1 BCLK).
-                clk_256fs_r <= '0';
-                clk_128fs_r <= '0';
-                clk_64fs_r  <= '0';
-                fs_r        <= '1';
-                bclk_r_r    <= '0';
-                fs_tdm_r    <= '1';
-                fs_tdm_cnt  <= to_unsigned(2, 2);
+                nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + nco_phase_bias;
             else
-                -- Normal NCO advance
+                nco_increment <= nco_increment + nco_phase_bias;
+            end if;
+
+            -- ===== Hard resync on wallclock_set / phase_jump =====
+            -- These are large-step events. A pull loop would take too
+            -- long to converge from arbitrary phase, so reset the NCO
+            -- to align with the wallclock fs edge that media_proc will
+            -- produce ~3 cycles later. The pull loop then maintains it.
+            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+                nco_phase      <= (others => '0');
+                nco_phase_prev <= '0';
+                mclk_cnt       <= (others => '0');
+            else
                 nco_phase <= unsigned(signed(nco_phase) + nco_increment);
                 nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
                 if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
@@ -432,6 +471,14 @@ begin
     -- absolute value (sec*48000 + sample_in_sec) via a 3-stage
     -- pipeline. This is the only time the media clock jumps.
     -- ============================================================
+    -- media_clock is now a *pure function* of the wallclock — no NCO
+    -- dependency at all. Every cycle:
+    --   media_base    = sec_reg(31:0) * audio_fs                  (Stage 0)
+    --   media_mult    = nsec_reg * MEDIA_CLK_RECIP                (Stage 1)
+    --   media_clock   = media_base_reg + media_mult(47:32)        (Stage 2)
+    -- This means media_clock_reg(0) toggles at the wallclock sample
+    -- boundary — bit-exactly synchronous across all PTP-locked boards.
+    -- It is the reference the NCO is pulled towards.
     media_proc: process(clk, reset_n)
         variable sample_in_sec  : unsigned(15 downto 0);  -- 0..47999
     begin
@@ -439,41 +486,15 @@ begin
             media_clock_reg  <= (others => '0');
             media_base       <= (others => '0');
             media_mult_reg   <= (others => '0');
-            media_resync_cnt <= (others => '0');
-            wallclock_set_i_reg <= '0';
         elsif rising_edge(clk) then
-            -- ===== Pipeline: always running for wallclock_set resync =====
-            -- Stage 0: register nsec. On wallclock_set the main process writes
-            -- nsec_reg <= wallclock_nanoseconds_i in the same cycle, so we have
-            -- to inject the input value here directly — otherwise the pipeline
-            -- captures the stale nsec_reg from before the set, producing a
-            -- media_clock that jumps slightly off the new epoch every reset.
-
-            -- Stage 1: multiply (32×18 = 50 bits)
+            -- Stage 0: register sec*audio_fs (cheap — sec_reg changes at 1 Hz)
+            media_base <= resize(sec_reg(31 downto 0)
+                                 * to_unsigned(audio_fs, 32), 32);
+            -- Stage 1: multiply nsec * RECIP (32×18 = 50 bits)
             media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
-            wallclock_set_i_reg <= wallclock_set_i;
-            if wallclock_set_i_reg = '1' then
-                -- Hard set: compute media_base from wallclock seconds
-                media_base <= resize(
-                    wallclock_seconds_i(31 downto 0)
-                    * to_unsigned(audio_fs, 32), 32);
-                -- Start resync pipeline (3 cycles for nsec to propagate)
-                media_resync_cnt <= to_unsigned(1, 2);
-
-            elsif media_resync_cnt = 3 then
-                -- Pipeline output ready: load absolute wallclock-derived value
-                sample_in_sec := media_mult_reg(47 downto 32);
-                media_clock_reg <= media_base + resize(sample_in_sec, 32);
-                media_resync_cnt <= (others => '0');
-
-            elsif media_resync_cnt /= 0 then
-                -- Pipeline flushing, count up
-                media_resync_cnt <= media_resync_cnt + 1;
-
-            elsif sample_pulse_int = '1' then
-                -- Normal operation: increment by 1, coherent with NCO
-                media_clock_reg <= media_clock_reg + 1;
-            end if;
+            -- Stage 2: add — produces the absolute media-clock sample index
+            sample_in_sec := media_mult_reg(47 downto 32);
+            media_clock_reg <= media_base + resize(sample_in_sec, 32);
         end if;
     end process media_proc;
 
