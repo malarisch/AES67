@@ -26,7 +26,7 @@ ENTITY top_cyc1000 IS
         RXCHANNELS      : INTEGER := 16;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
-		STATIC_PTP_CONF : 		string := "FALSE";
+		STATIC_PTP_CONF : 		string := "TRUE";
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 8
 	);

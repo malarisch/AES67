@@ -380,6 +380,8 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../old_modules_unused/audioclock_generator.vhd
 set_global_assignment -name VHDL_FILE ../../../ethernet_timestamp_mii.vhd
 set_global_assignment -name VHDL_FILE ../../../audioclock_generator_sysclk.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/static_ptp_conf.vhd

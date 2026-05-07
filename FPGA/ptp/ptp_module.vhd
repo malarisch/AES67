@@ -49,6 +49,16 @@ ENTITY ptp_module IS
 		wallclock_locked :  OUT  STD_LOGIC;
 		wallclock_configured :  OUT  STD_LOGIC;
 		wc_mclk :  OUT  STD_LOGIC;
+		-- Audio sub-clocks: phase-coherent with the wallclock NCO and
+		-- the fs/sample_pulse epoch (replaces audioclock_generator(_sysclk)).
+		wc_clk_256fs    : OUT STD_LOGIC;
+		wc_clk_128fs    : OUT STD_LOGIC;
+		wc_clk_64fs     : OUT STD_LOGIC;
+		wc_fs           : OUT STD_LOGIC;
+		wc_bclk_r       : OUT STD_LOGIC;
+		wc_bclk_f       : OUT STD_LOGIC;
+		wc_fs_pulse     : OUT STD_LOGIC;
+		wc_fs_tdm_pulse : OUT STD_LOGIC;
 		second_pulse_sys :  OUT  STD_LOGIC;
 		wallclock_phasejump :  OUT  STD_LOGIC;
 		media_clock :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -404,6 +414,14 @@ PORT MAP(clk => sys_clk,
 		 second_pulse_o => second_pulse_sys_ALTERA_SYNTHESIZED,
 		 ms_pulse_o => ms_pulse_sys,
 		 audio_mclk_o => wc_mclk,
+		 clk_256fs_o    => wc_clk_256fs,
+		 clk_128fs_o    => wc_clk_128fs,
+		 clk_64fs_o     => wc_clk_64fs,
+		 fs_o           => wc_fs,
+		 bclk_r_o       => wc_bclk_r,
+		 bclk_f_o       => wc_bclk_f,
+		 sample_pulse_o => wc_fs_pulse,
+		 fs_tdm_pulse_o => wc_fs_tdm_pulse,
 		 media_clock_o => media_clock_u,
 		 wallclock_nanoseconds_o => wallclock_nanoseconds,
 		 wallclock_seconds_o => wallclock_seconds);

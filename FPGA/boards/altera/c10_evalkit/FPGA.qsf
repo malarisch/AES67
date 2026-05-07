@@ -491,6 +491,8 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to arduino
 set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to arduino_io3
 set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to arduino_io4
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk_tdm_o
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../old_modules_unused/audioclock_generator.vhd
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyclone10/gateware/litex_soc_cyclone10.v
 set_global_assignment -name SOURCE_FILE litex_soc_cyc1000.cmp
 set_global_assignment -name BSF_FILE litex_soc_cyc1000.bsf
@@ -571,5 +573,5 @@ set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/gowin/fpga_project/
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/ptp/static_ptp_conf.vhd
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/audioclock_generator_sysclk.vhd
 set_global_assignment -name VHDL_FILE /home/wolff/AES67/FPGA/ethernet_timestamp_mii.vhd
-set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp

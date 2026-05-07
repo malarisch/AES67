@@ -186,6 +186,17 @@ signal pll_256fs_falling : STD_LOGIC;
 signal pll_256fs_rising : STD_LOGIC;
 signal clk_512fs : STD_LOGIC;
 signal wc_mclk : STD_LOGIC; -- 512·fs NCO generated from wallclock
+
+-- Wallclock-NCO-derived audio sub-clocks (phase-coherent with fs epoch).
+-- Used in the internal-NCO path; the external-PLL path uses pll_* directly.
+signal wc_clk_256fs   : STD_LOGIC;
+signal wc_clk_128fs   : STD_LOGIC;
+signal wc_clk_64fs_int : STD_LOGIC;
+signal wc_fs_int       : STD_LOGIC;
+signal wc_bclk_r_int   : STD_LOGIC;
+signal wc_bclk_f_int   : STD_LOGIC;
+signal wc_fs_pulse     : STD_LOGIC;
+signal wc_fs_tdm_int   : STD_LOGIC;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal second_pulse_sys : STD_LOGIC;
 signal mac_linkup : STD_LOGIC;
@@ -270,21 +281,15 @@ mclk_switch_extern: if USE_EXTERNAL_PLL = "true" generate
 end generate;
 
 mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
-	clk_512fs <= wc_mclk;
-	audioclocks_inst: entity work.audioclock_generator_sysclk
-	 port map(
-		sys_clk => sys_clk_125MHz_i,
-		rst_n => ptp_module_rst_n,
-		mclk_ref => wc_mclk,
-		--clk_256fs => clk_256fs,
-		--clk_128fs => clk_128fs,
-		clk_64fs => pll_64fs,
-		fs => pll_48k_fs,
-		bclk_r => pll_256fs_falling,
-		bclk_f => pll_256fs_rising,
-		--fs_pulse => fs_pulse,
-		fs_tdm_pulse => pll_48k_fs_tdm
-	);
+	-- Sub-clocks come straight from the wallclock NCO (ptp_module).
+	-- They are sys_clk-synchronous, phase-coherent with fs/sample_pulse,
+	-- and reset cleanly on PTP resync — no separate divider needed.
+	clk_512fs         <= wc_mclk;
+	pll_64fs          <= wc_clk_64fs_int;
+	pll_48k_fs        <= wc_fs_int;
+	pll_256fs_rising  <= wc_bclk_r_int;
+	pll_256fs_falling <= wc_bclk_f_int;
+	pll_48k_fs_tdm    <= wc_fs_tdm_int;
 end generate;
 
 wc_512fs_o <= clk_512fs;
@@ -412,6 +417,17 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 -- generated clocks
 		 wc_mclk => wc_mclk,
+		 -- Audio sub-clocks straight from the wallclock NCO. Phase-coherent
+		 -- with the fs/sample epoch (replaces the divider in
+		 -- audioclock_generator(_sysclk) for the internal-NCO path).
+		 wc_clk_256fs    => wc_clk_256fs,
+		 wc_clk_128fs    => wc_clk_128fs,
+		 wc_clk_64fs     => wc_clk_64fs_int,
+		 wc_fs           => wc_fs_int,
+		 wc_bclk_r       => wc_bclk_r_int,
+		 wc_bclk_f       => wc_bclk_f_int,
+		 wc_fs_pulse     => wc_fs_pulse,
+		 wc_fs_tdm_pulse => wc_fs_tdm_int,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
 		 mac_speed_i => mac_speed,

@@ -47,7 +47,16 @@ entity wallclock is
         -- Pulse at fs rate in sys_clk domain (rising edge of LRCK)
         sample_pulse_o          : out std_logic;
         -- 1 ms tick in sys_clk domain (derived from sample_pulse, audio_fs/1000 samples)
-        ms_pulse_o              : out std_logic
+        ms_pulse_o              : out std_logic;
+
+
+        clk_256fs_o             : out std_logic;  -- fs * 256
+        clk_128fs_o             : out std_logic;  -- fs * 128
+        clk_64fs_o              : out std_logic;  -- fs * 64  (= BCLK for I2S)
+        fs_o                    : out std_logic;  -- fs       (= LRCK, 50 % duty)
+        bclk_r_o                : out std_logic;  -- 256fs sampled on NCO rising  edge
+        bclk_f_o                : out std_logic;  -- 256fs sampled on NCO falling edge
+        fs_tdm_pulse_o          : out std_logic   -- fs frame sync, 1 BCLK wide
     );
 end wallclock;
 
@@ -138,6 +147,21 @@ architecture Behavioral of wallclock is
     signal mclk_cnt      : unsigned(8 downto 0) := (others => '0');
     signal sample_pulse_int : std_logic := '0';
 
+    signal clk_256fs_r   : std_logic := '0';
+    signal clk_128fs_r   : std_logic := '0';
+    signal clk_64fs_r    : std_logic := '0';
+    signal fs_r          : std_logic := '0';
+    signal bclk_r_r      : std_logic := '0';
+    signal bclk_f_r      : std_logic := '0';
+    -- TDM frame sync: held high for 2 NCO rising edges (= 1 BCLK).
+    signal fs_tdm_r      : std_logic := '0';
+    signal fs_tdm_cnt    : unsigned(1 downto 0) := (others => '0');
+
+    -- NCO MSB edge detection (sys_clk domain — phase already exists in
+    -- nco_phase, so we just compare current MSB against nco_phase_prev).
+    signal nco_rising_tick  : std_logic;
+    signal nco_falling_tick : std_logic;
+
     signal   nco_resync_pending : std_logic := '0';
     signal   sample_in_sec_prev : unsigned(15 downto 0) := (others => '0');
 
@@ -160,9 +184,6 @@ architecture Behavioral of wallclock is
 
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
 
-    -- For wallclock_set resync: pipeline to compute absolute media clock
-    -- Pipeline: Stage 0 (register nsec) → Stage 1 (multiply) → Stage 2 (add)
-    signal media_nsec_reg   : unsigned(31 downto 0) := (others => '0');
     signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');
     signal media_base       : unsigned(31 downto 0) := (others => '0');
 
@@ -215,6 +236,21 @@ begin
     sample_pulse_o          <= sample_pulse_int;
     ms_pulse_o              <= ms_pulse_int;
 
+    clk_256fs_o    <= clk_256fs_r;
+    clk_128fs_o    <= clk_128fs_r;
+    clk_64fs_o     <= clk_64fs_r;
+    fs_o           <= fs_r;
+    bclk_r_o       <= bclk_r_r;
+    bclk_f_o       <= bclk_f_r;
+    fs_tdm_pulse_o <= fs_tdm_r;
+
+    -- NCO MSB edge detection: nco_phase_prev holds the previous MSB
+    -- (registered in nco_proc), so a flank is just (prev xor current).
+    nco_rising_tick  <= '1' when (nco_phase_prev = '0'
+                                  and nco_phase(NCO_PHASE_BITS - 1) = '1') else '0';
+    nco_falling_tick <= '1' when (nco_phase_prev = '1'
+                                  and nco_phase(NCO_PHASE_BITS - 1) = '0') else '0';
+
     -- ============================================================
     -- NCO Process: Generate PTP-disciplined audio clocks
     -- BCLK (fs*64 = 3.072 MHz): NCO phase accumulator MSB
@@ -247,6 +283,7 @@ begin
     nco_proc: process(clk, reset_n)
         variable v_sample_in_sec : unsigned(15 downto 0);
         variable v_boundary_hit  : boolean;
+        variable v_new_cnt       : unsigned(8 downto 0);
     begin
         if reset_n = '0' then
             nco_phase          <= (others => '0');
@@ -256,6 +293,13 @@ begin
             sample_pulse_int   <= '0';
             nco_resync_pending <= '0';
             sample_in_sec_prev <= (others => '0');
+            clk_256fs_r        <= '0';
+            clk_128fs_r        <= '0';
+            clk_64fs_r         <= '0';
+            fs_r               <= '0';
+            bclk_r_r           <= '0';
+            fs_tdm_r           <= '0';
+            fs_tdm_cnt         <= (others => '0');
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
 
@@ -291,21 +335,66 @@ begin
                 mclk_cnt           <= (others => '0');
                 sample_pulse_int   <= '1';
                 nco_resync_pending <= '0';
+
+                -- Sub-clocks track cnt=0: all divider bits low; fs high
+                -- (frame just started, cnt < 256). TDM frame sync arms
+                -- for 2 NCO rising edges (= 1 BCLK).
+                clk_256fs_r <= '0';
+                clk_128fs_r <= '0';
+                clk_64fs_r  <= '0';
+                fs_r        <= '1';
+                bclk_r_r    <= '0';
+                fs_tdm_r    <= '1';
+                fs_tdm_cnt  <= to_unsigned(2, 2);
             else
                 -- Normal NCO advance
                 nco_phase <= unsigned(signed(nco_phase) + nco_increment);
                 nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
                 if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
+                    -- NCO rising edge: advance divider counter.
                     if mclk_cnt = 511 then
-                        mclk_cnt         <= (others => '0');
+                        v_new_cnt        := (others => '0');
                         sample_pulse_int <= '1';
+                        -- Frame boundary: arm TDM frame sync for 1 BCLK.
+                        fs_tdm_r   <= '1';
+                        fs_tdm_cnt <= to_unsigned(2, 2);
                     else
-                        mclk_cnt <= mclk_cnt + 1;
+                        v_new_cnt := mclk_cnt + 1;
+                        if fs_tdm_cnt /= 0 then
+                            fs_tdm_cnt <= fs_tdm_cnt - 1;
+                            if fs_tdm_cnt = 1 then
+                                fs_tdm_r <= '0';
+                            end if;
+                        end if;
                     end if;
+                    mclk_cnt <= v_new_cnt;
+
+                    -- Drive sub-clocks from the post-increment counter.
+                    -- fs rises with sample_pulse (cnt = 0 → fs = '1'),
+                    -- so fs is the inverted MSB of v_new_cnt.
+                    clk_256fs_r <= v_new_cnt(0);
+                    clk_128fs_r <= v_new_cnt(1);
+                    clk_64fs_r  <= v_new_cnt(2);
+                    fs_r        <= not v_new_cnt(8);
+                    bclk_r_r    <= v_new_cnt(0);
                 end if;
             end if;
         end if;
     end process nco_proc;
+
+    -- bclk_f: like bclk_r_r but updated on NCO falling edges
+    -- (half-period shift), giving a phase-shifted 256fs for DACs that
+    -- want data captured on the opposite BCLK edge.
+    bclk_f_proc: process(clk, reset_n)
+    begin
+        if reset_n = '0' then
+            bclk_f_r <= '0';
+        elsif rising_edge(clk) then
+            if nco_falling_tick = '1' then
+                bclk_f_r <= mclk_cnt(0);
+            end if;
+        end if;
+    end process bclk_f_proc;
 
     -- ============================================================
     -- Millisecond Pulse Process
@@ -349,7 +438,6 @@ begin
         if reset_n = '0' then
             media_clock_reg  <= (others => '0');
             media_base       <= (others => '0');
-            media_nsec_reg   <= (others => '0');
             media_mult_reg   <= (others => '0');
             media_resync_cnt <= (others => '0');
             wallclock_set_i_reg <= '0';
@@ -360,13 +448,9 @@ begin
             -- to inject the input value here directly — otherwise the pipeline
             -- captures the stale nsec_reg from before the set, producing a
             -- media_clock that jumps slightly off the new epoch every reset.
-            if wallclock_set_i = '1' then
-                media_nsec_reg <= wallclock_nanoseconds_i;
-            else
-                media_nsec_reg <= unsigned(nsec_reg);
-            end if;
+
             -- Stage 1: multiply (32×18 = 50 bits)
-            media_mult_reg <= media_nsec_reg * MEDIA_CLK_RECIP;
+            media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
             wallclock_set_i_reg <= wallclock_set_i;
             if wallclock_set_i_reg = '1' then
                 -- Hard set: compute media_base from wallclock seconds
