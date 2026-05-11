@@ -57,7 +57,22 @@ entity wallclock is
         bclk_r_o                : out std_logic;  -- 256fs sampled on NCO rising  edge
         bclk_f_o                : out std_logic;  -- 256fs sampled on NCO falling edge
         fs_tdm_pulse_o          : out std_logic;   -- fs frame sync, 1 BCLK wide
-        phase_locked_o : out std_logic
+        phase_locked_o : out std_logic;
+
+        -- Diagnostic outputs for SignalTap / TB monitoring of the
+        -- phase pull loop. mclk_cnt_o = NCO sub-sample counter
+        -- (0..511), media_edge_tick_o = 1-cycle pulse on each
+        -- wallclock-derived sample boundary. Sampling mclk_cnt_o on
+        -- media_edge_tick_o gives the phase error in mclk-ticks.
+        mclk_cnt_o        : out unsigned(8 downto 0);
+        media_edge_tick_o : out std_logic;
+        -- Pull-loop internals (TB visibility; small enough for SignalTap)
+        ppb_adj_dbg_o     : out signed(31 downto 0);  -- low 32b of ppb_adj_reg
+        ppb_trim_dbg_o    : out signed(31 downto 0);  -- low 32b of ppb_trim
+        bias_dbg_o        : out signed(31 downto 0);  -- low 32b of nco_phase_bias
+        sample_pulse_int_o : out std_logic;           -- NCO sample boundary pulse
+        nco_phase_dbg_o   : out unsigned(31 downto 0);-- top 32b of nco_phase
+        nco_inc_dbg_o     : out signed(31 downto 0)   -- top 32b of nco_increment
     );
 end wallclock;
 
@@ -116,8 +131,17 @@ architecture Behavioral of wallclock is
     -- The 48-bit increment is just (this << NCO_FRAC_BITS), so we build it
     -- without ever needing a >32-bit integer literal (VHDL's integer is
     -- typically 32-bit on synthesisers).
+    -- Rounded to nearest, not floored. VHDL's integer() truncates toward
+    -- zero. For sys_clk = 125 MHz / fs = 48 kHz, the exact value is
+    -- 843_705_581.57, so floor() gives -0.57 ULP of error. With NCO and
+    -- MEDIA_CLK_RECIP both floored independently, the resulting NCO vs
+    -- media_clock drift was ~2 ppm -- enough to drive the PI pull loop
+    -- into a slow sawtooth on a free-running leader where there is no
+    -- real PTP correction. Rounding both constants symmetrises the error
+    -- to +/-0.5 ULP each and removes the systematic relative drift.
     constant NCO_BASE_INC_32 : signed(31 downto 0) :=
-        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz) * 4294967296.0), 32);
+        to_signed(integer(real(audio_fs * 512) / real(sys_clk_hz)
+                          * 4294967296.0 + 0.5), 32);
 
     constant NCO_BASE_INC_48 : signed(NCO_PHASE_BITS - 1 downto 0) :=
         shift_left(resize(NCO_BASE_INC_32, NCO_PHASE_BITS), NCO_FRAC_BITS);
@@ -178,54 +202,38 @@ architecture Behavioral of wallclock is
     -- On wallclock_set_i, the absolute value is loaded from the
     -- wallclock (sec*48000 + sample_in_sec) to establish epoch alignment.
     -- ============================================================
-    constant MEDIA_CLK_RECIP : unsigned(17 downto 0) :=
-        to_unsigned(integer(real(audio_fs) * 4294967296.0 / 1.0e9), 18);
+
+    constant MEDIA_CLK_RECIP : unsigned(25 downto 0) :=
+        to_unsigned(integer(real(audio_fs) * 4294967296.0 / 1.0e9
+                            * 256.0 + 0.5), 26);
 
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
 
-    signal media_mult_reg   : unsigned(49 downto 0) := (others => '0');
+    -- 32-bit nsec * 26-bit RECIP = 58-bit product
+    signal media_mult_reg   : unsigned(57 downto 0) := (others => '0');
     signal media_base       : unsigned(31 downto 0) := (others => '0');
 
-    -- ============================================================
-    -- NCO phase-pull loop
-    --
-    -- The wallclock-derived media_clock_reg(0) toggles at the
-    -- *PTP-aligned* sample boundary (bit-exact across all locked
-    -- boards). On its rising edge we compare the NCO's mclk_cnt
-    -- against 0 (= the NCO's own sample boundary) and apply a tiny
-    -- one-shot tweak to the NCO increment to nudge it back into
-    -- alignment. The frequency is already correct (ppb servo), so a
-    -- proportional kick — not a PI loop — is enough.
-    --
-    -- Sign convention:
-    --   mclk_cnt small (1, 2)   → NCO already passed boundary → AHEAD → slow it down
-    --   mclk_cnt near 511 (510) → NCO not yet at boundary    → BEHIND → speed it up
-    -- ============================================================
-    signal media_clk_lsb_prev : std_logic := '0';
-    signal media_edge_tick    : std_logic;
 
-    -- One-shot bias added to nco_increment for a single cycle when a
-    -- phase error is detected. The kick adds KICK to nco_phase exactly
-    -- once. The NCO MSB period is 2^48 phase units = 512 mclk_cnt ticks,
-    -- so each kick shifts nco_phase by KICK/2^39 mclk-ticks.
-    constant NCO_PHASE_KICK : signed(NCO_PHASE_BITS - 1 downto 0) :=
-        shift_left(to_signed(1, NCO_PHASE_BITS), 33);
+    signal media_clock_prev : unsigned(31 downto 0) := (others => '0');
+    signal media_edge_tick  : std_logic;
+
+
+    constant PULL_LOOP_GAIN_SHIFT : natural := 4;  -- P: 2^-4 = 1/16 per edge
+    constant PHASE_ERR_TO_BIAS_SHIFT : natural :=
+        NCO_PHASE_BITS - 9 - PULL_LOOP_GAIN_SHIFT;  -- 48-9-4 = 35
+    constant PULL_INT_GAIN_SHIFT  : natural := 24;  -- I: phase_err << 24 per edge
+
+
+    constant PPB_TRIM_LIMIT_32 : integer :=
+        integer(real(audio_fs * 512) / real(sys_clk_hz)
+                * 4294967296.0 * 200.0e-6);
+    constant PPB_TRIM_LIMIT : signed(NCO_PHASE_BITS - 1 downto 0) :=
+        shift_left(to_signed(PPB_TRIM_LIMIT_32, NCO_PHASE_BITS), 16);
+    signal ppb_trim : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
 
     signal nco_phase_bias : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     
-    -- ============================================================
-    -- Pipeline registers to break freq_correction → sec_reg critical path.
-    -- Original single-cycle chain (~17ns):
-    --   multiply → frac_add → overflow → ns_adjust → nsec_add
-    --   → compare_1e9 → 48-bit sec_increment
-    -- Pipelined into 5 stages (≤6ns each):
-    --   Stage 1: multiply → frac_increment_reg
-    --   Stage 2: frac_add + overflow → ns_adjust_pipe
-    --   Stage 3a: nsec_add → new_nsec_pipe (SPLIT from original Stage 3)
-    --   Stage 3b: compare_1e9 + conditional → sec_adj_pipe
-    --   Stage 4: 48-bit sec_increment
-    -- Total latency: 4 extra cycles (32ns). Invisible at PTP rate (≤128 Hz).
-    -- ============================================================
+
     signal frac_increment_reg : signed(31 downto 0) := (others => '0');
     signal ns_adjust_pipe     : integer range -1 to 1 := 0;
     -- Pre-computed increment value (breaks ns_adjust_pipe → new_nsec critical path)
@@ -266,6 +274,25 @@ begin
     bclk_f_o       <= bclk_f_r;
     fs_tdm_pulse_o <= fs_tdm_r;
 
+    -- Diagnostic outputs (see port declaration)
+    mclk_cnt_o         <= mclk_cnt;
+    media_edge_tick_o  <= media_edge_tick;
+    -- Show ppb_trim shifted right by 16, so the visible 32-bit value
+    -- maps 1:1 with ppb_adj_reg's scaling (both are in NCO-base-32 units
+    -- after the shift). With +/-200 ppm clamp, ppb_trim's 48-bit value
+    -- saturates at ~+/-1.1e10, which truncated to 32 bits flips sign.
+    -- Shifting first keeps the displayed value within signed-32 range.
+    ppb_adj_dbg_o      <= ppb_adj_reg(31 downto 0);
+    ppb_trim_dbg_o     <= resize(shift_right(ppb_trim, 16), 32);
+    -- nco_phase_bias = phase_err << PHASE_ERR_TO_BIAS_SHIFT; recover
+    -- phase_err by shifting back. This shows the *current-cycle* P-term
+    -- (= 0 except for one cycle following each media_edge_tick).
+    bias_dbg_o         <= resize(shift_right(nco_phase_bias,
+                                  PHASE_ERR_TO_BIAS_SHIFT), 32);
+    sample_pulse_int_o <= sample_pulse_int;
+    nco_phase_dbg_o    <= nco_phase(47 downto 16);
+    nco_inc_dbg_o      <= nco_increment(47 downto 16);
+
     -- NCO MSB edge detection: nco_phase_prev holds the previous MSB
     -- (registered in nco_proc), so a flank is just (prev xor current).
     nco_rising_tick  <= '1' when (nco_phase_prev = '0'
@@ -303,34 +330,82 @@ begin
         end if;
     end process;
     -- ===== Phase-pull edge detector =====
-    -- media_clock_reg(0) toggles at the wallclock-derived (PTP-aligned)
-    -- sample boundary. Detect its rising edge in sys_clk: that's the
-    -- moment we sample the NCO's mclk_cnt for the phase-error decision.
-    media_edge_tick <= '1' when (media_clock_reg(0) = '1'
-                                 and media_clk_lsb_prev = '0') else '0';
+    -- media_clock_reg is a monotonically increasing sample index. A
+    -- sample boundary = "value just changed". Compare against the
+    -- previous-cycle value rather than just bit(0) (which toggles at
+    -- fs/2 = 24 kHz, not fs — that mistake meant the pull loop only
+    -- saw every second boundary and at the wrong cadence).
+    media_edge_tick <= '1' when (media_clock_reg /= media_clock_prev)
+                       else '0';
 
 
-    nco_bias_proc: process (clk)
+    nco_bias_proc: process (clk, reset_n)
+        -- 11-bit signed: holds -1024..+1023, large enough for both
+        -- halves of mclk_cnt 0..511 expressed as a signed phase error
+        -- and for the +512 constant used in the upper-half formula
+        -- (which doesn't fit in 10-bit signed).
+        variable phase_err  : signed(10 downto 0);
+        variable trim_step  : signed(NCO_PHASE_BITS - 1 downto 0);
+        variable trim_next  : signed(NCO_PHASE_BITS - 1 downto 0);
     begin
-        if rising_edge(clk) then
+        if reset_n = '0' then
             nco_phase_bias <= (others => '0');
-            if media_edge_tick = '1' then
-                phase_locked_o <= '0';
-                if mclk_cnt >= to_unsigned(3, 9)
-                   and mclk_cnt <= to_unsigned(255, 9) then
-                    nco_phase_bias <= NCO_PHASE_KICK;
-                    
-                elsif mclk_cnt >= to_unsigned(256, 9)
-                      and mclk_cnt <= to_unsigned(508, 9) then
-                    nco_phase_bias <= -NCO_PHASE_KICK;
-                      else 
-                        phase_locked_o <= '1';
+            ppb_trim       <= (others => '0');
+            phase_locked_o <= '0';
+        elsif rising_edge(clk) then
+            nco_phase_bias <= (others => '0');
+            -- ppb_trim is persistent (integrator) - no default assignment.
+            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+                -- Hard resync zeroes the NCO; clear the integrator too so
+                -- it doesn't carry old drift compensation across the jump.
+                ppb_trim <= (others => '0');
+            elsif media_edge_tick = '1' then
+                -- Compute signed phase error in mclk-ticks. Applied on
+                -- EVERY edge (no dead band): a dead band would let
+                -- residual XO drift push the NCO out of band, then snap
+                -- it back when it crosses the threshold. With a
+                -- continuous PI loop, the integrator absorbs the drift
+                -- so the P-term sees ~0 steady-state error.
+                if mclk_cnt <= to_unsigned(255, 9) then
+                    -- Lower half: NCO ahead by mclk_cnt ticks.
+                    -- For mclk_cnt = 0 this gives 0 (no bias).
+                    phase_err := -signed(resize(mclk_cnt, 11));
+                else
+                    -- Upper half: NCO behind by (512 - mclk_cnt).
+                    phase_err := to_signed(512, 11)
+                               - signed(resize(mclk_cnt, 11));
+                end if;
+                -- P-term: one-shot bias on nco_increment for this cycle.
+                nco_phase_bias <=
+                    shift_left(resize(phase_err, NCO_PHASE_BITS),
+                               PHASE_ERR_TO_BIAS_SHIFT);
+
+                -- I-term: accumulate phase_err into ppb_trim with clamp.
+                trim_step := shift_left(resize(phase_err, NCO_PHASE_BITS),
+                                        PULL_INT_GAIN_SHIFT);
+                trim_next := ppb_trim + trim_step;
+                if trim_next > PPB_TRIM_LIMIT then
+                    ppb_trim <= PPB_TRIM_LIMIT;
+                elsif trim_next < -PPB_TRIM_LIMIT then
+                    ppb_trim <= -PPB_TRIM_LIMIT;
+                else
+                    ppb_trim <= trim_next;
+                end if;
+
+                -- phase_locked_o is purely a status flag; the dead
+                -- band only governs whether we declare lock, not
+                -- whether we apply correction.
+                if mclk_cnt <= to_unsigned(2, 9)
+                   or mclk_cnt >= to_unsigned(509, 9) then
+                    phase_locked_o <= '1';
+                else
+                    phase_locked_o <= '0';
                 end if;
             end if;
-
         end if;
     end process;
 
+    nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + ppb_trim + nco_phase_bias;
 
     nco_proc: process(clk, reset_n)
         variable v_new_cnt : unsigned(8 downto 0);
@@ -338,10 +413,9 @@ begin
         if reset_n = '0' then
             nco_phase          <= (others => '0');
             nco_phase_prev     <= '0';
-            nco_increment      <= NCO_BASE_INC_48;
             mclk_cnt           <= (others => '0');
             sample_pulse_int   <= '0';
-            media_clk_lsb_prev <= '0';
+            media_clock_prev   <= (others => '0');
             clk_256fs_r        <= '0';
             clk_128fs_r        <= '0';
             clk_64fs_r         <= '0';
@@ -351,32 +425,27 @@ begin
             fs_tdm_cnt         <= (others => '0');
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
-            media_clk_lsb_prev <= media_clock_reg(0);
+            media_clock_prev <= media_clock_reg;
 
-            -- ===== Phase-pull bias =====
-            -- Default: no bias. On a wallclock-fs edge, look at where
-            -- the NCO sits inside its own sample period and apply a
-            -- one-shot kick if it's far from the boundary.
-            --
-            -- mclk_cnt at the wallclock edge:
-            --   0, 1, 2, 509, 510, 511     → within ±2 ticks → ALIGNED, dead band
-            --   [3 .. 255]   (lower half)  → NCO just rolled over, not far
-            --                                 enough yet — wallclock got
-            --                                 there first → NCO BEHIND
-            --                                 → speed up (+KICK)
-            --   [256 .. 508] (upper half)  → NCO already past mid-frame,
-            --                                 wallclock arrived late →
-            --                                 NCO AHEAD → slow down (−KICK)
-            
+            -- ===== Phase-pull bias (computed in nco_bias_proc) =====
+            -- nco_phase_bias is a one-shot signed bias added to
+            -- nco_increment for one cycle on every media_edge_tick. The
+            -- magnitude is proportional to the phase error (see
+            -- nco_bias_proc). Sign convention:
+            --   mclk_cnt in [3..255]   -> NCO AHEAD  -> bias < 0
+            --   mclk_cnt in [256..508] -> NCO BEHIND -> bias > 0
+            -- The dead band {0,1,2,509,510,511} sets phase_locked='1'.
+
             -- nco_increment = base + ppb-correction + phase-pull-bias.
-            -- ppb_adj_reg latches every other cycle (nco_ppb_adj_wait
-            -- toggles), so we only refresh when it's stable.
-            if (nco_ppb_adj_wait = '0') then
-                nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + nco_phase_bias;
-            else
-                nco_increment <= nco_increment + nco_phase_bias;
-            end if;
-
+            -- All three are recomputed every cycle so the phase-pull
+            -- bias is a true one-shot kick — adding it to the previous
+            -- nco_increment instead would let the bias accumulate
+            -- across cycles whenever ppb_adj_reg's update was held off
+            -- by nco_ppb_adj_wait, producing a phase-dependent
+            -- frequency offset. ppb_adj_reg itself only changes every
+            -- other cycle (see nco_ppb_adj_proc) but reading the held
+            -- value here is fine.
+            
             -- ===== Hard resync on wallclock_set / phase_jump =====
             -- These are large-step events. A pull loop would take too
             -- long to converge from arbitrary phase, so reset the NCO
@@ -471,14 +540,16 @@ begin
     -- absolute value (sec*48000 + sample_in_sec) via a 3-stage
     -- pipeline. This is the only time the media clock jumps.
     -- ============================================================
-    -- media_clock is now a *pure function* of the wallclock — no NCO
+    -- media_clock is now a *pure function* of the wallclock -- no NCO
     -- dependency at all. Every cycle:
     --   media_base    = sec_reg(31:0) * audio_fs                  (Stage 0)
     --   media_mult    = nsec_reg * MEDIA_CLK_RECIP                (Stage 1)
-    --   media_clock   = media_base_reg + media_mult(47:32)        (Stage 2)
-    -- This means media_clock_reg(0) toggles at the wallclock sample
-    -- boundary — bit-exactly synchronous across all PTP-locked boards.
-    -- It is the reference the NCO is pulled towards.
+    --   media_clock   = media_base_reg + media_mult(55:40)        (Stage 2)
+    -- RECIP is in Q26 form (= audio_fs * 2^(32+8) / 1e9 rounded), so the
+    -- top 16 bits of the product sit at [55:40], not [47:32] as in the
+    -- previous Q18 version. This means media_clock_reg(0) toggles at the
+    -- wallclock sample boundary -- bit-exactly synchronous across all
+    -- PTP-locked boards. It is the reference the NCO is pulled towards.
     media_proc: process(clk, reset_n)
         variable sample_in_sec  : unsigned(15 downto 0);  -- 0..47999
     begin
@@ -487,13 +558,14 @@ begin
             media_base       <= (others => '0');
             media_mult_reg   <= (others => '0');
         elsif rising_edge(clk) then
-            -- Stage 0: register sec*audio_fs (cheap — sec_reg changes at 1 Hz)
+            -- Stage 0: register sec*audio_fs (cheap -- sec_reg changes at 1 Hz)
             media_base <= resize(sec_reg(31 downto 0)
                                  * to_unsigned(audio_fs, 32), 32);
-            -- Stage 1: multiply nsec * RECIP (32×18 = 50 bits)
+            -- Stage 1: multiply nsec * RECIP (32x26 = 58 bits)
             media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
-            -- Stage 2: add — produces the absolute media-clock sample index
-            sample_in_sec := media_mult_reg(47 downto 32);
+            -- Stage 2: extract sample_in_sec from bits [55:40] of the
+            -- Q26 product (top 16 bits = integer part 0..47999)
+            sample_in_sec := media_mult_reg(55 downto 40);
             media_clock_reg <= media_base + resize(sample_in_sec, 32);
         end if;
     end process media_proc;
@@ -537,10 +609,14 @@ begin
 
             -- ===== STAGE 1: Pre-compute multiply (always, independent) =====
             -- freq_correction changes at PTP rate — 1 cycle delay invisible.
-            -- Use resize() to preserve sign; raw slicing of a signed vector
-            -- drops the sign bit and corrupts negative corrections.
+            -- Full-width signed multiply (no narrowing of ppb): the
+            -- previous resize(ppb, 20) capped ppb at +/-2^19 = +/-524k,
+            -- silently truncating any larger correction. Multiplier core
+            -- is signed(12) * signed(32) = signed(44); we resize to 32
+            -- after the multiply since frac_ns_accum is 32-bit and
+            -- 8 * 250e6 = 2e9 still fits.
             frac_increment_reg <= resize(to_signed(increment_interval, 12)
-                                         * resize(freq_correction_ppb_i, 20), 32);
+                                         * freq_correction_ppb_i, 32);
 
             -- ===== STAGE 4: Apply delayed seconds rollover =====
             -- sec_adj_pipe was written by Stage 3b in the PREVIOUS cycle.

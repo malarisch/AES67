@@ -424,7 +424,15 @@ PORT MAP(clk => sys_clk,
 		 fs_tdm_pulse_o => wc_fs_tdm_pulse,
 		 media_clock_o => media_clock_u,
 		 wallclock_nanoseconds_o => wallclock_nanoseconds,
-		 wallclock_seconds_o => wallclock_seconds);
+		 wallclock_seconds_o => wallclock_seconds,
+		 mclk_cnt_o => open,
+		 media_edge_tick_o => open,
+		 ppb_adj_dbg_o => open,
+		 ppb_trim_dbg_o => open,
+		 bias_dbg_o => open,
+		 sample_pulse_int_o => open,
+		 nco_phase_dbg_o => open,
+		 nco_inc_dbg_o => open);
 
 tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 powerGood <= rst_n;

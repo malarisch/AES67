@@ -5,7 +5,8 @@ simulation/
 greybox_tmp/
 incremental_db/
 db/
-
+*.ghw
+*.cf
 *_generation_script*
 *_inst.vhd
 *.bak
