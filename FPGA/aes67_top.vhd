@@ -130,6 +130,8 @@ ENTITY aes67_top IS
 		servo_lock_count_threshold_i : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_unsigned(24, 8));
 		parser_min_filter_enable_i        : IN STD_LOGIC := '0';
 		parser_min_filter_active_depth_i  : IN STD_LOGIC_VECTOR(7 downto 0) := std_logic_vector(to_unsigned(2, 8));
+		-- IEEE 1588 delayAsymmetry (ns, signed). +ve = M->S path longer.
+		parser_delay_asymmetry_ns_i       : IN signed(31 downto 0) := (others => '0');
 
 		-- PTP servo monitoring outputs (live PI internal state)
 		servo_mon_filtered_offset_o      : OUT STD_LOGIC_VECTOR(31 downto 0);
@@ -445,6 +447,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 servo_lock_count_threshold_i => unsigned(servo_lock_count_threshold_i),
 		 parser_min_filter_enable_i        => parser_min_filter_enable_i,
 		 parser_min_filter_active_depth_i  => unsigned(parser_min_filter_active_depth_i),
+		 parser_delay_asymmetry_ns_i       => parser_delay_asymmetry_ns_i,
 
 		 -- Servo monitoring outputs to top-level
 		 servo_mon_filtered_offset_o      => servo_mon_filtered_offset_signed,

@@ -355,6 +355,9 @@ int eth_litex_write_ptp_tuning(const struct device *dev,
 		      ((uint32_t)t->min_filter_active_depth << 8);
 	litex_csr_write(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR, mf);
 
+	litex_csr_write(CSR_AES67_CSR_PARSER_DELAY_ASYMMETRY_NS_ADDR,
+			(uint32_t)t->delay_asymmetry_ns);
+
 	return 0;
 }
 
@@ -381,6 +384,9 @@ void eth_litex_read_ptp_tuning(const struct device *dev,
 	uint32_t mf = litex_csr_read(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR);
 	t->min_filter_enable       = (mf & 0x1) != 0;
 	t->min_filter_active_depth = (uint8_t)((mf >> 8) & 0xFF);
+
+	t->delay_asymmetry_ns      = (int32_t)litex_csr_read(
+		CSR_AES67_CSR_PARSER_DELAY_ASYMMETRY_NS_ADDR);
 }
 
 void eth_litex_read_ptp_monitor(const struct device *dev,

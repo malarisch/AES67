@@ -263,6 +263,7 @@ _io_common = [
         Subsignal("servo_lock_count_threshold", Pins(8)),
         Subsignal("parser_min_filter_enable",       Pins(1)),
         Subsignal("parser_min_filter_active_depth", Pins(8)),
+        Subsignal("parser_delay_asymmetry_ns",      Pins(32)),
         # PTP servo monitoring (FPGA -> SoC)
         Subsignal("servo_mon_filtered_offset",      Pins(32)),
         Subsignal("servo_mon_integral_sum",         Pins(32)),
@@ -606,6 +607,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_servo_lock_count_threshold = Signal(8)
         self.o_parser_min_filter_enable        = Signal()
         self.o_parser_min_filter_active_depth  = Signal(8)
+        self.o_parser_delay_asymmetry_ns       = Signal(32)
 
         # PTP servo monitoring (FPGA -> SoC)
         self.i_servo_mon_filtered_offset      = Signal(32)
@@ -698,6 +700,12 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("active_depth", size=8, offset=8,  description="Active min filter depth (clamped to MIN_FILTER_DEPTH)"),
         ])
 
+        # IEEE 1588 delayAsymmetry (signed ns). Positive = downstream
+        # (Master->Slave) path is longer than upstream. Used to compensate
+        # static PHY/MAC TX vs RX latency mismatch (e.g. LAN8720A).
+        self.parser_delay_asymmetry_ns = CSRStorage(32, reset=0,
+            description="PTP delayAsymmetry (signed ns); positive = M2S path longer than S2M")
+
         # PTP module reset (RW pulse register: write 1 to assert, write 0 to release)
         self.ptp_reset = CSRStorage(1, reset=0, description="PTP module reset (1 = held in reset)")
 
@@ -783,6 +791,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.o_servo_lock_count_threshold.eq(self.servo_lock_count_threshold.storage),
             self.o_parser_min_filter_enable.eq(self.parser_min_filter.fields.enable),
             self.o_parser_min_filter_active_depth.eq(self.parser_min_filter.fields.active_depth),
+            self.o_parser_delay_asymmetry_ns.eq(self.parser_delay_asymmetry_ns.storage),
 
             # PTP servo monitoring inputs -> CSR status
             self.servo_mon_filtered_offset.status.eq(self.i_servo_mon_filtered_offset),
@@ -1262,6 +1271,7 @@ class AES67SoC(SoCCore):
             aes67_pads.servo_lock_count_threshold.eq(self.aes67_csr.o_servo_lock_count_threshold),
             aes67_pads.parser_min_filter_enable.eq(self.aes67_csr.o_parser_min_filter_enable),
             aes67_pads.parser_min_filter_active_depth.eq(self.aes67_csr.o_parser_min_filter_active_depth),
+            aes67_pads.parser_delay_asymmetry_ns.eq(self.aes67_csr.o_parser_delay_asymmetry_ns),
 
             # PTP servo monitoring (FPGA -> SoC)
             self.aes67_csr.i_servo_mon_filtered_offset.eq(aes67_pads.servo_mon_filtered_offset),

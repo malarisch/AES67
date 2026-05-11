@@ -218,10 +218,12 @@ architecture Behavioral of wallclock is
     signal media_edge_tick  : std_logic;
 
 
-    constant PULL_LOOP_GAIN_SHIFT : natural := 4;  -- P: 2^-4 = 1/16 per edge
+
+    constant PULL_LOOP_GAIN_SHIFT : natural := 10;
     constant PHASE_ERR_TO_BIAS_SHIFT : natural :=
-        NCO_PHASE_BITS - 9 - PULL_LOOP_GAIN_SHIFT;  -- 48-9-4 = 35
-    constant PULL_INT_GAIN_SHIFT  : natural := 24;  -- I: phase_err << 24 per edge
+        NCO_PHASE_BITS - 9 - PULL_LOOP_GAIN_SHIFT;  -- 48-9-10 = 29
+    constant PULL_INT_GAIN_SHIFT  : natural := 30;
+    constant PULL_DEAD_BAND       : natural := 4;
 
 
     constant PPB_TRIM_LIMIT_32 : integer :=
@@ -376,9 +378,13 @@ begin
                                - signed(resize(mclk_cnt, 11));
                 end if;
                 -- P-term: one-shot bias on nco_increment for this cycle.
-                nco_phase_bias <=
-                    shift_left(resize(phase_err, NCO_PHASE_BITS),
-                               PHASE_ERR_TO_BIAS_SHIFT);
+
+                if phase_err > to_signed(PULL_DEAD_BAND, 11)
+                   or phase_err < to_signed(-PULL_DEAD_BAND, 11) then
+                    nco_phase_bias <=
+                        shift_left(resize(phase_err, NCO_PHASE_BITS),
+                                   PHASE_ERR_TO_BIAS_SHIFT);
+                end if;
 
                 -- I-term: accumulate phase_err into ppb_trim with clamp.
                 trim_step := shift_left(resize(phase_err, NCO_PHASE_BITS),

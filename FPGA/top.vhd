@@ -187,6 +187,7 @@ COMPONENT litex_soc_cyclone10
 		 aes67_ctrl_servo_lock_count_threshold      : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		 aes67_ctrl_parser_min_filter_enable        : OUT STD_LOGIC;
 		 aes67_ctrl_parser_min_filter_active_depth  : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		 aes67_ctrl_parser_delay_asymmetry_ns       : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 aes67_ctrl_servo_mon_filtered_offset       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 aes67_ctrl_servo_mon_integral_sum          : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		 aes67_ctrl_servo_mon_pi_proportional       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -317,6 +318,7 @@ COMPONENT litex_soc_cyc1000
 		aes67_ctrl_servo_lock_count_threshold      : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		aes67_ctrl_parser_min_filter_enable        : OUT STD_LOGIC;
 		aes67_ctrl_parser_min_filter_active_depth  : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		aes67_ctrl_parser_delay_asymmetry_ns       : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
 		aes67_ctrl_servo_mon_filtered_offset       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		aes67_ctrl_servo_mon_integral_sum          : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
 		aes67_ctrl_servo_mon_pi_proportional       : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -580,6 +582,10 @@ signal servo_unlock_threshold_ns_i  : STD_LOGIC_VECTOR(31 downto 0);
 signal servo_lock_count_threshold_i : STD_LOGIC_VECTOR(7 downto 0);
 signal parser_min_filter_enable_i        : STD_LOGIC;
 signal parser_min_filter_active_depth_i  : STD_LOGIC_VECTOR(7 downto 0);
+signal parser_delay_asymmetry_ns_i       : STD_LOGIC_VECTOR(31 downto 0);
+-- CSR-source mirror (always driven by LiteX); selected in dynamic mode only,
+-- so the static path lets Quartus prune the CSR storage at synthesis.
+signal parser_delay_asymmetry_ns_csr     : STD_LOGIC_VECTOR(31 downto 0);
 -- PTP servo / parser tuning (driven by whichever SoC backend is active).
 signal servo_kp_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
 signal servo_ki_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
@@ -593,6 +599,7 @@ signal servo_unlock_threshold_ns_o  : STD_LOGIC_VECTOR(31 downto 0);
 signal servo_lock_count_threshold_o : STD_LOGIC_VECTOR(7 downto 0);
 signal parser_min_filter_enable_o        : STD_LOGIC;
 signal parser_min_filter_active_depth_o  : STD_LOGIC_VECTOR(7 downto 0);
+signal parser_delay_asymmetry_ns_o       : STD_LOGIC_VECTOR(31 downto 0);
 
 -- PTP servo monitoring (driven from aes67_top, consumed by both backends).
 signal servo_mon_filtered_offset      : STD_LOGIC_VECTOR(31 downto 0);
@@ -749,6 +756,7 @@ generic map(
 	servo_lock_count_threshold_i => servo_lock_count_threshold_o,
 	parser_min_filter_enable_i        => parser_min_filter_enable_o,
 	parser_min_filter_active_depth_i  => parser_min_filter_active_depth_o,
+	parser_delay_asymmetry_ns_i       => signed(parser_delay_asymmetry_ns_i),
 
 	-- PTP servo monitoring outputs
 	servo_mon_filtered_offset_o      => servo_mon_filtered_offset,
@@ -883,6 +891,7 @@ PORT MAP(
 	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
 	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
 	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
+	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_csr,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -1010,6 +1019,7 @@ PORT MAP(
 	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
 	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
 	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
+	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_csr,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -1179,6 +1189,9 @@ spigen: if (soctype = "spi") generate
 
 		mcu_irq_o => spictrl_irq_n_o
 	);
+
+	-- SPI backend has no CSR for delayAsymmetry; rely on static_ptp_conf default.
+	parser_delay_asymmetry_ns_i <= parser_delay_asymmetry_ns_o;
 end generate;
 
 
@@ -1186,6 +1199,9 @@ end generate;
 ptp_conf_gen_static: if (static_ptp_conf = "TRUE") generate
 
 static_ptp_conf_inst: entity work.static_ptp_conf
+ generic map(
+	ETHERNET_TYPE => ethernet_type
+ )
  port map(
 	servo_kp_gain_o => servo_kp_gain_o,
 	servo_ki_gain_o => servo_ki_gain_o,
@@ -1198,11 +1214,15 @@ static_ptp_conf_inst: entity work.static_ptp_conf
 	servo_unlock_threshold_ns_o => servo_unlock_threshold_ns_o,
 	servo_lock_count_threshold_o => servo_lock_count_threshold_o,
 	parser_min_filter_enable_o => parser_min_filter_enable_o,
-	parser_min_filter_active_depth_o => parser_min_filter_active_depth_o
+	parser_min_filter_active_depth_o => parser_min_filter_active_depth_o,
+	parser_delay_asymmetry_ns_o => parser_delay_asymmetry_ns_o
 );
 
+-- Static mode: drive parser directly from compile-time constant; CSR
+-- output (parser_delay_asymmetry_ns_csr) has no sink and will be pruned.
+parser_delay_asymmetry_ns_i <= parser_delay_asymmetry_ns_o;
 
-end generate; 
+end generate;
 
 ptp_conf_gen_dynamic: if (static_ptp_conf /= "TRUE") generate
 	servo_kp_gain_i              <= servo_kp_gain_o;
@@ -1217,6 +1237,7 @@ ptp_conf_gen_dynamic: if (static_ptp_conf /= "TRUE") generate
 	servo_lock_count_threshold_i <= servo_lock_count_threshold_o;
 	parser_min_filter_enable_i        <= parser_min_filter_enable_o;
 	parser_min_filter_active_depth_i  <= parser_min_filter_active_depth_o;
+	parser_delay_asymmetry_ns_i       <= parser_delay_asymmetry_ns_csr;
 
 end generate;
 

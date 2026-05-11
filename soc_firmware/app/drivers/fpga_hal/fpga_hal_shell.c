@@ -54,6 +54,18 @@ static int parse_i8(const char *s, int8_t *out)
 	return 0;
 }
 
+static int parse_i32(const char *s, int32_t *out)
+{
+	char *end;
+	long v = strtol(s, &end, 0);
+
+	if (*s == '\0' || *end != '\0' || v < INT32_MIN || v > INT32_MAX) {
+		return -EINVAL;
+	}
+	*out = (int32_t)v;
+	return 0;
+}
+
 static int parse_ipv4(const char *s, struct in_addr *out)
 {
 	unsigned int o[4];
@@ -379,6 +391,38 @@ static int cmd_rx(const struct shell *sh, size_t argc, char **argv)
 	return ret;
 }
 
+/* ---- commands: PTP delayAsymmetry calibration ---- */
+
+static int cmd_asym(const struct shell *sh, size_t argc, char **argv)
+{
+	struct fpga_hal_ptp_tuning t;
+
+	fpga_hal_read_ptp_tuning(&t);
+
+	if (argc == 1) {
+		shell_print(sh, "delay_asymmetry = %d ns", t.delay_asymmetry_ns);
+		shell_print(sh, "  (positive = M->S path longer than S->M)");
+		return 0;
+	}
+
+	int32_t ns;
+
+	if (argc != 2 || parse_i32(argv[1], &ns) < 0) {
+		shell_error(sh, "usage: fpga asym [<signed_ns>]");
+		return -EINVAL;
+	}
+
+	t.delay_asymmetry_ns = ns;
+	int ret = fpga_hal_write_ptp_tuning(&t);
+
+	if (ret == 0) {
+		shell_print(sh, "delay_asymmetry <- %d ns", ns);
+	} else {
+		shell_error(sh, "write failed: %d", ret);
+	}
+	return ret;
+}
+
 /* ---- command tree ---- */
 
 SHELL_STATIC_SUBCMD_SET_CREATE(fpga_ctrl_cmds,
@@ -412,6 +456,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(fpga_cmds,
 	SHELL_CMD_ARG(rx,   NULL,
 		"Configure RX stream. Usage: fpga rx <stream> <dst_ip> <port> <ch_cnt> <delay> <spc> [ch_map …]",
 		cmd_rx, 7, 8),
+	SHELL_CMD_ARG(asym, NULL,
+		"Read/write PTP delayAsymmetry (ns, signed; +ve = M->S longer). "
+		"Usage: fpga asym [<signed_ns>]",
+		cmd_asym, 1, 1),
 	SHELL_SUBCMD_SET_END
 );
 

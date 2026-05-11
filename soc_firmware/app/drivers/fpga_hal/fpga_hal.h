@@ -257,6 +257,8 @@ struct fpga_hal_ptp_tuning {
 	uint8_t  lock_count_threshold;
 	bool     min_filter_enable;
 	uint8_t  min_filter_active_depth;
+	int32_t  delay_asymmetry_ns;  /* IEEE 1588 delayAsymmetry, signed ns;
+	                                  positive = M2S path longer than S2M */
 };
 
 struct fpga_hal_ptp_monitor {

@@ -191,6 +191,7 @@ struct eth_litex_ptp_tuning {
 	uint8_t  lock_count_threshold;
 	bool     min_filter_enable;
 	uint8_t  min_filter_active_depth;
+	int32_t  delay_asymmetry_ns;
 };
 
 struct eth_litex_ptp_monitor {

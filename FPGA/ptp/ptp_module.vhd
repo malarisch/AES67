@@ -85,6 +85,10 @@ ENTITY ptp_module IS
 		parser_min_filter_enable_i        : IN STD_LOGIC := '0';
 		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0);
 
+		-- IEEE 1588 delayAsymmetry (ns, signed). Compensates PHY/MAC
+		-- TX vs RX latency mismatch. 0 = symmetric link.
+		parser_delay_asymmetry_ns_i       : IN signed(31 downto 0) := (others => '0');
+
 		-- ============================================================
 		-- Servo monitoring outputs (live PI internal state)
 		-- ============================================================
@@ -261,6 +265,7 @@ PORT MAP(clk => sys_clk,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
 		 min_filter_enable_i => parser_min_filter_enable_i,
 		 min_filter_active_depth_i => parser_min_filter_active_depth_i,
+		 delay_asymmetry_ns_i => parser_delay_asymmetry_ns_i,
 		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
 		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
 		 src_mac_address => mac_address,

@@ -298,6 +298,7 @@ int fpga_hal_write_ptp_tuning(const struct fpga_hal_ptp_tuning *t)
 		.lock_count_threshold    = t->lock_count_threshold,
 		.min_filter_enable       = t->min_filter_enable,
 		.min_filter_active_depth = t->min_filter_active_depth,
+		.delay_asymmetry_ns      = t->delay_asymmetry_ns,
 	};
 	return eth_litex_write_ptp_tuning(dev, &lt);
 }
@@ -328,6 +329,7 @@ void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t)
 	t->lock_count_threshold    = lt.lock_count_threshold;
 	t->min_filter_enable       = lt.min_filter_enable;
 	t->min_filter_active_depth = lt.min_filter_active_depth;
+	t->delay_asymmetry_ns      = lt.delay_asymmetry_ns;
 }
 
 void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m)

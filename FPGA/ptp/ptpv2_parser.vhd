@@ -63,6 +63,13 @@ entity ptpv2_parser is
         -- min_filter_active_depth_i is clamped internally to MIN_FILTER_DEPTH.
         min_filter_enable_i        : in std_logic := '0';
         min_filter_active_depth_i  : in unsigned(7 downto 0) := to_unsigned(2, 8);
+
+        -- IEEE 1588-2008 delayAsymmetry in nanoseconds (signed).
+        -- Positive value = downstream (Master->Slave) path is longer than
+        -- upstream. Used to compensate PHY/MAC TX vs RX latency mismatch
+        -- (e.g. LAN8720A). meanLinkDelay = ((t2-t1)+(t4-t3) - asym)/2,
+        -- offset = ((t2-t1)-(t4-t3) + asym)/2.
+        delay_asymmetry_ns_i       : in signed(31 downto 0) := (others => '0');
         
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
@@ -771,13 +778,13 @@ begin
                         end if;
 
                     when MS_OUTPUT =>
-                        -- mean_path_delay = (min_m2s + min_s2m) / 2
-                        -- offset          = (min_m2s - min_s2m) / 2
-                        mean_path_delay_ns_o <= shift_right(temp_min_m2s + temp_min_s2m, 1);
+                        -- meanLinkDelay = ((min_m2s + min_s2m) - delayAsymmetry) / 2
+                        -- offset        = ((min_m2s - min_s2m) + delayAsymmetry) / 2
+                        mean_path_delay_ns_o <= shift_right(temp_min_m2s + temp_min_s2m - delay_asymmetry_ns_i, 1);
                         if (ptp_locked_i = '1') then
-                            offset_from_master_ns_o <= shift_right(temp_min_m2s - temp_min_s2m, 1);
+                            offset_from_master_ns_o <= shift_right(temp_min_m2s - temp_min_s2m + delay_asymmetry_ns_i, 1);
                         else
-                            offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
+                            offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg + delay_asymmetry_ns_i, 1);
                         end if;
 
                         ptp_calc_valid_o <= '1';
@@ -787,10 +794,10 @@ begin
 
             elsif (s_SM_PtpParser = s_Calc_Bypass) then
                 -- Min filter disabled: use raw deltas directly.
-                -- mean_path_delay = (delta_m2s + delta_s2m) / 2
-                -- offset          = (delta_m2s - delta_s2m) / 2
-                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg, 1);
-                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg, 1);
+                -- meanLinkDelay = ((delta_m2s + delta_s2m) - delayAsymmetry) / 2
+                -- offset        = ((delta_m2s - delta_s2m) + delayAsymmetry) / 2
+                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg - delay_asymmetry_ns_i, 1);
+                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg + delay_asymmetry_ns_i, 1);
                 ptp_calc_valid_o <= '1';
                 s_SM_PtpParser <= s_Done;
 
