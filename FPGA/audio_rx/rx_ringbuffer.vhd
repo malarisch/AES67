@@ -8,7 +8,9 @@ entity rx_ringbuffer is
         audio_buffer_sample_depth : integer := 256; -- must be power of 2
         global_channel_count : integer := 16; -- must be power of 2
         bytes_per_sample : integer := 3;
-        max_streams : integer := 8
+        max_streams : integer := 8;
+        ENABLE_METERING: BOOLEAN := true
+
     );
 	port
 	(
@@ -529,7 +531,7 @@ begin
                         audio_out(((playout_channel_id + 1) * (bytes_per_sample * 8)) - 1 downto playout_channel_id * (bytes_per_sample * 8)) 
                             <= playout_data_latch((bytes_per_sample-1)*8+7 downto 8) & sample_rd_data;
                         
-
+                        if (ENABLE_METERING = true) then
                         -- Metering: clip & signal detection on assembled sample
                         -- Use variable for combinational abs + compare in same cycle
                         -- Assemble full sample first, then extract magnitude bits
@@ -545,6 +547,12 @@ begin
                         if v_sample_abs >= SIGNAL_THRESHOLD then
                             metering_signal_o(playout_channel_id) <= '1';
                         end if;
+
+                    else
+                        metering_clip_o <= (others => '0');
+                        metering_signal_o <= (others => '0');
+                    end if;
+
 
                         playout_byte <= 0;
                         playout_data_latch <= (others => '0');

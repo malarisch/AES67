@@ -83,29 +83,39 @@ architecture Behavioral of wallclock is
     signal nsec_reg : signed(31 downto 0) := (others => '0');
     signal sec_reg  : unsigned(47 downto 0) := (others => '0');
     
-    -- Fractional nanosecond accumulator for sub-nanosecond precision
-    -- Range limited to ±2^31 to prevent runaway
-    signal frac_ns_accum : signed(31 downto 0) := (others => '0');
-    
+    -- Fractional nanosecond accumulator for sub-nanosecond precision.
+    -- Range: bounded by ±FRAC_OVERFLOW = ±sys_clk_hz = ±125e6, which
+    -- fits in 28-bit signed (max ±134M). Narrowing from 32 to 28 bits
+    -- shortens the Stage-2 adder/compare/subtractor carry chain by
+    -- ~4 bits worth of LUT delay -- the dominant critical path here.
+    signal frac_ns_accum : signed(27 downto 0) := (others => '0');
+    signal new_frac : signed (28 downto 0) := (others => '0');
     -- Fractional accumulator overflow threshold.
     --
-    -- Per cycle we add (increment_interval * ppb) = 8 * ppb to frac_ns_accum.
-    -- Per real second there are sys_clk_hz cycles (1.25e8 @ 125 MHz). For
-    -- 1 ppb to translate into exactly 1 ns/s of correction (the definition
-    -- of ppb), we need: (sys_clk_hz * 8 * 1) / FRAC_OVERFLOW = 1 ns/s
-    --   → FRAC_OVERFLOW = sys_clk_hz * increment_interval = 1e9.
+    -- Per cycle we add ppb to frac_ns_accum. Per real second there are
+    -- sys_clk_hz cycles. For 1 ppb to translate into exactly 1 ns/s of
+    -- correction (the definition of ppb), we need:
+    --   (sys_clk_hz * 1) / FRAC_OVERFLOW = 1 ns/s
+    --   → FRAC_OVERFLOW = sys_clk_hz = 125e6.
     --
-    -- The previous threshold of 2^30 was off by 2^30/1e9 ≈ 1.0737, i.e. the
-    -- wallclock interpreted 1 ppb as ~0.93 ns/s. The PI servo locked the
-    -- wallclock anyway (by overshooting the ppb output by ~7.4 %), but the
-    -- NCO uses NCO_PPB_SCALE = NCO_BASE_INC_48 / 1e9 (correct ppb scaling),
-    -- so it received the *overshot* value at face value and ran 7.4 % of
-    -- the XO drift fast/slow relative to the master — visible as a constant
-    -- audio fs drift even with PTP "locked".
-    constant FRAC_OVERFLOW  : signed(31 downto 0) :=
-        to_signed(sys_clk_hz * increment_interval, 32);
-    constant FRAC_UNDERFLOW : signed(31 downto 0) :=
-        to_signed(-(sys_clk_hz * increment_interval), 32);
+    -- (Previously both sides carried a factor of increment_interval (= 8),
+    -- which cancelled out: the per-cycle increment was 8*ppb and the
+    -- threshold was sys_clk_hz*8 = 1e9. Removing the common factor leaves
+    -- the same ppb-to-ns/s ratio but shrinks operand widths -- the adder,
+    -- compare and subtractor on the critical path drop from 32 to 28 bit
+    -- in their effective range, and Quartus has a much easier time.)
+    --
+    -- Historical note: the very first threshold was 2^30, which was off
+    -- by 2^30/1e9 ≈ 1.0737 vs the correct value. The PI servo locked the
+    -- wallclock anyway (by overshooting the ppb output by ~7.4 %), but
+    -- the NCO uses NCO_PPB_SCALE = NCO_BASE_INC_48 / 1e9 (correct ppb
+    -- scaling), so it received the overshot value at face value and ran
+    -- 7.4 % of the XO drift fast/slow relative to the master.
+
+    constant FRAC_OVERFLOW  : signed(27 downto 0) :=
+        to_signed(sys_clk_hz, 28);
+    constant FRAC_UNDERFLOW : signed(27 downto 0) :=
+        to_signed(-sys_clk_hz, 28);
     
     -- Internal second pulse (usable by other processes)
     signal second_pulse_int : std_logic := '0';
@@ -160,6 +170,9 @@ architecture Behavioral of wallclock is
     signal nco_phase      : unsigned(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
     signal nco_increment  : signed(NCO_PHASE_BITS - 1 downto 0) := NCO_BASE_INC_48;
+    signal phase_err  : signed(10 downto 0);
+    signal trim_next  : signed(NCO_PHASE_BITS - 1 downto 0);
+    signal phase_error_valid: std_logic := '0';
 
     -- Pipeline register to break freq_correction → nco_increment critical path
     -- Original: 32×16 multiply + shift + add (~10ns combined)
@@ -208,9 +221,9 @@ architecture Behavioral of wallclock is
                             * 256.0 + 0.5), 26);
 
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
-
+    signal media_clock_nsec_latch : UNSIGNED(29 downto 0);
     -- 32-bit nsec * 26-bit RECIP = 58-bit product
-    signal media_mult_reg   : unsigned(57 downto 0) := (others => '0');
+    signal media_mult_reg   : unsigned(55 downto 0) := (others => '0');
     signal media_base       : unsigned(31 downto 0) := (others => '0');
 
 
@@ -236,7 +249,9 @@ architecture Behavioral of wallclock is
     signal nco_phase_bias : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     
 
-    signal frac_increment_reg : signed(31 downto 0) := (others => '0');
+    -- Range: ppb is clamped to ±500_000 in the servo (fits in 20-bit signed
+    -- easily). 28 bits matches frac_ns_accum so the Stage-2 adder is uniform.
+    signal frac_increment_reg : signed(27 downto 0) := (others => '0');
     signal ns_adjust_pipe     : integer range -1 to 1 := 0;
     -- Pre-computed increment value (breaks ns_adjust_pipe → new_nsec critical path)
     signal ns_increment_reg   : signed(31 downto 0) := to_signed(increment_interval, 32);
@@ -256,6 +271,7 @@ architecture Behavioral of wallclock is
     signal phase_jump_pending : std_logic := '0';
     signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
     signal nco_ppb_adj_wait : std_logic := '0';
+    signal media_clock_proc_wait : std_logic := '0';
 
 begin
 
@@ -294,6 +310,7 @@ begin
     sample_pulse_int_o <= sample_pulse_int;
     nco_phase_dbg_o    <= nco_phase(47 downto 16);
     nco_inc_dbg_o      <= nco_increment(47 downto 16);
+    
 
     -- NCO MSB edge detection: nco_phase_prev holds the previous MSB
     -- (registered in nco_proc), so a flank is just (prev xor current).
@@ -342,54 +359,66 @@ begin
 
 
     nco_bias_proc: process (clk, reset_n)
-        -- 11-bit signed: holds -1024..+1023, large enough for both
-        -- halves of mclk_cnt 0..511 expressed as a signed phase error
-        -- and for the +512 constant used in the upper-half formula
-        -- (which doesn't fit in 10-bit signed).
-        variable phase_err  : signed(10 downto 0);
-        variable trim_step  : signed(NCO_PHASE_BITS - 1 downto 0);
-        variable trim_next  : signed(NCO_PHASE_BITS - 1 downto 0);
     begin
         if reset_n = '0' then
-            nco_phase_bias <= (others => '0');
-            ppb_trim       <= (others => '0');
-            phase_locked_o <= '0';
+            phase_error_valid       <='0';
         elsif rising_edge(clk) then
-            nco_phase_bias <= (others => '0');
+            phase_error_valid <= '0';
             -- ppb_trim is persistent (integrator) - no default assignment.
-            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
-                -- Hard resync zeroes the NCO; clear the integrator too so
-                -- it doesn't carry old drift compensation across the jump.
-                ppb_trim <= (others => '0');
-            elsif media_edge_tick = '1' then
-                -- Compute signed phase error in mclk-ticks. Applied on
-                -- EVERY edge (no dead band): a dead band would let
-                -- residual XO drift push the NCO out of band, then snap
-                -- it back when it crosses the threshold. With a
-                -- continuous PI loop, the integrator absorbs the drift
-                -- so the P-term sees ~0 steady-state error.
+
+            if media_edge_tick = '1' then
+
                 if mclk_cnt <= to_unsigned(255, 9) then
                     -- Lower half: NCO ahead by mclk_cnt ticks.
                     -- For mclk_cnt = 0 this gives 0 (no bias).
-                    phase_err := -signed(resize(mclk_cnt, 11));
+                    phase_err <= -signed(resize(mclk_cnt, 11));
                 else
                     -- Upper half: NCO behind by (512 - mclk_cnt).
-                    phase_err := to_signed(512, 11)
+                    phase_err <= to_signed(512, 11)
                                - signed(resize(mclk_cnt, 11));
                 end if;
+                phase_error_valid <= '1';
                 -- P-term: one-shot bias on nco_increment for this cycle.
 
+            end if;
+        end if;
+    end process;
+
+    nco_p_proc: process (clk, reset_n) begin
+        if (reset_n = '0') then
+            nco_phase_bias <= (others => '0');
+            phase_locked_o <= '0';
+        elsif rising_edge(clk) then
+            nco_phase_bias <= (others => '0');
+            if (phase_error_valid = '1') then
                 if phase_err > to_signed(PULL_DEAD_BAND, 11)
                    or phase_err < to_signed(-PULL_DEAD_BAND, 11) then
                     nco_phase_bias <=
                         shift_left(resize(phase_err, NCO_PHASE_BITS),
                                    PHASE_ERR_TO_BIAS_SHIFT);
+                        phase_locked_o <= '0';
+                   else
+                    phase_locked_o <= '1';
                 end if;
+            end if;
+        end if;
+    end process;
 
+
+
+    nco_i_proc: process (clk, reset_n) begin
+        if (reset_n = '0') then
+
+            ppb_trim       <= (others => '0');
+        elsif rising_edge(clk) then
+            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+                -- Hard resync zeroes the NCO; clear the integrator too so
+                -- it doesn't carry old drift compensation across the jump.
+                ppb_trim <= (others => '0');
+            elsif (phase_error_valid = '1') then
                 -- I-term: accumulate phase_err into ppb_trim with clamp.
-                trim_step := shift_left(resize(phase_err, NCO_PHASE_BITS),
-                                        PULL_INT_GAIN_SHIFT);
-                trim_next := ppb_trim + trim_step;
+                trim_next <= shift_left(resize(phase_err, NCO_PHASE_BITS),
+                                        PULL_INT_GAIN_SHIFT) + ppb_trim;
                 if trim_next > PPB_TRIM_LIMIT then
                     ppb_trim <= PPB_TRIM_LIMIT;
                 elsif trim_next < -PPB_TRIM_LIMIT then
@@ -397,21 +426,22 @@ begin
                 else
                     ppb_trim <= trim_next;
                 end if;
-
-                -- phase_locked_o is purely a status flag; the dead
-                -- band only governs whether we declare lock, not
-                -- whether we apply correction.
-                if mclk_cnt <= to_unsigned(2, 9)
-                   or mclk_cnt >= to_unsigned(509, 9) then
-                    phase_locked_o <= '1';
-                else
-                    phase_locked_o <= '0';
-                end if;
             end if;
+
         end if;
     end process;
 
-    nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + ppb_trim + nco_phase_bias;
+
+    nco_increment_proc: process(clk, reset_n) begin
+
+        if (reset_n = '0') then
+            nco_increment <= (others => '0');
+        elsif (rising_edge(clk)) then
+
+        nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + ppb_trim + nco_phase_bias;
+        end if;
+    end process;
+    
 
     nco_proc: process(clk, reset_n)
         variable v_new_cnt : unsigned(8 downto 0);
@@ -563,16 +593,21 @@ begin
             media_clock_reg  <= (others => '0');
             media_base       <= (others => '0');
             media_mult_reg   <= (others => '0');
+            media_clock_proc_wait <= '0';
         elsif rising_edge(clk) then
+            if (media_clock_proc_wait = '0') then
+            media_clock_nsec_latch <= unsigned(nsec_reg(29 downto 0));
             -- Stage 0: register sec*audio_fs (cheap -- sec_reg changes at 1 Hz)
             media_base <= resize(sec_reg(31 downto 0)
                                  * to_unsigned(audio_fs, 32), 32);
             -- Stage 1: multiply nsec * RECIP (32x26 = 58 bits)
-            media_mult_reg <= unsigned(nsec_reg) * MEDIA_CLK_RECIP;
+            media_mult_reg <= media_clock_nsec_latch * MEDIA_CLK_RECIP;
             -- Stage 2: extract sample_in_sec from bits [55:40] of the
             -- Q26 product (top 16 bits = integer part 0..47999)
             sample_in_sec := media_mult_reg(55 downto 40);
             media_clock_reg <= media_base + resize(sample_in_sec, 32);
+            end if;
+            media_clock_proc_wait <= not media_clock_proc_wait;
         end if;
     end process media_proc;
 
@@ -580,7 +615,7 @@ begin
     -- Main Wallclock Timekeeping Process (5-stage pipeline)
     --
     -- Pipeline stages (signal reads get PREVIOUS cycle's value):
-    --   Stage 1: freq_correction → multiply → frac_increment_reg  (~5ns)
+    --   Stage 1: freq_correction → resize → frac_increment_reg  (trivial)
     --   Stage 2: frac_increment_reg → frac_add → overflow → ns_adjust_pipe  (~6ns)
     --   Stage 3a: ns_adjust_pipe → nsec_add → new_nsec_pipe  (~5ns)
     --   Stage 3b: new_nsec_pipe → compare_1e9 → nsec_reg, sec_adj_pipe  (~6ns)
@@ -591,17 +626,47 @@ begin
     -- This is invisible: freq_correction changes at ≤128 Hz (millions of
     -- cycles apart), and the phase/second updates being a few cycles late
     -- (32ns) are negligible for PTP accuracy requirements.
+
     -- ============================================================
+
+    process (clk, reset_n)
+    begin
+        if (reset_n = '0') then
+            frac_increment_reg <= (others => '0');
+            new_frac <= (others => '0');
+        elsif rising_edge(clk) then
+            frac_increment_reg <= resize(freq_correction_ppb_i, 28);
+            new_frac <= resize(frac_ns_accum, 29)
+                          + resize(frac_increment_reg, 29);
+        end if;
+    end process;
+
+    process (clk, reset_n)
+    begin
+        if reset_n = '0' then
+            frac_ns_accum      <= (others => '0');
+            ns_adjust_pipe     <= 0;
+        elsif rising_edge(clk) then
+            
+                ns_adjust_pipe <= 0;  -- default
+
+                if new_frac >= resize(FRAC_OVERFLOW, 29) then
+                    frac_ns_accum  <= resize(new_frac - FRAC_OVERFLOW, 28);
+                    ns_adjust_pipe <= 1;
+                elsif new_frac <= resize(FRAC_UNDERFLOW, 29) then
+                    frac_ns_accum  <= resize(new_frac - FRAC_UNDERFLOW, 28);
+                    ns_adjust_pipe <= -1;
+                else
+                    frac_ns_accum <= resize(new_frac, 28);
+                end if;
+        end if;
+    end process;
     process(clk, reset_n)
-        variable new_frac  : signed(31 downto 0);
     begin
         if reset_n = '0' then
             second_pulse_int   <= '0';
             nsec_reg           <= (others => '0');
             sec_reg            <= (others => '0');
-            frac_ns_accum      <= (others => '0');
-            frac_increment_reg <= (others => '0');
-            ns_adjust_pipe     <= 0;
             ns_increment_reg   <= to_signed(increment_interval, 32);
             new_nsec_pipe      <= (others => '0');
             new_nsec_minus_sec <= -NS_PER_SEC;
@@ -613,16 +678,14 @@ begin
         elsif rising_edge(clk) then
             second_pulse_int <= '0';
 
-            -- ===== STAGE 1: Pre-compute multiply (always, independent) =====
+            -- ===== STAGE 1: Latch ppb correction (no multiply needed) =====
             -- freq_correction changes at PTP rate — 1 cycle delay invisible.
-            -- Full-width signed multiply (no narrowing of ppb): the
-            -- previous resize(ppb, 20) capped ppb at +/-2^19 = +/-524k,
-            -- silently truncating any larger correction. Multiplier core
-            -- is signed(12) * signed(32) = signed(44); we resize to 32
-            -- after the multiply since frac_ns_accum is 32-bit and
-            -- 8 * 250e6 = 2e9 still fits.
-            frac_increment_reg <= resize(to_signed(increment_interval, 12)
-                                         * freq_correction_ppb_i, 32);
+            -- The previous version multiplied ppb by increment_interval (= 8)
+            -- here, but the FRAC_OVERFLOW threshold carried the same factor,
+            -- so the two cancelled out. Dropping the multiply shrinks the
+            -- operand width that the Stage-2 adder/compare/subtractor see,
+            -- which is the dominant critical path on this clock.
+            
 
             -- ===== STAGE 4: Apply delayed seconds rollover =====
             -- sec_adj_pipe was written by Stage 3b in the PREVIOUS cycle.
@@ -649,8 +712,6 @@ begin
                 -- Hard set of time — overrides everything
                 nsec_reg      <= signed(wallclock_nanoseconds_i);
                 sec_reg       <= wallclock_seconds_i;
-                frac_ns_accum <= (others => '0');
-                ns_adjust_pipe <= 0;
                 new_nsec_pipe  <= signed(wallclock_nanoseconds_i);
                 new_nsec_minus_sec <= signed(wallclock_nanoseconds_i) - NS_PER_SEC;
                 new_nsec_plus_sec  <= signed(wallclock_nanoseconds_i) + NS_PER_SEC;
@@ -679,23 +740,14 @@ begin
                     new_nsec_minus_sec <= phase_jump_sum_reg - NS_PER_SEC;
                     new_nsec_plus_sec  <= phase_jump_sum_reg + NS_PER_SEC;
                 end if;
-                ns_adjust_pipe <= 0;
 
             else
                 -- ===== STAGE 2: Fractional accumulation + overflow =====
                 -- Uses frac_increment_reg from Stage 1 of PREVIOUS cycle.
-                new_frac := frac_ns_accum + frac_increment_reg;
-                ns_adjust_pipe <= 0;  -- default
-
-                if new_frac >= FRAC_OVERFLOW then
-                    frac_ns_accum  <= new_frac - FRAC_OVERFLOW;
-                    ns_adjust_pipe <= 1;
-                elsif new_frac <= FRAC_UNDERFLOW then
-                    frac_ns_accum  <= new_frac - FRAC_UNDERFLOW;
-                    ns_adjust_pipe <= -1;
-                else
-                    frac_ns_accum <= new_frac;
-                end if;
+                -- 29-bit add to avoid overflow at range limits; result is
+                -- always brought back into the ±FRAC_OVERFLOW band before
+                -- being stored in the 28-bit frac_ns_accum.
+                
 
                 -- ===== STAGE 2.5: Pre-compute increment value =====
                 -- ns_adjust_pipe read here is from Stage 2 of PREVIOUS cycle.

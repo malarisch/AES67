@@ -94,3 +94,7 @@ set_multicycle_path -setup -end 2 \
     -to [get_registers {*ptp_inst|b2v_bmc|ext_beats_self_r}]
 set_multicycle_path -hold  -end 1 \
     -to [get_registers {*ptp_inst|b2v_bmc|ext_beats_self_r}]
+
+
+set_multicycle_path -setup -end 2 -from [get_registers *media_clock_nsec_latch*] -to [get_registers *media_mult_reg*]
+set_multicycle_path -hold  -end 1 -from [get_registers *media_clock_nsec_latch*] -to [get_registers *media_mult_reg*]

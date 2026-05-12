@@ -25,12 +25,13 @@ ENTITY audio_tx_module IS
 	GENERIC (bytes_per_sample : INTEGER := 3;
 			global_channel_count : INTEGER := 16;
 			max_streams : INTEGER := 8;
-			samples_per_channel_depth : INTEGER := 48
+			samples_per_channel_depth : INTEGER := 48;
+			ENABLE_METERING : BOOLEAN := true
 	);
 	PORT
 	(
 		sys_clk :  IN  STD_LOGIC;
-		fmc_clk :  IN  STD_LOGIC;
+		ctrl_plane_clk :  IN  STD_LOGIC;
 		rst_n :  IN  STD_LOGIC;
 		fs_clk_i :  IN  STD_LOGIC;
 		cfg_wr_en_i :  IN  STD_LOGIC;
@@ -93,7 +94,7 @@ PORT MAP(sys_clk_i => sys_clk,
 		 sample_ready_i => sample_ready,
 		 tx_en_i => tx_en_audiotx,
 		 tx_busy_i => mac_tx_busy,
-		 config_wr_clk_i => fmc_clk,
+		 config_wr_clk_i => ctrl_plane_clk,
 		 config_wr_addr_i => cfg_wr_addr_i,
 		 config_wr_data_i => cfg_wr_data_i,
 		 packet_time_i => media_clock_i,

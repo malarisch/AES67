@@ -15,7 +15,8 @@ ENTITY top IS
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		MII_WIDTH : integer := 4;
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
-		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
+		USE_EXTERNAL_PLL : BOOLEAN := true; -- when disabled it will use the nco-generated clocks on the outputs
+		ENABLE_METERING: BOOLEAN := true;
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
@@ -26,7 +27,7 @@ ENTITY top IS
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-		STATIC_PTP_CONF : 		string := "TRUE";
+		STATIC_PTP_CONF : 		BOOLEAN := TRUE;
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0')
 	);
 	PORT
@@ -645,7 +646,8 @@ generic map(
 	TX_CHANNELS => TXCHANNELS,
 	RX_MAX_STREAMS => RXSTREAMS,
 	TX_MAX_STREAMS => TXSTREAMS,
-	USE_EXTERNAL_PLL => USE_EXTERNAL_PLL
+	USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
+	ENABLE_METERING => ENABLE_METERING
 )
  port map(
 	sys_clk_125MHz_i       => clk_125MHz,
@@ -1196,7 +1198,7 @@ end generate;
 
 
 
-ptp_conf_gen_static: if (static_ptp_conf = "TRUE") generate
+ptp_conf_gen_static: if (static_ptp_conf = true) generate
 
 static_ptp_conf_inst: entity work.static_ptp_conf
  generic map(
@@ -1224,7 +1226,7 @@ parser_delay_asymmetry_ns_i <= parser_delay_asymmetry_ns_o;
 
 end generate;
 
-ptp_conf_gen_dynamic: if (static_ptp_conf /= "TRUE") generate
+ptp_conf_gen_dynamic: if (static_ptp_conf = false) generate
 	servo_kp_gain_i              <= servo_kp_gain_o;
 	servo_ki_gain_i              <= servo_ki_gain_o;
 	servo_gain_shift_i           <= servo_gain_shift_o;
@@ -1440,10 +1442,10 @@ tdm8in(1) <= tdm8in_1_i;
 lrclk_tdm_o        <= pll_48k_fs_tdm; -- gpio13
 lrclk_o        <= pll_48k_fs; -- gpio11
 
-pll_switch: if (USE_EXTERNAL_PLL = "true") generate
+pll_switch: if (USE_EXTERNAL_PLL = true) generate
 pll_512fs_o        <= pll_512fs_i;-- gpio 11 <= gpio 1 pll_512fs passthrough
 end generate;
-wc_switch: if (USE_EXTERNAL_PLL /= "true") generate
+wc_switch: if (USE_EXTERNAL_PLL /= true) generate
 pll_512fs_o        <= wc_512fs; -- output nco generated mclk
 end generate;
 -- LEDs

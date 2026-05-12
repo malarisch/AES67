@@ -1,3 +1,6 @@
+
+-- This file was originally based of, but heavily modified:
+--
 -- UDP Audio Packet Sender
 -- (c) 2025 Dr.-Ing. Christian Noeding
 -- christian@noeding-online.de

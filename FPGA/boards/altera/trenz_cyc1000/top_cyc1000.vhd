@@ -17,7 +17,7 @@ ENTITY top_cyc1000 IS
 		ethernet_type	 : string := "RMII"; -- RMII; RGMII
 		MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii or mii, 8 gmii
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
-		USE_EXTERNAL_PLL : string := "FALSE"; -- when disabled it will use the nco-generated clocks on the outputs
+		USE_EXTERNAL_PLL : BOOLEAN := false; -- when disabled it will use the nco-generated clocks on the outputs
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
@@ -26,7 +26,7 @@ ENTITY top_cyc1000 IS
         RXCHANNELS      : INTEGER := 16;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
-		STATIC_PTP_CONF : 		string := "TRUE";
+		STATIC_PTP_CONF : 		boolean := true;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 8
 	);

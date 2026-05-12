@@ -11,7 +11,7 @@ ENTITY topevalkit IS
 		MII_CLK_NS_PER_TICK : integer := 8; -- 20 for rmii, 40 mii, 8 rgmii/gmii
 		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
-		USE_EXTERNAL_PLL : string := "false"; -- when disabled it will use the nco-generated clocks on the outputs
+		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 		FPGAVERSIONMSB : integer := 1;
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
@@ -22,7 +22,8 @@ ENTITY topevalkit IS
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-				STATIC_PTP_CONF : 		string := "TRUE"
+		STATIC_PTP_CONF : 		BOOLEAN := true;
+        ENABLE_METERING: BOOLEAN := false
 	);
 	PORT
 	(
@@ -140,7 +141,8 @@ begin
         RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
 		MII_WIDTH => MII_WIDTH,
 		MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-				STATIC_PTP_CONF => STATIC_PTP_CONF
+		STATIC_PTP_CONF => STATIC_PTP_CONF,
+        ENABLE_METERING => ENABLE_METERING
     )
      port map(
         rst_n_i => rst_n_i,

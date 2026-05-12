@@ -361,10 +361,8 @@ begin
       phase_jump_reg       <= (others => '0');
       phase_jump_valid_reg <= '0';
       first_offset         <= (others => '0');
-      freq_seed_ppb        <= (others => '0');
-      freq_seed_pulse      <= '0';
+
       settle_count         <= 0;
-      freq_seeded          <= '0';
       post_settle_jump_done <= '0';
       post_jump_wait_done   <= '0';
       pi_trigger           <= '0';
@@ -386,7 +384,9 @@ begin
         pi_trigger <= '0';
       end if;
       request_reconfigure_reg <= '0';
-      freq_seed_pulse      <= '0';
+      if (freq_seed_pulse = '1') then
+        settle_count <= 0;
+      end if;
 
       case input_state is
         when INP_IDLE =>
@@ -467,20 +467,7 @@ begin
               -- Approximate /N as shift right by floor(log2(N)). Net shift
               -- is (log2(N) + logInt); for fast sync (logInt < 0) this can
               -- go negative, in which case we left-shift instead.
-              if sample_count = to_integer(warmup_samples_i) - 1 and freq_seeded = '0' then
-                if (warmup_log2 + to_integer(current_log_interval)) >= 0 then
-                  freq_seed_ppb <= shift_right(
-                    first_offset - inp_offset,
-                    warmup_log2 + to_integer(current_log_interval));
-                else
-                  freq_seed_ppb <= shift_left(
-                    first_offset - inp_offset,
-                    -(warmup_log2 + to_integer(current_log_interval)));
-                end if;
-                freq_seed_pulse <= '1';
-                freq_seeded     <= '1';
-                settle_count    <= 0;
-              end if;
+              
 
               -- Startup sequence after warmup:
               --   1) settle_count counts SETTLE_SAMPLES — IIR converges on the
@@ -513,6 +500,28 @@ begin
           input_state <= INP_IDLE;
       end case;
     end if; -- rising_edge
+  end process;
+  freq_seed_proc: process (reset_n, clk) begin
+    if (reset_n = '0') then
+      freq_seed_pulse <= '0';
+      freq_seeded     <= '0';
+      freq_seed_ppb <= (others => '0');
+    elsif (rising_edge(clk)) then
+      freq_seed_pulse <= '0';
+      if sample_count = to_integer(warmup_samples_i) - 1 and freq_seeded = '0' and inp_do_normal_op = '1' and inp_valid_meas = '1' then
+                if (warmup_log2 + to_integer(current_log_interval)) >= 0 then
+                  freq_seed_ppb <= shift_right(
+                    first_offset - inp_offset,
+                    warmup_log2 + to_integer(current_log_interval));
+                else
+                  freq_seed_ppb <= shift_left(
+                    first_offset - inp_offset,
+                    -(warmup_log2 + to_integer(current_log_interval)));
+        end if;
+        freq_seed_pulse <= '1';
+        freq_seeded     <= '1';
+        end if;
+    end if;
   end process;
 
 end Behavioral;

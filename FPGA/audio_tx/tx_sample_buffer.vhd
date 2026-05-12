@@ -7,7 +7,8 @@ entity tx_sample_buffer is
     (
         samples_per_channel_depth : integer := 48; -- number of samples per channel to buffer
         global_channel_count : integer := 16; -- number of channels to buffer
-        bytes_per_sample : integer := 3 -- number of bytes per sample (e.g., 3 for 24-bit audio)
+        bytes_per_sample : integer := 3; -- number of bytes per sample (e.g., 3 for 24-bit audio)
+        ENABLE_METERING: boolean := true
     );
 	port
 	(
@@ -72,6 +73,7 @@ architecture Behavioral of tx_sample_buffer is
     signal metering_valid_reg  : std_logic := '0';
 begin
     
+    metering_proc_gen: if (ENABLE_METERING = true) generate
     -- metering process
     -- Pipeline:
     --   Stage 1: select channel from audio_in (large mux) -> metering_sample_reg
@@ -129,8 +131,14 @@ begin
         end if;
 
     end process;
+    end generate;
 
 
+    metering_proc_disable_gen: if (ENABLE_METERING = false) generate
+        metering_signal_o <= (others => '0');
+        metering_clip_o <= (others=> '0');
+    end generate;
+        
     -- cdc process
     process (sys_clk, reset_n)
     begin

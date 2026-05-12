@@ -28,7 +28,8 @@ ENTITY aes67_top IS
 
 		AUDIO_INPUT_MODE : string := "tdm8";
 		AUDIO_OUTPUT_MODE : string := "tdm8";
-		USE_EXTERNAL_PLL : string := "true"
+		USE_EXTERNAL_PLL : BOOLEAN := true;
+		ENABLE_METERING: BOOLEAN := true
 
 	);
 	PORT
@@ -270,7 +271,7 @@ mac_rx_clock_o <= mac_rx_clock;
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
-mclk_switch_extern: if USE_EXTERNAL_PLL = "true" generate
+mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 	clk_512fs <= pll_512fs_i;
 	audioclocks_inst: entity work.audioclock_generator
 	PORT MAP(mclk => clk_512fs,
@@ -280,9 +281,20 @@ mclk_switch_extern: if USE_EXTERNAL_PLL = "true" generate
 		 bclk_r => pll_256fs_rising,
 		 bclk_f => pll_256fs_falling,
 		 fs_pulse => pll_48k_fs_tdm);
+	
+	ppb_meter_inst: entity work.clock_ppb_meter
+	PORT MAP(sys_clk => sys_clk_125MHz_i,
+		 reset_n => rst_n,
+		 wallclock_512fs_in => wc_mclk,
+		 pll_512fs_in => pll_512fs_i,
+		 wallclock_second_pulse_i => second_pulse_sys,
+		 start_i => ppb_meter_start_i,
+		 valid_o => pll_meas_valid_o,
+		 count_pll_o => pll_counter_o,
+		 count_wc_o => wc_counter_o);
 end generate;
 
-mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
+mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
 	-- Sub-clocks come straight from the wallclock NCO (ptp_module).
 	-- They are sys_clk-synchronous, phase-coherent with fs/sample_pulse,
 	-- and reset cleanly on PTP resync — no separate divider needed.
@@ -292,6 +304,9 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL /= "true" generate
 	pll_256fs_rising  <= wc_bclk_r_int;
 	pll_256fs_falling <= wc_bclk_f_int;
 	pll_48k_fs_tdm    <= wc_fs_tdm_int;
+	wc_counter_o <= (others => '0');
+	pll_counter_o <= (others => '0');
+	pll_meas_valid_o <= '0';
 end generate;
 
 wc_512fs_o <= clk_512fs;
@@ -303,10 +318,11 @@ audiotx_inst: entity work.audio_tx_module
 GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			global_channel_count => TX_CHANNELS,
 			samples_per_channel_depth => TX_SAMPLE_BUFFER_DEPTH,
-			max_streams => TX_MAX_STREAMS
+			max_streams => TX_MAX_STREAMS,
+			ENABLE_METERING => ENABLE_METERING
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
-		 fmc_clk => clk_mcu_i,
+		 ctrl_plane_clk => clk_mcu_i,
 		 rst_n => rst_n,
 		 fs_clk_i => pll_48k_fs,
 		 
@@ -335,32 +351,6 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 tx_data_o => eth_tx_data_rtp,
 		 mac_speed_i => mac_speed);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-ppb_meter_inst: entity work.clock_ppb_meter
-PORT MAP(sys_clk => sys_clk_125MHz_i,
-		 reset_n => rst_n,
-		 wallclock_512fs_in => wc_mclk,
-		 pll_512fs_in => pll_512fs_i,
-		 wallclock_second_pulse_i => second_pulse_sys,
-		 start_i => ppb_meter_start_i,
-		 valid_o => pll_meas_valid_o,
-		 count_pll_o => pll_counter_o,
-		 count_wc_o => wc_counter_o);
 
 
 mac_linkup_o <= mac_linkup;
@@ -489,7 +479,8 @@ rx_ringbuffer_inst: entity work.rx_ringbuffer
 GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			bytes_per_sample => RX_BYTE_DEPTH,
 			global_channel_count => RX_CHANNELS,
-			max_streams => RX_MAX_STREAMS
+			max_streams => RX_MAX_STREAMS,
+			ENABLE_METERING => ENABLE_METERING
 			
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,

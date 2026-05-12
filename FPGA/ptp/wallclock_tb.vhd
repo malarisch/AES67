@@ -44,8 +44,8 @@ architecture sim of wallclock_tb is
     -- Use a smaller sys_clk_hz / audio_fs ratio so simulation finishes
     -- in reasonable wallclock time while keeping the same arithmetic.
     -- sys_clk_hz must be a multiple of audio_fs*512 only loosely (NCO
-    -- handles the rest), but FRAC_OVERFLOW = sys_clk_hz*increment_interval
-    -- must fit in 32-bit signed -> keep below ~2.1e9.
+    -- handles the rest), and FRAC_OVERFLOW = sys_clk_hz must fit in
+    -- 32-bit signed -> keep below ~2.1e9.
     constant SYS_CLK_HZ_C        : natural := 125_000_000;
     constant AUDIO_FS_C          : natural := 48_000;
     constant INCREMENT_INTERVAL_C: natural := 8;   -- ns/tick at 125 MHz
