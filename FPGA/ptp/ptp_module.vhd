@@ -107,7 +107,7 @@ ARCHITECTURE bdf_type OF ptp_module IS
 
 
 
-SIGNAL	freq_correction :  SIGNED(31 DOWNTO 0);
+SIGNAL	freq_correction :  SIGNED(19 DOWNTO 0);
 SIGNAL	log_msg_interval :  SIGNED(7 DOWNTO 0);
 SIGNAL	log_msg_interval_valid :  STD_LOGIC;
 SIGNAL	phase_jump :  SIGNED(31 DOWNTO 0);

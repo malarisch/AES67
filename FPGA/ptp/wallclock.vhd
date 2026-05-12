@@ -24,7 +24,7 @@ entity wallclock is
         wallclock_nanoseconds_i : in  unsigned(31 downto 0);
 
         -- PTP Servo correction inputs
-        freq_correction_ppb_i   : in  signed(31 downto 0);  -- PPB correction (parts per billion)
+        freq_correction_ppb_i   : in  signed(19 downto 0);  -- PPB correction (parts per billion, clamped to ±500_000 by servo)
         phase_jump_ns_i         : in  signed(31 downto 0);  -- One-time phase adjustment in ns
         phase_jump_valid_i      : in  std_logic;            -- Pulse to apply phase jump
 
@@ -252,6 +252,7 @@ architecture Behavioral of wallclock is
     -- Range: ppb is clamped to ±500_000 in the servo (fits in 20-bit signed
     -- easily). 28 bits matches frac_ns_accum so the Stage-2 adder is uniform.
     signal frac_increment_reg : signed(27 downto 0) := (others => '0');
+    
     signal ns_adjust_pipe     : integer range -1 to 1 := 0;
     -- Pre-computed increment value (breaks ns_adjust_pipe → new_nsec critical path)
     signal ns_increment_reg   : signed(31 downto 0) := to_signed(increment_interval, 32);
@@ -338,9 +339,12 @@ begin
         elsif rising_edge(clk) then
             if (nco_ppb_adj_wait = '0') then
                 nco_ppb_adj_wait <= '1';
-                -- Full-width product fits in 32+18 = 50 bits; resize to 48
-                -- (the integer overflow margin only matters for ppb beyond
-                -- ±2^31/NCO_PPB_SCALE ≈ ±38 ppm, well outside servo range).
+                -- Product is 20+18 = 38 bits, sign-extended to NCO_PHASE_BITS.
+                -- With ppb clamped to ±500_000 and NCO_PPB_SCALE ≈ 55_340,
+                -- the peak product magnitude is ~2.77e10 (~35 bits), well
+                -- within the 38-bit native width. Fits in a single Cyclone-
+                -- 10LP 18×18 DSP with a small extension instead of the
+                -- two-DSP build the old 32×18 needed.
                 ppb_adj_reg <= resize(freq_correction_ppb_i * NCO_PPB_SCALE,
                                       NCO_PHASE_BITS);
             else
@@ -632,12 +636,10 @@ begin
     process (clk, reset_n)
     begin
         if (reset_n = '0') then
-            frac_increment_reg <= (others => '0');
             new_frac <= (others => '0');
         elsif rising_edge(clk) then
-            frac_increment_reg <= resize(freq_correction_ppb_i, 28);
             new_frac <= resize(frac_ns_accum, 29)
-                          + resize(frac_increment_reg, 29);
+                          + resize(freq_correction_ppb_i, 29);
         end if;
     end process;
 

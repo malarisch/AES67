@@ -98,3 +98,16 @@ set_multicycle_path -hold  -end 1 \
 
 set_multicycle_path -setup -end 2 -from [get_registers *media_clock_nsec_latch*] -to [get_registers *media_mult_reg*]
 set_multicycle_path -hold  -end 1 -from [get_registers *media_clock_nsec_latch*] -to [get_registers *media_mult_reg*]
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*ptpv2_servo*|inp_offset[*]}] \
+    -to   [get_registers {*ptpv2_servo*|freq_seed_ppb[*]}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*ptpv2_servo*|inp_offset[*]}] \
+    -to   [get_registers {*ptpv2_servo*|freq_seed_ppb[*]}]
+
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*ptpv2_servo*|first_offset[*]}] \
+    -to   [get_registers {*ptpv2_servo*|freq_seed_ppb[*]}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*ptpv2_servo*|first_offset[*]}] \
+    -to   [get_registers {*ptpv2_servo*|freq_seed_ppb[*]}]

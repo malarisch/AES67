@@ -51,7 +51,7 @@ entity ptpv2_servo is
     lock_count_threshold_i : in unsigned(7 downto 0):= to_unsigned(24, 8);
 
     -- Outputs to wallclock
-    freq_correction_o  : out signed(31 downto 0); -- PPB correction (parts per billion)
+    freq_correction_o  : out signed(19 downto 0); -- PPB correction (parts per billion)
     phase_jump_o       : out signed(31 downto 0); -- One-time ns adjustment
     phase_jump_valid_o : out std_logic;           -- Pulse to apply phase jump
 
@@ -79,8 +79,13 @@ architecture Behavioral of ptpv2_servo is
   signal filtered_offset : signed(31 downto 0) := (others => '0');
 
   -- PI controller state (clamped to ±500,000)
-  signal integral_sum    : signed(31 downto 0) := (others => '0');
-  signal freq_correction : signed(31 downto 0) := (others => '0');
+  -- Both clamped to ±500_000 ppb -- 20-bit signed (max ±524_287) is the
+  -- tightest width that holds the clamp range. Shrinking from 32 to 20 bits
+  -- shortens the PI carry chains and (importantly) lets the NCO-side
+  -- multiplier (freq_correction * NCO_PPB_SCALE = 20×18) fit in a single
+  -- Cyclone-10LP 18×18 DSP block instead of two 16×16 splits.
+  signal integral_sum    : signed(19 downto 0) := (others => '0');
+  signal freq_correction : signed(19 downto 0) := (others => '0');
 
   -- Lock detection (sized via generic)
   signal lock_counter : integer range 0 to MAX_LOCK_COUNT := 0;
@@ -204,9 +209,9 @@ begin
   phase_jump_valid_o <= phase_jump_valid_reg;
   request_clock_reconfigure_o <= request_reconfigure_reg;
 
-  -- Monitoring outputs
+  -- Monitoring outputs 
   mon_filtered_offset_o      <= filtered_offset;
-  mon_integral_sum_o         <= integral_sum;
+  mon_integral_sum_o         <= resize(integral_sum, 32);
   mon_pi_proportional_o      <= pi_proportional;
   mon_pi_sum_raw_o           <= pi_sum_raw;
   mon_effective_gain_shift_o <= to_unsigned(EFFECTIVE_GAIN_SHIFT, 8);
@@ -260,8 +265,21 @@ begin
       -- PI_SUM's integral_sum write, but freq_seed_pulse only fires during
       -- warmup before pi_trigger ever asserts, so the PI pipeline is idle.
       if freq_seed_pulse = '1' then
-        integral_sum    <= freq_seed_ppb;
-        freq_correction <= freq_seed_ppb;
+        -- freq_seed_ppb is computed from a drift estimate over the warmup
+        -- window and is not pre-clamped. Saturate to ±500_000 before
+        -- latching into the 20-bit integral/freq_correction registers;
+        -- a naked resize() would silently wrap a large drift estimate
+        -- into a bogus seed value.
+        if freq_seed_ppb > to_signed(500_000, 32) then
+          integral_sum    <= to_signed(500_000, 20);
+          freq_correction <= to_signed(500_000, 20);
+        elsif freq_seed_ppb < to_signed(-500_000, 32) then
+          integral_sum    <= to_signed(-500_000, 20);
+          freq_correction <= to_signed(-500_000, 20);
+        else
+          integral_sum    <= resize(freq_seed_ppb, 20);
+          freq_correction <= resize(freq_seed_ppb, 20);
+        end if;
       end if;
 
       if (pi_wait_state = 3) then
@@ -281,30 +299,34 @@ begin
 
           when PI_CLAMP =>
             pi_proportional <= - resize(shift_right(pi_mult_p, EFFECTIVE_GAIN_SHIFT), 32);
-            pi_int_update <= integral_sum -
+            pi_int_update <= resize(integral_sum, 32) -
               resize(shift_right(pi_mult_i,
                                  EFFECTIVE_GAIN_SHIFT + to_integer(ki_extra_shift_i)), 32);
             pi_state      <= PI_SUM;
 
           when PI_SUM =>
-            pi_sum_raw <= pi_proportional + integral_sum;
+            pi_sum_raw <= pi_proportional + resize(integral_sum, 32);
 
             if pi_int_update > to_signed(500_000, 32) then
-              integral_sum <= to_signed(500_000, 32);
+              integral_sum <= to_signed(500_000, 20);
             elsif pi_int_update < to_signed(-500_000, 32) then
-              integral_sum <= to_signed(-500_000, 32);
+              integral_sum <= to_signed(-500_000, 20);
             else
-              integral_sum <= pi_int_update;
+              -- Safe to truncate to 20 bits: this branch only runs when
+              -- pi_int_update is within ±500_000, which fits in 20 bits.
+              integral_sum <= resize(pi_int_update, 20);
             end if;
             pi_state <= PI_OUTPUT;
 
           when PI_OUTPUT =>
             if pi_sum_raw > to_signed(500_000, 32) then
-              freq_correction <= to_signed(500_000, 32);
+              freq_correction <= to_signed(500_000, 20);
             elsif pi_sum_raw < to_signed(-500_000, 32) then
-              freq_correction <= to_signed(-500_000, 32);
+              freq_correction <= to_signed(-500_000, 20);
             else
-              freq_correction <= pi_sum_raw;
+              -- Safe to truncate: this branch only runs when pi_sum_raw is
+              -- within ±500_000, which fits in 20 bits.
+              freq_correction <= resize(pi_sum_raw, 20);
             end if;
 
             pi_state <= PI_IDLE;
