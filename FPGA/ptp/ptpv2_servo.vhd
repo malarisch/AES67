@@ -52,8 +52,6 @@ entity ptpv2_servo is
 
     -- Outputs to wallclock
     freq_correction_o  : out signed(19 downto 0); -- PPB correction (parts per billion)
-    phase_jump_o       : out signed(31 downto 0); -- One-time ns adjustment
-    phase_jump_valid_o : out std_logic;           -- Pulse to apply phase jump
 
     -- Request a full clock reconfiguration (offset implausibly large)
     request_clock_reconfigure_o : out std_logic;
@@ -142,15 +140,9 @@ architecture Behavioral of ptpv2_servo is
   -- Sanity check: reject obviously invalid measurements (> 0.5 s)
   constant MAX_VALID_OFFSET : signed(31 downto 0) := to_signed(500_000_000, 32);
 
-  -- Phase jump threshold: if offset > this, do phase jump
-  constant PHASE_JUMP_THRESHOLD : signed(31 downto 0) := to_signed(200_000, 32);
-
   -- Reconfigure threshold
   constant RECONFIGURE_THRESHOLD : signed(31 downto 0) := to_signed(500_000, 32);
 
-  -- Phase jump output registers
-  signal phase_jump_reg       : signed(31 downto 0) := (others => '0');
-  signal phase_jump_valid_reg : std_logic           := '0';
 
   -- Reconfigure request register (pulsed)
   signal request_reconfigure_reg : std_logic := '0';
@@ -178,8 +170,6 @@ architecture Behavioral of ptpv2_servo is
   signal inp_offset_abs     : signed(31 downto 0) := (others => '0');
   signal inp_offset         : signed(31 downto 0) := (others => '0');
   signal inp_valid_meas     : std_logic           := '0';
-  signal inp_do_phase_jump  : std_logic           := '0';
-  signal inp_phase_jump_val : signed(31 downto 0) := (others => '0');
   signal inp_do_normal_op   : std_logic           := '0';
   signal pi_wait_state      : unsigned(1 downto 0)          := (others => '0');
 
@@ -205,8 +195,6 @@ begin
   -- Output assignments
   freq_correction_o  <= freq_correction;
   locked_o           <= locked;
-  phase_jump_o       <= phase_jump_reg;
-  phase_jump_valid_o <= phase_jump_valid_reg;
   request_clock_reconfigure_o <= request_reconfigure_reg;
 
   -- Monitoring outputs 
@@ -265,21 +253,8 @@ begin
       -- PI_SUM's integral_sum write, but freq_seed_pulse only fires during
       -- warmup before pi_trigger ever asserts, so the PI pipeline is idle.
       if freq_seed_pulse = '1' then
-        -- freq_seed_ppb is computed from a drift estimate over the warmup
-        -- window and is not pre-clamped. Saturate to ±500_000 before
-        -- latching into the 20-bit integral/freq_correction registers;
-        -- a naked resize() would silently wrap a large drift estimate
-        -- into a bogus seed value.
-        if freq_seed_ppb > to_signed(500_000, 32) then
-          integral_sum    <= to_signed(500_000, 20);
-          freq_correction <= to_signed(500_000, 20);
-        elsif freq_seed_ppb < to_signed(-500_000, 32) then
-          integral_sum    <= to_signed(-500_000, 20);
-          freq_correction <= to_signed(-500_000, 20);
-        else
-          integral_sum    <= resize(freq_seed_ppb, 20);
-          freq_correction <= resize(freq_seed_ppb, 20);
-        end if;
+        integral_sum    <= resize(freq_seed_ppb, 20);
+        freq_correction <= resize(freq_seed_ppb, 20);
       end if;
 
       if (pi_wait_state = 3) then
@@ -346,7 +321,7 @@ begin
       locked       <= '0';
       first_lock_achieved <= '0';
     elsif rising_edge(clk) then
-      if (inp_do_phase_jump = '1' or inp_do_reconfigure = '1') then
+      if (inp_do_reconfigure = '1') then
         locked       <= '0';
         lock_counter <= 0;
       end if;
@@ -380,8 +355,6 @@ begin
     if reset_n = '0' then
       filtered_offset      <= (others => '0');
       sample_count         <= 0;
-      phase_jump_reg       <= (others => '0');
-      phase_jump_valid_reg <= '0';
       first_offset         <= (others => '0');
 
       settle_count         <= 0;
@@ -393,13 +366,10 @@ begin
       inp_offset_abs     <= (others => '0');
       inp_offset         <= (others => '0');
       inp_valid_meas     <= '0';
-      inp_do_phase_jump  <= '0';
-      inp_phase_jump_val <= (others => '0');
       inp_do_normal_op   <= '0';
       inp_do_reconfigure <= '0';
 
     elsif rising_edge(clk) then
-      phase_jump_valid_reg <= '0';
       -- pi_trigger stays sticky until pi_controller_proc acknowledges it.
       -- Only clear it on ack; setting happens below in INP_ACTION.
       if pi_trigger_ack = '1' then
@@ -423,7 +393,6 @@ begin
           end if;
 
         when INP_DECIDE =>
-          inp_do_phase_jump  <= '0';
           inp_do_normal_op   <= '0';
           inp_do_reconfigure <= '0';
 
@@ -436,16 +405,6 @@ begin
               inp_valid_meas <= '0';
             elsif inp_offset_abs > RECONFIGURE_THRESHOLD then
               inp_do_reconfigure <= '1';
-            elsif inp_offset_abs > PHASE_JUMP_THRESHOLD
-                  and sample_count >= to_integer(warmup_samples_i) then
-              inp_do_phase_jump <= '1';
-              if inp_offset > to_signed(2 ** 30 - 1, 32) then
-                inp_phase_jump_val <= to_signed( - (2 ** 30 - 1), 32);
-              elsif inp_offset < to_signed( - (2 ** 30 - 1), 32) then
-                inp_phase_jump_val <= to_signed(2 ** 30 - 1, 32);
-              else
-                inp_phase_jump_val <= - inp_offset;
-              end if;
             else
               inp_do_normal_op <= '1';
             end if;
@@ -465,9 +424,7 @@ begin
             if inp_do_reconfigure = '1' then
               request_reconfigure_reg <= '1';
 
-            elsif inp_do_phase_jump = '1' then
-              phase_jump_reg       <= inp_phase_jump_val;
-              phase_jump_valid_reg <= '1';
+
 
             elsif inp_do_normal_op = '1' then
 
@@ -500,18 +457,6 @@ begin
               if sample_count >= to_integer(warmup_samples_i) then
                 if settle_count < SETTLE_SAMPLES then
                   settle_count <= settle_count + 1;
-                elsif post_settle_jump_done = '0' then
-                  if inp_offset > to_signed(2 ** 30 - 1, 32) then
-                    phase_jump_reg <= to_signed( - (2 ** 30 - 1), 32);
-                  elsif inp_offset < to_signed( - (2 ** 30 - 1), 32) then
-                    phase_jump_reg <= to_signed(2 ** 30 - 1, 32);
-                  else
-                    phase_jump_reg <= - inp_offset;
-                  end if;
-                  phase_jump_valid_reg  <= '1';
-                  post_settle_jump_done <= '1';
-                elsif post_jump_wait_done = '0' then
-                  post_jump_wait_done <= '1';
                 else
                   pi_trigger <= '1';
                 end if;

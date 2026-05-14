@@ -112,7 +112,6 @@ ENTITY aes67_top IS
 		ptp_offset_from_master_o : OUT STD_LOGIC_VECTOR(31 downto 0);
 		wallclock_locked_o : OUT STD_LOGIC;
 		wallclock_configured_o : OUT STD_LOGIC;
-		wallclock_phasejump_o : OUT STD_LOGIC;
 
 		-- PTP module reset (active high, async). Combined with global rst_n
 		-- to reset everything time-related (servo, parser, wallclock).
@@ -400,7 +399,6 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		ptp_is_leader_o => ptp_is_leader_o,
 		 wallclock_locked => wallclock_locked_o,
 		 wallclock_configured => wallclock_configured_o,
-		 wallclock_phasejump => wallclock_phasejump_o,
 		 
 		 
 		 ptp_mean_path_delay => ptp_mean_path_delay_o,

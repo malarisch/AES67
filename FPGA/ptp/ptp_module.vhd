@@ -60,7 +60,6 @@ ENTITY ptp_module IS
 		wc_fs_pulse     : OUT STD_LOGIC;
 		wc_fs_tdm_pulse : OUT STD_LOGIC;
 		second_pulse_sys :  OUT  STD_LOGIC;
-		wallclock_phasejump :  OUT  STD_LOGIC;
 		media_clock :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_mean_path_delay :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_offset_from_master :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -110,7 +109,6 @@ ARCHITECTURE bdf_type OF ptp_module IS
 SIGNAL	freq_correction :  SIGNED(19 DOWNTO 0);
 SIGNAL	log_msg_interval :  SIGNED(7 DOWNTO 0);
 SIGNAL	log_msg_interval_valid :  STD_LOGIC;
-SIGNAL	phase_jump :  SIGNED(31 DOWNTO 0);
 SIGNAL	powerGood :  STD_LOGIC;
 SIGNAL	ptp_allow :  STD_LOGIC;
 SIGNAL	ptp_calc_valid :  STD_LOGIC;
@@ -140,7 +138,6 @@ SIGNAL	timestamp_s :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_nanoseconds :  UNSIGNED(31 DOWNTO 0);
 SIGNAL	ptp_ram_addr_u :  UNSIGNED(10 DOWNTO 0);
 SIGNAL	media_clock_u :  UNSIGNED(31 DOWNTO 0);
-SIGNAL	wallclock_phasejump_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	servo_request_clock_reconfigure :  STD_LOGIC;
 SIGNAL	wallclock_seconds :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_set :  STD_LOGIC;
@@ -376,10 +373,10 @@ PORT MAP(clk => sys_clk,
 		 log_msg_interval_valid_i => log_msg_interval_valid,
 		 log_msg_interval_i => log_msg_interval,
 		 offset_from_master_i => ptp_offset_from_master_ALTERA_SYNTHESIZED,
-		 phase_jump_valid_o => wallclock_phasejump_ALTERA_SYNTHESIZED,
+		 
 		 locked_o => ptp_locked_ALTERA_SYNTHESIZED,
 		 freq_correction_o => freq_correction,
-		 phase_jump_o => phase_jump,
+		 
 		 request_clock_reconfigure_o => servo_request_clock_reconfigure,
 		 -- Live-tuning inputs from top-level
 		 kp_gain_i              => servo_kp_gain_i,
@@ -411,9 +408,10 @@ GENERIC MAP(audio_fs => 48000,
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 wallclock_set_i => wallclock_set,
-		 phase_jump_valid_i => wallclock_phasejump_ALTERA_SYNTHESIZED,
+		 --phase_jump_valid_i => wallclock_phasejump_ALTERA_SYNTHESIZED,
+		 
 		 freq_correction_ppb_i => freq_correction,
-		 phase_jump_ns_i => phase_jump,
+		 --phase_jump_ns_i => phase_jump,
 		 wallclock_nanoseconds_i => unsigned(wallclock_set_ns),
 		 wallclock_seconds_i => unsigned(wallclock_set_s),
 		 second_pulse_o => second_pulse_sys_ALTERA_SYNTHESIZED,
@@ -445,7 +443,6 @@ powerGood <= rst_n;
 ptp_allow <= mac_tx_allow_i;
 ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
 second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
-wallclock_phasejump <= wallclock_phasejump_ALTERA_SYNTHESIZED;
 media_clock <= std_logic_vector(media_clock_u);
 ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
 ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);

@@ -712,7 +712,6 @@ generic map(
 	ptp_offset_from_master_o    => ptp_offset_from_master,
 	wallclock_locked_o          => wallclock_locked,
 	wallclock_configured_o      => wallclock_configured,
-	wallclock_phasejump_o       => wallclock_phasejump,
 
 	-- ppb meter
 	ppb_meter_start_i           => ppb_meter_start,

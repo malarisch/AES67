@@ -25,8 +25,7 @@ entity wallclock is
 
         -- PTP Servo correction inputs
         freq_correction_ppb_i   : in  signed(19 downto 0);  -- PPB correction (parts per billion, clamped to ±500_000 by servo)
-        phase_jump_ns_i         : in  signed(31 downto 0);  -- One-time phase adjustment in ns
-        phase_jump_valid_i      : in  std_logic;            -- Pulse to apply phase jump
+
 
         second_pulse_o          : out std_logic;
 
@@ -248,10 +247,6 @@ architecture Behavioral of wallclock is
 
     signal nco_phase_bias : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     
-
-    -- Range: ppb is clamped to ±500_000 in the servo (fits in 20-bit signed
-    -- easily). 28 bits matches frac_ns_accum so the Stage-2 adder is uniform.
-    signal frac_increment_reg : signed(27 downto 0) := (others => '0');
     
     signal ns_adjust_pipe     : integer range -1 to 1 := 0;
     -- Pre-computed increment value (breaks ns_adjust_pipe → new_nsec critical path)
@@ -265,12 +260,7 @@ architecture Behavioral of wallclock is
     signal new_nsec_minus_sec : signed(31 downto 0) := -NS_PER_SEC;  -- new_nsec_pipe - NS_PER_SEC
     signal new_nsec_plus_sec  : signed(31 downto 0) := NS_PER_SEC;   -- new_nsec_pipe + NS_PER_SEC
     
-    -- Phase jump pipeline registers
-    -- Original: nsec_reg + phase_jump → compare → nsec_reg (~9ns in one cycle)
-    -- Pipelined: Stage A: compute sum → phase_jump_sum_reg
-    --            Stage B: compare/normalize → apply to nsec_reg, new_nsec_pipe
-    signal phase_jump_pending : std_logic := '0';
-    signal phase_jump_sum_reg : signed(31 downto 0) := (others => '0');
+
     signal nco_ppb_adj_wait : std_logic := '0';
     signal media_clock_proc_wait : std_logic := '0';
 
@@ -415,7 +405,7 @@ begin
 
             ppb_trim       <= (others => '0');
         elsif rising_edge(clk) then
-            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+            if wallclock_set_i = '1' then
                 -- Hard resync zeroes the NCO; clear the integrator too so
                 -- it doesn't carry old drift compensation across the jump.
                 ppb_trim <= (others => '0');
@@ -491,7 +481,7 @@ begin
             -- long to converge from arbitrary phase, so reset the NCO
             -- to align with the wallclock fs edge that media_proc will
             -- produce ~3 cycles later. The pull loop then maintains it.
-            if wallclock_set_i = '1' or phase_jump_valid_i = '1' then
+            if wallclock_set_i = '1' then
                 nco_phase      <= (others => '0');
                 nco_phase_prev <= '0';
                 mclk_cnt       <= (others => '0');
@@ -674,8 +664,6 @@ begin
             new_nsec_minus_sec <= -NS_PER_SEC;
             new_nsec_plus_sec  <= NS_PER_SEC;
             sec_adj_pipe       <= 0;
-            phase_jump_pending <= '0';
-            phase_jump_sum_reg <= (others => '0');
 
         elsif rising_edge(clk) then
             second_pulse_int <= '0';
@@ -701,13 +689,7 @@ begin
             -- Default for this cycle (may be overwritten below)
             sec_adj_pipe <= 0;
 
-            -- ===== PHASE JUMP PIPELINE: Stage A (capture + add) =====
-            -- On phase_jump_valid_i pulse: compute nsec_reg + phase_jump, set pending flag
-            -- The actual application happens in Stage B next cycle.
-            if phase_jump_valid_i = '1' then
-                phase_jump_sum_reg <= nsec_reg + resize(phase_jump_ns_i, 32);
-                phase_jump_pending <= '1';
-            end if;
+
 
             -- ===== OVERRIDE PATHS =====
             if wallclock_set_i = '1' then
@@ -718,30 +700,8 @@ begin
                 new_nsec_minus_sec <= signed(wallclock_nanoseconds_i) - NS_PER_SEC;
                 new_nsec_plus_sec  <= signed(wallclock_nanoseconds_i) + NS_PER_SEC;
                 sec_adj_pipe   <= 0;
-                phase_jump_pending <= '0';
 
-            elsif phase_jump_pending = '1' then
-                -- ===== PHASE JUMP PIPELINE: Stage B (normalize + apply) =====
-                -- Uses phase_jump_sum_reg from Stage A (previous cycle)
-                phase_jump_pending <= '0';
-                if phase_jump_sum_reg >= NS_PER_SEC then
-                    nsec_reg      <= phase_jump_sum_reg - NS_PER_SEC;
-                    new_nsec_pipe <= phase_jump_sum_reg - NS_PER_SEC;
-                    new_nsec_minus_sec <= phase_jump_sum_reg - NS_PER_SEC - NS_PER_SEC;
-                    new_nsec_plus_sec  <= phase_jump_sum_reg - NS_PER_SEC + NS_PER_SEC;
-                    sec_adj_pipe  <= 1;
-                elsif phase_jump_sum_reg < 0 then
-                    nsec_reg      <= phase_jump_sum_reg + NS_PER_SEC;
-                    new_nsec_pipe <= phase_jump_sum_reg + NS_PER_SEC;
-                    new_nsec_minus_sec <= phase_jump_sum_reg;
-                    new_nsec_plus_sec  <= phase_jump_sum_reg + NS_PER_SEC + NS_PER_SEC;
-                    sec_adj_pipe  <= -1;
-                else
-                    nsec_reg      <= phase_jump_sum_reg;
-                    new_nsec_pipe <= phase_jump_sum_reg;
-                    new_nsec_minus_sec <= phase_jump_sum_reg - NS_PER_SEC;
-                    new_nsec_plus_sec  <= phase_jump_sum_reg + NS_PER_SEC;
-                end if;
+            
 
             else
                 -- ===== STAGE 2: Fractional accumulation + overflow =====
