@@ -584,9 +584,6 @@ signal servo_lock_count_threshold_i : STD_LOGIC_VECTOR(7 downto 0);
 signal parser_min_filter_enable_i        : STD_LOGIC;
 signal parser_min_filter_active_depth_i  : STD_LOGIC_VECTOR(7 downto 0);
 signal parser_delay_asymmetry_ns_i       : STD_LOGIC_VECTOR(31 downto 0);
--- CSR-source mirror (always driven by LiteX); selected in dynamic mode only,
--- so the static path lets Quartus prune the CSR storage at synthesis.
-signal parser_delay_asymmetry_ns_csr     : STD_LOGIC_VECTOR(31 downto 0);
 -- PTP servo / parser tuning (driven by whichever SoC backend is active).
 signal servo_kp_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
 signal servo_ki_gain_o              : STD_LOGIC_VECTOR(7 downto 0);
@@ -893,7 +890,7 @@ PORT MAP(
 	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
 	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
 	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
-	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_csr,
+	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_i,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -1021,7 +1018,7 @@ PORT MAP(
 	aes67_ctrl_servo_lock_count_threshold      => servo_lock_count_threshold_i,
 	aes67_ctrl_parser_min_filter_enable        => parser_min_filter_enable_i,
 	aes67_ctrl_parser_min_filter_active_depth  => parser_min_filter_active_depth_i,
-	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_csr,
+	aes67_ctrl_parser_delay_asymmetry_ns       => parser_delay_asymmetry_ns_i,
 	aes67_ctrl_servo_mon_filtered_offset       => servo_mon_filtered_offset,
 	aes67_ctrl_servo_mon_integral_sum          => servo_mon_integral_sum,
 	aes67_ctrl_servo_mon_pi_proportional       => servo_mon_pi_proportional,
@@ -1192,8 +1189,6 @@ spigen: if (soctype = "spi") generate
 		mcu_irq_o => spictrl_irq_n_o
 	);
 
-	-- SPI backend has no CSR for delayAsymmetry; rely on static_ptp_conf default.
-	parser_delay_asymmetry_ns_i <= parser_delay_asymmetry_ns_o;
 end generate;
 
 
@@ -1220,26 +1215,24 @@ static_ptp_conf_inst: entity work.static_ptp_conf
 	parser_delay_asymmetry_ns_o => parser_delay_asymmetry_ns_o
 );
 
--- Static mode: drive parser directly from compile-time constant; CSR
--- output (parser_delay_asymmetry_ns_csr) has no sink and will be pruned.
-parser_delay_asymmetry_ns_i <= parser_delay_asymmetry_ns_o;
+
 
 end generate;
 
 ptp_conf_gen_dynamic: if (static_ptp_conf = false) generate
-	servo_kp_gain_i              <= servo_kp_gain_o;
-	servo_ki_gain_i              <= servo_ki_gain_o;
-	servo_gain_shift_i           <= servo_gain_shift_o;
-	servo_gain_shift_locked_i    <= servo_gain_shift_locked_o;
-	servo_ki_extra_shift_i       <= servo_ki_extra_shift_o;
-	servo_filter_shift_i         <= servo_filter_shift_o;
-	servo_warmup_samples_i       <= servo_warmup_samples_o;
-	servo_lock_threshold_ns_i    <= servo_lock_threshold_ns_o;
-	servo_unlock_threshold_ns_i  <= servo_unlock_threshold_ns_o;
-	servo_lock_count_threshold_i <= servo_lock_count_threshold_o;
-	parser_min_filter_enable_i        <= parser_min_filter_enable_o;
-	parser_min_filter_active_depth_i  <= parser_min_filter_active_depth_o;
-	parser_delay_asymmetry_ns_i       <= parser_delay_asymmetry_ns_csr;
+	servo_kp_gain_o              <= servo_kp_gain_i;
+	servo_ki_gain_o              <= servo_ki_gain_i;
+	servo_gain_shift_o           <= servo_gain_shift_i;
+	servo_gain_shift_locked_o    <= servo_gain_shift_locked_i;
+	servo_ki_extra_shift_o       <= servo_ki_extra_shift_i;
+	servo_filter_shift_o         <= servo_filter_shift_i;
+	servo_warmup_samples_o       <= servo_warmup_samples_i;
+	servo_lock_threshold_ns_o    <= servo_lock_threshold_ns_i;
+	servo_unlock_threshold_ns_o  <= servo_unlock_threshold_ns_i;
+	servo_lock_count_threshold_o <= servo_lock_count_threshold_i;
+	parser_min_filter_enable_o        <= parser_min_filter_enable_i;
+	parser_min_filter_active_depth_o  <= parser_min_filter_active_depth_i;
+	parser_delay_asymmetry_ns_o       <= parser_delay_asymmetry_ns_i;
 
 end generate;
 

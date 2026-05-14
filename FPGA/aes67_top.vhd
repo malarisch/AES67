@@ -457,6 +457,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 phy_mii_rx_en_i => phy_mii_rx_en_i
 		 );
 
+
+gen_ptp_metering: if (ENABLE_METERING = true) generate
 servo_mon_filtered_offset_o      <= std_logic_vector(servo_mon_filtered_offset_signed);
 servo_mon_integral_sum_o         <= std_logic_vector(servo_mon_integral_sum_signed);
 servo_mon_pi_proportional_o      <= std_logic_vector(servo_mon_pi_proportional_signed);
@@ -464,7 +466,7 @@ servo_mon_pi_sum_raw_o           <= std_logic_vector(servo_mon_pi_sum_raw_signed
 servo_mon_effective_gain_shift_o <= std_logic_vector(servo_mon_effective_gain_shift_unsigned);
 servo_mon_lock_counter_o         <= std_logic_vector(servo_mon_lock_counter_unsigned);
 servo_mon_sample_count_o         <= std_logic_vector(servo_mon_sample_count_unsigned);
-		 
+end generate; 
 
 
 
