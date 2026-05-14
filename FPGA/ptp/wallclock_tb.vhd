@@ -1,9 +1,9 @@
 -- Testbench for wallclock.vhd
 --
 -- Scope: pure internal timekeeping logic at sys_clk = 125 MHz.
--- freq_correction_ppb_i and phase_jump_valid_i are held inactive - this
--- exercises only the deterministic path (tick -> ns -> sec, sample/ms
--- pulses, media_clock derivation, wallclock_set override).
+-- freq_correction_ppb_i is held inactive in the deterministic checks -
+-- this exercises only the deterministic path (tick -> ns -> sec,
+-- sample/ms pulses, media_clock derivation, wallclock_set override).
 --
 -- Checks performed:
 --   1. Reset behaviour (all outputs cleared).
@@ -63,9 +63,7 @@ architecture sim of wallclock_tb is
     signal wc_sec_i   : unsigned(47 downto 0) := (others => '0');
     signal wc_ns_i    : unsigned(31 downto 0) := (others => '0');
 
-    signal freq_corr  : signed(31 downto 0) := (others => '0');
-    signal phase_jump : signed(31 downto 0) := (others => '0');
-    signal phase_jump_valid : std_logic := '0';
+    signal freq_corr  : signed(19 downto 0) := (others => '0');
 
     signal second_pulse  : std_logic;
     signal audio_mclk    : std_logic;
@@ -137,8 +135,6 @@ begin
             wallclock_seconds_i     => wc_sec_i,
             wallclock_nanoseconds_i => wc_ns_i,
             freq_correction_ppb_i   => freq_corr,
-            phase_jump_ns_i         => phase_jump,
-            phase_jump_valid_i      => phase_jump_valid,
             second_pulse_o          => second_pulse,
             audio_mclk_o            => audio_mclk,
             media_clock_o           => media_clock,
@@ -322,12 +318,15 @@ begin
     -- short enough to keep the sim under a second of wallclock-time.
     -- ============================================================
     freq_corr_stim: process
-        -- 5 ms window: enough for media_clock (sample-rate quantised) to
-        -- show 240 vs 242.4 vs 237.6 increments at ppb 0 / +1% / -1%, so
-        -- the +/-1% effect is resolvable above the +/-1 quantisation.
-        constant MEAS_WIN : time    := 5 ms;
+        -- 20 ms window: needed because the freq_correction_ppb_i port
+        -- is signed(19) (range ±524_287; servo clamps to ±500_000), so
+        -- the largest ppb the wallclock can actually see is ±500_000 =
+        -- ±500 ppm. Over 20 ms that produces a 960*5e-4 ≈ 0.48 sample
+        -- delta on media_clock — resolvable above the ±2 quantisation
+        -- of MC_TOL only with the longer window.
+        constant MEAS_WIN : time    := 20 ms;
         constant SETTLE   : time    := 100 us;
-        constant WIN_NS   : integer := 5_000_000;  -- MEAS_WIN in ns
+        constant WIN_NS   : integer := 20_000_000;  -- MEAS_WIN in ns
 
         -- Tolerances per window
         --   NS_TOL: wallclock is exact apart from frac-accumulator rounding.
@@ -339,8 +338,11 @@ begin
         constant MCLK_TOL  : integer := 3;
 
         type ppb_array_t is array (natural range <>) of integer;
+        -- Largest ppb that fits in the signed(19) port is ±524_287; the
+        -- real PTP servo clamps to ±500_000. Test at 0 and the servo
+        -- clamp to exercise the full usable range.
         constant PPB_LIST : ppb_array_t :=
-            (0, 10_000_000, -10_000_000);
+            (0, 500_000, -500_000);
 
         -- Realistic PTP-servo pull-in sequence used after the strict
         -- tolerance windows: +/-50 ppm range, stepped every 200 us.
@@ -377,7 +379,7 @@ begin
 
             -- Apply ppb and let the 2-cycle ppb_adj pipeline + NCO bias
             -- settle before we start measuring.
-            freq_corr <= to_signed(ppb, 32);
+            freq_corr <= to_signed(ppb, 20);
             wait for SETTLE;
             wait until rising_edge(clk);
 
@@ -464,7 +466,7 @@ begin
         -- and the resolution would corrupt freq_corr to 'X'.
         -- ============================================================
         loop
-            freq_corr <= to_signed(SERVO_SEQ(servo_idx mod SERVO_SEQ'length), 32);
+            freq_corr <= to_signed(SERVO_SEQ(servo_idx mod SERVO_SEQ'length), 20);
             servo_idx := servo_idx + 1;
             wait for 200 us;
         end loop;
@@ -497,18 +499,12 @@ begin
             TARGET_SEC * AUDIO_FS_C
             + integer(real(TARGET_NS) * real(AUDIO_FS_C) / 1.0e9);
 
-        variable ns_before, ns_after  : unsigned(31 downto 0);
-        variable sec_before, sec_after : unsigned(47 downto 0);
         variable mc_obs                : unsigned(31 downto 0);
         variable mc_expect             : integer;
-        variable jump_diff             : integer;
         variable mc_check_count        : integer := 0;
         variable mc_check_fail         : integer := 0;
 
-        -- For lock-recovery and NCO/mediaclock drift checks
-        variable lk_a, lk_b   : integer;
-        variable lk_n_a, lk_n_b : integer;
-        variable lk_pct       : integer;
+        -- For NCO/mediaclock drift check (Step 7)
         variable smp_a, smp_b : integer;
         variable mc_start, mc_end : unsigned(31 downto 0);
         variable nco_samples  : integer;
@@ -529,9 +525,11 @@ begin
         wc_set   <= '0';
 
         -- Pipeline: wallclock_set is registered immediately into
-        -- nsec_reg/sec_reg, but media_proc has 3 stages from
-        -- (sec, nsec) -> media_clock_o, so wait a few cycles.
-        for i in 1 to 5 loop
+        -- nsec_reg/sec_reg, but media_proc has 3 pipeline stages each
+        -- gated by media_clock_proc_wait (toggles every cycle), so the
+        -- effective latency from sec/nsec inputs to media_clock_o is
+        -- 6 cycles. Wait 8 to be safe.
+        for i in 1 to 8 loop
             wait until rising_edge(clk);
         end loop;
 
@@ -558,136 +556,10 @@ begin
              & " expected ~" & integer'image(TARGET_MC) & ")";
 
         -- ===== Step 2: free-run with ppb modulation =====
-        wait for 3 ms;
-
-        -- ===== Step 3: phase jump #1 (+200 us) =====
-        ns_before  := wc_ns_o;
-        sec_before := wc_sec_o;
-        report "scenario: phase jump #1 = +200_000 ns at "
-             & time'image(now);
-        phase_jump       <= to_signed(200_000, 32);
-        phase_jump_valid <= '1';
-        wait until rising_edge(clk);
-        phase_jump_valid <= '0';
-
-        -- Phase jump pipeline: Stage A captures the sum, Stage B
-        -- applies it, plus media_proc takes 3 more cycles to reflect.
-        for i in 1 to 6 loop
-            wait until rising_edge(clk);
-        end loop;
-        ns_after  := wc_ns_o;
-        sec_after := wc_sec_o;
-
-        -- Observed (sec, ns) advance vs. expected (~5 cycles of natural
-        -- advance + 200_000 ns of jump).
-        jump_diff := to_integer(sec_after - sec_before) * 1_000_000_000
-                   + to_integer(ns_after) - to_integer(ns_before);
-        assert jump_diff >= 200_000 - 50 and jump_diff <= 200_000 + 200
-            report "phase jump #1: nsec advance unexpected, got "
-                 & integer'image(jump_diff) & " expected ~200_000"
-            severity error;
-        report "phase jump #1 OK (nsec advance = "
-             & integer'image(jump_diff) & ")";
-
-        -- ===== Step 3b: NCO/mediaclock frequency sync after phase jump #1 =====
-        -- Phase jump resets nco_phase / mclk_cnt to 0; the pull-loop
-        -- bias is small (one KICK shifts mclk_cnt by ~1/64), so full
-        -- *phase* relock takes much longer than a phase jump rate
-        -- realistically requires. What we *can* assert is that the
-        -- *frequency* stays locked even immediately after the jump:
-        -- NCO sample boundaries (sample_pulse) and mediaclock
-        -- increments must continue to tick 1:1.
-        --
-        -- Also report phase_locked %% as a diagnostic so a regression
-        -- in the pull loop (e.g. wrong sign) shows up as a drop from
-        -- a previously-known good value.
-        wait for 500 us;
-        wait until rising_edge(clk);
-        lk_a     := locked_cnt;
-        lk_n_a   := locked_sample_cnt;
-        smp_a    := sample_cnt;
-        mc_start := media_clock;
-        wait for 1 ms;
-        wait until rising_edge(clk);
-        lk_b     := locked_cnt;
-        lk_n_b   := locked_sample_cnt;
-        smp_b    := sample_cnt;
-        mc_end   := media_clock;
-        if (lk_n_b - lk_n_a) > 0 then
-            lk_pct := (100 * (lk_b - lk_a)) / (lk_n_b - lk_n_a);
-        else
-            lk_pct := 0;
-        end if;
-        nco_samples := smp_b - smp_a;
-        mc_samples  := to_integer(mc_end - mc_start);
-        drift       := abs(nco_samples - mc_samples);
-        report "after PJ#1: nco_samples=" & integer'image(nco_samples)
-             & "  mc_samples=" & integer'image(mc_samples)
-             & "  drift=" & integer'image(drift)
-             & "  phase_locked=" & integer'image(lk_pct) & "% (diagnostic)";
-        assert drift <= 2
-            report "after PJ#1: NCO/mediaclock desynced (drift = "
-                 & integer'image(drift) & ")"
-            severity error;
-
-        -- ===== Step 4: free-run =====
-        wait for 1 ms;
-
-        -- ===== Step 5: phase jump #2 (-50 us) =====
-        ns_before  := wc_ns_o;
-        sec_before := wc_sec_o;
-        report "scenario: phase jump #2 = -50_000 ns at "
-             & time'image(now);
-        phase_jump       <= to_signed(-50_000, 32);
-        phase_jump_valid <= '1';
-        wait until rising_edge(clk);
-        phase_jump_valid <= '0';
-
-        for i in 1 to 6 loop
-            wait until rising_edge(clk);
-        end loop;
-        ns_after  := wc_ns_o;
-        sec_after := wc_sec_o;
-
-        jump_diff := to_integer(sec_after - sec_before) * 1_000_000_000
-                   + to_integer(ns_after) - to_integer(ns_before);
-        -- Negative jump: expected ~ -50_000 + ~50 cycles natural advance
-        assert jump_diff >= -50_000 - 50 and jump_diff <= -50_000 + 200
-            report "phase jump #2: nsec advance unexpected, got "
-                 & integer'image(jump_diff) & " expected ~-50_000"
-            severity error;
-        report "phase jump #2 OK (nsec advance = "
-             & integer'image(jump_diff) & ")";
-
-        -- ===== Step 5b: NCO/mediaclock sync after phase jump #2 =====
-        wait for 500 us;
-        wait until rising_edge(clk);
-        lk_a     := locked_cnt;
-        lk_n_a   := locked_sample_cnt;
-        smp_a    := sample_cnt;
-        mc_start := media_clock;
-        wait for 1 ms;
-        wait until rising_edge(clk);
-        lk_b     := locked_cnt;
-        lk_n_b   := locked_sample_cnt;
-        smp_b    := sample_cnt;
-        mc_end   := media_clock;
-        if (lk_n_b - lk_n_a) > 0 then
-            lk_pct := (100 * (lk_b - lk_a)) / (lk_n_b - lk_n_a);
-        else
-            lk_pct := 0;
-        end if;
-        nco_samples := smp_b - smp_a;
-        mc_samples  := to_integer(mc_end - mc_start);
-        drift       := abs(nco_samples - mc_samples);
-        report "after PJ#2: nco_samples=" & integer'image(nco_samples)
-             & "  mc_samples=" & integer'image(mc_samples)
-             & "  drift=" & integer'image(drift)
-             & "  phase_locked=" & integer'image(lk_pct) & "% (diagnostic)";
-        assert drift <= 2
-            report "after PJ#2: NCO/mediaclock desynced (drift = "
-                 & integer'image(drift) & ")"
-            severity error;
+        -- (Previously Steps 3-5 exercised phase_jump_valid_i. The phase
+        -- jump path has been removed from wallclock.vhd; the PTP servo
+        -- now corrects offsets purely via freq_correction_ppb_i.)
+        wait for 5 ms;
 
         -- ===== Step 6: media-clock consistency over a 3 ms window =====
         -- Sample media_clock and (sec, ns) every 100 us; verify

@@ -11,13 +11,13 @@ entity ptpv2_controller is
         frame_start_o       : out std_logic;
         request_port_identity_o : out std_logic_vector(79 downto 0);
         wallclock_seconds_i     : in  unsigned(47 downto 0);
-        wallclock_nanoseconds_i : in  unsigned(31 downto 0);
+        wallclock_nanoseconds_i : in  unsigned(29 downto 0);
         timestamp_seconds_o         : out unsigned(47 downto 0);
-        timestamp_nanoseconds_o     : out unsigned(31 downto 0);
+        timestamp_nanoseconds_o     : out unsigned(29 downto 0);
         rx_timestamp_seconds_i     : in  unsigned(3 downto 0);
         tx_timestamp_seconds_i     : in  unsigned(3 downto 0);
-        rx_timestamp_nanoseconds_i : in  unsigned(31 downto 0);
-        tx_timestamp_nanoseconds_i      : in unsigned(31 downto 0);
+        rx_timestamp_nanoseconds_i : in  unsigned(29 downto 0);
+        tx_timestamp_nanoseconds_i      : in unsigned(29 downto 0);
         wait_amount_i               : in unsigned(3 downto 0);
 
         sequence_id_i         : in  unsigned(15 downto 0);
@@ -57,13 +57,11 @@ entity ptpv2_controller is
                                  p2p_Send_Pdelay_Resp, p2p_Wait_for_Pdelay_Resp_Ack, p2p_Wait_for_Pdelay_Resp_Done,
                                  p2p_Send_Pdelay_Follow_Up, p2p_Wait_for_Pdelay_Follow_Up_Ack, p2p_Wait_for_Pdelay_Follow_Up_Done);
 
-    type t_state_controller is (c_Idle, c_Leader, c_Follower, c_Leader_Lost, c_Run_BMC);
 
     signal leader_state : t_state_leader := s_Idle;
 
     signal follower_state : t_state_follower := f_Idle;
     signal p2p_state: t_state_p2p_delay := p2p_Idle;
-    signal c_state: t_state_controller := c_Idle;
 
     signal sync_sequence_id  : unsigned(15 downto 0) := (others => '0');
     signal announce_sequence_id : unsigned(15 downto 0) := (others => '0');
@@ -74,7 +72,7 @@ entity ptpv2_controller is
     signal sequence_id_i_latched : unsigned(15 downto 0) := (others => '0');
     signal request_port_identity_i_latched : std_logic_vector(79 downto 0) := (others => '0');
     signal send_delay_resp : std_logic := '0';
-    signal timestamp_nanoseconds_i_latched : unsigned(31 downto 0) := (others => '0');
+    signal timestamp_nanoseconds_i_latched : unsigned(29 downto 0) := (others => '0');
     signal timestamp_seconds_i_latched : unsigned(3 downto 0) := (others => '0');
 
 

@@ -19,15 +19,7 @@ use ieee.numeric_std.all;
 -- Dataset comparison order per IEEE 1588 (lower value wins):
 --   priority1 -> clockClass -> clockAccuracy -> offsetScaledLogVariance
 --   -> priority2 -> clockIdentity (tie breaker)
---
--- Timing note:
--- The two dataset comparisons live in their own always-running processes
--- (P_CMP_ANN_EXT, P_CMP_EXT_SELF). Their results are registered into
--- ann_better_r / ext_beats_self_r before being consumed by the main FSM,
--- which now adds one cycle of wait state at the end of an Announce update.
--- The compare-to-register paths are declared multi-cycle in the SDC, which
--- lets the synthesis tool relax timing on those long comparators.
--- See FPGA SDC: set_multicycle_path on *|ann_better_r and *|ext_beats_self_r.
+
 
 entity ptpv2_bmc is
     port (
@@ -80,7 +72,6 @@ architecture rtl of ptpv2_bmc is
     -- startup grace period has elapsed and a first decision has been made.
     signal is_leader_r       : std_logic := '0';
     signal is_follower_r     : std_logic := '0';
-    signal current_leader_r  : std_logic_vector(63 downto 0) := (others => '0');
 
     -- Startup grace: while the MAC link is down, the BMC is held idle. Once
     -- the link goes up we wait GRACE_MS milliseconds to collect Announces
@@ -156,7 +147,6 @@ begin
 
     is_leader_o         <= is_leader_r;
     is_follower_o       <= is_follower_r;
-    current_leader_id_o <= current_leader_r;
 
     ------------------------------------------------------------------
     -- P_CMP_ANN_EXT
@@ -223,7 +213,6 @@ begin
             ext_timeout_ms   <= (others => '0');
             is_leader_r      <= '0';
             is_follower_r    <= '0';
-            current_leader_r <= (others => '0');
             update_wait_r    <= '0';
             grace_active     <= '1';
             grace_cnt_ms     <= (others => '0');
@@ -244,7 +233,6 @@ begin
                 ext_timeout_ms   <= (others => '0');
                 is_leader_r      <= '0';
                 is_follower_r    <= '0';
-                current_leader_r <= (others => '0');
             else
                 -- Rising edge of link: (re)arm the grace timer
                 if link_up_d = '0' then
@@ -276,8 +264,7 @@ begin
             -- Incoming Announce: ignore self-announce, otherwise compare
             -- against stored best candidate (or install if slot empty).
             -- accept condition uses the *registered* ann_better_r flag.
-            if announce_valid_i = '1' and
-               announce_clock_identity_i /= my_clock_identity_i then
+            if announce_valid_i = '1' then
 
                 if ext_valid = '0' then
                     accept_announce := '1';
@@ -309,16 +296,16 @@ begin
                     if ext_beats_self_r = '1' then
                         is_leader_r      <= '0';
                         is_follower_r    <= '1';
-                        current_leader_r <= ext_clock_id;
+                        current_leader_id_o <= ext_clock_id;
                     else
                         is_leader_r      <= '1';
                         is_follower_r    <= '0';
-                        current_leader_r <= my_clock_identity_i;
+                        current_leader_id_o <= my_clock_identity_i;
                     end if;
                 else
                     is_leader_r      <= '1';
                     is_follower_r    <= '0';
-                    current_leader_r <= my_clock_identity_i;
+                    current_leader_id_o <= my_clock_identity_i;
                 end if;
             end if;
 

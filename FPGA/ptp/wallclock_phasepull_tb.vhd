@@ -8,8 +8,10 @@
 -- Sequence:
 --   1. Reset, then a few cycles of free-run.
 --   2. wallclock_set to a non-zero epoch.
---   3. phase_jump = +400_000 ns (= ~19 mclk-ticks @ 48kHz fs * 512 =
---      24.576 MHz; well above the dead band).
+--   3. wallclock_set with a +400_000 ns offset (~19 mclk-ticks @ 48kHz
+--      fs*512 = 24.576 MHz; well above the dead band). Drops the NCO
+--      mid-sample to stress the pull loop. (Was a phase_jump in earlier
+--      versions; the phase_jump path has been removed.)
 --   4. Apply a constant ppb that does NOT perfectly match the XO
 --      drift the loop is trying to remove. This is what happens on
 --      real HW between PTP servo updates: ppb_adj_reg is close but
@@ -58,10 +60,7 @@ architecture sim of wallclock_phasepull_tb is
     signal wc_sec_i  : unsigned(47 downto 0) := (others => '0');
     signal wc_ns_i   : unsigned(31 downto 0) := (others => '0');
 
-    signal freq_corr   : signed(31 downto 0) := (others => '0');
-    signal phase_jump  : signed(31 downto 0) := (others => '0');
-    signal phase_jump_valid : std_logic := '0';
-
+    signal freq_corr   : signed(19 downto 0) := (others => '0');
     signal second_pulse : std_logic;
     signal audio_mclk   : std_logic;
     signal media_clock  : unsigned(31 downto 0);
@@ -85,7 +84,7 @@ architecture sim of wallclock_phasepull_tb is
 
     -- Test phase indicator (mirrored into CSV so post-processing can
     -- partition the trace by what was happening when each row was
-    -- logged: 0 = warmup, 1 = post wallclock_set, 2 = post phase_jump,
+    -- logged: 0 = warmup, 1 = post wallclock_set, 2 = post offset-set,
     -- 3 = constant-ppb drift, 4 = stepped-ppb).
     signal phase_id : integer := 0;
 
@@ -117,8 +116,6 @@ begin
             wallclock_seconds_i     => wc_sec_i,
             wallclock_nanoseconds_i => wc_ns_i,
             freq_correction_ppb_i   => freq_corr,
-            phase_jump_ns_i         => phase_jump,
-            phase_jump_valid_i      => phase_jump_valid,
             second_pulse_o          => second_pulse,
             audio_mclk_o            => audio_mclk,
             media_clock_o           => media_clock,
@@ -243,13 +240,20 @@ begin
         -- Let things settle for 500 us (~24 sample edges) at ppb=0.
         wait for 500 us;
 
-        -- ----- Step 2: phase jump of +400_000 ns ( ~ 19.2 sample
-        -- periods, deliberately not a multiple so we end up mid-sample).
-        report "--- phase jump +400_000 ns ---";
-        phase_jump       <= to_signed(400_000, 32);
-        phase_jump_valid <= '1';
+        -- ----- Step 2: re-set wallclock to a deliberately off-grid
+        -- nanosecond value (was a phase_jump of +400_000 ns in the old
+        -- design; phase_jump has been removed, so we drive the NCO
+        -- through the same kind of mid-sample offset via wallclock_set,
+        -- which also hard-resets nco_phase / mclk_cnt to 0).
+        -- 500_400_000 ns - 500_000_000 ns = +400_000 ns offset
+        -- (~ 19.2 sample periods, not a multiple, so the pull loop
+        -- starts mid-sample).
+        report "--- wallclock_set with +400_000 ns offset ---";
+        wc_sec_i <= to_unsigned(1234, 48);
+        wc_ns_i  <= to_unsigned(500_400_000, 32);
+        wc_set   <= '1';
         wait until rising_edge(clk);
-        phase_jump_valid <= '0';
+        wc_set   <= '0';
         phase_id <= 2;
 
         -- Watch the loop pull from 0 (hard-reset) back into alignment.
@@ -264,7 +268,7 @@ begin
         -- should converge so the NCO continues to track at zero phase
         -- error.
         report "--- residual drift: ppb=+10000 ---";
-        freq_corr <= to_signed(10_000, 32);
+        freq_corr <= to_signed(10_000, 20);
         phase_id  <= 3;
         wait for 5 ms;
 
@@ -276,12 +280,12 @@ begin
         phase_id <= 4;
         for k in 0 to 19 loop
             case k mod 6 is
-                when 0 => freq_corr <= to_signed( 8_000, 32);
-                when 1 => freq_corr <= to_signed(12_000, 32);
-                when 2 => freq_corr <= to_signed( 9_500, 32);
-                when 3 => freq_corr <= to_signed(11_000, 32);
-                when 4 => freq_corr <= to_signed(10_500, 32);
-                when 5 => freq_corr <= to_signed( 9_800, 32);
+                when 0 => freq_corr <= to_signed( 8_000, 20);
+                when 1 => freq_corr <= to_signed(12_000, 20);
+                when 2 => freq_corr <= to_signed( 9_500, 20);
+                when 3 => freq_corr <= to_signed(11_000, 20);
+                when 4 => freq_corr <= to_signed(10_500, 20);
+                when 5 => freq_corr <= to_signed( 9_800, 20);
                 when others => null;
             end case;
             wait for 700 us;

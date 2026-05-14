@@ -437,23 +437,6 @@ begin
                 filtered_offset <= filtered_offset + filter_delta;
               end if;
 
-              -- End of warmup: estimate drift over the warmup window and
-              -- pre-seed the integral. PTP convention: offset > 0 means the
-              -- local (slave) clock is AHEAD of master ⇒ running too fast ⇒
-              -- needs NEGATIVE ppb correction. So Δoffset > 0 over the warmup
-              -- window ⇒ slave drifting further ahead ⇒ negative seed.
-              -- ppb = -Δoffset_ns / (N · T_sync_s) where T_sync_s = 2^logInt.
-              -- Approximate /N as shift right by floor(log2(N)). Net shift
-              -- is (log2(N) + logInt); for fast sync (logInt < 0) this can
-              -- go negative, in which case we left-shift instead.
-              
-
-              -- Startup sequence after warmup:
-              --   1) settle_count counts SETTLE_SAMPLES — IIR converges on the
-              --      pre-seeded frequency.
-              --   2) one-shot phase jump on the current offset.
-              --   3) wait one sample so the filter sees the post-jump offset.
-              --   4) pi_trigger goes high.
               if sample_count >= to_integer(warmup_samples_i) then
                 if settle_count < SETTLE_SAMPLES then
                   settle_count <= settle_count + 1;

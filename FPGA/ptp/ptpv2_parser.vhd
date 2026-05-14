@@ -19,11 +19,11 @@ entity ptpv2_parser is
         
         is_leader           : in std_logic; -- '1' if this node is PTP leader; will answer to delay_req
 
-        rx_timestamp_seconds_i     : in std_logic_vector(3 downto 0);
-        rx_timestamp_nanoseconds_i : in std_logic_vector(31 downto 0);
+        rx_timestamp_seconds_i     : in unsigned(3 downto 0);
+        rx_timestamp_nanoseconds_i : in UNSIGNED(29 downto 0);
 
-        rx_timestamp_seconds_o     : out std_logic_vector(3 downto 0);
-        rx_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0);
+        rx_timestamp_seconds_o     : out unsigned(3 downto 0);
+        rx_timestamp_nanoseconds_o : out unsigned(29 downto 0);
         rx_follower_identity_o      : out std_logic_vector(79 downto 0);
 
         send_delay_resp_o         : out std_logic;
@@ -34,8 +34,8 @@ entity ptpv2_parser is
 
         send_delay_req_o         : out std_logic;
 
-        tx_timestamp_seconds_i     : in std_logic_vector(3 downto 0);
-        tx_timestamp_nanoseconds_i : in std_logic_vector(31 downto 0);
+        tx_timestamp_seconds_i     : in unsigned(3 downto 0);
+        tx_timestamp_nanoseconds_i : in unsigned(29 downto 0);
         t3_valid_i                 : in std_logic;
 
         src_mac_address		: in std_logic_vector(47 downto 0);
@@ -49,8 +49,8 @@ entity ptpv2_parser is
 
         clock_set_o            : out std_logic;
         clock_configured_o   : out std_logic;
-        clock_configure_timestamp_seconds_o     : out std_logic_vector(47 downto 0);
-        clock_configure_timestamp_nanoseconds_o : out std_logic_vector(31 downto 0); 
+        clock_configure_timestamp_seconds_o     : out unsigned(47 downto 0);
+        clock_configure_timestamp_nanoseconds_o : out unsigned(29 downto 0); 
         ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
         ptp_is_follower_i : in std_logic;
         ptp_locked_i : in std_logic;
@@ -169,22 +169,19 @@ architecture Behavioral of ptpv2_parser is
     signal delta_m2s_reg : signed(31 downto 0) := (others => '0');  -- T2 - T1
     signal delta_s2m_reg : signed(31 downto 0) := (others => '0');  -- T4 - T3
 
-    -- ============================================================
-    -- PTP Calculation Function (DSP-FREE, 32-bit VERSION)
-    -- ============================================================
     function timestamp_diff_ns(
-        sec_a  : std_logic_vector(3 downto 0);
-        ns_a   : std_logic_vector(31 downto 0);
-        sec_b  : std_logic_vector(3 downto 0);
-        ns_b   : std_logic_vector(31 downto 0)
+        sec_a  : unsigned(3 downto 0);
+        ns_a   : unsigned(29 downto 0);
+        sec_b  : unsigned(3 downto 0);
+        ns_b   : unsigned(29 downto 0)
     ) return signed is
         variable sec_diff    : signed(4 downto 0);
-        variable ns_diff     : signed(32 downto 0);
+        variable ns_diff     : signed(30 downto 0);
         variable sec_as_ns   : signed(31 downto 0);
         variable result      : signed(31 downto 0);
     begin
         sec_diff := resize(signed('0' & sec_a), 5) - resize(signed('0' & sec_b), 5);
-        ns_diff := resize(signed('0' & ns_a), 33) - resize(signed('0' & ns_b), 33);
+        ns_diff := resize(signed('0' & ns_a), 31) - resize(signed('0' & ns_b), 31);
         
         case to_integer(sec_diff) is
             when  0 => sec_as_ns := (others => '0');
@@ -238,8 +235,8 @@ architecture Behavioral of ptpv2_parser is
     signal ptp_control_field: std_logic_vector(7 downto 0);
     signal ptp_log_msg_interval: std_logic_vector(7 downto 0);
     signal ptp_version: std_logic_vector(3 downto 0);
-    signal ptp_origin_timestamp_seconds: std_logic_vector(47 downto 0);
-    signal ptp_origin_timestamp_nanoseconds: std_logic_vector(31 downto 0);
+    signal ptp_origin_timestamp_seconds: STD_LOGIC_VECTOR(47 downto 0);
+    signal ptp_origin_timestamp_nanoseconds: STD_LOGIC_VECTOR(29 downto 0);
     signal ptp_requesting_port_identity : STD_LOGIC_VECTOR(79 downto 0);
     signal active_sequence_id: STD_LOGIC_VECTOR(15 downto 0);
  
@@ -250,17 +247,17 @@ architecture Behavioral of ptpv2_parser is
 
     
     -- PTP Timestamp Storage
-    signal stored_t1_seconds     : std_logic_vector(47 downto 0) := (others => '0');
-    signal stored_t1_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t2_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t2_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t3_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t3_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
-    signal stored_t4_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal stored_t4_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal stored_t1_seconds     : unsigned(47 downto 0) := (others => '0');
+    signal stored_t1_nanoseconds : unsigned(29 downto 0) := (others => '0');
+    signal stored_t2_seconds     : unsigned(3 downto 0) := (others => '0');
+    signal stored_t2_nanoseconds : unsigned(29 downto 0) := (others => '0');
+    signal stored_t3_seconds     : unsigned(3 downto 0) := (others => '0');
+    signal stored_t3_nanoseconds : unsigned(29 downto 0) := (others => '0');
+    signal stored_t4_seconds     : unsigned(3 downto 0) := (others => '0');
+    signal stored_t4_nanoseconds : unsigned(29 downto 0) := (others => '0');
     
-    signal latched_rx_timestamp_seconds     : std_logic_vector(3 downto 0) := (others => '0');
-    signal latched_rx_timestamp_nanoseconds : std_logic_vector(31 downto 0) := (others => '0');
+    signal latched_rx_timestamp_seconds     : unsigned(3 downto 0) := (others => '0');
+    signal latched_rx_timestamp_nanoseconds : unsigned(29 downto 0) := (others => '0');
     signal configure_wait_cycle: unsigned (2 downto 0) := (others => '0') ;
     
     
@@ -323,13 +320,13 @@ begin
             elsif (s_SM_ClockConfigurator = s_ClockSet_Apply) then
                 -- Takt 2: Clock setzen auf T1 + elapsed_ns (mit Sekunden-Carry)
                 if (ns_sum >= unsigned(ONE_SECOND_NS_POS)) then
-                    clock_configure_timestamp_nanoseconds_o <= std_logic_vector(
-                        ns_sum - unsigned(ONE_SECOND_NS_POS));
+                    clock_configure_timestamp_nanoseconds_o <= resize(
+                        ns_sum - unsigned(ONE_SECOND_NS_POS), 30);
                     clock_configure_timestamp_seconds_o <=
-                        std_logic_vector(unsigned(stored_t1_seconds) + 1);
+                        unsigned(stored_t1_seconds) + 1;
                 else
                     clock_configure_timestamp_nanoseconds_o <=
-                        std_logic_vector(ns_sum);
+                        resize(ns_sum, 30);
                     clock_configure_timestamp_seconds_o <= stored_t1_seconds;
                 end if;
                 s_SM_ClockConfigurator <= s_ClockSet_Apply2;
@@ -420,7 +417,7 @@ begin
                     when 79 => ptp_origin_timestamp_seconds(23 downto 16) <= rx_data_i;
                     when 80 => ptp_origin_timestamp_seconds(15 downto 8) <= rx_data_i;
                     when 81 => ptp_origin_timestamp_seconds(7 downto 0) <= rx_data_i;
-                    when 82 => ptp_origin_timestamp_nanoseconds(31 downto 24) <= rx_data_i;
+                    when 82 => ptp_origin_timestamp_nanoseconds(29 downto 24) <= rx_data_i(5 downto 0);
                     when 83 => ptp_origin_timestamp_nanoseconds(23 downto 16) <= rx_data_i;
                     when 84 => ptp_origin_timestamp_nanoseconds(15 downto 8) <= rx_data_i;
                     when 85 => 
@@ -599,12 +596,12 @@ begin
                                 if ptp_sequence_id = active_sequence_id then
                                     if (clock_configured = '0') then
                                         -- Store T1 for clock set, then compute elapsed time compensation
-                                        stored_t1_seconds <= ptp_origin_timestamp_seconds;
-                                        stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
+                                        stored_t1_seconds <= unsigned(ptp_origin_timestamp_seconds);
+                                        stored_t1_nanoseconds <= unsigned(ptp_origin_timestamp_nanoseconds);
                                         configureClock <= '1';
                                     else
-                                        stored_t1_seconds <= ptp_origin_timestamp_seconds;
-                                        stored_t1_nanoseconds <= ptp_origin_timestamp_nanoseconds;
+                                        stored_t1_seconds <=unsigned(ptp_origin_timestamp_seconds);
+                                        stored_t1_nanoseconds <= unsigned(ptp_origin_timestamp_nanoseconds);
                                         sequence_id_o <= ptp_sequence_id;
                                         send_delay_req_o <= '1';
                                         s_SM_PtpParser <= s_Done;
@@ -620,8 +617,8 @@ begin
                             -- Delay_resp Message
                             if (is_leader = '0' and ptp_is_follower_i = '1') then
                                 if ptp_sequence_id = active_sequence_id and ptp_requesting_port_identity = my_clock_id then
-                                    stored_t4_seconds <= ptp_origin_timestamp_seconds(3 downto 0);
-                                    stored_t4_nanoseconds <= ptp_origin_timestamp_nanoseconds;
+                                    stored_t4_seconds <= unsigned(ptp_origin_timestamp_seconds(3 downto 0));
+                                    stored_t4_nanoseconds <= unsigned(ptp_origin_timestamp_nanoseconds);
                                     s_SM_PtpParser <= s_Calc_Stage1;
                                 else
                                     s_SM_PtpParser <= s_Done;

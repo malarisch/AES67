@@ -27,7 +27,7 @@ entity ptpv2_sender is
 		sequence_id			: in unsigned(15 downto 0);
 
 		timestamp_seconds_i : in unsigned(47 downto 0);
-		timestamp_nanoseconds_i : in unsigned(31 downto 0);
+		timestamp_nanoseconds_i : in unsigned(29 downto 0);
 
 		request_port_identity : in std_logic_vector(79 downto 0);
 
@@ -130,7 +130,7 @@ architecture Behavioral of ptpv2_sender is
 		pkt_cnt        : unsigned(15 downto 0);
 		seq_id         : unsigned(15 downto 0);
 		ts_sec         : unsigned(47 downto 0);
-		ts_nsec        : unsigned(31 downto 0);
+		ts_nsec        : unsigned(29 downto 0);
 		req_port_id    : std_logic_vector(79 downto 0);
 		udp_payload_len : integer;
 		log_interval   : std_logic_vector(7 downto 0);
@@ -260,7 +260,7 @@ architecture Behavioral of ptpv2_sender is
 			when 79 => return std_logic_vector(ts_sec(23 downto 16));
 			when 80 => return std_logic_vector(ts_sec(15 downto 8));
 			when 81 => return std_logic_vector(ts_sec(7 downto 0));
-			when 82 => return std_logic_vector(ts_nsec(31 downto 24));
+			when 82 => return std_logic_vector(resize(ts_nsec(29 downto 24), 8));
 			when 83 => return std_logic_vector(ts_nsec(23 downto 16));
 			when 84 => return std_logic_vector(ts_nsec(15 downto 8));
 			when 85 => return std_logic_vector(ts_nsec(7 downto 0));
@@ -446,7 +446,7 @@ architecture Behavioral of ptpv2_sender is
 	signal cap_message_type_raw : std_logic_vector(3 downto 0) := (others => '0');
 	signal cap_sequence_id      : unsigned(15 downto 0) := (others => '0');
 	signal cap_timestamp_sec    : unsigned(47 downto 0) := (others => '0');
-	signal cap_timestamp_nsec   : unsigned(31 downto 0) := (others => '0');
+	signal cap_timestamp_nsec   : unsigned(29 downto 0) := (others => '0');
 	signal cap_req_port_id      : std_logic_vector(79 downto 0) := (others => '0');
 	signal cap_log_interval     : std_logic_vector(7 downto 0) := (others => '0');
 	signal cap_time_source      : std_logic_vector(7 downto 0) := (others => '0');

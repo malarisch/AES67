@@ -119,10 +119,10 @@ SIGNAL	rx_follower_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	rx_send_delay_req :  STD_LOGIC;
 SIGNAL	rx_send_delay_resp :  STD_LOGIC;
 SIGNAL	rx_sequence_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	rx_timestamp_ns :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	rx_timestamp_ns :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	rx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
-SIGNAL	rx_ts_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	rx_ts_s :  STD_LOGIC_VECTOR(3 DOWNTO 0);
+SIGNAL	rx_ts_ns :  unsigned(29 DOWNTO 0);
+SIGNAL	rx_ts_s :  UNSIGNED(3 DOWNTO 0);
 SIGNAL	second_pulse_sys_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	tx_en_ptpfu_ALTERA_SYNTHESIZED :  STD_LOGIC;
 SIGNAL	tx_frame_start :  STD_LOGIC;
@@ -131,18 +131,18 @@ SIGNAL	tx_ptp_log_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_req_port_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	tx_seq_id :  UNSIGNED(15 DOWNTO 0);
 SIGNAL	tx_t3_valid :  STD_LOGIC;
-SIGNAL	tx_timestamp_ns :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	tx_timestamp_ns :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	tx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
-SIGNAL	timestamp_ns :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	timestamp_ns :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	timestamp_s :  UNSIGNED(47 DOWNTO 0);
-SIGNAL	wallclock_nanoseconds :  UNSIGNED(31 DOWNTO 0);
+SIGNAL	wallclock_nanoseconds :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	ptp_ram_addr_u :  UNSIGNED(10 DOWNTO 0);
 SIGNAL	media_clock_u :  UNSIGNED(31 DOWNTO 0);
 SIGNAL	servo_request_clock_reconfigure :  STD_LOGIC;
 SIGNAL	wallclock_seconds :  UNSIGNED(47 DOWNTO 0);
 SIGNAL	wallclock_set :  STD_LOGIC;
-SIGNAL	wallclock_set_ns :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	wallclock_set_s :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	wallclock_set_ns :  unsigned(29 DOWNTO 0);
+SIGNAL	wallclock_set_s :  unsigned(47 DOWNTO 0);
 
 SIGNAL tx_done_sys: STD_LOGIC := '0';
 SIGNAL ms_pulse_sys : STD_LOGIC;
@@ -200,8 +200,8 @@ PORT MAP(clk => sys_clk,
 		 ptp_announce_log_message_interval_i => ptp_announce_interval,
 		 ptp_log_message_interval_i => ptp_log_message_interval,
 		 request_port_identity_i => rx_follower_identity,
-		 rx_timestamp_nanoseconds_i => unsigned(rx_ts_ns),
-		 rx_timestamp_seconds_i => unsigned(rx_ts_s),
+		 rx_timestamp_nanoseconds_i => rx_ts_ns,
+		 rx_timestamp_seconds_i => rx_ts_s,
 		 sequence_id_i => unsigned(rx_sequence_id),
 		 wallclock_nanoseconds_i => wallclock_nanoseconds,
 		 wallclock_seconds_i => wallclock_seconds,
@@ -263,11 +263,11 @@ PORT MAP(clk => sys_clk,
 		 min_filter_enable_i => parser_min_filter_enable_i,
 		 min_filter_active_depth_i => parser_min_filter_active_depth_i,
 		 delay_asymmetry_ns_i => parser_delay_asymmetry_ns_i,
-		 rx_timestamp_nanoseconds_i => std_logic_vector(rx_timestamp_ns),
-		 rx_timestamp_seconds_i => std_logic_vector(rx_timestamp_s),
+		 rx_timestamp_nanoseconds_i => rx_timestamp_ns,
+		 rx_timestamp_seconds_i => rx_timestamp_s,
 		 src_mac_address => mac_address,
-		 tx_timestamp_nanoseconds_i => std_logic_vector(tx_timestamp_ns),
-		 tx_timestamp_seconds_i => std_logic_vector(tx_timestamp_s),
+		 tx_timestamp_nanoseconds_i => tx_timestamp_ns,
+		 tx_timestamp_seconds_i => tx_timestamp_s,
 		 send_delay_resp_o => rx_send_delay_resp,
 		 send_delay_req_o => rx_send_delay_req,
 		 ptp_calc_valid_o => ptp_calc_valid,

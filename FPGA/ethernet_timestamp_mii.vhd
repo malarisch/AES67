@@ -20,9 +20,9 @@ entity ethernet_timestamp_mii is
         reset_n			: in std_logic;
         
         wallclock_seconds_i : in unsigned(3 downto 0);
-        wallclock_nanoseconds_i : in unsigned(31 downto 0);
+        wallclock_nanoseconds_i : in unsigned(29 downto 0);
         timestamp_seconds_o	: out unsigned(3 downto 0);
-        timestamp_nanoseconds_o : out unsigned(31 downto 0);
+        timestamp_nanoseconds_o : out unsigned(29 downto 0);
         mii_in : in STD_LOGIC_VECTOR(MII_WIDTH-1 downto 0);
         mii_en_in : in STD_LOGIC
 
@@ -43,7 +43,7 @@ architecture Behavioral of ethernet_timestamp_mii is
 
     signal s_reg : UNSIGNED(3 downto 0);
     signal stamp_valid : std_logic := '0';
-    signal adjusted : integer;
+    signal adjusted : integer range -(PIPELINE_LATENCY - MII_LATENCY) to 1e9 + PIPELINE_LATENCY - MII_LATENCY;
     signal mii_en_prev : std_logic;
     signal mii_data_prev : STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
 
@@ -148,13 +148,13 @@ end generate;
         if rising_edge(sys_clk_i) then
             if (stamp_valid = '1') then
                 if adjusted >= 1000000000 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 32);
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 30);
                     timestamp_seconds_o     <= s_reg + 1;
                 elsif adjusted < 0 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 32);
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 30);
                     timestamp_seconds_o     <= s_reg - 1;
                 else
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 32);
+                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 30);
                     timestamp_seconds_o     <= s_reg;
                 end if;
             end if;

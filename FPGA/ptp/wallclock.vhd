@@ -17,11 +17,11 @@ entity wallclock is
         reset_n                 : in  std_logic;
 
         wallclock_seconds_o     : out unsigned(47 downto 0);
-        wallclock_nanoseconds_o : out unsigned(31 downto 0);
+        wallclock_nanoseconds_o : out unsigned(29 downto 0);
 
         wallclock_set_i         : in  std_logic;
         wallclock_seconds_i     : in  unsigned(47 downto 0);
-        wallclock_nanoseconds_i : in  unsigned(31 downto 0);
+        wallclock_nanoseconds_i : in  unsigned(29 downto 0);
 
         -- PTP Servo correction inputs
         freq_correction_ppb_i   : in  signed(19 downto 0);  -- PPB correction (parts per billion, clamped to ±500_000 by servo)
@@ -169,8 +169,8 @@ architecture Behavioral of wallclock is
     signal nco_phase      : unsigned(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
     signal nco_increment  : signed(NCO_PHASE_BITS - 1 downto 0) := NCO_BASE_INC_48;
-    signal phase_err  : signed(10 downto 0);
-    signal trim_next  : signed(NCO_PHASE_BITS - 1 downto 0);
+    signal phase_err  : signed(10 downto 0) := (others => '0');
+    signal trim_next  : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     signal phase_error_valid: std_logic := '0';
 
     -- Pipeline register to break freq_correction → nco_increment critical path
@@ -220,7 +220,7 @@ architecture Behavioral of wallclock is
                             * 256.0 + 0.5), 26);
 
     signal media_clock_reg  : unsigned(31 downto 0) := (others => '0');
-    signal media_clock_nsec_latch : UNSIGNED(29 downto 0);
+    signal media_clock_nsec_latch : UNSIGNED(29 downto 0) := (others => '0');
     -- 32-bit nsec * 26-bit RECIP = 58-bit product
     signal media_mult_reg   : unsigned(55 downto 0) := (others => '0');
     signal media_base       : unsigned(31 downto 0) := (others => '0');
@@ -267,7 +267,7 @@ architecture Behavioral of wallclock is
 begin
 
     -- Output assignments
-    wallclock_nanoseconds_o <= unsigned(nsec_reg);
+    wallclock_nanoseconds_o <= unsigned(nsec_reg)(29 downto 0);
     wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
     audio_mclk_o            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
@@ -694,11 +694,11 @@ begin
             -- ===== OVERRIDE PATHS =====
             if wallclock_set_i = '1' then
                 -- Hard set of time — overrides everything
-                nsec_reg      <= signed(wallclock_nanoseconds_i);
+                nsec_reg      <= signed(resize(wallclock_nanoseconds_i, 32));
                 sec_reg       <= wallclock_seconds_i;
-                new_nsec_pipe  <= signed(wallclock_nanoseconds_i);
-                new_nsec_minus_sec <= signed(wallclock_nanoseconds_i) - NS_PER_SEC;
-                new_nsec_plus_sec  <= signed(wallclock_nanoseconds_i) + NS_PER_SEC;
+                new_nsec_pipe  <= signed(resize(wallclock_nanoseconds_i, 32));
+                new_nsec_minus_sec <= signed(resize(wallclock_nanoseconds_i, 32)) - NS_PER_SEC;
+                new_nsec_plus_sec  <= signed(resize(wallclock_nanoseconds_i, 32)) + NS_PER_SEC;
                 sec_adj_pipe   <= 0;
 
             
