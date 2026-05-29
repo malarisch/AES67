@@ -104,6 +104,10 @@ architecture Behavioral of rx_ringbuffer is
 
     -- Read pointer: derived from media_clock to maintain fixed offset from write pointer
     signal sample_rd_ptr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
+    -- Frame-stable snapshot of sample_rd_ptr for the TDM-output fetch FSM. Latched
+    -- once per frame at fs sync so the read address can't jump by SAMPLE_STRIDE
+    -- mid-readout when media_clock ticks over (parallel path uses playout_rd_base).
+    signal sample_rd_base : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
 
     -- Synchronous read port for sample_ram
     signal sample_rd_addr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
@@ -630,8 +634,9 @@ parellel_out_proc_gen: if (PARALLEL_OUT = true) generate
 end generate;
 
 tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
-    -- Base read pointer follows the media clock (same scheme as parallel path).
     sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+
+
 
     -- Counters and ticks.
     --   tdm_byte_tick at bit_counter(2:0) = 0 -> start prefetch of the byte
@@ -703,6 +708,15 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
                         tdm_fetch_pin_idx <= 0;
                         v_ch_global := 0 * TDM_CHANNELS + to_integer(v_next_ch);
+                        -- "+1" is REQUIRED here (verified on hardware): removing it
+                        -- shifts the whole TDM stream one byte early, so the wire
+                        -- carries [pad ch(N-1)][MSB ch0][mid ch0][LSB ch0]... .
+                        -- This branch is NOT latency-symmetric with tfs_capture: it
+                        -- only issues the address once tdm_byte_tick arrives, and
+                        -- that tick is itself registered one cycle behind the bclk
+                        -- edge in tdm_out_ctrl_proc, so pin 0's read needs to point
+                        -- one byte further ahead than the tfs_capture pins to land
+                        -- in the same wire byte slot. DO NOT remove this +1.
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
                             + resize(v_off, ADDR_BITS) + 1;
@@ -746,12 +760,9 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
     -- Serial output: shift MSB-first out of each latched byte.
     tdmoutgen : for i in 0 to TDM_OUTPUTS - 1 generate
-        process (sys_clk)
-        begin
-           if rising_edge(sys_clk) then
+
                 tdm_out(i) <= tdm_byte_latch(i)(7 - to_integer(tdm_channel_bit_counter(2 downto 0)));
-           end if;
-        end process;
+
     end generate;
 end generate;
 

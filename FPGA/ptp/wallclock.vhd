@@ -267,7 +267,12 @@ architecture Behavioral of wallclock is
 begin
 
     -- Output assignments
-    wallclock_nanoseconds_o <= unsigned(nsec_reg)(29 downto 0);
+    -- Take the low 30 bits of nsec_reg. resize() of an unsigned keeps the
+    -- least-significant bits, so this is bit-identical to the old
+    -- unsigned(nsec_reg)(29 downto 0) slice -- but slicing the result of a
+    -- type conversion is illegal in strict VHDL (GHDL rejects it), whereas
+    -- resize() is portable across GHDL / ModelSim / Quartus.
+    wallclock_nanoseconds_o <= resize(unsigned(nsec_reg), 30);
     wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
     audio_mclk_o            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz

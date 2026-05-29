@@ -509,7 +509,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 -- clocking
 		fs_clk_sync_i => pll_48k_fs_tdm,
-		bclk_sync_i => pll_256fs_rising,
+		bclk_sync_i => pll_256fs_falling,
 		media_clock_i => media_clock,
 		 
 		 -- configuration
