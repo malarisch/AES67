@@ -26,7 +26,11 @@ ENTITY audio_tx_module IS
 			global_channel_count : INTEGER := 16;
 			max_streams : INTEGER := 8;
 			samples_per_channel_depth : INTEGER := 48;
-			ENABLE_METERING : BOOLEAN := true
+			ENABLE_METERING : BOOLEAN := true;
+			-- TDM serial input frontend (forwarded to tx_sample_buffer)
+			TDM_INPUT : BOOLEAN := true;
+			TDM_INPUTS : INTEGER := 2;
+			TDM_CHANNELS : INTEGER := 8
 	);
 	PORT
 	(
@@ -42,7 +46,10 @@ ENTITY audio_tx_module IS
 		metering_clear_i :  IN  STD_LOGIC;
 		cfg_wr_addr_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		cfg_wr_data_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
-		audio_i : IN STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0);
+		audio_i : IN STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0) := (others => '0');
+		-- TDM serial input (only used when TDM_INPUT=true)
+		bclk_i : IN STD_LOGIC := '0';
+		tdm_in_i : IN STD_LOGIC_VECTOR(TDM_INPUTS - 1 downto 0) := (others => '0');
 		ip_addr_i :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		mac_addr_i :  IN  STD_LOGIC_VECTOR(47 DOWNTO 0);
 		media_clock_i :  IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -113,11 +120,17 @@ PORT MAP(sys_clk_i => sys_clk,
 b2v_tx_sample_buffer : entity work.tx_sample_buffer
 GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			global_channel_count => global_channel_count,
-			samples_per_channel_depth => samples_per_channel_depth
+			samples_per_channel_depth => samples_per_channel_depth,
+			ENABLE_METERING => ENABLE_METERING,
+			TDM_INPUT => TDM_INPUT,
+			TDM_INPUTS => TDM_INPUTS,
+			TDM_CHANNELS => TDM_CHANNELS
 			)
 PORT MAP(sys_clk => sys_clk,
 		 reset_n => rst_n,
 		 fs_clk_i => fs_clk_i,
+		 bclk_sync_i => bclk_i,
+		 tdm_in => tdm_in_i,
 		 metering_clear_i => metering_clear_i,
 		 audio_in => audio_i,
 		 read0Addr => unsigned(sample_ram_read_addr),

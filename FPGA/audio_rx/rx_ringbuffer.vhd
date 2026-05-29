@@ -705,7 +705,7 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                         v_ch_global := 0 * TDM_CHANNELS + to_integer(v_next_ch);
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
-                            + resize(v_off, ADDR_BITS);
+                            + resize(v_off, ADDR_BITS) + 1;
                         tdm_fetch_state <= tfs_addr_wait;
                     end if;
 
@@ -748,9 +748,9 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
     tdmoutgen : for i in 0 to TDM_OUTPUTS - 1 generate
         process (sys_clk)
         begin
-            if rising_edge(sys_clk) then
+           if rising_edge(sys_clk) then
                 tdm_out(i) <= tdm_byte_latch(i)(7 - to_integer(tdm_channel_bit_counter(2 downto 0)));
-            end if;
+           end if;
         end process;
     end generate;
 end generate;

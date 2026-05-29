@@ -66,7 +66,15 @@ architecture Behavioral of tx_transmitter is
 	-- calc dynamically constant UDP_PAYLOAD_LENGTH	: integer := AUDIO_START_SIGNAL + AUDIO_BUFFER_LENGTH; -- 8 start-bytes + x bytes for audio
 	-- calc dynammically constant PACKET_LENGTH			: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH;
 	constant PACKET_HEADER_LENGTH	: integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL;
-	constant AUDIO_BUFFER_LENGTH	: integer := samples_per_channel_depth * global_channel_count * bytes_per_sample * 2;
+
+	-- Two distinct strides (see tx_sample_buffer): the RAM stores 4-byte slots
+	-- (power of two -> address shifts), but the RTP wire payload stays L24 = 3
+	-- bytes per sample. SLOT_BYTES drives RAM addressing; WIRE_BYTES drives the
+	-- payload length and the per-sample byte iteration count.
+	constant SLOT_BYTES				: integer := 4;
+	constant WIRE_BYTES				: integer := bytes_per_sample; -- 3 (L24)
+	-- Must match tx_sample_buffer's AUDIO_BUFFER_LENGTH exactly.
+	constant AUDIO_BUFFER_LENGTH	: integer := samples_per_channel_depth * global_channel_count * SLOT_BYTES * 2;
 
     signal PACKET_LENGTH : integer := 0;
     signal PACKET_LENGTH_MINUS_1 : integer := 0; -- Pre-computed to break comparison critical path
@@ -354,17 +362,20 @@ begin
                         -- Pipeline Stage 1: compute samples * channels (breaks critical path)
                         audio_samples_x_channels <= to_integer(unsigned(samples_per_packet_per_channel_i)) * to_integer(unsigned(channel_count_i));
                     end if;
-                -- Pipeline Stage 2: multiply by bytes_per_sample and compute final lengths
+                -- Pipeline Stage 2: multiply by WIRE_BYTES (L24=3) and compute final
+                -- lengths. The payload is on the wire, so it uses WIRE_BYTES, not the
+                -- 4-byte RAM slot stride.
                 when s_A_CalcAudioLen =>
-                    audio_data_length <= audio_samples_x_channels * bytes_per_sample;
-                    UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample;
-                    PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample;
+                    audio_data_length <= audio_samples_x_channels * WIRE_BYTES;
+                    UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + audio_samples_x_channels * WIRE_BYTES;
+                    PACKET_LENGTH <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * WIRE_BYTES;
                     -- Pre-compute PACKET_LENGTH - 1 to remove subtraction from critical comparison path
-                    PACKET_LENGTH_MINUS_1 <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * bytes_per_sample - 1;
+                    PACKET_LENGTH_MINUS_1 <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH + AUDIO_START_SIGNAL + audio_samples_x_channels * WIRE_BYTES - 1;
                     SM_AssemblePacket <= s_A_CalcValues;
                 when s_A_CalcValues =>
-						-- Compute read base: go back samples_per_packet sample periods from write pointer
-						rd_offset := to_integer(unsigned(samples_per_packet_per_channel_i)) * global_channel_count * bytes_per_sample;
+						-- Compute read base: go back samples_per_packet sample periods from write pointer.
+						-- RAM addressing uses the 4-byte slot stride.
+						rd_offset := to_integer(unsigned(samples_per_packet_per_channel_i)) * global_channel_count * SLOT_BYTES;
 						if to_integer(unsigned(sample_buffer_tx_start_addr_i)) >= rd_offset then
 							read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset;
 						else
@@ -434,11 +445,11 @@ begin
 							-- Pipeline Stage 1 setup: Initialize for first byte (MSB of ch0, sample 0)
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
 							sample_base_addr <= 0;  -- sample_index=0, so base=0
-							byte_offset_reg <= bytes_per_sample - 1;  -- MSB first
+							byte_offset_reg <= 0;  -- MSB first @ slot offset 0 (linear layout)
 						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 3) then
 							-- Pipeline Stage 2: Compute address for first byte
-							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
+							raw_addr := read_base + sample_base_addr + ch_id_reg * SLOT_BYTES + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
@@ -446,13 +457,13 @@ begin
 							-- Setup Stage 1 for second byte
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
 							sample_base_addr <= 0;
-							byte_offset_reg <= bytes_per_sample - 2;  -- middle byte
+							byte_offset_reg <= 1;  -- middle byte @ +1
 						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 2) then
 							-- Stage 3: Output first address to RAM
 							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
 							-- Pipeline Stage 2: Compute address for second byte
-							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
+							raw_addr := read_base + sample_base_addr + ch_id_reg * SLOT_BYTES + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
@@ -460,13 +471,13 @@ begin
 							-- Setup Stage 1 for third byte
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(63 downto 56)));
 							sample_base_addr <= 0;
-							byte_offset_reg <= 0;  -- LSB byte
+							byte_offset_reg <= 2;  -- LSB byte @ +2
 						end if;
 						if (frame_write_index = PACKET_HEADER_LENGTH - 1) then
 							-- Stage 4: RAM is now reading first byte; output second address
 							sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
 							-- Pipeline Stage 2: Compute address for third byte (ch0 LSB)
-							raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
+							raw_addr := read_base + sample_base_addr + ch_id_reg * SLOT_BYTES + byte_offset_reg;
 							if raw_addr >= AUDIO_BUFFER_LENGTH then
 								raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 							end if;
@@ -474,7 +485,7 @@ begin
 							-- Setup Stage 1 for fourth byte (ch1 MSB)
 							ch_id_reg <= to_integer(unsigned(ch_ids_i(55 downto 48)));
 							sample_base_addr <= 0;
-							byte_offset_reg <= bytes_per_sample - 1;  -- MSB
+							byte_offset_reg <= 0;  -- MSB @ offset 0 (next channel)
 							-- next_* at HEADER-1 feeds Stage 1 at HEADER, result appears at PI=4 (ch1 MID)
                             next_byte_counter <= 1;
                             next_channel_counter <= 1;
@@ -491,7 +502,7 @@ begin
 						sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
 						
 						-- Stage 2 COMPUTE: Use registered ch_id and base from Stage 1
-						raw_addr := read_base + sample_base_addr + ch_id_reg * bytes_per_sample + byte_offset_reg;
+						raw_addr := read_base + sample_base_addr + ch_id_reg * SLOT_BYTES + byte_offset_reg;
 						if raw_addr >= AUDIO_BUFFER_LENGTH then
 							raw_addr := raw_addr - AUDIO_BUFFER_LENGTH;
 						end if;
@@ -509,8 +520,9 @@ begin
 							when 7 => ch_id_reg <= to_integer(unsigned(ch_ids_i(7 downto 0)));
 							when others => ch_id_reg <= 0;
 						end case;
-						sample_base_addr <= next_sample_index * global_channel_count * bytes_per_sample;
-						byte_offset_reg <= bytes_per_sample - 1 - next_byte_counter;
+						sample_base_addr <= next_sample_index * global_channel_count * SLOT_BYTES;
+						-- Linear slot layout: byte 0=MSB@+0, 1=mid@+1, 2=LSB@+2.
+						byte_offset_reg <= next_byte_counter;
 
 						-- Update current counters (lagging behind look-ahead by 1)
 						byte_counter <= next_byte_counter;

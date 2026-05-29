@@ -29,6 +29,9 @@ ENTITY aes67_top IS
 		AUDIO_INPUT_MODE : string := "tdm8";
 		AUDIO_OUTPUT_MODE : string := "tdm8";
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := FALSE;
+		-- TX TDM frontend: FALSE = demux integrated in tx_sample_buffer (default),
+		-- TRUE = legacy external tdm8_in -> parallel audio_i bus.
+		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := FALSE;
 		USE_EXTERNAL_PLL : BOOLEAN := true;
 		ENABLE_METERING: BOOLEAN := true
 
@@ -208,6 +211,12 @@ signal mac_linkup : STD_LOGIC;
 signal rx_sample_register : STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
 signal tx_sample_register : STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0);
 
+-- TX TDM frontend is integrated in tx_sample_buffer when in tdm8 mode and the
+-- legacy parallel interface is not forced.
+constant TX_TDM_INTEGRATED : boolean := (AUDIO_INPUT_MODE = "tdm8" and AUDIO_TX_USE_PARALLEL_INTERFACE = false);
+-- Frame sync feeding the TX buffer: TDM fsync when integrated, else regular fs.
+
+
 
 signal mac_tx_clock : STD_LOGIC;
 signal mac_rx_clock : STD_LOGIC;
@@ -317,13 +326,22 @@ GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			global_channel_count => TX_CHANNELS,
 			samples_per_channel_depth => TX_SAMPLE_BUFFER_DEPTH,
 			max_streams => TX_MAX_STREAMS,
-			ENABLE_METERING => ENABLE_METERING
+			ENABLE_METERING => ENABLE_METERING,
+			-- TDM demux integrated unless the legacy parallel interface is forced.
+			TDM_INPUT => TX_TDM_INTEGRATED,
+			TDM_INPUTS => TX_CHANNELS / 8,
+			TDM_CHANNELS => 8
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ctrl_plane_clk => clk_mcu_i,
 		 rst_n => rst_n,
-		 fs_clk_i => pll_48k_fs,
-		 
+		 -- In integrated TDM mode the buffer's frame sync must be the TDM fsync
+		 -- (pll_48k_fs_tdm), matching what the external tdm8_in used; the parallel
+		 -- capture path uses the regular pll_48k_fs.
+		 fs_clk_i => pll_48k_fs_tdm,
+		 bclk_i => pll_256fs_rising,
+		 tdm_in_i => tdm8in_i(TX_CHANNELS/8 - 1 downto 0),
+
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
@@ -491,7 +509,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 -- clocking
 		fs_clk_sync_i => pll_48k_fs_tdm,
-		bclk_sync_i => pll_256fs_falling,
+		bclk_sync_i => pll_256fs_rising,
 		media_clock_i => media_clock,
 		 
 		 -- configuration
@@ -516,43 +534,6 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 
 
-
-
--- generate tdm8 input modules
-gen_tdm8_in : if (AUDIO_INPUT_MODE = "tdm8") generate
-	tdm8demux : for i in 0 to (TX_CHANNELS / 8) - 1 generate
-		tdm8demux_inst: entity work.tdm8_in
-		GENERIC MAP(width => TX_BYTE_DEPTH * 8
-		)
-		PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_falling,
-		 DIN => tdm8in_i(i),
-		 RESET => rst_n,
-		 SYS_CLK => sys_clk_125MHz_i,
-		 data_out => tx_sample_register((TX_BYTE_DEPTH * 8 * 8) * (i + 1) - 1 downto (TX_BYTE_DEPTH * 8 * 8) * (i))
-		);
-	end generate;
-
-
-end generate;
-
-
--- generate tdm8 output modules
-gen_tdm8_out : if (AUDIO_OUTPUT_MODE = "tdm8" and AUDIO_RX_USE_PARALLEL_INTERFACE = true) generate
-	tdm8mux : for i in 0 to (RX_CHANNELS / 8) - 1 generate
-		tdm8mux_inst: entity work.tdm8_out
-		GENERIC MAP(width => RX_BYTE_DEPTH * 8
-		)
-		PORT MAP(FSYNC => pll_48k_fs_tdm,
-		 BIT_CLK => pll_256fs_falling,
-		 DOUT => tdm8out_o(i),
-		 RESET => rst_n,
-		 DIN => rx_sample_register((RX_BYTE_DEPTH * 8 * 8) * (i + 1) - 1 downto (RX_BYTE_DEPTH * 8 * 8) * (i))
-		);
-	end generate;
-
-
-end generate;
 
 
 
