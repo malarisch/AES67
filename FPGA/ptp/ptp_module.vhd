@@ -81,8 +81,6 @@ ENTITY ptp_module IS
 		servo_unlock_threshold_ns_i  : IN unsigned(31 downto 0);
 		servo_lock_count_threshold_i : IN unsigned(7 downto 0);
 
-		parser_min_filter_enable_i        : IN STD_LOGIC := '0';
-		parser_min_filter_active_depth_i  : IN unsigned(7 downto 0);
 
 		-- IEEE 1588 delayAsymmetry (ns, signed). Compensates PHY/MAC
 		-- TX vs RX latency mismatch. 0 = symmetric link.
@@ -191,7 +189,7 @@ b2v_controller : entity work.ptpv2_controller
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
 		 send_delay_resp_in => rx_send_delay_resp,
-		 wait_amount_i => unsigned(mac_address(6 downto 3)), -- just use some lower bits of the mac adress for wait timer since it's different for every device
+		 wait_amount_i => unsigned(mac_address(8 downto 3)), -- just use some lower bits of the mac adress for wait timer since it's different for every device
 		 ms_pulse_i => ms_pulse_sys,
 		 is_leader_i => eff_is_leader,
 		 is_follower_i => eff_is_follower,
@@ -250,18 +248,14 @@ PORT MAP(sys_clk => sys_clk,
 
 
 b2v_ptpparser :  entity work.ptpv2_parser
-GENERIC MAP(MIN_FILTER_DEPTH => 8
-			)
+
 PORT MAP(clk => sys_clk,
 		 is_leader => eff_is_leader,
 		 reset_n => powerGood,
 		 t3_valid_i => tx_t3_valid,
 		 ptp_is_follower_i => eff_is_follower,
-		 ptp_locked_i => ptp_locked_ALTERA_SYNTHESIZED,
 		 ptp_current_leader_id_i => eff_current_leader_id,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
-		 min_filter_enable_i => parser_min_filter_enable_i,
-		 min_filter_active_depth_i => parser_min_filter_active_depth_i,
 		 delay_asymmetry_ns_i => parser_delay_asymmetry_ns_i,
 		 rx_timestamp_nanoseconds_i => rx_timestamp_ns,
 		 rx_timestamp_seconds_i => rx_timestamp_s,

@@ -43,7 +43,15 @@ architecture Behavioral of tx_sample_buffer is
     signal current_channel_id : integer range 0 to global_channel_count - 1 := 0;
     signal write_active : std_logic := '0';
     signal byte_count : integer range 0 to bytes_per_sample - 1 := 0;
-    
+
+    -- Snapshot of audio_in taken atomically on the fs edge. The capture loop
+    -- below reads from this latch (not from the live audio_in bus) so that
+    -- mid-frame updates from the producer (rx_ringbuffer playout or tdm8_in)
+    -- cannot smear bytes between the old and new sample. Without this latch,
+    -- a single bit migrating between MSB and LSB position during capture
+    -- produces huge values -> audible white noise on louder material.
+    signal audio_in_latched : std_logic_vector(audio_in'range) := (others => '0');
+
     signal ram_wr_en : std_logic := '0';
     signal ram_wr_data : std_logic_vector(7 downto 0);
     signal ram_wr_addr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
@@ -174,6 +182,7 @@ begin
             ram_wr_en <= '0';
             ram_wr_data <= (others => '0');
             ram_wr_addr <= 0;
+            audio_in_latched <= (others => '0');
         elsif rising_edge(sys_clk) then
             
             -- Delay wr_ready by 1 clock: wr_ready_pending -> wr_ready_o
@@ -185,12 +194,17 @@ begin
 
 
             if (zaudio_sync = '0' and fs_clk_i_sync2 = '1') then
+                -- Atomic snapshot of the entire audio_in bus on the fs edge.
+                -- The capture loop below reads from audio_in_latched so the
+                -- producer can update audio_in mid-frame without corrupting
+                -- the sample being written to RAM.
+                audio_in_latched <= audio_in;
                 write_active <= '1';
             end if;
             if write_active = '1' then
 
-                
-                ram_wr_data <= audio_in((SAMPLE_BITS * (current_channel_id) + byte_count * 8 + 7)  downto (SAMPLE_BITS * current_channel_id ) + byte_count *8 );
+
+                ram_wr_data <= audio_in_latched((SAMPLE_BITS * (current_channel_id) + byte_count * 8 + 7)  downto (SAMPLE_BITS * current_channel_id ) + byte_count *8 );
                 ram_wr_addr <= sample_wr_ptr + current_channel_id * bytes_per_sample + byte_count;
                 ram_wr_en <= '1';
                 -- sample_ram(sample_wr_ptr + current_channel_id * bytes_per_sample + byte_count) <= data_latch(byte_count*8 + 7 downto byte_count*8);

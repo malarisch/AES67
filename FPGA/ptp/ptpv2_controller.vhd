@@ -18,7 +18,7 @@ entity ptpv2_controller is
         tx_timestamp_seconds_i     : in  unsigned(3 downto 0);
         rx_timestamp_nanoseconds_i : in  unsigned(29 downto 0);
         tx_timestamp_nanoseconds_i      : in unsigned(29 downto 0);
-        wait_amount_i               : in unsigned(3 downto 0);
+        wait_amount_i               : in unsigned(5 downto 0);
 
         sequence_id_i         : in  unsigned(15 downto 0);
         send_delay_resp_in        : in std_logic;
@@ -439,7 +439,7 @@ begin
                             send_delay_req_i_reg <= send_delay_req_i;
                         end if;
                     when f_WaitABit =>
-                        if (ms_counter(3 downto 0) = wait_amount_i) then 
+                        if (ms_counter(5 downto 0) = wait_amount_i) then
                             -- we need to wait a bit here since ptp4l does not like when two followers send delay requests at exactly
                             -- the same time - one of them will not get answered and ptp4l logs an error about receiving a packet without a timestamp (probably a linux driver bug? idk)
                             follower_state <= f_Send_Delay_Req;

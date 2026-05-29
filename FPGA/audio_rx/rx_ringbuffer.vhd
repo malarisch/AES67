@@ -9,7 +9,17 @@ entity rx_ringbuffer is
         global_channel_count : integer := 16; -- must be power of 2
         bytes_per_sample : integer := 3;
         max_streams : integer := 8;
-        ENABLE_METERING: BOOLEAN := true
+        ENABLE_METERING: BOOLEAN := true;
+        PARALLEL_OUT: BOOLEAN := true;
+        TDM_OUTPUTS:  integer := 2; -- amount of output pins
+        TDM_CHANNELS : integer := 8; -- tdm format, eg. 2, 8, 16
+
+        -- Simulation-only backdoor into sample_ram. When false (the default,
+        -- and the only synthesizable value) the dbg_* ports are unused and
+        -- the extra logic optimizes away. When true a testbench can write
+        -- known data into sample_ram and read it back to test the packet
+        -- parser and the playout paths independently. See rx_ringbuffer_tb.
+        SIM_SAMPLE_RAM_BACKDOOR : boolean := false
 
     );
 	port
@@ -18,7 +28,9 @@ entity rx_ringbuffer is
         reset_n                    : in std_logic;
 
         audio_out :             out std_logic_vector(bytes_per_sample * 8 * global_channel_count - 1 downto 0);
-		fs_clk_i      				: in std_logic;
+        tdm_out : out std_logic_vector(TDM_OUTPUTS - 1 downto 0);
+		fs_clk_sync_i      				: in std_logic;
+        bclk_sync_i : in std_logic;
 
 		media_clock_i: in std_logic_vector(31 downto 0);
 
@@ -33,7 +45,16 @@ entity rx_ringbuffer is
         stream_config_data_i: in std_logic_vector(7 downto 0);
         metering_signal_o : out std_logic_vector(global_channel_count - 1 downto 0);
         metering_clip_o : out std_logic_vector(global_channel_count - 1 downto 0);
-        metering_clear_i : in std_logic
+        metering_clear_i : in std_logic;
+
+        -- ===== Simulation backdoor into sample_ram (see SIM_SAMPLE_RAM_BACKDOOR) =====
+        -- Synchronous, byte-wide. Read has 1-cycle latency like the real RAM.
+        -- Tie off / leave open in synthesis.
+        dbg_wr_en_i   : in  std_logic := '0';
+        dbg_wr_addr_i : in  unsigned(13 downto 0) := (others => '0');
+        dbg_wr_data_i : in  std_logic_vector(7 downto 0) := (others => '0');
+        dbg_rd_addr_i : in  unsigned(13 downto 0) := (others => '0');
+        dbg_rd_data_o : out std_logic_vector(7 downto 0)
 	);
 end entity;
 
@@ -93,12 +114,11 @@ architecture Behavioral of rx_ringbuffer is
     signal sample_wr_data : std_logic_vector(7 downto 0) := (others => '0');
     signal sample_wr_en   : std_logic := '0';
 
-    signal fs_clk_i_sync1 : std_logic := '0';
-    signal fs_clk_i_sync2 : std_logic := '0';
     signal packet_ready_i_sync1 : std_logic := '0';
     signal packet_ready_i_sync2 : std_logic := '0';
     signal packet_ready_i_sync3 : std_logic := '0'; -- 3rd stage: toggle change detection
     signal zaudio_sync : std_logic := '0';
+    signal zbclk : std_logic := '0';
     signal byte_count_parser : integer range 0 to bytes_per_sample - 1 := 0;
     signal output_next_sample : std_logic := '0';
 
@@ -134,12 +154,38 @@ architecture Behavioral of rx_ringbuffer is
     signal cached_delay : unsigned(7 downto 0) := (others => '0');
 
     -- Cached channel map from stream_ram (avoids repeated stream_ram reads during parsing)
-    type t_channel_map is array (0 to 7) of unsigned(3 downto 0);
+    type t_channel_map is array (0 to 7) of unsigned(3 downto 0); -- hardcoded 8 channels per stream, as maximum per AES67 spec
     signal channel_map : t_channel_map := (others => (others => '0'));
     signal metering_clear_i_sync1 : std_logic := '0';
     signal metering_clear_i_sync2 : std_logic := '0';
     signal metering_clear_last : std_logic := '0';
+    
 
+    -- tdm output signals
+    type t_tdm_latch is array (0 to TDM_OUTPUTS - 1) of STD_LOGIC_VECTOR(7 downto 0);
+    signal tdm_byte_latch  : t_tdm_latch := (others => (others => '0')); -- driving the serial output
+    signal tdm_byte_shadow : t_tdm_latch := (others => (others => '0')); -- pre-fetched next byte
+    signal tdm_channel_bit_counter : unsigned(4 downto 0) := (others => '0');
+    signal tdm_channel_counter : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
+
+    -- TDM byte fetch FSM. We prefetch one byte for every TDM_OUTPUTS pin into
+    -- tdm_byte_shadow during the previous bclk byte time (8 bclk ~ 32 sys_clk),
+    -- then commit shadow -> latch atomically when bit_counter wraps to the
+    -- next byte boundary.
+    type t_tdm_fetch_state is (tfs_idle, tfs_addr_wait, tfs_capture);
+    signal tdm_fetch_state    : t_tdm_fetch_state := tfs_idle;
+    signal tdm_fetch_pin_idx  : integer range 0 to TDM_OUTPUTS := 0;
+    -- byte_in_slot is also the RAM byte offset: we read offsets 0,1,2,3 of
+    -- each channel's 4-byte slot in order. No mapping, no scrambling --
+    -- whatever the packet parser wrote into RAM[ch*4 + 0..3] goes straight
+    -- out on the wire in that order.
+    signal tdm_byte_in_slot   : unsigned(1 downto 0) := (others => '0');
+    -- Channel that the prefetch is currently building.
+    signal tdm_fetch_ch       : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
+    signal tdm_byte_tick    : std_logic := '0';  -- pulse: start prefetching next byte
+    signal tdm_commit_tick  : std_logic := '0';  -- pulse: copy shadow -> latch
+    signal tdm_byte_off     : unsigned(1 downto 0) := (others => '0'); -- captured offset for in-flight burst
+    
     -- Metering
     constant SAMPLE_BITS : integer := bytes_per_sample * 8;
 
@@ -171,12 +217,6 @@ begin
             
         elsif rising_edge(sys_clk) then
             sample_wr_en <= '0';
-
-
-
-
-
-
 
             -- ======== Packet parser state machine ========
             case packetParserState is
@@ -229,7 +269,7 @@ begin
                             current_packet_media_clock(7 downto 0) <= eth_read_data_i;
                             packetParserState <= s_prepare;
                         when others =>
-                            packetParserState <= s_End;
+                            null;
                     end case;
 
                 when s_prepare =>
@@ -242,8 +282,7 @@ begin
                             prepare_step <= 1;
 
                         when 1 =>
-                            -- Wait cycle for RAM read: M10K has 1 cycle addr reg + 1 cycle data reg
-                            -- Stay here for 2 cycles total before moving to comparison
+                            -- Wait cycle for RAM read
                             if ram_read_wait = '0' then
                                 ram_read_wait <= '1';
                             else
@@ -360,12 +399,20 @@ begin
                             prepare_step <= 11;
 
                         when 11 =>
-                            -- Set initial write address: base + channel_map(0) * 4 + (bytes_per_sample - 1)
+                            -- Set initial write address: base + channel_map(0) * 4 + 0
+                            -- Linear slot layout: MSB@offset0, mid@1, LSB@2, pad@3.
+                            -- First byte from ETH is the MSB (RFC 3190 L24 big-endian),
+                            -- so we start at offset 0 and increment.
                             v_channel_addr := wr_addr_sample_base
-                                + resize(channel_map(0) & "00", ADDR_BITS)
-                                + to_unsigned(bytes_per_sample - 1, ADDR_BITS);
+                                + resize(channel_map(0) & "00", ADDR_BITS);
                             wr_addr_current <= v_channel_addr;
-                            packetParserState <= s_readSampleData;
+                            -- Go through s_readSampleData_wait to absorb the
+                            -- 1-cycle eth_ram read latency: addr 54 is being
+                            -- registered now, its data is not valid until the
+                            -- cycle after next. Skipping the wait state writes
+                            -- the first payload byte from a stale address and
+                            -- shifts every sample by one byte.
+                            packetParserState <= s_readSampleData_wait;
                             packet_read_index <= 54;
                             eth_read_addr_o <= to_unsigned(54, 11);
                             byte_count_parser <= 0;
@@ -376,9 +423,13 @@ begin
                             packetParserState <= s_Idle;
                     end case;
                  when s_readSampleData_wait =>
-                    -- Pipeline fill for 2-cycle eth_ram read latency:
-                    -- addr from prepare_step 11 is being registered now,
-                    -- pre-request next address so data arrives back-to-back.
+                    -- Pipeline fill for the 1-cycle eth_ram read latency.
+                    -- prepare_step 11 registered the read address (54) last
+                    -- cycle, so byte[54] appears at eth_read_data_i next cycle
+                    -- (when s_readSampleData first runs). Pre-advance the read
+                    -- address to 55 here so the read pointer stays exactly one
+                    -- ahead of packet_read_index throughout the loop, keeping
+                    -- the invariant "eth_read_data_i == byte[packet_read_index]".
                     eth_read_addr_o <= to_unsigned(packet_read_index + 1, 11);
                     packetParserState <= s_readSampleData;
                 when s_readSampleData =>
@@ -390,23 +441,24 @@ begin
                         sample_wr_data <= eth_read_data_i;
                         sample_wr_en <= '1';
 
-                        -- Advance ETH read
-                        eth_read_addr_o <= to_unsigned(packet_read_index + 1, 11);
+                        -- Advance ETH read: keep eth_read_addr_o one ahead of
+                        -- packet_read_index (the wait state primed it to +1).
+                        eth_read_addr_o <= to_unsigned(packet_read_index + 2, 11);
                         packet_read_index <= packet_read_index + 1;
 
                         -- Compute next address incrementally
                         if byte_count_parser < bytes_per_sample - 1 then
                             byte_count_parser <= byte_count_parser + 1;
-                            -- Next byte in same sample: decrement by 1 (MSB-first → address goes down)
-                            wr_addr_current <= wr_addr_current - 1;
+                            -- Next byte in same sample: increment by 1.
+                            -- MSB written first at offset 0 → mid@1, LSB@2 (address goes up).
+                            wr_addr_current <= wr_addr_current + 1;
                         else
                             byte_count_parser <= 0;
                             if current_read_channel_index < current_stream_channel_count - 1 then
                                 current_read_channel_index <= current_read_channel_index + 1;
-                                -- Jump to next channel's MSB byte using cached channel_map
+                                -- Jump to next channel's MSB byte (offset 0) using cached channel_map
                                 v_channel_addr := wr_addr_sample_base
-                                    + resize(channel_map(current_read_channel_index + 1) & "00", ADDR_BITS)
-                                    + to_unsigned(bytes_per_sample - 1, ADDR_BITS);
+                                    + resize(channel_map(current_read_channel_index + 1) & "00", ADDR_BITS);
                                 wr_addr_current <= v_channel_addr;
                             else
                                 current_read_channel_index <= 0;
@@ -414,10 +466,9 @@ begin
                                     current_packet_sample_index <= current_packet_sample_index + 1;
                                     -- Next sample: advance base by SAMPLE_STRIDE (64)
                                     wr_addr_sample_base <= wr_addr_sample_base + to_unsigned(SAMPLE_STRIDE, ADDR_BITS);
-                                    -- Jump to first channel of next sample
+                                    -- Jump to first channel of next sample (MSB byte, offset 0)
                                     v_channel_addr := wr_addr_sample_base + to_unsigned(SAMPLE_STRIDE, ADDR_BITS)
-                                        + resize(channel_map(0) & "00", ADDR_BITS)
-                                        + to_unsigned(bytes_per_sample - 1, ADDR_BITS);
+                                        + resize(channel_map(0) & "00", ADDR_BITS);
                                     wr_addr_current <= v_channel_addr;
                                 else
                                     current_packet_sample_index <= 0;
@@ -448,8 +499,6 @@ begin
 
     begin
         if (reset_n = '0') then
-            fs_clk_i_sync1 <= '0';
-            fs_clk_i_sync2 <= '0';
             zaudio_sync <= '0';
             packet_ready_i_sync1 <= '0';
             packet_ready_i_sync2 <= '0';
@@ -458,18 +507,14 @@ begin
             metering_clear_i_sync1 <= '0';
             metering_clear_i_sync2 <= '0';
             
-            fs_clk_i_sync1 <= '0';
-            fs_clk_i_sync2 <= '0';
             zaudio_sync <= '0';
         elsif (rising_edge(sys_clk)) then
             metering_clear_i_sync1 <= metering_clear_i;
             metering_clear_i_sync2 <= metering_clear_i_sync1;
 
-
-            -- CDC for fs_clk_i
-            fs_clk_i_sync1 <= fs_clk_i;
-            fs_clk_i_sync2 <= fs_clk_i_sync1;
-            zaudio_sync <= fs_clk_i_sync2;
+            zaudio_sync <= fs_clk_sync_i;
+            zbclk <= bclk_sync_i;
+            
 
             -- CDC synchronizer for toggle signal from mac_rx_clock domain
             packet_ready_i_sync1 <= packet_ready_i;
@@ -479,6 +524,8 @@ begin
 
     end process;
 
+
+parellel_out_proc_gen: if (PARALLEL_OUT = true) generate
     -- data playout
     process(sys_clk)
 
@@ -498,7 +545,7 @@ begin
             end if;
 
 
-            if zaudio_sync = '0' and fs_clk_i_sync2 = '1' then
+            if zaudio_sync = '0' and fs_clk_sync_i = '1' then
                 output_next_sample <= '1';
                 -- Derive read pointer directly from media clock (same as write side, but without delay)
                 -- This keeps read-write distance constant at exactly the configured delay
@@ -514,8 +561,9 @@ begin
                         playout_rd_base <= sample_rd_ptr;
                         playout_data_latch <= (others => '0');
                         -- Present first read address: channel 0, MSB byte
-                        -- channel 0 * 4 + (bytes_per_sample - 1) = 2
-                        sample_rd_addr <= sample_rd_ptr + to_unsigned(bytes_per_sample - 1, ADDR_BITS);
+                        -- Linear slot layout: MSB@offset0, mid@1, LSB@2.
+                        -- channel 0 * 4 + 0 = 0
+                        sample_rd_addr <= sample_rd_ptr;
                     end if;
 
                 when ps_addr =>
@@ -548,10 +596,10 @@ begin
                             metering_signal_o(playout_channel_id) <= '1';
                         end if;
 
-                    else
-                        metering_clip_o <= (others => '0');
-                        metering_signal_o <= (others => '0');
-                    end if;
+                        else
+                            metering_clip_o <= (others => '0');
+                            metering_signal_o <= (others => '0');
+                        end if;
 
 
                         playout_byte <= 0;
@@ -563,22 +611,150 @@ begin
                             playout_state <= ps_idle;
                         else
                             playout_channel_id <= playout_channel_id + 1;
-                            -- Next channel MSB byte: base + (ch+1)*4 + (bps-1)
+                            -- Next channel MSB byte: base + (ch+1)*4 + 0
                             sample_rd_addr <= playout_rd_base
-                                + to_unsigned((playout_channel_id + 1) * CHANNEL_STRIDE + (bytes_per_sample - 1), ADDR_BITS);
+                                + to_unsigned((playout_channel_id + 1) * CHANNEL_STRIDE, ADDR_BITS);
                             playout_state <= ps_addr;
                         end if;
                     else
                         playout_byte <= playout_byte + 1;
-                        -- Next byte in same channel (address decrements)
+                        -- Next byte in same channel (address increments: MSB@0 → mid@1 → LSB@2)
                         sample_rd_addr <= playout_rd_base
-                            + to_unsigned(playout_channel_id * CHANNEL_STRIDE + (bytes_per_sample - 1 - (playout_byte + 1)), ADDR_BITS);
+                            + to_unsigned(playout_channel_id * CHANNEL_STRIDE + (playout_byte + 1), ADDR_BITS);
                         playout_state <= ps_addr;
                     end if;
             end case;
         end if;
     
     end process;
+end generate;
+
+tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
+    -- Base read pointer follows the media clock (same scheme as parallel path).
+    sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+
+    -- Counters and ticks.
+    --   tdm_byte_tick at bit_counter(2:0) = 0 -> start prefetch of the byte
+    --     that will be shifted out on the next byte boundary.
+    --   tdm_commit_tick at bit_counter(2:0) = 7 -> copy shadow -> latch so
+    --     the next bclk edge starts shifting the new byte (MSB first).
+    tdm_out_ctrl_proc: process (sys_clk)
+    begin
+        if rising_edge(sys_clk) then
+            tdm_byte_tick   <= '0';
+            tdm_commit_tick <= '0';
+            if (bclk_sync_i = '1' and zbclk = '0') then
+                tdm_channel_bit_counter <= tdm_channel_bit_counter + 1;
+
+                if tdm_channel_bit_counter(2 downto 0) = "000" then
+                    tdm_byte_tick <= '1';
+                end if;
+
+                if tdm_channel_bit_counter(2 downto 0) = "111" then
+                    tdm_commit_tick <= '1';
+                end if;
+
+                if tdm_channel_bit_counter = to_unsigned(31, tdm_channel_bit_counter'length) then
+                    tdm_channel_counter <= tdm_channel_counter + 1;
+                end if;
+            end if;
+            if (fs_clk_sync_i = '1' and zaudio_sync = '0') then
+                tdm_channel_bit_counter <= (others => '0');
+                tdm_channel_counter <= (others => '0');
+            end if;
+        end if;
+    end process;
+
+    -- Prefetch FSM. On tdm_byte_tick we walk through all TDM_OUTPUTS pins and
+    -- read one byte each (RAM offset = tdm_byte_off, same for every pin) into
+    -- tdm_byte_shadow. On tdm_commit_tick we copy shadow -> latch atomically.
+    --
+    -- Pipeline phase: the shifter consumes one byte per 8 bclk cycles. The
+    -- byte_tick at bit_counter=0 starts the prefetch for the byte that will
+    -- be shifted out starting at the *next* byte boundary (bit_counter=8).
+    -- Commit at bit_counter=7 swaps the latch right before that edge.
+    --
+    -- byte_in_slot is initialised to 3 so that the *first* byte_tick after
+    -- frame sync wraps to 0. With the linear RAM slot layout (offset 0=MSB,
+    -- 1=mid, 2=LSB, 3=pad) the RAM offset == byte_in_slot, so the wire carries
+    -- MSB, mid, LSB, pad in that time order, which matches the datasheet.
+    tdm_fetch_proc: process(sys_clk)
+        variable v_ch_global : integer range 0 to global_channel_count - 1;
+        variable v_next_byte_in_slot : unsigned(1 downto 0);
+        variable v_next_ch           : unsigned(clog2(TDM_CHANNELS)-1 downto 0);
+        variable v_off               : unsigned(1 downto 0);
+    begin
+        if rising_edge(sys_clk) then
+            case tdm_fetch_state is
+                when tfs_idle =>
+                    if tdm_byte_tick = '1' then
+                        if tdm_byte_in_slot = to_unsigned(3, 2) then
+                            v_next_byte_in_slot := (others => '0');
+                            v_next_ch := tdm_fetch_ch + 1;
+                        else
+                            v_next_byte_in_slot := tdm_byte_in_slot + 1;
+                            v_next_ch := tdm_fetch_ch;
+                        end if;
+                        tdm_byte_in_slot <= v_next_byte_in_slot;
+                        tdm_fetch_ch     <= v_next_ch;
+                        -- RAM byte offset == position in slot: linear 0..3.
+                        v_off := v_next_byte_in_slot;
+                        tdm_byte_off <= v_off;
+
+                        tdm_fetch_pin_idx <= 0;
+                        v_ch_global := 0 * TDM_CHANNELS + to_integer(v_next_ch);
+                        sample_rd_addr <= sample_rd_ptr
+                            + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
+                            + resize(v_off, ADDR_BITS);
+                        tdm_fetch_state <= tfs_addr_wait;
+                    end if;
+
+                when tfs_addr_wait =>
+                    tdm_fetch_state <= tfs_capture;
+
+                when tfs_capture =>
+                    tdm_byte_shadow(tdm_fetch_pin_idx) <= sample_rd_data;
+
+                    if tdm_fetch_pin_idx = TDM_OUTPUTS - 1 then
+                        tdm_fetch_state <= tfs_idle;
+                    else
+                        tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
+                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CHANNELS + to_integer(tdm_fetch_ch);
+                        -- Linear slot layout: RAM offset == position in slot.
+                        -- offset 0,1,2,3 = MSB, mid, LSB, pad. Same offset for every pin.
+                        sample_rd_addr <= sample_rd_ptr
+                            + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
+                            + resize(tdm_byte_off, ADDR_BITS);
+                        tdm_fetch_state <= tfs_addr_wait;
+                    end if;
+            end case;
+
+            -- Atomic shadow -> latch swap.
+            if tdm_commit_tick = '1' then
+                tdm_byte_latch <= tdm_byte_shadow;
+            end if;
+
+            -- Frame sync: align so the next byte_tick wraps byte_in_slot
+            -- from 3 -> 0 (= MSB lane) and fetch_ch from N-1 -> 0.
+            if (fs_clk_sync_i = '1' and zaudio_sync = '0') then
+                tdm_byte_in_slot <= to_unsigned(3, 2);
+                tdm_fetch_ch     <= (others => '1');
+                tdm_fetch_state  <= tfs_idle;
+            end if;
+        end if;
+    end process;
+
+    -- Serial output: shift MSB-first out of each latched byte.
+    tdmoutgen : for i in 0 to TDM_OUTPUTS - 1 generate
+        process (sys_clk)
+        begin
+            if rising_edge(sys_clk) then
+                tdm_out(i) <= tdm_byte_latch(i)(7 - to_integer(tdm_channel_bit_counter(2 downto 0)));
+            end if;
+        end process;
+    end generate;
+end generate;
+
 
     -- Dedicated sample_ram process (simple dual-port: sync write + sync read)
     -- no_rw_check attribute tells Quartus read-during-write result is don't-care,
@@ -589,9 +765,29 @@ begin
             if sample_wr_en = '1' then
                 sample_ram(to_integer(sample_wr_addr)) <= sample_wr_data;
             end if;
+            -- Simulation backdoor write (testbench only). Takes priority over
+            -- the parser write port; disabled / optimized away in synthesis.
+            if SIM_SAMPLE_RAM_BACKDOOR and dbg_wr_en_i = '1' then
+                sample_ram(to_integer(dbg_wr_addr_i(ADDR_BITS - 1 downto 0))) <= dbg_wr_data_i;
+            end if;
             sample_rd_data <= sample_ram(to_integer(sample_rd_addr));
         end if;
     end process;
+
+    -- Simulation backdoor read port (testbench only). Separate 1-cycle-latency
+    -- read so a testbench can inspect sample_ram contents without disturbing
+    -- the playout read pointer. Disabled / optimized away in synthesis.
+    sim_backdoor_rd_gen : if SIM_SAMPLE_RAM_BACKDOOR generate
+        process(sys_clk)
+        begin
+            if rising_edge(sys_clk) then
+                dbg_rd_data_o <= sample_ram(to_integer(dbg_rd_addr_i(ADDR_BITS - 1 downto 0)));
+            end if;
+        end process;
+    end generate;
+    sim_backdoor_rd_off_gen : if not SIM_SAMPLE_RAM_BACKDOOR generate
+        dbg_rd_data_o <= (others => '0');
+    end generate;
 
     -- Stream config RAM Write Process (Port A - stream_config_wr_clk_i domain)
     process(stream_config_wr_clk_i)

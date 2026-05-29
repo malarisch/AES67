@@ -30,8 +30,6 @@ entity static_ptp_conf is
         servo_lock_threshold_ns_o    : OUT STD_LOGIC_VECTOR(31 downto 0);
         servo_unlock_threshold_ns_o  : OUT STD_LOGIC_VECTOR(31 downto 0);
         servo_lock_count_threshold_o : OUT STD_LOGIC_VECTOR(7 downto 0);
-        parser_min_filter_enable_o        : OUT STD_LOGIC;
-        parser_min_filter_active_depth_o  : OUT STD_LOGIC_VECTOR(7 downto 0);
         parser_delay_asymmetry_ns_o       : OUT STD_LOGIC_VECTOR(31 downto 0)
 
     );
@@ -51,8 +49,6 @@ begin
         servo_lock_threshold_ns_o    <= std_logic_vector(to_unsigned(500, 32));
         servo_unlock_threshold_ns_o  <= std_logic_vector(to_unsigned(5000, 32));
         servo_lock_count_threshold_o <= std_logic_vector(to_unsigned(24, 8));
-        parser_min_filter_enable_o        <= '0';
-        parser_min_filter_active_depth_o <= std_logic_vector(to_unsigned(2, 8));
         parser_delay_asymmetry_ns_o      <=
             std_logic_vector(to_signed(DELAY_ASYMMETRY_NS_1G,   32)) when ETHERNET_TYPE = "RGMII"
        else std_logic_vector(to_signed(DELAY_ASYMMETRY_NS_100M, 32));

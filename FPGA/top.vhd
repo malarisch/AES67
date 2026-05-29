@@ -26,7 +26,7 @@ ENTITY top IS
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 128;
 		STATIC_PTP_CONF : 		BOOLEAN := TRUE;
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0')
 	);
@@ -556,7 +556,7 @@ signal mcu_clk       : STD_LOGIC;
 signal hram_clk      : STD_LOGIC;
 
 signal tdm8in : STD_LOGIC_VECTOR(3 downto 0);
-signal tdm8out : STD_LOGIC_VECTOR(3 downto 0);
+signal tdm8out : STD_LOGIC_VECTOR(1 downto 0);
 
 signal sys_clk_locked : std_logic := '0';
 signal rst_n : STD_LOGIC := '0';
@@ -595,8 +595,6 @@ signal servo_warmup_samples_o       : STD_LOGIC_VECTOR(7 downto 0);
 signal servo_lock_threshold_ns_o    : STD_LOGIC_VECTOR(31 downto 0);
 signal servo_unlock_threshold_ns_o  : STD_LOGIC_VECTOR(31 downto 0);
 signal servo_lock_count_threshold_o : STD_LOGIC_VECTOR(7 downto 0);
-signal parser_min_filter_enable_o        : STD_LOGIC;
-signal parser_min_filter_active_depth_o  : STD_LOGIC_VECTOR(7 downto 0);
 signal parser_delay_asymmetry_ns_o       : STD_LOGIC_VECTOR(31 downto 0);
 
 -- PTP servo monitoring (driven from aes67_top, consumed by both backends).
@@ -752,8 +750,6 @@ generic map(
 	servo_lock_threshold_ns_i    => servo_lock_threshold_ns_o,
 	servo_unlock_threshold_ns_i  => servo_unlock_threshold_ns_o,
 	servo_lock_count_threshold_i => servo_lock_count_threshold_o,
-	parser_min_filter_enable_i        => parser_min_filter_enable_o,
-	parser_min_filter_active_depth_i  => parser_min_filter_active_depth_o,
 	parser_delay_asymmetry_ns_i       => signed(parser_delay_asymmetry_ns_i),
 
 	-- PTP servo monitoring outputs
@@ -1209,8 +1205,6 @@ static_ptp_conf_inst: entity work.static_ptp_conf
 	servo_lock_threshold_ns_o => servo_lock_threshold_ns_o,
 	servo_unlock_threshold_ns_o => servo_unlock_threshold_ns_o,
 	servo_lock_count_threshold_o => servo_lock_count_threshold_o,
-	parser_min_filter_enable_o => parser_min_filter_enable_o,
-	parser_min_filter_active_depth_o => parser_min_filter_active_depth_o,
 	parser_delay_asymmetry_ns_o => parser_delay_asymmetry_ns_o
 );
 
@@ -1229,8 +1223,6 @@ ptp_conf_gen_dynamic: if (static_ptp_conf = false) generate
 	servo_lock_threshold_ns_o    <= servo_lock_threshold_ns_i;
 	servo_unlock_threshold_ns_o  <= servo_unlock_threshold_ns_i;
 	servo_lock_count_threshold_o <= servo_lock_count_threshold_i;
-	parser_min_filter_enable_o        <= parser_min_filter_enable_i;
-	parser_min_filter_active_depth_o  <= parser_min_filter_active_depth_i;
 	parser_delay_asymmetry_ns_o       <= parser_delay_asymmetry_ns_i;
 
 end generate;
