@@ -73,12 +73,16 @@ architecture Behavioral of tx_transmitter is
   -- Must match tx_sample_buffer's AUDIO_BUFFER_LENGTH exactly.
   constant AUDIO_BUFFER_LENGTH : integer := samples_per_channel_depth * global_channel_count * SLOT_BYTES * 2;
 
-  signal PACKET_LENGTH         : integer := 0;
-  signal PACKET_LENGTH_MINUS_1 : integer := 0; -- Pre-computed to break comparison critical path
-  signal UDP_PAYLOAD_LENGTH    : integer := 0;
-  -- Pipeline registers for audio_length multiplication (breaks channel_count_o critical path)
-  signal audio_samples_x_channels : integer range 0 to 65535 := 0; -- samples * channels (Stage 1)
-  signal audio_data_length        : integer range 0 to 65535 := 0; -- (samples * channels) * bytes (Stage 2)
+  -- Frame-length signals: range-constrained so Quartus infers ~11-bit registers
+  -- and adders/comparators instead of the default 32-bit integer width.
+  signal PACKET_LENGTH         : integer range 0 to 1518 := 0;
+  signal PACKET_LENGTH_MINUS_1 : integer range 0 to 1518 := 0; -- Pre-computed to break comparison critical path
+  signal UDP_PAYLOAD_LENGTH    : integer range 0 to 1518 := 0;
+  -- Pipeline register for audio_length multiplication (breaks channel_count_o critical path)
+  -- Both inputs are 8-bit CSR values, so the product is bounded by 255*255; the
+  -- range stays well under the default 32-bit integer width while never tripping
+  -- a range check on a pathological CSR value.
+  signal audio_samples_x_channels : integer range 0 to 255 * 255 := 0; -- samples * channels (Stage 1)
   -- Types
   type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_Transmit, s_End, s_WaitDeassert);
   type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcAudioLen, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_SettleChecksum, s_FinalizeChecksum);
@@ -246,7 +250,6 @@ architecture Behavioral of tx_transmitter is
 
   signal s_SM_Ethernet          : t_SM_Ethernet                                                                          := s_Idle;
   signal frame_write_index      : integer range 0 to 1518                                                                := 0;
-  signal audio_payload_index    : integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample := 0;
   signal ip_checksum_acc        : unsigned(31 downto 0)                                                                  := (others => '0');
   signal ip_checksum_upper_byte : std_logic_vector(7 downto 0)                                                           := (others => '0');
   signal ip_checksum_byte_phase : std_logic                                                                              := '0';
@@ -285,9 +288,6 @@ architecture Behavioral of tx_transmitter is
   constant UDP_CSUM_LO_OFF : integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 7; -- 41
 
   signal start_i_sync1   : std_logic                                        := '0';
-  signal channel_counter : integer range 0 to 7                             := 0;
-  signal byte_counter    : integer range 0 to 2                             := 0;
-  signal sample_index    : integer range 0 to samples_per_channel_depth - 1 := 0;
 
   -- ============================================================
   -- Pipeline registers to break sample_ram_read_addr critical path
@@ -306,6 +306,13 @@ architecture Behavioral of tx_transmitter is
   signal next_channel_counter : integer range 0 to 7                             := 0;
   signal next_byte_counter    : integer range 0 to 2                             := 0;
   signal next_sample_index    : integer range 0 to samples_per_channel_depth - 1 := 0;
+
+  -- Per-sample slot stride. sample_base_addr = sample_index * SAMPLE_STRIDE used
+  -- to need a runtime multiply; instead next_sample_base accumulates this
+  -- constant stride as next_sample_index increments, turning the multiplier into
+  -- a constant-increment adder (saves LEs on the DSP-poor Cyclone 10LP).
+  constant SAMPLE_STRIDE   : integer                                          := global_channel_count * SLOT_BYTES;
+  signal   next_sample_base : integer range 0 to AUDIO_BUFFER_LENGTH - 1       := 0;
 
   signal tx_ack       : std_logic := '0';
   signal tx_ack_sync1 : std_logic := '0';
@@ -438,8 +445,11 @@ begin
 
   sys_clock_process : process (sys_clk)
     variable header_data : std_logic_vector(7 downto 0);
-    variable rd_offset   : integer;
-    variable audio_len   : integer; -- WIRE_BYTES payload length, computed once per cycle
+    -- Bounds cover the worst-case 8-bit CSR inputs so a pathological value can
+    -- never trip a range error; real values are far smaller. rd_offset uses the
+    -- fixed global_channel_count generic, audio_len follows audio_samples_x_channels.
+    variable rd_offset   : integer range 0 to 255 * global_channel_count * SLOT_BYTES;
+    variable audio_len   : integer range 0 to 255 * 255 * WIRE_BYTES;
   begin
     if rising_edge(sys_clk) then
       packet_wr_en <= '0'; -- default: no write (overridden when needed)
@@ -463,7 +473,6 @@ begin
         when s_A_CalcAudioLen =>
           -- Single L24 payload product; the rest are constant offsets.
           audio_len := audio_samples_x_channels * WIRE_BYTES;
-          audio_data_length  <= audio_len;
           UDP_PAYLOAD_LENGTH <= AUDIO_START_SIGNAL + audio_len;
           PACKET_LENGTH      <= FRAME_OVERHEAD + audio_len;
           -- Pre-compute PACKET_LENGTH - 1 to remove subtraction from critical comparison path
@@ -479,8 +488,7 @@ begin
             read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset + AUDIO_BUFFER_LENGTH;
           end if;
 
-          frame_write_index   <= 0;
-          audio_payload_index <= 0;
+          frame_write_index <= 0;
 
           -- Seed the UDP accumulator with the UDP/IPv4 pseudo-header sum. The
           -- dedicated udp_checksum_proc loads this on the next edge (csum_arm)
@@ -551,6 +559,7 @@ begin
               next_byte_counter    <= 1;
               next_channel_counter <= 1;
               next_sample_index    <= 0;
+              next_sample_base     <= 0; -- sample 0 -> base 0; accumulates +SAMPLE_STRIDE per sample
             end if;
           else
             -- ===== PIPELINED AUDIO PAYLOAD ASSEMBLY =====
@@ -577,14 +586,11 @@ begin
               when 7      => ch_id_reg      <= to_integer(unsigned(ch_ids_i(7 downto 0)));
               when others => ch_id_reg <= 0;
             end case;
-            sample_base_addr <= next_sample_index * global_channel_count * SLOT_BYTES;
+            -- sample_base = sample_index * SAMPLE_STRIDE, tracked by the
+            -- next_sample_base accumulator instead of a runtime multiply.
+            sample_base_addr <= next_sample_base;
             -- Linear slot layout: byte 0=MSB@+0, 1=mid@+1, 2=LSB@+2.
             byte_offset_reg <= next_byte_counter;
-
-            -- Update current counters (lagging behind look-ahead by 1)
-            byte_counter    <= next_byte_counter;
-            channel_counter <= next_channel_counter;
-            sample_index    <= next_sample_index;
 
             -- Advance look-ahead counters
             if (next_byte_counter < bytes_per_sample - 1) then
@@ -597,8 +603,11 @@ begin
                 next_channel_counter <= 0;
                 if (next_sample_index < to_integer(unsigned(samples_per_packet_per_channel_i)) - 1) then
                   next_sample_index <= next_sample_index + 1;
+                  -- Constant-increment adder mirrors next_sample_index * SAMPLE_STRIDE.
+                  next_sample_base <= next_sample_base + SAMPLE_STRIDE;
                 else
                   next_sample_index <= 0;
+                  next_sample_base  <= 0;
                 end if;
               end if;
             end if;
