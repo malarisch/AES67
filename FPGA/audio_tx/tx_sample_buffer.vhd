@@ -64,8 +64,7 @@ architecture Behavioral of tx_sample_buffer is
         return result;
     end function;
 
-    -- Internal RAM slot = 4 bytes per sample (pad 24-bit -> 32-bit). Channel and
-    -- sample strides become powers of two, so the *3 address multiplies are gone.
+    -- Internal RAM slot = 4 bytes per sample (pad 24-bit -> 32-bit). 
     constant SLOT_BYTES   : integer := 4;
     constant CHANNEL_STRIDE : integer := SLOT_BYTES;                       -- 4
     constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES; -- ch * 4
@@ -356,10 +355,6 @@ begin
                 wr_ready_pending <= '0';
                 demux_metering_valid <= '0';
 
-                -- A new frame begins: reset write pointer to the start of the
-                -- inactive half is NOT done here; we keep a free-running ring
-                -- pointer just like the parallel path. Frame start only matters
-                -- for channel alignment (handled by the ctrl counters).
 
                 case demux_state is
                     when ds_idle =>

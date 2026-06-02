@@ -104,10 +104,7 @@ architecture Behavioral of rx_ringbuffer is
 
     -- Read pointer: derived from media_clock to maintain fixed offset from write pointer
     signal sample_rd_ptr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
-    -- Frame-stable snapshot of sample_rd_ptr for the TDM-output fetch FSM. Latched
-    -- once per frame at fs sync so the read address can't jump by SAMPLE_STRIDE
-    -- mid-readout when media_clock ticks over (parallel path uses playout_rd_base).
-    signal sample_rd_base : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
+
 
     -- Synchronous read port for sample_ram
     signal sample_rd_addr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
