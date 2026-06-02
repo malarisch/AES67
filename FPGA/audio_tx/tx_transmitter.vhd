@@ -15,7 +15,7 @@ use IEEE.NUMERIC_STD.all;
 
 entity tx_transmitter is
   generic (
-    samples_per_channel_depth : integer := 48; -- number of samples per channel to buffer
+    samples_per_channel_depth : integer := 64; -- number of samples per channel to buffer (power of two: media-clock-derived pointer)
     global_channel_count      : integer := 16; -- number of channels to buffer
     bytes_per_sample          : integer := 3   -- number of bytes per sample (e.g., 3 for 24-bit audio)
   );
@@ -34,7 +34,6 @@ entity tx_transmitter is
 
     channel_count_i                  : in std_logic_vector(7 downto 0)  := (others => '0');
     samples_per_packet_per_channel_i : in std_logic_vector(7 downto 0)  := (others => '0');
-    sample_buffer_tx_start_addr_i    : in std_logic_vector(15 downto 0) := (others => '0');
 
     sample_ram_read_addr_o : out std_logic_vector(15 downto 0) := (others => '0');
     sample_ram_data_in_i   : in std_logic_vector(7 downto 0);
@@ -53,6 +52,18 @@ entity tx_transmitter is
 end entity;
 architecture Behavioral of tx_transmitter is
 
+  -- ceil(log2(n)) (same helper as tx_sample_buffer / rx_ringbuffer)
+  function clog2(n : positive) return natural is
+    variable result : natural := 0;
+    variable val    : natural := n - 1;
+  begin
+    while val > 0 loop
+      result := result + 1;
+      val    := val / 2;
+    end loop;
+    return result;
+  end function;
+
   constant MAC_HEADER_LENGTH  : integer := 14;
   constant IP_HEADER_LENGTH   : integer := 5 * (32 / 8); -- Header length always 20 bytes (5 * 32 bit words)
   constant AUDIO_START_SIGNAL : integer := 8;            -- 8 bytes at the beginning of the UDP payload reserved for RTP header (version, payload type, packet counter, sample counter, ssrc)
@@ -70,8 +81,31 @@ architecture Behavioral of tx_transmitter is
   -- payload length and the per-sample byte iteration count.
   constant SLOT_BYTES : integer := 4;
   constant WIRE_BYTES : integer := bytes_per_sample; -- 3 (L24)
-  -- Must match tx_sample_buffer's AUDIO_BUFFER_LENGTH exactly.
-  constant AUDIO_BUFFER_LENGTH : integer := samples_per_channel_depth * global_channel_count * SLOT_BYTES * 2;
+  -- Must match tx_sample_buffer's AUDIO_BUFFER_LENGTH exactly. Single (non-doubled)
+  -- buffer: with a media-clock-derived write pointer the read window sits a fixed
+  -- samples_per_packet behind the write head, so the former x2 overrun headroom is
+  -- replaced by the deterministic media-clock phase (same as rx_ringbuffer).
+  constant AUDIO_BUFFER_LENGTH : integer := samples_per_channel_depth * global_channel_count * SLOT_BYTES;
+
+  -- Geometry for deriving the read base directly from the packet's media-clock
+  -- timestamp (sample_counter), mirroring tx_sample_buffer's write base and
+  -- rx_ringbuffer's read pointer. depth, channel count and slot are all powers
+  -- of two, so AUDIO_BUFFER_LENGTH = 2**ADDR_BITS and an ADDR_BITS-wide unsigned
+  -- address wraps naturally (no modulo, no multiply, no if/subtract).
+  constant SAMPLE_STRIDE   : integer := global_channel_count * SLOT_BYTES;  -- ch * 4
+  constant SAMPLE_SHIFT    : integer := clog2(SAMPLE_STRIDE);               -- log2(ch*4)
+  constant ADDR_BITS       : integer := clog2(AUDIO_BUFFER_LENGTH);         -- log2(depth*ch*4)
+  constant SAMPLE_IDX_BITS : integer := ADDR_BITS - SAMPLE_SHIFT;           -- = clog2(depth)
+
+  -- Read-side backoff: the read window [ts .. ts+spp) otherwise reaches up to the
+  -- write head, whose newest row(s) may still be mid-write (the TDM frontend fills
+  -- a row across a whole 256-bclk frame). Stepping the READ BASE back by a couple
+  -- of samples keeps the whole window inside fully-written rows. This shifts only
+  -- the RAM read address, NOT packet_time_o -- the RTP timestamp on the wire is
+  -- unchanged, so AES67 playout timing is preserved; the cost is a constant few-
+  -- sample read latency. Pure unsigned subtraction on the media value before the
+  -- slice (no modulo/multiply; the slice + natural wrap handle the ring).
+  constant READ_BACKOFF_SAMPLES : integer := 0;
 
   -- Frame-length signals: range-constrained so Quartus infers ~11-bit registers
   -- and adders/comparators instead of the default 32-bit integer width.
@@ -207,21 +241,24 @@ architecture Behavioral of tx_transmitter is
     end if;
   end procedure;
 
-  -- Wrapped RAM address for one payload byte. Mirrors the ping-pong buffer's
-  -- 4-byte slot stride (SLOT_BYTES) and wraps within AUDIO_BUFFER_LENGTH.
+  -- Wrapped RAM address for one payload byte. The 4-byte slot stride (SLOT_BYTES)
+  -- and the ring wrap are handled by ADDR_BITS-wide unsigned arithmetic: because
+  -- AUDIO_BUFFER_LENGTH = 2**ADDR_BITS (depth/channels/slot are all powers of two),
+  -- the sum truncated to ADDR_BITS bits IS the modulo wrap -- no comparison, no
+  -- subtraction, no overflow guard. The result is always in [0, LENGTH-1].
   function wrap_sample_addr(
     base        : integer;
     sample_base : integer;
     ch_id       : integer;
     byte_offset : integer
   ) return integer is
-    variable addr : integer;
+    variable addr_u : unsigned(ADDR_BITS - 1 downto 0);
   begin
-    addr := base + sample_base + ch_id * SLOT_BYTES + byte_offset;
-    if addr >= AUDIO_BUFFER_LENGTH then
-      addr := addr - AUDIO_BUFFER_LENGTH;
-    end if;
-    return addr;
+    addr_u := to_unsigned(base, ADDR_BITS)
+            + to_unsigned(sample_base, ADDR_BITS)
+            + to_unsigned(ch_id * SLOT_BYTES, ADDR_BITS)
+            + to_unsigned(byte_offset, ADDR_BITS);
+    return to_integer(addr_u);
   end function;
 
   function finalize_checksum(sum_in : unsigned(31 downto 0)) return std_logic_vector is
@@ -311,7 +348,7 @@ architecture Behavioral of tx_transmitter is
   -- to need a runtime multiply; instead next_sample_base accumulates this
   -- constant stride as next_sample_index increments, turning the multiplier into
   -- a constant-increment adder (saves LEs on the DSP-poor Cyclone 10LP).
-  constant SAMPLE_STRIDE   : integer                                          := global_channel_count * SLOT_BYTES;
+  -- (SAMPLE_STRIDE is declared with the read-base geometry constants above.)
   signal   next_sample_base : integer range 0 to AUDIO_BUFFER_LENGTH - 1       := 0;
 
   signal tx_ack       : std_logic := '0';
@@ -334,6 +371,15 @@ architecture Behavioral of tx_transmitter is
   signal ram_q    : std_logic_vector(7 downto 0) := (others => '0');
   signal csum_sel : integer range 0 to 4         := 0; -- 0=RAM, 1=IPhi 2=IPlo 3=UDPhi 4=UDPlo
 begin
+
+  -- The read base is sliced out of the media-clock timestamp (sample_counter):
+  -- read_base = sample_counter(SAMPLE_IDX_BITS-1:0) << SAMPLE_SHIFT. That low-bit
+  -- slice only maps to the right RAM row when the buffer depth is a power of two
+  -- (so AUDIO_BUFFER_LENGTH = 2**ADDR_BITS and addresses wrap naturally). Fail
+  -- synthesis loudly otherwise.
+  assert 2 ** clog2(samples_per_channel_depth) = samples_per_channel_depth
+    report "tx_transmitter: samples_per_channel_depth must be a power of two"
+    severity failure;
 
   -- Packet RAM Port A (sys_clk): write-only during assembly.
   packet_ram_port_a : process (sys_clk)
@@ -445,11 +491,12 @@ begin
 
   sys_clock_process : process (sys_clk)
     variable header_data : std_logic_vector(7 downto 0);
-    -- Bounds cover the worst-case 8-bit CSR inputs so a pathological value can
-    -- never trip a range error; real values are far smaller. rd_offset uses the
-    -- fixed global_channel_count generic, audio_len follows audio_samples_x_channels.
-    variable rd_offset   : integer range 0 to 255 * global_channel_count * SLOT_BYTES;
+    -- Bound covers the worst-case 8-bit CSR inputs so a pathological value can
+    -- never trip a range error; real values are far smaller.
     variable audio_len   : integer range 0 to 255 * 255 * WIRE_BYTES;
+    -- Media value backed off by READ_BACKOFF_SAMPLES, before slicing the row index
+    -- (VHDL can't slice a parenthesised expression directly, hence this variable).
+    variable v_read_media : unsigned(31 downto 0);
   begin
     if rising_edge(sys_clk) then
       packet_wr_en <= '0'; -- default: no write (overridden when needed)
@@ -479,14 +526,20 @@ begin
           PACKET_LENGTH_MINUS_1 <= FRAME_OVERHEAD + audio_len - 1;
           SM_AssemblePacket     <= s_A_CalcValues;
         when s_A_CalcValues =>
-          -- Compute read base: go back samples_per_packet sample periods from write pointer.
-          -- RAM addressing uses the 4-byte slot stride.
-          rd_offset := to_integer(unsigned(samples_per_packet_per_channel_i)) * global_channel_count * SLOT_BYTES;
-          if to_integer(unsigned(sample_buffer_tx_start_addr_i)) >= rd_offset then
-            read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset;
-          else
-            read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset + AUDIO_BUFFER_LENGTH;
-          end if;
+          -- Derive the RAM read base directly from the packet's media-clock
+          -- timestamp (sample_counter), which the router set to the OLDEST sample
+          -- in the packet. This is the SAME formula tx_sample_buffer uses for its
+          -- write base -- low SAMPLE_IDX_BITS of the media value << SAMPLE_SHIFT --
+          -- so read and write index the identical RAM row. No separate start-addr
+          -- port, no modulo/multiply (depth is a power of two): the low bits are
+          -- the row index, the shift is the byte stride.
+          -- READ_BACKOFF_SAMPLES is subtracted from the media value FIRST (full
+          -- 32-bit unsigned, wraps cleanly), so the whole read window sits behind
+          -- the write head. Only the read address moves; the RTP timestamp
+          -- (sample_counter, emitted in the header) is untouched.
+          v_read_media := unsigned(sample_counter) - to_unsigned(READ_BACKOFF_SAMPLES, 32);
+          read_base <= to_integer(
+              v_read_media(SAMPLE_IDX_BITS - 1 downto 0) & to_unsigned(0, SAMPLE_SHIFT));
 
           frame_write_index <= 0;
 

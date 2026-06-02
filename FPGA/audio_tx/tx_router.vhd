@@ -5,7 +5,7 @@ use IEEE.NUMERIC_STD.ALL;
 entity tx_router is
     generic
     (
-        samples_per_channel_depth : integer := 48; -- number of samples per channel to buffer
+        samples_per_channel_depth : integer := 64; -- number of samples per channel to buffer (power of two: media-clock-derived pointer)
         global_channel_count : integer := 16; -- number of channels to buffer
         bytes_per_sample : integer := 3; -- number of bytes per sample (e.g., 3 for 24-bit audio)
 		  max_streams : integer := 8
@@ -14,13 +14,15 @@ entity tx_router is
     (
         sys_clk_i                       : in std_logic;
         reset_n                         : in std_logic;
-        sample_buffer_wr_ptr_i          : in std_logic_vector(15 downto 0);
 
         ip_addr_o                       : out std_logic_vector(31 downto 0) := (others => '0');
         channel_count_o                 : out std_logic_vector(7 downto 0) := (others => '0');
         samples_per_packet_per_channel_o : out std_logic_vector(7 downto 0) := (others => '0');
-        sample_buffer_tx_start_addr_o   : out std_logic_vector(15 downto 0) := (others => '0');
 
+        -- packet_time_o is the media-clock value of the packet's OLDEST sample.
+        -- It serves BOTH as the RTP timestamp AND as the read pointer: the
+        -- transmitter derives its RAM read base directly from this single value
+        -- (no separate start-address port -- they carried the same information).
         packet_time_i                   : in std_logic_vector(31 downto 0);
         packet_time_o                   : out std_logic_vector(31 downto 0) := (others => '0');
         sequence_id_o                   : out unsigned(15 downto 0) := (others => '0');
@@ -77,13 +79,13 @@ architecture Behavioral of tx_router is
     type t_sample_count is array (0 to 7) of unsigned(7 downto 0);
     signal sample_count : t_sample_count := (others => (others => '0'));
 
-    -- TX ready FIFOs: parallel FIFOs for stream index, write pointer, and packet time
-    
+    -- Packet-due queue: holds WHICH stream is due (multiple streams can cross
+    -- threshold on the same fs edge, so a queue is still required). The write
+    -- pointer is no longer queued -- it is re-derived from the media clock at
+    -- dequeue time (see current_start_addr).
     type t_stream_fifo is array (0 to max_streams - 1) of unsigned(2 downto 0);
-    type t_wrptr_fifo is array (0 to max_streams - 1) of std_logic_vector(15 downto 0);
     type t_seqid_fifo is array (0 to max_streams - 1) of unsigned(15 downto 0);
     signal fifo_stream  : t_stream_fifo := (others => (others => '0'));
-    signal fifo_wrptr   : t_wrptr_fifo := (others => (others => '0'));
     signal fifo_seqid   : t_seqid_fifo := (others => (others => '0'));
     signal fifo_wr_ptr  : unsigned(2 downto 0) := (others => '0');
     signal fifo_rd_ptr  : unsigned(2 downto 0) := (others => '0');
@@ -103,7 +105,6 @@ architecture Behavioral of tx_router is
     signal tx_state : t_tx_state := IDLE;
 
     signal current_stream    : unsigned(2 downto 0) := (others => '0');
-    signal current_wr_ptr    : std_logic_vector(15 downto 0) := (others => '0');
 
     -- CDC synchronizer for tx_en_i (crosses clock domain)
     signal tx_en_meta        : std_logic := '0';
@@ -171,13 +172,13 @@ begin
         if reset_n = '0' then
             sample_count <= (others => (others => '0'));
             fifo_stream <= (others => (others => '0'));
-            fifo_wrptr <= (others => (others => '0'));
             fifo_wr_ptr <= (others => '0');
             sample_ready_sync <= '0';
         elsif rising_edge(sys_clk_i) then
             sample_ready_sync <= sample_ready_i;
 
-            -- Rising edge of sample_ready
+            -- Falling edge of sample_ready (= 50%-duty LR clock), where the media
+            -- clock is stable. Per-stream sample counting / packet-due detection.
             if sample_ready_i = '0' and sample_ready_sync = '1' then
                 for i in 0 to max_streams -1 loop
 
@@ -186,9 +187,9 @@ begin
                     if threshold_shadow(i) > 3 then
                         if sample_count(i) >= threshold_shadow(i) then
                             sample_count(i) <= (others => '0');
-                            -- Enqueue into parallel FIFOs with snapshot of current state
+                            -- Enqueue WHICH stream is due; the start address is
+                            -- re-derived from the media clock at dequeue time.
                             fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
-                            fifo_wrptr(to_integer(fifo_wr_ptr)) <= sample_buffer_wr_ptr_i;
                             fifo_wr_ptr <= fifo_wr_ptr + 1;
                         else
                             sample_count(i) <= sample_count(i) + 1;
@@ -224,17 +225,16 @@ begin
     -- Sequential RAM reads (one byte per clock) for Block RAM compatibility
     -- ==========================================================================
     process(sys_clk_i, reset_n)
+        variable v_start_media : unsigned(31 downto 0); -- media clock at packet-start time
     begin
         if reset_n = '0' then
             fifo_rd_ptr <= (others => '0');
             tx_state <= IDLE;
             current_stream <= (others => '0');
-            current_wr_ptr <= (others => '0');
             audio_packet_tx_start_o <= '0';
             ip_addr_o <= (others => '0');
             channel_count_o <= (others => '0');
             samples_per_packet_per_channel_o <= (others => '0');
-            sample_buffer_tx_start_addr_o <= (others => '0');
             packet_time_o <= (others => '0');
             ch_ids_o <= (others => '0');
             ssrc_o <= (others => '0');
@@ -245,8 +245,7 @@ begin
                 when IDLE =>
                     if fifo_rd_ptr /= fifo_wr_ptr then
                         current_stream <= fifo_stream(to_integer(fifo_rd_ptr));
-                        current_wr_ptr <= fifo_wrptr(to_integer(fifo_rd_ptr));
-                        
+
                         fifo_rd_ptr <= fifo_rd_ptr + 1;
                         -- Setup first RAM read address (IP byte 1 at offset 1)
                         -- Base address = stream_index * 32 (5 zero bits)
@@ -260,9 +259,17 @@ begin
                 -- (base + N) with a distinct constant adder in each state. Only
                 -- LOAD_CH7 jumps by two to skip the reserved byte (offset 0x0F).
                 when LOAD_IP1 =>
-                    packet_time_o <= STD_LOGIC_VECTOR(unsigned(packet_time_i) 
+                    -- Reconstruct the media clock value at the instant this stream's
+                    -- packet became due (= the OLDEST sample in the packet). This is
+                    -- the RTP timestamp AND the read pointer in one: the transmitter
+                    -- derives its RAM read base from packet_time_o directly. Self-
+                    -- corrects for queue latency: while the packet waits in the queue,
+                    -- sample_count and packet_time_i grow by the same sample count, so
+                    -- the difference stays pinned to the packet's oldest sample.
+                    v_start_media := unsigned(packet_time_i)
                         - sample_count(to_integer(current_stream))
-                        - threshold_shadow(to_integer(current_stream)));
+                        - threshold_shadow(to_integer(current_stream));
+                    packet_time_o <= std_logic_vector(v_start_media);
 
                     sequence_id_o <= fifo_seqid(to_integer(current_stream));
                     ram_rd_addr <= ram_rd_addr + 1;
@@ -358,9 +365,9 @@ begin
 
                 when ASSERT_START =>
                     ssrc_o(7 downto 0) <= ram_rd_data;    -- SSRC byte 4
-                    -- Commit all latched values to outputs
-                    
-                    sample_buffer_tx_start_addr_o <= current_wr_ptr;
+                    -- Commit all latched values to outputs. The read pointer is
+                    -- carried by packet_time_o (set in LOAD_IP1); the transmitter
+                    -- derives the RAM read base from it -- no separate address port.
                     audio_packet_tx_start_o <= '1';
                     tx_state <= WAIT_TX_EN_HIGH;
 

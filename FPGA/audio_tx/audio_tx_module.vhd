@@ -25,7 +25,7 @@ ENTITY audio_tx_module IS
 	GENERIC (bytes_per_sample : INTEGER := 3;
 			global_channel_count : INTEGER := 16;
 			max_streams : INTEGER := 8;
-			samples_per_channel_depth : INTEGER := 48;
+			samples_per_channel_depth : INTEGER := 64;
 			ENABLE_METERING : BOOLEAN := true;
 			-- TDM serial input frontend (forwarded to tx_sample_buffer)
 			TDM_INPUT : BOOLEAN := true;
@@ -71,8 +71,6 @@ SIGNAL	audio_allow_req :  STD_LOGIC;
 SIGNAL	ch_ids :  STD_LOGIC_VECTOR(63 DOWNTO 0);
 SIGNAL	channel_count :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	packet_time :  STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL	sample_buffer_rd_ptr :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	sample_buffer_start_addr :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	sample_ram_read_addr :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	sample_ram_read_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	sample_ready :  STD_LOGIC;
@@ -106,13 +104,11 @@ PORT MAP(sys_clk_i => sys_clk,
 		 config_wr_addr_i => cfg_wr_addr_i,
 		 config_wr_data_i => cfg_wr_data_i,
 		 packet_time_i => media_clock_i,
-		 sample_buffer_wr_ptr_i => sample_buffer_rd_ptr,
 		 audio_packet_tx_start_o => SYNTHESIZED_WIRE_0,
 		 ch_ids_o => ch_ids,
 		 channel_count_o => channel_count,
 		 ip_addr_o => SYNTHESIZED_WIRE_1,
 		 packet_time_o => packet_time,
-		 sample_buffer_tx_start_addr_o => sample_buffer_start_addr,
 		 samples_per_packet_per_channel_o => samples_per_packet_per_ch,
 		 ssrc_o => ssrc,
 		 sequence_id_o => sequence_id);
@@ -132,14 +128,15 @@ PORT MAP(sys_clk => sys_clk,
 		 fs_clk_i => fs_tdm_clk_i,
 		 bclk_sync_i => bclk_i,
 		 tdm_in => tdm_in_i,
+		 media_clock_i => media_clock_i,
+		 fs_halfduty_clk_i => fs_halfduty_clk_i,
 		 metering_clear_i => metering_clear_i,
 		 audio_in => audio_i,
 		 read0Addr => unsigned(sample_ram_read_addr),
 		 wr_ready_o => sample_ready,
 		 data0_out => sample_ram_read_data,
 		 metering_clip_o => metering_clip_o,
-		 metering_signal_o => metering_signal_o,
-		 wr_ptr_o => sample_buffer_rd_ptr);
+		 metering_signal_o => metering_signal_o);
 
 
 b2v_tx_transmitter : entity work.tx_transmitter
@@ -155,7 +152,6 @@ PORT MAP(sys_clk => sys_clk,
 		 ch_ids_i => ch_ids,
 		 channel_count_i => channel_count,
 		 dst_ip_address => SYNTHESIZED_WIRE_1,
-		 sample_buffer_tx_start_addr_i => sample_buffer_start_addr,
 		 sample_counter => packet_time,
 		 sample_ram_data_in_i => sample_ram_read_data,
 		 samples_per_packet_per_channel_i => samples_per_packet_per_ch,

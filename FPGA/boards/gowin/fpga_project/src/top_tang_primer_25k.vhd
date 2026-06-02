@@ -89,7 +89,7 @@ begin
         RXCHANNELS => 8,
         BITDEPTH => 24,
         SAMPLERATE => 48,
-        TX_SAMPLE_BUFFER_DEPTH => 48,
+        TX_SAMPLE_BUFFER_DEPTH => 64, -- must be power of two (media-clock-derived TX write pointer)
         RX_SAMPLE_BUFFER_DEPTH => 48,
         MIIM_PHY_ADDRESS => "00001"
     )
