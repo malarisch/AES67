@@ -169,17 +169,11 @@ architecture Behavioral of rx_ringbuffer is
     signal tdm_channel_bit_counter : unsigned(4 downto 0) := (others => '0');
     signal tdm_channel_counter : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
 
-    -- TDM byte fetch FSM. We prefetch one byte for every TDM_OUTPUTS pin into
-    -- tdm_byte_shadow during the previous bclk byte time (8 bclk ~ 32 sys_clk),
-    -- then commit shadow -> latch atomically when bit_counter wraps to the
-    -- next byte boundary.
-    type t_tdm_fetch_state is (tfs_idle, tfs_addr_wait, tfs_capture);
+    type t_tdm_fetch_state is (tfs_idle, tfs_addr_wait, tfs_capture,
+                               tfs_prime_wait, tfs_prime_cap);
     signal tdm_fetch_state    : t_tdm_fetch_state := tfs_idle;
     signal tdm_fetch_pin_idx  : integer range 0 to TDM_OUTPUTS := 0;
-    -- byte_in_slot is also the RAM byte offset: we read offsets 0,1,2,3 of
-    -- each channel's 4-byte slot in order. No mapping, no scrambling --
-    -- whatever the packet parser wrote into RAM[ch*4 + 0..3] goes straight
-    -- out on the wire in that order.
+
     signal tdm_byte_in_slot   : unsigned(1 downto 0) := (others => '0');
     -- Channel that the prefetch is currently building.
     signal tdm_fetch_ch       : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
@@ -705,15 +699,6 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
                         tdm_fetch_pin_idx <= 0;
                         v_ch_global := 0 * TDM_CHANNELS + to_integer(v_next_ch);
-                        -- "+1" is REQUIRED here (verified on hardware): removing it
-                        -- shifts the whole TDM stream one byte early, so the wire
-                        -- carries [pad ch(N-1)][MSB ch0][mid ch0][LSB ch0]... .
-                        -- This branch is NOT latency-symmetric with tfs_capture: it
-                        -- only issues the address once tdm_byte_tick arrives, and
-                        -- that tick is itself registered one cycle behind the bclk
-                        -- edge in tdm_out_ctrl_proc, so pin 0's read needs to point
-                        -- one byte further ahead than the tfs_capture pins to land
-                        -- in the same wire byte slot. DO NOT remove this +1.
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
                             + resize(v_off, ADDR_BITS) + 1;
@@ -738,19 +723,35 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                             + resize(tdm_byte_off, ADDR_BITS);
                         tdm_fetch_state <= tfs_addr_wait;
                     end if;
+
+
+                when tfs_prime_wait =>
+                    tdm_fetch_state <= tfs_prime_cap;
+
+                when tfs_prime_cap =>
+                    tdm_byte_latch(tdm_fetch_pin_idx) <= sample_rd_data;
+                    if tdm_fetch_pin_idx = TDM_OUTPUTS - 1 then
+                        tdm_fetch_state <= tfs_idle;
+                    else
+                        tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
+                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CHANNELS + 0;
+                        sample_rd_addr <= sample_rd_ptr
+                            + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS);
+                        tdm_fetch_state <= tfs_prime_wait;
+                    end if;
             end case;
 
-            -- Atomic shadow -> latch swap.
-            if tdm_commit_tick = '1' then
+            if tdm_commit_tick = '1'
+               and not (fs_clk_sync_i = '1' and zaudio_sync = '0') then
                 tdm_byte_latch <= tdm_byte_shadow;
             end if;
 
-            -- Frame sync: align so the next byte_tick wraps byte_in_slot
-            -- from 3 -> 0 (= MSB lane) and fetch_ch from N-1 -> 0.
             if (fs_clk_sync_i = '1' and zaudio_sync = '0') then
-                tdm_byte_in_slot <= to_unsigned(3, 2);
-                tdm_fetch_ch     <= (others => '1');
-                tdm_fetch_state  <= tfs_idle;
+                tdm_byte_in_slot  <= to_unsigned(3, 2);
+                tdm_fetch_ch      <= (others => '1');
+                tdm_fetch_pin_idx <= 0;
+                sample_rd_addr    <= sample_rd_ptr;      -- ch0, offset 0 (MSB)
+                tdm_fetch_state   <= tfs_prime_wait;
             end if;
         end if;
     end process;
