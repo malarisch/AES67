@@ -81,7 +81,7 @@ architecture Behavioral of tx_transmitter is
   signal audio_data_length        : integer range 0 to 65535 := 0; -- (samples * channels) * bytes (Stage 2)
   -- Types
   type t_SM_Ethernet is (s_Idle, s_waitForAllow, s_Transmit, s_End, s_WaitDeassert);
-  type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcAudioLen, s_A_CalcValues, s_A_CalcChecksum, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_FinalizeChecksum, s_WriteChecksum);
+  type t_SM_AssemblePacket is (s_A_Idle, s_A_CalcAudioLen, s_A_CalcValues, s_A_PrepFrame, s_A_Payload, s_A_WaitAckDone, s_SettleChecksum, s_FinalizeChecksum);
   type t_packet_ram is array (0 to 1518) of std_logic_vector(7 downto 0);
 
   signal SM_AssemblePacket : t_SM_AssemblePacket := s_A_Idle;
@@ -234,20 +234,19 @@ architecture Behavioral of tx_transmitter is
   signal packet_wr_en      : std_logic                    := '0';
   signal packet_wr_addr    : integer range 0 to 1518 - 1  := 0;
   signal packet_wr_data    : std_logic_vector(7 downto 0) := (others => '0');
-  signal first_packet_byte : std_logic_vector(7 downto 0) := (others => '0');
 
   attribute ram_style : string;
 
   attribute ram_style of packet_ram : signal is "block";
 
   -- Packet RAM: Port A (sys_clk) write-only, Port B (tx_clk) for TX read.
-  -- (The former Port A read path fed the UDP checksum loop; the checksum is now
-  -- computed inline during assembly, so no read-back port is needed.)
+  -- The checksums are folded by dedicated accumulator processes that tap the
+  -- same Port A write stream, and are muxed into the Port B read at their byte
+  -- offsets -- so neither checksum is ever stored in or read back from RAM.
 
   signal s_SM_Ethernet          : t_SM_Ethernet                                                                          := s_Idle;
   signal frame_write_index      : integer range 0 to 1518                                                                := 0;
   signal audio_payload_index    : integer range 0 to samples_per_channel_depth * global_channel_count * bytes_per_sample := 0;
-  signal checksum_write_index   : integer range 0 to 4                                                                   := 0;
   signal ip_checksum_acc        : unsigned(31 downto 0)                                                                  := (others => '0');
   signal ip_checksum_upper_byte : std_logic_vector(7 downto 0)                                                           := (others => '0');
   signal ip_checksum_byte_phase : std_logic                                                                              := '0';
@@ -258,18 +257,37 @@ architecture Behavioral of tx_transmitter is
   signal udp_checksum_byte_phase : std_logic                     := '0';
   signal udp_checksum_value      : std_logic_vector(15 downto 0) := (others => '0');
 
+  -- ============================================================
+  -- Linear checksum accumulators (fed off the packet_wr stream)
+  -- ------------------------------------------------------------
+  -- Two independent processes fold the byte stream written to the packet RAM
+  -- into running ones'-complement sums, exactly mirroring packet_ram_port_a's
+  -- linear write. The IP process covers the 20-byte IPv4 header; the UDP
+  -- process covers the UDP header + RTP/audio payload. Both checksum *fields*
+  -- are written as 0x0000 by get_header_byte, so folding them in is a no-op and
+  -- needs no skip logic. The finalized 16-bit values stay in registers and are
+  -- muxed into the TX byte stream (packet_ram_port_b) -- they are never written
+  -- back to RAM.
+  -- csum_arm pulses for one sys_clk at the start of frame assembly to seed both
+  -- accumulators (IP starts at 0, UDP at the pseudo-header sum).
+  constant IP_HDR_FIRST  : integer := MAC_HEADER_LENGTH;                    -- 14
+  constant IP_HDR_LAST   : integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH - 1; -- 33
+  constant UDP_FIRST     : integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH; -- 34
+  signal csum_arm        : std_logic            := '0';
+  signal udp_pseudo_seed : unsigned(31 downto 0) := (others => '0');
+
+  -- Packet byte offsets of the four checksum bytes. The TX read (packet_ram_port_b)
+  -- substitutes the held checksum registers at these offsets instead of reading
+  -- RAM, so the checksums never need to be written back to the packet RAM.
+  constant IP_CSUM_HI_OFF  : integer := MAC_HEADER_LENGTH + 10;                -- 24
+  constant IP_CSUM_LO_OFF  : integer := MAC_HEADER_LENGTH + 11;                -- 25
+  constant UDP_CSUM_HI_OFF : integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 6; -- 40
+  constant UDP_CSUM_LO_OFF : integer := MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 7; -- 41
+
   signal start_i_sync1   : std_logic                                        := '0';
   signal channel_counter : integer range 0 to 7                             := 0;
   signal byte_counter    : integer range 0 to 2                             := 0;
   signal sample_index    : integer range 0 to samples_per_channel_depth - 1 := 0;
-
-  -- ============================================================
-  -- Pipeline registers to break IP checksum critical path
-  -- Original: 8-way addition in s_A_CalcValues (~12ns combinational)
-  -- Solution: Pre-compute static parts, split into two stages
-  -- ============================================================
-  signal ip_checksum_partial1 : unsigned(31 downto 0) := (others => '0'); -- src_ip + 0x8011
-  signal ip_checksum_partial2 : unsigned(31 downto 0) := (others => '0'); -- dst_ip
 
   -- ============================================================
   -- Pipeline registers to break sample_ram_read_addr critical path
@@ -298,6 +316,16 @@ architecture Behavioral of tx_transmitter is
   signal tx_frame_start_sync2 : std_logic               := '0';
   signal read_addr            : integer range 0 to 1532 := 0;
   signal tx_done_reg          : std_logic               := '0';
+
+  -- TX read-port pipeline. The RAM read is kept unconditional (ram_q <=
+  -- packet_ram(eff_addr)) so Quartus infers a real block-RAM read port -- the
+  -- checksum mux must NOT sit on the RAM output inside the clocked process or
+  -- inference breaks. Instead, csum_sel carries the eff_addr classification
+  -- registered in lockstep with ram_q, and tx_data is selected combinationally
+  -- outside the process. Latency is unchanged vs. the old direct-registered
+  -- read (one cycle: address -> ram_q/csum_sel -> combinational tx_data).
+  signal ram_q    : std_logic_vector(7 downto 0) := (others => '0');
+  signal csum_sel : integer range 0 to 4         := 0; -- 0=RAM, 1=IPhi 2=IPlo 3=UDPhi 4=UDPlo
 begin
 
   -- Packet RAM Port A (sys_clk): write-only during assembly.
@@ -310,16 +338,73 @@ begin
     end if;
   end process packet_ram_port_a;
 
+  -- IP checksum accumulator: folds the 20 IPv4 header bytes (write addresses
+  -- IP_HDR_FIRST..IP_HDR_LAST) off the same write stream that fills the RAM.
+  -- The checksum field (write addr MAC+10/11) carries 0x00 from get_header_byte,
+  -- so it folds in as zero -- no skip needed. Armed (cleared) by csum_arm.
+  ip_checksum_proc : process (sys_clk)
+  begin
+    if rising_edge(sys_clk) then
+      if (csum_arm = '1') then
+        ip_checksum_acc        <= (others => '0');
+        ip_checksum_upper_byte <= (others => '0');
+        ip_checksum_byte_phase <= '0';
+      elsif (packet_wr_en = '1'
+             and packet_wr_addr >= IP_HDR_FIRST
+             and packet_wr_addr <= IP_HDR_LAST) then
+        feed_checksum(ip_checksum_upper_byte, ip_checksum_byte_phase, ip_checksum_acc, packet_wr_data);
+      end if;
+    end if;
+  end process ip_checksum_proc;
+
+  -- UDP checksum accumulator: seeded with the UDP/IPv4 pseudo-header sum, then
+  -- folds every byte from UDP_FIRST onward (UDP header + RTP + L24 payload).
+  -- The UDP checksum field (write addr 40/41) carries 0x00, folding in as zero.
+  udp_checksum_proc : process (sys_clk)
+  begin
+    if rising_edge(sys_clk) then
+      if (csum_arm = '1') then
+        udp_checksum_acc        <= udp_pseudo_seed;
+        udp_checksum_upper_byte <= (others => '0');
+        udp_checksum_byte_phase <= '0';
+      elsif (packet_wr_en = '1' and packet_wr_addr >= UDP_FIRST) then
+        feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, packet_wr_data);
+      end if;
+    end if;
+  end process udp_checksum_proc;
+
   -- Port B (tx_clk): TX read
   -- Synchronous read: address register -> RAM -> registered output (tx_data)
+  -- At the four checksum byte offsets the held checksum registers are muxed in
+  -- instead of the RAM contents. ip_/udp_checksum_value are computed in sys_clk
+  -- and are stable long before tx_ack rises (assembly finishes first), so they
+  -- cross into tx_clk as quasi-static values without an extra synchronizer.
   packet_ram_port_b : process (tx_clk)
+    variable eff_addr : integer range 0 to 1532;
   begin
     if rising_edge(tx_clk) then
+      -- Effective address of the byte fetched this edge (advances on tx_byte_sent).
       if (tx_byte_sent = '1') then
-        tx_data <= packet_ram(read_addr + 1);
+        eff_addr := read_addr + 1;
       else
-        tx_data <= packet_ram(read_addr);
+        eff_addr := read_addr;
       end if;
+
+      -- Unconditional RAM read -> registered output. Keep this the ONLY thing
+      -- that touches packet_ram so Quartus infers a block-RAM read port.
+      ram_q <= packet_ram(eff_addr);
+
+      -- Classify the SAME eff_addr and register it alongside ram_q, so the
+      -- combinational mux below picks the checksum byte on the cycle ram_q holds
+      -- that address's RAM data.
+      case eff_addr is
+        when IP_CSUM_HI_OFF  => csum_sel <= 1;
+        when IP_CSUM_LO_OFF  => csum_sel <= 2;
+        when UDP_CSUM_HI_OFF => csum_sel <= 3;
+        when UDP_CSUM_LO_OFF => csum_sel <= 4;
+        when others          => csum_sel <= 0;
+      end case;
+
       if tx_ack = '1' and tx_allow_i = '1' then
         tx_enable <= '1';
         if (mac_speed_i = "10" and read_addr < PACKET_LENGTH - 1) or (mac_speed_i /= "10" and read_addr < PACKET_LENGTH) then
@@ -340,15 +425,25 @@ begin
     end if;
   end process packet_ram_port_b;
 
+  -- Combinational checksum substitution on the RAM read output. ram_q and
+  -- csum_sel are registered together in packet_ram_port_b, so they describe the
+  -- same byte; the checksum registers (ip_/udp_checksum_value) are quasi-static
+  -- across a frame, so this mux carries no extra CDC concern.
+  with csum_sel select tx_data <=
+    ip_checksum_value(15 downto 8)  when 1,
+    ip_checksum_value(7 downto 0)   when 2,
+    udp_checksum_value(15 downto 8) when 3,
+    udp_checksum_value(7 downto 0)  when 4,
+    ram_q                           when others;
+
   sys_clock_process : process (sys_clk)
-    variable header_data       : std_logic_vector(7 downto 0);
-    variable pseudo_header_sum : unsigned(31 downto 0);
-    variable rd_offset         : integer;
-    variable audio_len         : integer;                      -- WIRE_BYTES payload length, computed once per cycle
-    variable csum_byte         : std_logic_vector(7 downto 0); -- byte fed to the inline UDP checksum this cycle
+    variable header_data : std_logic_vector(7 downto 0);
+    variable rd_offset   : integer;
+    variable audio_len   : integer; -- WIRE_BYTES payload length, computed once per cycle
   begin
     if rising_edge(sys_clk) then
       packet_wr_en <= '0'; -- default: no write (overridden when needed)
+      csum_arm     <= '0'; -- default: accumulators free-run; pulsed in s_A_CalcValues
 
       -- sync start_i to sys_clk domain
       start_i_sync1 <= start_i;
@@ -384,41 +479,23 @@ begin
             read_base <= to_integer(unsigned(sample_buffer_tx_start_addr_i)) - rd_offset + AUDIO_BUFFER_LENGTH;
           end if;
 
-          frame_write_index    <= 0;
-          audio_payload_index  <= 0;
-          checksum_write_index <= 0;
-          -- ===== IP CHECKSUM PIPELINE STAGE 1 =====
-          -- Split 8-way addition into two stages to meet timing
-          -- Stage 1: Compute partial sums (src_ip + 0x8011) and (dst_ip)
-          ip_checksum_partial1 <= resize(to_unsigned(16#8011#, 16), 32) +
-            resize(unsigned(src_ip_address(31 downto 16)), 32) +
-            resize(unsigned(src_ip_address(15 downto 0)), 32);
-          ip_checksum_partial2 <=
-            resize(unsigned(dst_ip_address(31 downto 16)), 32) +
-            resize(unsigned(dst_ip_address(15 downto 0)), 32);
+          frame_write_index   <= 0;
+          audio_payload_index <= 0;
 
-          ip_checksum_upper_byte  <= (others => '0');
-          ip_checksum_byte_phase  <= '0';
-          udp_checksum_upper_byte <= (others => '0');
-          udp_checksum_byte_phase <= '0';
-          pseudo_header_sum := resize(unsigned(src_ip_address(31 downto 16)), 32)
+          -- Seed the UDP accumulator with the UDP/IPv4 pseudo-header sum. The
+          -- dedicated udp_checksum_proc loads this on the next edge (csum_arm)
+          -- and then folds every byte written from UDP_FIRST onward. The IP
+          -- accumulator seeds at 0 and folds the 20 header bytes directly, so
+          -- no pre-computed IP partial sum is needed anymore.
+          udp_pseudo_seed <= resize(unsigned(src_ip_address(31 downto 16)), 32)
             + resize(unsigned(src_ip_address(15 downto 0)), 32)
             + resize(unsigned(dst_ip_address(31 downto 16)), 32)
             + resize(unsigned(dst_ip_address(15 downto 0)), 32)
             + resize(to_unsigned(16#0011#, 16), 32)
             + resize(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32);
-          -- Pre-load the UDP accumulator with the pseudo-header sum; the inline
-          -- feed in s_A_PrepFrame folds the remaining UDP header + payload bytes.
-          udp_checksum_acc  <= pseudo_header_sum;
-          SM_AssemblePacket <= s_A_CalcChecksum;
-
-          -- ===== IP CHECKSUM PIPELINE STAGE 2 =====
-          -- Final sum using registered partial sums from Stage 1
-        when s_A_CalcChecksum =>
-          ip_checksum_acc <= ip_checksum_partial1 + ip_checksum_partial2 +
-            resize(to_unsigned(16#4500#, 16), 32) +
-            resize(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16), 32) +
-            resize(sequence_id_in, 32); -- already incremented in s_A_CalcValues
+          -- Arm both accumulators (clear IP, load UDP seed) before the first
+          -- header byte is written in s_A_PrepFrame.
+          csum_arm          <= '1';
           SM_AssemblePacket <= s_A_PrepFrame;
 
         when s_A_PrepFrame =>
@@ -433,10 +510,6 @@ begin
               std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)));
 
             packet_wr_data <= header_data;
-            csum_byte := header_data;
-            if (frame_write_index = 0) then
-              first_packet_byte <= header_data;
-            end if;
 
             -- ===== ADDRESS PIPELINE PRE-FETCH (4 stages to account for pipeline latency) =====
             -- Need 4 pre-fetch cycles: Stage 1 (ch_id/base), Stage 2 (addr compute),
@@ -485,7 +558,6 @@ begin
             -- Each cycle: output data from 2 cycles ago, compute address for 2 cycles ahead
 
             packet_wr_data <= sample_ram_data_in_i;
-            csum_byte := sample_ram_data_in_i;
 
             -- Stage 2 OUTPUT: Address computed last cycle
             sample_ram_read_addr_o <= std_logic_vector(to_unsigned(raw_addr_reg, 16));
@@ -533,58 +605,30 @@ begin
 
           end if;
 
-          -- ===== INLINE UDP CHECKSUM =====
-          -- The UDP checksum covers the UDP header + RTP/audio payload, i.e. every
-          -- byte from offset (MAC_HEADER_LENGTH + IP_HEADER_LENGTH) onward. Those are
-          -- exactly the bytes written to packet_wr_data this cycle (csum_byte), so we
-          -- fold them into the accumulator as the frame is assembled instead of
-          -- streaming the packet RAM back a second time. The UDP checksum field
-          -- (offset 40/41) is 0x0000 here, as required. udp_checksum_acc was
-          -- pre-loaded with the pseudo-header sum in s_A_CalcValues.
-          -- (As in the original, an odd trailing byte stays in upper_byte un-added;
-          -- the L24 payload keeps the UDP byte count even.)
-          if (frame_write_index >= MAC_HEADER_LENGTH + IP_HEADER_LENGTH) then
-            feed_checksum(udp_checksum_upper_byte, udp_checksum_byte_phase, udp_checksum_acc, csum_byte);
-          end if;
-
+          -- Checksums are now folded by the dedicated ip_checksum_proc /
+          -- udp_checksum_proc, which listen to this same packet_wr stream. No
+          -- inline fold here.
           if (frame_write_index = PACKET_LENGTH_MINUS_1) then
-            -- Note: packet_wr_en stays '1' this cycle so the last byte is written to RAM.
-            -- The final payload byte is folded into udp_checksum_acc on this same edge.
-            SM_AssemblePacket <= s_FinalizeChecksum;
+            -- Last byte's packet_wr_* is registered on this edge; the dedicated
+            -- accumulators fold it one edge later. s_SettleChecksum absorbs that
+            -- one-cycle lag before we read the final accumulator value.
+            SM_AssemblePacket <= s_SettleChecksum;
           else
             frame_write_index <= frame_write_index + 1;
           end if;
 
+        when s_SettleChecksum =>
+          -- Wait one cycle so the final folded byte has landed in the accumulators.
+          SM_AssemblePacket <= s_FinalizeChecksum;
+
         when s_FinalizeChecksum =>
+          -- Fold the carries and one's-complement. Values stay in registers and
+          -- are muxed into the TX byte stream (packet_ram_port_b); they are no
+          -- longer written back to the packet RAM.
           ip_checksum_value  <= finalize_checksum(ip_checksum_acc);
           udp_checksum_value <= finalize_checksum(udp_checksum_acc);
-          SM_AssemblePacket  <= s_WriteChecksum;
+          SM_AssemblePacket  <= s_A_Payload;
 
-        when s_WriteChecksum =>
-          case checksum_write_index is
-            when 0 =>
-              packet_wr_en         <= '1';
-              packet_wr_addr       <= MAC_HEADER_LENGTH + 10;
-              packet_wr_data       <= ip_checksum_value(15 downto 8);
-              checksum_write_index <= 1;
-            when 1 =>
-              packet_wr_en         <= '1';
-              packet_wr_addr       <= MAC_HEADER_LENGTH + 11;
-              packet_wr_data       <= ip_checksum_value(7 downto 0);
-              checksum_write_index <= 2;
-            when 2 =>
-              packet_wr_en         <= '1';
-              packet_wr_addr       <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 6;
-              packet_wr_data       <= udp_checksum_value(15 downto 8);
-              checksum_write_index <= 3;
-            when 3 =>
-              packet_wr_en         <= '1';
-              packet_wr_addr       <= MAC_HEADER_LENGTH + IP_HEADER_LENGTH + 7;
-              packet_wr_data       <= udp_checksum_value(7 downto 0);
-              checksum_write_index <= 4;
-            when others =>
-              SM_AssemblePacket <= s_A_Payload;
-          end case;
         when s_A_Payload =>
           tx_frame_start <= '1';
           -- Phase 3: tx_process saw our request and acked
