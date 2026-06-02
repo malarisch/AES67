@@ -61,6 +61,10 @@ ENTITY ptp_module IS
 		wc_fs_tdm_pulse : OUT STD_LOGIC;
 		second_pulse_sys :  OUT  STD_LOGIC;
 		media_clock :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
+		-- 1 sys-clk pulse on every media_clock increment (= media-clock fs tick).
+		-- Used by the packetizer so its sample count and RTP timestamp share the
+		-- media clock, independent of the NCO audio-sample boundary.
+		media_tick :  OUT  STD_LOGIC;
 		ptp_mean_path_delay :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_offset_from_master :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
 		ptp_ram_addr :  OUT  STD_LOGIC_VECTOR(10 DOWNTO 0);
@@ -423,7 +427,7 @@ PORT MAP(clk => sys_clk,
 		 wallclock_nanoseconds_o => wallclock_nanoseconds,
 		 wallclock_seconds_o => wallclock_seconds,
 		 mclk_cnt_o => open,
-		 media_edge_tick_o => open,
+		 media_edge_tick_o => media_tick,
 		 ppb_adj_dbg_o => open,
 		 ppb_trim_dbg_o => open,
 		 bias_dbg_o => open,

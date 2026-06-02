@@ -202,6 +202,7 @@ signal wc_bclk_f_int   : STD_LOGIC;
 signal wc_fs_pulse     : STD_LOGIC;
 signal wc_fs_tdm_int   : STD_LOGIC;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
+signal media_tick : STD_LOGIC;
 signal second_pulse_sys : STD_LOGIC;
 signal mac_linkup : STD_LOGIC;
 -- mac_linkup_o is driven from internal mac_linkup below
@@ -338,7 +339,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- In integrated TDM mode the buffer's frame sync must be the TDM fsync
 		 -- (pll_48k_fs_tdm), matching what the external tdm8_in used; the parallel
 		 -- capture path uses the regular pll_48k_fs.
-		 fs_clk_i => pll_48k_fs_tdm,
+		 fs_tdm_clk_i => pll_48k_fs_tdm,
+		 fs_halfduty_clk_i => wc_fs_int,
 		 bclk_i => pll_256fs_rising,
 		 tdm_in_i => tdm8in_i(TX_CHANNELS/8 - 1 downto 0),
 
@@ -437,6 +439,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 wc_fs_tdm_pulse => wc_fs_tdm_int,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
+		 media_tick => media_tick,
 		 mac_speed_i => mac_speed,
 
 		 -- Servo / parser tuning inputs (live-tunable from SoC)

@@ -37,7 +37,8 @@ ENTITY audio_tx_module IS
 		sys_clk :  IN  STD_LOGIC;
 		ctrl_plane_clk :  IN  STD_LOGIC;
 		rst_n :  IN  STD_LOGIC;
-		fs_clk_i :  IN  STD_LOGIC;
+		fs_tdm_clk_i :  IN  STD_LOGIC;
+		fs_halfduty_clk_i :  IN  STD_LOGIC;
 		cfg_wr_en_i :  IN  STD_LOGIC;
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
@@ -98,7 +99,7 @@ GENERIC MAP(bytes_per_sample => bytes_per_sample,
 PORT MAP(sys_clk_i => sys_clk,
 		 reset_n => rst_n,
 		 config_wr_en_i => cfg_wr_en_i,
-		 sample_ready_i => sample_ready,
+		 sample_ready_i => fs_halfduty_clk_i,
 		 tx_en_i => tx_en_audiotx,
 		 tx_busy_i => mac_tx_busy,
 		 config_wr_clk_i => ctrl_plane_clk,
@@ -128,7 +129,7 @@ GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			)
 PORT MAP(sys_clk => sys_clk,
 		 reset_n => rst_n,
-		 fs_clk_i => fs_clk_i,
+		 fs_clk_i => fs_tdm_clk_i,
 		 bclk_sync_i => bclk_i,
 		 tdm_in => tdm_in_i,
 		 metering_clear_i => metering_clear_i,

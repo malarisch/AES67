@@ -120,7 +120,6 @@ architecture Behavioral of tx_router is
 
     signal tx_busy_meta        : std_logic := '0';
     signal tx_busy_sync        : std_logic := '0';
-    signal calc_step : std_logic := '0';
     attribute PRESERVE : boolean;
     attribute PRESERVE of tx_en_meta : signal is true;
     attribute PRESERVE of tx_en_sync : signal is true;
@@ -180,7 +179,7 @@ begin
             sample_ready_sync <= sample_ready_i;
 
             -- Rising edge of sample_ready
-            if sample_ready_i = '1' and sample_ready_sync = '0' then
+            if sample_ready_i = '0' and sample_ready_sync = '1' then
                 for i in 0 to max_streams -1 loop
 
                     if threshold_shadow(i) > 4 then
@@ -206,7 +205,7 @@ begin
     process (sys_clk_i)
     begin
         if rising_edge(sys_clk_i) then
-            if sample_ready_i = '1' and sample_ready_sync = '0' then
+            if sample_ready_i = '0' and sample_ready_sync = '1' then
                 for i in 0 to max_streams -1 loop
                     fifo_time(to_integer(fifo_wr_ptr)) <= std_logic_vector(unsigned(packet_time_i) - (unsigned(threshold_shadow(i)) - 1));
                 end loop;
