@@ -37,6 +37,7 @@ entity tx_sample_buffer is
         -- exactly like the transmitter read pointer -- they cannot drift even
         -- though the fs (NCO) and media-clock edges are not simultaneous.
         media_clock_i               : in std_logic_vector(31 downto 0) := (others => '0');
+        
         -- 50%-duty LR clock. The media clock is ONLY stable/correct around this
         -- clock's falling edge (fs/NCO is not synchronous with the media clock),
         -- so media_clock_i is latched there -- the same edge tx_router uses for
@@ -94,7 +95,8 @@ architecture Behavioral of tx_sample_buffer is
     type t_sample_ram is array (0 to AUDIO_BUFFER_LENGTH - 1) of std_logic_vector(7 downto 0);
    	signal sample_ram		: t_sample_ram := (others => (others => '0'));
     signal sample_wr_ptr : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-
+    signal media_clock_latch: unsigned(SAMPLE_IDX_BITS - 1 downto 0) := (others => '0');
+    signal media_clock_latch2: unsigned(SAMPLE_IDX_BITS - 1 downto 0) := (others => '0');
     signal zaudio_sync : std_logic := '0';
     signal zbclk : std_logic := '0';
 
@@ -134,25 +136,16 @@ architecture Behavioral of tx_sample_buffer is
 
     -- ===== TDM demux frontend signals (TDM_INPUT=true) =====
     -- bit/slot counters, clocked on bclk edges, reset on fs edge.
-    signal tdm_bit_counter     : unsigned(4 downto 0) := (others => '0'); -- 0..31 within a slot
-    signal tdm_channel_counter : unsigned(clog2(TDM_CHANNELS) - 1 downto 0) := (others => '0');
-    -- one shift register per serial pin, capturing the top SAMPLE_BITS of each slot
-    type t_tdm_shift is array (0 to TDM_INPUTS - 1) of std_logic_vector(SAMPLE_BITS - 1 downto 0);
+    signal tdm_bit_counter     : unsigned(clog2(TDM_CHANNELS * SLOT_BYTES * 8) - 1 downto 0) := (others => '0'); -- 0..31 within a slot
+
+    type t_tdm_shift is array (0 to TDM_INPUTS - 1) of std_logic_vector(7 downto 0);
     signal tdm_shift : t_tdm_shift := (others => (others => '0'));
-    -- pulse: a full 32-bit slot just finished -> commit shift regs to RAM
-    signal tdm_slot_done   : std_logic := '0';
-    signal tdm_frame_start : std_logic := '0';
+
     -- demux write FSM
     type t_demux_state is (ds_idle, ds_write);
     signal demux_state   : t_demux_state := ds_idle;
     signal demux_pin     : integer range 0 to TDM_INPUTS := 0;
-    signal demux_byte    : integer range 0 to bytes_per_sample - 1 := 0;
-    signal demux_channel : integer range 0 to TDM_CHANNELS - 1 := 0;
-    signal demux_slot_data : t_tdm_shift := (others => (others => '0'));
-    signal demux_wr_ptr  : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
-    signal demux_metering_sample : std_logic_vector(SAMPLE_BITS - 1 downto 0) := (others => '0');
-    signal demux_metering_ch     : integer range 0 to global_channel_count - 1 := 0;
-    signal demux_metering_valid  : std_logic := '0';
+
 begin
 
     assert 2 ** clog2(samples_per_channel_depth) = samples_per_channel_depth
@@ -191,7 +184,9 @@ begin
     -- PARALLEL INPUT FRONTEND (TDM_INPUT = false)
     -- =========================================================================
     parallel_in_gen: if (TDM_INPUT = false) generate
-
+        wr_sample_base <= to_integer(
+                    unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
+                    & to_unsigned(0, SAMPLE_SHIFT));
         -- metering process (operates on audio_in)
         metering_proc_gen: if (ENABLE_METERING = true) generate
         process (sys_clk, reset_n)
@@ -304,182 +299,85 @@ begin
 
     -- =========================================================================
     -- TDM SERIAL INPUT FRONTEND (TDM_INPUT = true)
-    -- Inverse of rx_ringbuffer's serial TDM output: shift bits in MSB-first,
-    -- commit one channel slot every 32 bclk, write the demuxed bytes into RAM
-    -- in linear order MSB@+0, mid@+1, LSB@+2, pad@+3.
     -- =========================================================================
     tdm_in_gen: if (TDM_INPUT = true) generate
+        
 
+        
         -- ----- bclk-domain (sampled into sys_clk via edge detect) bit/slot counters -----
         tdm_ctrl_proc: process(sys_clk, reset_n)
         begin
             if reset_n = '0' then
                 tdm_bit_counter <= (others => '0');
-                tdm_channel_counter <= (others => '0');
-                tdm_slot_done <= '0';
-                tdm_frame_start <= '0';
                 tdm_shift <= (others => (others => '0'));
             elsif rising_edge(sys_clk) then
-                tdm_slot_done   <= '0';
-                tdm_frame_start <= '0';
-
-                -- bclk rising edge: sample one bit per pin
-                if (bclk_sync_i = '1' and zbclk = '0') then
-                    -- shift MSB-first; only the top SAMPLE_BITS of the 32-bit slot
-                    -- are kept (the rest are padding/ignored).
+                if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
+                    media_clock_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0));
+                end if;
+                if (fs_halfduty_clk_i = '1' and fs_halfduty_sync = '0') then
+                    media_clock_latch2 <= media_clock_latch + 1;
+                end if;
+                -- bclk falling edge: sample one bit per pin
+                if (bclk_sync_i = '0' and zbclk = '1') then
+                    tdm_bit_counter <= tdm_bit_counter + 1;
                     for p in 0 to TDM_INPUTS - 1 loop
-                        if tdm_bit_counter < to_unsigned(SAMPLE_BITS, 5) then
-                            tdm_shift(p) <= tdm_shift(p)(SAMPLE_BITS - 2 downto 0) & tdm_in(p);
-                        end if;
+                            tdm_shift(p) <= tdm_shift(p)(6 downto 0) & tdm_in(p);
                     end loop;
 
-                    if tdm_bit_counter = to_unsigned(31, 5) then
-                        -- slot complete: commit and advance channel
-                        tdm_slot_done <= '1';
-                        tdm_bit_counter <= (others => '0');
-                        if tdm_channel_counter = to_unsigned(TDM_CHANNELS - 1, tdm_channel_counter'length) then
-                            tdm_channel_counter <= (others => '0');
-                        else
-                            tdm_channel_counter <= tdm_channel_counter + 1;
-                        end if;
-                    else
-                        tdm_bit_counter <= tdm_bit_counter + 1;
-                    end if;
                 end if;
 
                 -- frame sync: restart at channel 0 / bit 0
                 if (fs_clk_i = '1' and zaudio_sync = '0') then
                     tdm_bit_counter <= (others => '0');
-                    tdm_channel_counter <= (others => '0');
-                    tdm_frame_start <= '1';
                 end if;
             end if;
         end process;
-
-        -- ----- write FSM: on each slot_done, push the TDM_INPUTS captured slots
-        -- into RAM. Pin p carries channels [p*TDM_CHANNELS .. p*TDM_CHANNELS+TC-1].
-        -- The slot just finished belongs to channel (tdm_channel_counter - 1) since
-        -- the counter already advanced; we latch the finishing channel index. -----
+        ram_wr_addr <= to_integer(
+                    media_clock_latch2 -- time index
+                    & (tdm_bit_counter(tdm_bit_counter'length -1 downto 5) -- channel index per tdm
+                     + (demux_pin * TDM_CHANNELS)) -- add the corresponding demux offset
+                    & tdm_bit_counter(4 downto 3)); -- byte index
+                    
         tdm_write_proc: process(sys_clk, reset_n)
-            variable v_ch_global : integer range 0 to global_channel_count - 1;
-            variable v_finished_ch : integer range 0 to TDM_CHANNELS - 1;
         begin
             if reset_n = '0' then
-                demux_state <= ds_idle;
                 demux_pin <= 0;
-                demux_byte <= 0;
-                demux_channel <= 0;
-                demux_slot_data <= (others => (others => '0'));
-                demux_wr_ptr <= 0;
                 ram_wr_en <= '0';
                 ram_wr_data <= (others => '0');
-                ram_wr_addr <= 0;
-                wr_ready_o <= '0';
-                wr_ready_pending <= '0';
-                demux_metering_valid <= '0';
+                demux_state <= ds_idle;
+                write_active <= '0';
             elsif rising_edge(sys_clk) then
                 ram_wr_en <= '0';
-                wr_ready_o <= wr_ready_pending;
-                wr_ready_pending <= '0';
-                demux_metering_valid <= '0';
-
-                -- Capture the frame's write base at frame start from wr_sample_base
-                -- (media clock latched on the stable 50%-duty-LR falling edge), NOT
-                -- from live media_clock_i: fs/NCO is not synchronous with the media
-                -- clock, so a frame-start sample of media_clock_i would be unstable.
-                if tdm_frame_start = '1' then
-                    demux_wr_ptr <= wr_sample_base;
-                end if;
 
                 case demux_state is
                     when ds_idle =>
-                        if tdm_slot_done = '1' then
-                            -- channel that just finished (counter already advanced)
-                            if tdm_channel_counter = to_unsigned(0, tdm_channel_counter'length) then
-                                v_finished_ch := TDM_CHANNELS - 1;
-                            else
-                                v_finished_ch := to_integer(tdm_channel_counter) - 1;
-                            end if;
-                            demux_channel <= v_finished_ch;
-                            demux_slot_data <= tdm_shift;
-                            demux_pin <= 0;
-                            demux_byte <= 0;
-                            -- present metering sample for pin 0's channel
-                            demux_metering_sample <= tdm_shift(0);
-                            demux_metering_ch <= 0 * TDM_CHANNELS + v_finished_ch;
-                            demux_metering_valid <= '1';
+                        if (tdm_bit_counter(2 downto 0) = "111") then
+                            if (write_active = '0') then
                             demux_state <= ds_write;
+                            demux_pin <= 0;
+                            end if;
+                            write_active <= '1';
+                        else 
+                            write_active <= '0';
                         end if;
 
                     when ds_write =>
-                        -- write byte demux_byte of pin demux_pin's channel.
-                        -- linear layout: MSB@+0, mid@+1, LSB@+2.
-                        v_ch_global := demux_pin * TDM_CHANNELS + demux_channel;
-                        ram_wr_addr <= demux_wr_ptr + v_ch_global * CHANNEL_STRIDE + demux_byte;
-                        -- byte 0 = MSB = top 8 bits of the captured word
-                        ram_wr_data <= demux_slot_data(demux_pin)(SAMPLE_BITS - 1 - demux_byte*8
-                                                                   downto SAMPLE_BITS - 8 - demux_byte*8);
+                        ram_wr_data <= tdm_shift(demux_pin);
                         ram_wr_en <= '1';
 
-                        if demux_byte = bytes_per_sample - 1 then
-                            demux_byte <= 0;
-                            if demux_pin = TDM_INPUTS - 1 then
-                                -- all pins for this channel written
-                                demux_state <= ds_idle;
-                                -- when the last channel of the frame is committed,
-                                -- signal wr_ready (one full multichannel sample done).
-                                -- No pointer increment: demux_wr_ptr is re-latched
-                                -- from the media clock at the next frame start.
-                                if demux_channel = TDM_CHANNELS - 1 then
-                                    wr_ready_pending <= '1';
-                                end if;
-                            else
-                                demux_pin <= demux_pin + 1;
-                                -- present metering sample for next pin's channel
-                                demux_metering_sample <= demux_slot_data(demux_pin + 1);
-                                demux_metering_ch <= (demux_pin + 1) * TDM_CHANNELS + demux_channel;
-                                demux_metering_valid <= '1';
-                            end if;
+                        if demux_pin = TDM_INPUTS - 1 then
+                            
+                            demux_state <= ds_idle;
                         else
-                            demux_byte <= demux_byte + 1;
+                            demux_pin <= demux_pin + 1;
                         end if;
                 end case;
             end if;
         end process;
 
-        -- metering for TDM path: consume demux_metering_* one-shot samples
-        metering_tdm_gen: if (ENABLE_METERING = true) generate
-        process(sys_clk, reset_n)
-            variable v_sample_top : unsigned(CMP_BITS - 1 downto 0);
-        begin
-            if reset_n = '0' then
-                metering_clear_last <= '0';
-            elsif rising_edge(sys_clk) then
-                if (metering_clear_i_sync2 /= metering_clear_last) then
-                    metering_clear_last <= metering_clear_i_sync2;
-                    metering_clip_o <= (others => '0');
-                    metering_signal_o <= (others => '0');
-                end if;
-                if demux_metering_valid = '1' then
-                    v_sample_top := unsigned(demux_metering_sample(SAMPLE_BITS - 2 downto SAMPLE_BITS - 1 - CMP_BITS));
-                    if demux_metering_sample(SAMPLE_BITS - 1) = '1' then
-                        v_sample_top := not v_sample_top;
-                    end if;
-                    if v_sample_top >= CLIP_THRESHOLD then
-                        metering_clip_o(demux_metering_ch) <= '1';
-                    end if;
-                    if v_sample_top >= SIGNAL_THRESHOLD then
-                        metering_signal_o(demux_metering_ch) <= '1';
-                    end if;
-                end if;
-            end if;
-        end process;
-        end generate;
-
-        metering_tdm_disable_gen: if (ENABLE_METERING = false) generate
+  
             metering_signal_o <= (others => '0');
             metering_clip_o <= (others => '0');
-        end generate;
 
     end generate;
 
