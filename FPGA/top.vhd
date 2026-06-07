@@ -25,7 +25,7 @@ ENTITY top IS
         RXCHANNELS      : INTEGER := 16;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 48;
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 128;
 		STATIC_PTP_CONF : 		BOOLEAN := TRUE;
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0')
@@ -807,10 +807,10 @@ PORT MAP(
 	aes67_ctrl_wallclock_locked        => wallclock_locked,
 	aes67_ctrl_wallclock_phasejump     => wallclock_phasejump,
 
-	aes67_ctrl_rx_meter_clip           => x"00" & audio_meter_rx_clip,
-	aes67_ctrl_rx_meter_signal         => x"00" & audio_meter_rx_signal,
-	aes67_ctrl_tx_meter_clip           => x"00" & audio_meter_tx_clip,
-	aes67_ctrl_tx_meter_signal         => x"00" & audio_meter_tx_signal,
+	aes67_ctrl_rx_meter_clip           => (others => '0'),--x"00" & audio_meter_rx_clip,
+	aes67_ctrl_rx_meter_signal         => (others => '0'),--x"00" & audio_meter_rx_signal,
+	aes67_ctrl_tx_meter_clip           => (others => '0'),--x"00" & audio_meter_tx_clip,
+	aes67_ctrl_tx_meter_signal         => (others => '0'),--x"00" & audio_meter_tx_signal,
 	aes67_ctrl_meter_clear             => audio_meter_clear,
 
 	aes67_ctrl_adda_nrst               => adda_nRST,

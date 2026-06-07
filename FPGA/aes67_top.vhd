@@ -19,7 +19,7 @@ ENTITY aes67_top IS
 		RX_BYTE_DEPTH	: natural := 3;
 		TX_BYTE_DEPTH	: natural := 3;
 		RX_SAMPLE_BUFFER_DEPTH : natural := 256;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 48;
+		TX_SAMPLE_BUFFER_DEPTH : natural := 64; -- must be power of two (media-clock-derived TX write pointer)
 		  
     	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
 
@@ -28,12 +28,13 @@ ENTITY aes67_top IS
 
 		AUDIO_INPUT_MODE : string := "tdm8";
 		AUDIO_OUTPUT_MODE : string := "tdm8";
-		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := FALSE;
+		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
 		-- TX TDM frontend: FALSE = demux integrated in tx_sample_buffer (default),
 		-- TRUE = legacy external tdm8_in -> parallel audio_i bus.
-		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := FALSE;
+		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
 		USE_EXTERNAL_PLL : BOOLEAN := true;
-		ENABLE_METERING: BOOLEAN := true
+		ENABLE_METERING: BOOLEAN := true;
+		DEBUG_PARALLEL_LOOPBACK: BOOLEAN := false
 
 	);
 	PORT
@@ -319,7 +320,9 @@ end generate;
 
 wc_512fs_o <= clk_512fs;
 
-
+dbug_parallel_loopback: if DEBUG_PARALLEL_LOOPBACK = true generate
+	tx_sample_register <= rx_sample_register;
+end generate;
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -341,6 +344,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- capture path uses the regular pll_48k_fs.
 		 fs_tdm_clk_i => pll_48k_fs_tdm,
 		 fs_halfduty_clk_i => wc_fs_int,
+ 
 		 bclk_i => pll_256fs_rising,
 		 tdm_in_i => tdm8in_i(TX_CHANNELS/8 - 1 downto 0),
 
@@ -512,6 +516,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 -- clocking
 		fs_clk_sync_i => pll_48k_fs_tdm,
+		fs_clk_50duty_i => pll_48k_fs,
 		bclk_sync_i => pll_256fs_falling,
 		media_clock_i => media_clock,
 		 

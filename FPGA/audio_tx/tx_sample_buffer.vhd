@@ -155,23 +155,11 @@ architecture Behavioral of tx_sample_buffer is
     signal demux_metering_valid  : std_logic := '0';
 begin
 
-    -- The media-clock-derived TX start pointer (tx_router) slices the low
-    -- clog2(depth) bits of the media clock, which only aliases to the right RAM
-    -- row if the buffer depth is a power of two. Fail synthesis loudly otherwise.
     assert 2 ** clog2(samples_per_channel_depth) = samples_per_channel_depth
         report "tx_sample_buffer: samples_per_channel_depth must be a power of two"
         severity failure;
 
-    -- =========================================================================
-    -- fs / bclk edge detection.
-    -- fs_clk_i and bclk_sync_i are already sys_clk-synchronous (generated in the
-    -- sys_clk domain by audioclock_generator_sysclk), so NO multi-FF CDC is
-    -- needed here -- a single delay register for edge detection is enough. This
-    -- matches the rx_ringbuffer timing exactly (1 sys_clk fs/bclk latency), so
-    -- in a serial loopback both sides start their frame on the same cycle.
-    -- (metering_clear_i does cross from the ctrl-plane domain, so it keeps its
-    -- 2-FF synchronizer.)
-    -- zaudio_sync = fs delayed by 1, zbclk = bclk delayed by 1.
+
     process (sys_clk, reset_n)
     begin
         if (reset_n = '0') then
@@ -180,34 +168,25 @@ begin
             zaudio_sync <= '0';
             zbclk <= '0';
             fs_halfduty_sync <= '0';
-            wr_sample_base <= 0;
+            --wr_sample_base <= 0;
         elsif (rising_edge(sys_clk)) then
             metering_clear_i_sync1 <= metering_clear_i;
             metering_clear_i_sync2 <= metering_clear_i_sync1;
             zaudio_sync <= fs_clk_i;
             zbclk <= bclk_sync_i;
 
-            -- Latch the media clock on the FALLING edge of the 50%-duty LR clock,
-            -- where it is stable (fs/NCO is not synchronous with the media clock).
-            -- Same edge tx_router uses for packet timestamps. The capture FSMs then
-            -- snapshot the resulting stable wr_sample_base ONCE per sample/frame and
-            -- hold it for the whole write -- never reading live media_clock_i across
-            -- the write (that mid-write jump is what bit-crushes; same lesson as the
-            -- rx_ringbuffer read-pointer fix).
-            -- Write row = media(SAMPLE_IDX_BITS-1:0) << SAMPLE_SHIFT, the SAME formula
-            -- the router uses for the start address (the write head). No modulo / no
-            -- multiply (depth is a power of two): low bits are the row index, the
-            -- shift is the byte stride. No +1 -- write row and read head must use the
-            -- identical media value or read_base lands in unwritten RAM.
+
             fs_halfduty_sync <= fs_halfduty_clk_i;
-            if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
-                wr_sample_base <= to_integer(
-                    unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
-                    & to_unsigned(0, SAMPLE_SHIFT));
-            end if;
+            --if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
+             --   wr_sample_base <= to_integer(
+             --       unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
+              --      & to_unsigned(0, SAMPLE_SHIFT));
+            --end if;
         end if;
     end process;
-
+    wr_sample_base <= to_integer(
+                    unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
+                    & to_unsigned(0, SAMPLE_SHIFT));
     -- =========================================================================
     -- PARALLEL INPUT FRONTEND (TDM_INPUT = false)
     -- =========================================================================
@@ -291,11 +270,6 @@ begin
                 if (zaudio_sync = '0' and fs_clk_i = '1') then
                     audio_in_latched <= audio_in;
                     write_active <= '1';
-                    -- Use the sample base captured from the media clock on the
-                    -- preceding 50%-duty-LR falling edge (wr_sample_base), where the
-                    -- media clock is stable. NOT sampled on this fs edge: fs/NCO is
-                    -- not synchronous with the media clock, so a fs-edge sample would
-                    -- read an unstable media value and bit-crush the audio.
                     sample_wr_ptr <= wr_sample_base;
                 end if;
                 if write_active = '1' then

@@ -30,6 +30,7 @@ entity rx_ringbuffer is
         audio_out :             out std_logic_vector(bytes_per_sample * 8 * global_channel_count - 1 downto 0);
         tdm_out : out std_logic_vector(TDM_OUTPUTS - 1 downto 0);
 		fs_clk_sync_i      				: in std_logic;
+        fs_clk_50duty_i                 : in std_logic;
         bclk_sync_i : in std_logic;
 
 		media_clock_i: in std_logic_vector(31 downto 0);
@@ -103,6 +104,7 @@ architecture Behavioral of rx_ringbuffer is
     signal stream_rd_data_r : std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register for comparison
 
     -- Read pointer: derived from media_clock to maintain fixed offset from write pointer
+    signal sample_rd_ptr_latch : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
     signal sample_rd_ptr : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
 
 
@@ -180,6 +182,7 @@ architecture Behavioral of rx_ringbuffer is
     signal tdm_byte_tick    : std_logic := '0';  -- pulse: start prefetching next byte
     signal tdm_commit_tick  : std_logic := '0';  -- pulse: copy shadow -> latch
     signal tdm_byte_off     : unsigned(1 downto 0) := (others => '0'); -- captured offset for in-flight burst
+    signal fs_clk_50duty_sync : std_logic := '0';
     
     -- Metering
     constant SAMPLE_BITS : integer := bytes_per_sample * 8;
@@ -625,8 +628,18 @@ parellel_out_proc_gen: if (PARALLEL_OUT = true) generate
 end generate;
 
 tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
+    
     sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
 
+    ---process (sys_clk) begin
+    --    if rising_edge(sys_clk) then
+    --         if fs_clk_50duty_i = '0' and fs_clk_50duty_sync = '1' then -- latch stable media clock at falling edge of 50 percent duty cycle
+    --            sample_rd_ptr_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+    --         elsif fs_clk_50duty_i = '1' and fs_clk_50duty_sync = '0' then
+    --            sample_rd_ptr <= sample_rd_ptr_latch;
+    --         end if;
+    --    end if;
+    --end process;
 
 
     -- Counters and ticks.

@@ -16,11 +16,11 @@ ENTITY topevalkit IS
         FPGAVERSIONLSB : integer := 123;
         TXSTREAMS      : integer := 8;
         RXSTREAMS       : INTEGER := 8;
-        TXCHANNELS      : INTEGER := 16;
-        RXCHANNELS      : INTEGER := 16;
+        TXCHANNELS      : INTEGER := 8;
+        RXCHANNELS      : INTEGER := 8;
         BITDEPTH        : INTEGER := 24;
         SAMPLERATE      : INTEGER := 48;
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 128; -- must be power of two (media-clock-derived TX write pointer)
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false
