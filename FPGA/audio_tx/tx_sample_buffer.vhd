@@ -145,6 +145,9 @@ architecture Behavioral of tx_sample_buffer is
     type t_demux_state is (ds_idle, ds_write);
     signal demux_state   : t_demux_state := ds_idle;
     signal demux_pin     : integer range 0 to TDM_INPUTS := 0;
+    signal tdm_in_sync : STD_LOGIC_VECTOR(TDM_INPUTS - 1 downto 0);
+    signal tdm_in_sync2 : STD_LOGIC_VECTOR(TDM_INPUTS - 1 downto 0);
+
 
 begin
 
@@ -170,22 +173,23 @@ begin
 
 
             fs_halfduty_sync <= fs_halfduty_clk_i;
-            --if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
-             --   wr_sample_base <= to_integer(
-             --       unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
-              --      & to_unsigned(0, SAMPLE_SHIFT));
-            --end if;
+            if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
+                    media_clock_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0));
+            end if;
+            if (fs_halfduty_clk_i = '1' and fs_halfduty_sync = '0') then
+                media_clock_latch2 <= media_clock_latch + 1;
+            end if;
+            tdm_in_sync <= tdm_in;
+            tdm_in_sync2 <= tdm_in_sync;
         end if;
     end process;
-    wr_sample_base <= to_integer(
-                    unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
-                    & to_unsigned(0, SAMPLE_SHIFT));
+
     -- =========================================================================
     -- PARALLEL INPUT FRONTEND (TDM_INPUT = false)
     -- =========================================================================
     parallel_in_gen: if (TDM_INPUT = false) generate
         wr_sample_base <= to_integer(
-                    unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0))
+                    media_clock_latch2
                     & to_unsigned(0, SAMPLE_SHIFT));
         -- metering process (operates on audio_in)
         metering_proc_gen: if (ENABLE_METERING = true) generate
@@ -268,11 +272,7 @@ begin
                     sample_wr_ptr <= wr_sample_base;
                 end if;
                 if write_active = '1' then
-                    -- Linear slot layout: MSB @ slot offset 0, mid @ +1, LSB @ +2,
-                    -- pad @ +3 (left 0). audio_in's per-channel slice has the MSB in
-                    -- its top 8 bits, so byte_count=0 selects the top 8 bits and the
-                    -- address increments -> MSB lands at offset 0. This matches the
-                    -- TDM frontend and the transmitter's linear read order.
+
                     ram_wr_data <= audio_in_latched((SAMPLE_BITS * current_channel_id) + (SAMPLE_BITS - 1 - byte_count*8)
                                                     downto (SAMPLE_BITS * current_channel_id) + (SAMPLE_BITS - 8 - byte_count*8));
                     ram_wr_addr <= sample_wr_ptr + current_channel_id * CHANNEL_STRIDE + byte_count;
@@ -305,29 +305,26 @@ begin
 
         
         -- ----- bclk-domain (sampled into sys_clk via edge detect) bit/slot counters -----
-        tdm_ctrl_proc: process(sys_clk, reset_n)
+        tdm_ctrl_proc: process(bclk_sync_i, reset_n)
         begin
             if reset_n = '0' then
                 tdm_bit_counter <= (others => '0');
                 tdm_shift <= (others => (others => '0'));
-            elsif rising_edge(sys_clk) then
-                if (fs_halfduty_clk_i = '0' and fs_halfduty_sync = '1') then
-                    media_clock_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0));
-                end if;
-                if (fs_halfduty_clk_i = '1' and fs_halfduty_sync = '0') then
-                    media_clock_latch2 <= media_clock_latch + 1;
-                end if;
+            elsif rising_edge(bclk_sync_i) then
+
                 -- bclk falling edge: sample one bit per pin
-                if (bclk_sync_i = '0' and zbclk = '1') then
+                --if (bclk_sync_i = '0' and zbclk = '1') then
                     tdm_bit_counter <= tdm_bit_counter + 1;
                     for p in 0 to TDM_INPUTS - 1 loop
-                            tdm_shift(p) <= tdm_shift(p)(6 downto 0) & tdm_in(p);
+                            tdm_shift(p) <= tdm_shift(p)(6 downto 0) & tdm_in_sync2(p);
                     end loop;
 
-                end if;
+                --end if;
+
 
                 -- frame sync: restart at channel 0 / bit 0
-                if (fs_clk_i = '1' and zaudio_sync = '0') then
+                --if (fs_clk_i = '1' and zaudio_sync = '0') then
+                if (fs_clk_i = '1') then
                     tdm_bit_counter <= (others => '0');
                 end if;
             end if;

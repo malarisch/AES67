@@ -345,7 +345,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 fs_tdm_clk_i => pll_48k_fs_tdm,
 		 fs_halfduty_clk_i => wc_fs_int,
  
-		 bclk_i => pll_256fs_rising,
+		 bclk_i => pll_256fs_falling,
 		 tdm_in_i => tdm8in_i(TX_CHANNELS/8 - 1 downto 0),
 
 		 mac_tx_clock => mac_tx_clock,
