@@ -73,3 +73,5 @@ datasheets/
 .west/**
 .github/**
 .vscode/**
+*__pycache__*
+

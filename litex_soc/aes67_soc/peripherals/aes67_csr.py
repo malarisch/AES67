@@ -1,0 +1,345 @@
+"""Application-specific AES67 control/status registers (CSR-only, no Wishbone slave)."""
+
+from litex.gen import *
+
+from migen import Cat
+from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRStatus, CSRField
+
+
+# -- Custom CSRs -------------------------------------------------------------
+
+class AES67CSRs(LiteXModule, AutoCSR):
+    """Application-specific control/status registers for AES67 FPGA logic."""
+    def __init__(self):
+        # =====================================================================
+        # Input signals (directly active from external FPGA logic)
+        # =====================================================================
+        self.i_pll_ppb_valid       = Signal()
+        self.i_pll_ppb_wc_count    = Signal(25)
+        self.i_pll_ppb_pll_count   = Signal(25)
+        self.i_wallclock_locked    = Signal()
+        self.i_wallclock_phasejump = Signal()
+        self.i_wallclock_configured = Signal()
+        self.i_ptp_sync_lost       = Signal()
+        self.i_eth_link_up         = Signal()
+        self.i_eth_speed           = Signal(2)
+        self.i_ptp_path_delay      = Signal(32)
+        self.i_ptp_offset          = Signal(32)
+        self.i_eth_tx_done         = Signal()
+        self.i_eth_rx_overflow     = Signal()
+        # PTP BMA results (from FPGA BMC)
+        self.i_ptp_is_leader       = Signal()
+        self.i_ptp_is_follower     = Signal()
+        self.i_ptp_leader_id       = Signal(64)
+        self.i_rx_meter_signal     = Signal(16)
+        self.i_rx_meter_clip       = Signal(16)
+        self.i_tx_meter_signal     = Signal(16)
+        self.i_tx_meter_clip       = Signal(16)
+
+        # =====================================================================
+        # Output signals (directly active to external FPGA logic)
+        # =====================================================================
+        self.o_pll_ppb_start       = Signal()
+        self.o_mac_addr            = Signal(48)
+        self.o_ip_addr             = Signal(32)
+        self.o_ptp_time_source     = Signal(8)
+        self.o_ptp_log_msg_interval = Signal(8)
+        self.o_ptp_announce_msg_interval = Signal(8)
+        self.o_ptp_gm_priority1    = Signal(8)
+        self.o_ptp_gm_priority2    = Signal(8)
+        self.o_ptp_gm_clock_class  = Signal(8)
+        self.o_ptp_gm_clock_accuracy = Signal(8)
+        self.o_eth_tx_request      = Signal()
+        self.o_adda_nrst           = Signal()  # AD/DA card hardware reset (active-high → nRST pin)
+        self.o_meter_clear         = Signal()  # Metering clear toggle (to FPGA)
+        self.o_ptp_reset           = Signal()  # PTP module reset (active high)
+
+        # PTP servo / parser tuning (SoC -> FPGA)
+        self.o_servo_kp_gain              = Signal(8)
+        self.o_servo_ki_gain              = Signal(8)
+        self.o_servo_gain_shift           = Signal(5)
+        self.o_servo_gain_shift_locked    = Signal(5)
+        self.o_servo_ki_extra_shift       = Signal(5)
+        self.o_servo_filter_shift         = Signal(5)
+        self.o_servo_warmup_samples       = Signal(8)
+        self.o_servo_lock_threshold_ns    = Signal(32)
+        self.o_servo_unlock_threshold_ns  = Signal(32)
+        self.o_servo_lock_count_threshold = Signal(8)
+        self.o_parser_min_filter_enable        = Signal()
+        self.o_parser_min_filter_active_depth  = Signal(8)
+        self.o_parser_delay_asymmetry_ns       = Signal(32)
+
+        # PTP servo monitoring (FPGA -> SoC)
+        self.i_servo_mon_filtered_offset      = Signal(32)
+        self.i_servo_mon_integral_sum         = Signal(32)
+        self.i_servo_mon_pi_proportional      = Signal(32)
+        self.i_servo_mon_pi_sum_raw           = Signal(32)
+        self.i_servo_mon_effective_gain_shift = Signal(8)
+        self.i_servo_mon_lock_counter         = Signal(16)
+        self.i_servo_mon_sample_count         = Signal(16)
+        self.i_servo_mon_first_lock_achieved  = Signal()
+
+        # =====================================================================
+        # CSR: Status registers (RO) — directly sampled from input signals
+        # =====================================================================
+        self.pll_ppb_status = CSRStatus(32, fields=[
+            CSRField("valid",     size=1,  offset=0,  description="PPB measurement valid"),
+        ])
+        self.pll_ppb_wc_count = CSRStatus(32, description="PPB measurement wallclock count [24:0]")
+        self.pll_ppb_pll_count = CSRStatus(32, description="PPB measurement PLL count [24:0]")
+
+        self.status = CSRStatus(32, fields=[
+            CSRField("wallclock_locked",    size=1, offset=0, description="Wallclock locked"),
+            CSRField("wallclock_phasejump", size=1, offset=1, description="Wallclock phase jump"),
+            CSRField("wallclock_configured", size=1, offset=2, description="Wallclock configured"),
+            CSRField("ptp_sync_lost",       size=1, offset=3, description="PTP sync lost"),
+            CSRField("eth_link_up",         size=1, offset=4, description="Ethernet link up"),
+            CSRField("eth_speed",           size=2, offset=5, description="Ethernet speed (00=10M,01=100M,10=1G)"),
+            CSRField("eth_tx_done",         size=1, offset=7, description="Ethernet TX done"),
+            CSRField("eth_rx_overflow",     size=1, offset=8, description="Ethernet RX overflow"),
+            CSRField("ptp_is_leader",       size=1, offset=9, description="PTP BMA result: node is leader"),
+            CSRField("ptp_is_follower",     size=1, offset=10, description="PTP BMA result: node is follower"),
+        ])
+
+        self.ptp_path_delay = CSRStatus(32, description="PTP path delay (ns)")
+        self.ptp_offset     = CSRStatus(32, description="PTP offset from master (ns)")
+
+        # =====================================================================
+        # CSR: Control registers (RW) — directly drive output signals
+        # =====================================================================
+        self.ctrl = CSRStorage(32, fields=[
+            CSRField("pll_ppb_start",   size=1, offset=0, description="Start PPB measurement"),
+            CSRField("eth_tx_request",  size=1, offset=3, description="Request Ethernet TX"),
+            CSRField("adda_nrst",       size=1, offset=4, description="AD/DA card reset release: 0=held in reset, 1=released"),
+        ])
+
+        self.mac_addr_lo = CSRStorage(32, description="MAC address [31:0]")
+        self.mac_addr_hi = CSRStorage(32, description="MAC address [47:32] (bits [15:0] used)")
+        self.ip_addr     = CSRStorage(32, description="IP address [31:0]")
+
+        self.ptp_leader_id_lo = CSRStatus(32, description="PTP leader identity [31:0] (from FPGA BMA)")
+        self.ptp_leader_id_hi = CSRStatus(32, description="PTP leader identity [63:32] (from FPGA BMA)")
+
+        self.ptp_time_source = CSRStorage(8, description="PTP time source")
+        self.ptp_log_msg_interval = CSRStorage(8, description="PTP logMessageInterval")
+        self.ptp_announce_msg_interval = CSRStorage(8, description="PTP announce logMessageInterval")
+
+        self.ptp_gm_priority1     = CSRStorage(8, description="PTP GM priority1")
+        self.ptp_gm_priority2     = CSRStorage(8, description="PTP GM priority2")
+        self.ptp_gm_clock_class   = CSRStorage(8, description="PTP GM clock class")
+        self.ptp_gm_clock_accuracy = CSRStorage(8, description="PTP GM clock accuracy")
+
+        # -- Audio metering status (RO) --
+        self.rx_meter_signal = CSRStatus(16, description="RX signal detect (1 bit per channel, sticky)")
+        self.rx_meter_clip   = CSRStatus(16, description="RX clip detect (1 bit per channel, sticky)")
+        self.tx_meter_signal = CSRStatus(16, description="TX signal detect (1 bit per channel, sticky)")
+        self.tx_meter_clip   = CSRStatus(16, description="TX clip detect (1 bit per channel, sticky)")
+
+        # -- Metering clear (RW, directly drives output toggle) --
+        self.meter_clear = CSRStorage(1, description="Toggle to clear metering sticky bits in FPGA")
+
+        # -- Scratch register (RW, no HW connection) --
+        self.scratch = CSRStorage(32, description="Scratch register (read/write, no HW effect)")
+
+        # =====================================================================
+        # PTP servo / parser tuning CSRs (RW) — one CSR per value as requested
+        # =====================================================================
+        self.servo_kp_gain              = CSRStorage(8,  reset=40,   description="Servo Kp gain (signed)")
+        self.servo_ki_gain              = CSRStorage(8,  reset=5,    description="Servo Ki gain (signed)")
+        self.servo_gain_shift           = CSRStorage(5,  reset=3,    description="Servo base gain shift")
+        self.servo_gain_shift_locked    = CSRStorage(5,  reset=0,    description="Servo extra gain shift when locked")
+        self.servo_ki_extra_shift       = CSRStorage(5,  reset=3,    description="Servo Ki extra shift relative to Kp")
+        self.servo_filter_shift         = CSRStorage(5,  reset=0,    description="Servo offset EMA filter shift (0=no filter)")
+        self.servo_warmup_samples       = CSRStorage(8,  reset=16,   description="Servo warmup sample count")
+        self.servo_lock_threshold_ns    = CSRStorage(32, reset=500,  description="Servo lock threshold (ns)")
+        self.servo_unlock_threshold_ns  = CSRStorage(32, reset=5000, description="Servo unlock threshold (ns)")
+        self.servo_lock_count_threshold = CSRStorage(8,  reset=24,   description="Servo consecutive samples needed to lock")
+
+        self.parser_min_filter = CSRStorage(32, reset=(2 << 8), fields=[
+            CSRField("enable",       size=1, offset=0,  description="Enable min filter"),
+            CSRField("active_depth", size=8, offset=8,  description="Active min filter depth (clamped to MIN_FILTER_DEPTH)"),
+        ])
+
+        # IEEE 1588 delayAsymmetry (signed ns). Positive = downstream
+        # (Master->Slave) path is longer than upstream. Used to compensate
+        # static PHY/MAC TX vs RX latency mismatch (e.g. LAN8720A).
+        self.parser_delay_asymmetry_ns = CSRStorage(32, reset=0,
+            description="PTP delayAsymmetry (signed ns); positive = M2S path longer than S2M")
+
+        # PTP module reset (RW pulse register: write 1 to assert, write 0 to release)
+        self.ptp_reset = CSRStorage(1, reset=0, description="PTP module reset (1 = held in reset)")
+
+        # =====================================================================
+        # PTP servo monitoring CSRs (RO)
+        # =====================================================================
+        self.servo_mon_filtered_offset      = CSRStatus(32, description="Servo: filtered offset (signed ns)")
+        self.servo_mon_integral_sum         = CSRStatus(32, description="Servo: PI integrator state (signed)")
+        self.servo_mon_pi_proportional      = CSRStatus(32, description="Servo: PI proportional term (signed)")
+        self.servo_mon_pi_sum_raw           = CSRStatus(32, description="Servo: PI raw sum pre-clamp (signed)")
+        self.servo_mon_status = CSRStatus(32, fields=[
+            CSRField("effective_gain_shift", size=8,  offset=0,  description="Effective gain shift"),
+            CSRField("lock_counter",         size=16, offset=8,  description="Lock counter"),
+            CSRField("first_lock_achieved",  size=1,  offset=24, description="First lock achieved"),
+        ])
+        self.servo_mon_sample_count = CSRStatus(16, description="Servo: warmup sample count")
+
+        # =====================================================================
+        # Wiring: input signals -> CSR status fields
+        # =====================================================================
+        self.comb += [
+            self.pll_ppb_status.fields.valid.eq(self.i_pll_ppb_valid),
+            self.pll_ppb_wc_count.status.eq(self.i_pll_ppb_wc_count),
+            self.pll_ppb_pll_count.status.eq(self.i_pll_ppb_pll_count),
+
+            self.status.fields.wallclock_locked.eq(self.i_wallclock_locked),
+            self.status.fields.wallclock_phasejump.eq(self.i_wallclock_phasejump),
+            self.status.fields.wallclock_configured.eq(self.i_wallclock_configured),
+            self.status.fields.ptp_sync_lost.eq(self.i_ptp_sync_lost),
+            self.status.fields.eth_link_up.eq(self.i_eth_link_up),
+            self.status.fields.eth_speed.eq(self.i_eth_speed),
+            self.status.fields.eth_tx_done.eq(self.i_eth_tx_done),
+            self.status.fields.eth_rx_overflow.eq(self.i_eth_rx_overflow),
+            self.status.fields.ptp_is_leader.eq(self.i_ptp_is_leader),
+            self.status.fields.ptp_is_follower.eq(self.i_ptp_is_follower),
+
+            self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
+            self.ptp_offset.status.eq(self.i_ptp_offset),
+
+            self.ptp_leader_id_lo.status.eq(self.i_ptp_leader_id[:32]),
+            self.ptp_leader_id_hi.status.eq(self.i_ptp_leader_id[32:]),
+
+            self.rx_meter_signal.status.eq(self.i_rx_meter_signal),
+            self.rx_meter_clip.status.eq(self.i_rx_meter_clip),
+            self.tx_meter_signal.status.eq(self.i_tx_meter_signal),
+            self.tx_meter_clip.status.eq(self.i_tx_meter_clip),
+        ]
+
+        # =====================================================================
+        # Wiring: CSR storage fields -> output signals
+        # =====================================================================
+        self.comb += [
+            self.o_pll_ppb_start.eq(self.ctrl.fields.pll_ppb_start),
+            self.o_eth_tx_request.eq(self.ctrl.fields.eth_tx_request),
+            self.o_adda_nrst.eq(self.ctrl.fields.adda_nrst),
+            self.o_meter_clear.eq(self.meter_clear.storage),
+
+            self.o_mac_addr.eq(Cat(self.mac_addr_lo.storage, self.mac_addr_hi.storage[:16])),
+            self.o_ip_addr.eq(self.ip_addr.storage),
+
+            self.o_ptp_time_source.eq(self.ptp_time_source.storage),
+            self.o_ptp_log_msg_interval.eq(self.ptp_log_msg_interval.storage),
+            self.o_ptp_announce_msg_interval.eq(self.ptp_announce_msg_interval.storage),
+
+            self.o_ptp_gm_priority1.eq(self.ptp_gm_priority1.storage),
+            self.o_ptp_gm_priority2.eq(self.ptp_gm_priority2.storage),
+            self.o_ptp_gm_clock_class.eq(self.ptp_gm_clock_class.storage),
+            self.o_ptp_gm_clock_accuracy.eq(self.ptp_gm_clock_accuracy.storage),
+
+            # PTP module reset
+            self.o_ptp_reset.eq(self.ptp_reset.storage[0]),
+
+            # PTP servo / parser tuning -> output signals
+            self.o_servo_kp_gain.eq(self.servo_kp_gain.storage),
+            self.o_servo_ki_gain.eq(self.servo_ki_gain.storage),
+            self.o_servo_gain_shift.eq(self.servo_gain_shift.storage),
+            self.o_servo_gain_shift_locked.eq(self.servo_gain_shift_locked.storage),
+            self.o_servo_ki_extra_shift.eq(self.servo_ki_extra_shift.storage),
+            self.o_servo_filter_shift.eq(self.servo_filter_shift.storage),
+            self.o_servo_warmup_samples.eq(self.servo_warmup_samples.storage),
+            self.o_servo_lock_threshold_ns.eq(self.servo_lock_threshold_ns.storage),
+            self.o_servo_unlock_threshold_ns.eq(self.servo_unlock_threshold_ns.storage),
+            self.o_servo_lock_count_threshold.eq(self.servo_lock_count_threshold.storage),
+            self.o_parser_min_filter_enable.eq(self.parser_min_filter.fields.enable),
+            self.o_parser_min_filter_active_depth.eq(self.parser_min_filter.fields.active_depth),
+            self.o_parser_delay_asymmetry_ns.eq(self.parser_delay_asymmetry_ns.storage),
+
+            # PTP servo monitoring inputs -> CSR status
+            self.servo_mon_filtered_offset.status.eq(self.i_servo_mon_filtered_offset),
+            self.servo_mon_integral_sum.status.eq(self.i_servo_mon_integral_sum),
+            self.servo_mon_pi_proportional.status.eq(self.i_servo_mon_pi_proportional),
+            self.servo_mon_pi_sum_raw.status.eq(self.i_servo_mon_pi_sum_raw),
+            self.servo_mon_status.fields.effective_gain_shift.eq(self.i_servo_mon_effective_gain_shift),
+            self.servo_mon_status.fields.lock_counter.eq(self.i_servo_mon_lock_counter),
+            self.servo_mon_status.fields.first_lock_achieved.eq(self.i_servo_mon_first_lock_achieved),
+            self.servo_mon_sample_count.status.eq(self.i_servo_mon_sample_count),
+        ]
+
+
+def add_aes67_csr(soc, platform):
+    """Wire ``soc.aes67_csr`` to the ``aes67_ctrl`` pads.
+
+    The instance must already be attached as ``soc.aes67_csr`` *in the SoC's own
+    ``__init__``* (see soc.py).  Migen derives generated net names from the
+    attribute an object is first stored into; instantiating here would prefix
+    every net with this function's name (``add_aes67_csr_*``) and break the
+    Quartus timing constraints (FPGA/sdc/litex_csr.sdc) that match ``aes67_csr_*``.
+    """
+    csr = soc.aes67_csr
+
+    aes67_pads = platform.request("aes67_ctrl")
+    soc.comb += [
+        # Inputs: pads -> CSR
+        csr.i_pll_ppb_valid.eq(aes67_pads.pll_ppb_valid),
+        csr.i_pll_ppb_wc_count.eq(aes67_pads.pll_ppb_wc_count),
+        csr.i_pll_ppb_pll_count.eq(aes67_pads.pll_ppb_pll_count),
+        csr.i_wallclock_locked.eq(aes67_pads.wallclock_locked),
+        csr.i_wallclock_phasejump.eq(aes67_pads.wallclock_phasejump),
+        csr.i_wallclock_configured.eq(aes67_pads.wallclock_configured),
+        csr.i_ptp_sync_lost.eq(aes67_pads.ptp_sync_lost),
+        csr.i_eth_link_up.eq(aes67_pads.eth_link_up),
+        csr.i_eth_speed.eq(aes67_pads.eth_speed),
+        csr.i_ptp_path_delay.eq(aes67_pads.ptp_path_delay),
+        csr.i_ptp_offset.eq(aes67_pads.ptp_offset),
+        csr.i_eth_tx_done.eq(aes67_pads.eth_tx_done),
+        csr.i_eth_rx_overflow.eq(aes67_pads.eth_rx_overflow),
+        csr.i_ptp_is_leader.eq(aes67_pads.ptp_is_leader),
+        csr.i_ptp_is_follower.eq(aes67_pads.ptp_is_follower),
+        csr.i_ptp_leader_id.eq(aes67_pads.ptp_leader_id),
+        csr.i_rx_meter_signal.eq(aes67_pads.rx_meter_signal),
+        csr.i_rx_meter_clip.eq(aes67_pads.rx_meter_clip),
+        csr.i_tx_meter_signal.eq(aes67_pads.tx_meter_signal),
+        csr.i_tx_meter_clip.eq(aes67_pads.tx_meter_clip),
+        # Outputs: CSR -> pads
+        aes67_pads.pll_ppb_start.eq(csr.o_pll_ppb_start),
+        aes67_pads.mac_addr.eq(csr.o_mac_addr),
+        aes67_pads.ip_addr.eq(csr.o_ip_addr),
+        aes67_pads.ptp_time_source.eq(csr.o_ptp_time_source),
+        aes67_pads.ptp_log_msg_interval.eq(csr.o_ptp_log_msg_interval),
+        aes67_pads.ptp_announce_msg_interval.eq(csr.o_ptp_announce_msg_interval),
+        aes67_pads.ptp_gm_priority1.eq(csr.o_ptp_gm_priority1),
+        aes67_pads.ptp_gm_priority2.eq(csr.o_ptp_gm_priority2),
+        aes67_pads.ptp_gm_clock_class.eq(csr.o_ptp_gm_clock_class),
+        aes67_pads.ptp_gm_clock_accuracy.eq(csr.o_ptp_gm_clock_accuracy),
+        aes67_pads.eth_tx_request.eq(csr.o_eth_tx_request),
+        aes67_pads.adda_nrst.eq(csr.o_adda_nrst),
+        aes67_pads.meter_clear.eq(csr.o_meter_clear),
+
+        # PTP module reset
+        aes67_pads.ptp_reset.eq(csr.o_ptp_reset),
+
+        # PTP servo / parser tuning (SoC -> FPGA)
+        aes67_pads.servo_kp_gain.eq(csr.o_servo_kp_gain),
+        aes67_pads.servo_ki_gain.eq(csr.o_servo_ki_gain),
+        aes67_pads.servo_gain_shift.eq(csr.o_servo_gain_shift),
+        aes67_pads.servo_gain_shift_locked.eq(csr.o_servo_gain_shift_locked),
+        aes67_pads.servo_ki_extra_shift.eq(csr.o_servo_ki_extra_shift),
+        aes67_pads.servo_filter_shift.eq(csr.o_servo_filter_shift),
+        aes67_pads.servo_warmup_samples.eq(csr.o_servo_warmup_samples),
+        aes67_pads.servo_lock_threshold_ns.eq(csr.o_servo_lock_threshold_ns),
+        aes67_pads.servo_unlock_threshold_ns.eq(csr.o_servo_unlock_threshold_ns),
+        aes67_pads.servo_lock_count_threshold.eq(csr.o_servo_lock_count_threshold),
+        aes67_pads.parser_min_filter_enable.eq(csr.o_parser_min_filter_enable),
+        aes67_pads.parser_min_filter_active_depth.eq(csr.o_parser_min_filter_active_depth),
+        aes67_pads.parser_delay_asymmetry_ns.eq(csr.o_parser_delay_asymmetry_ns),
+
+        # PTP servo monitoring (FPGA -> SoC)
+        csr.i_servo_mon_filtered_offset.eq(aes67_pads.servo_mon_filtered_offset),
+        csr.i_servo_mon_integral_sum.eq(aes67_pads.servo_mon_integral_sum),
+        csr.i_servo_mon_pi_proportional.eq(aes67_pads.servo_mon_pi_proportional),
+        csr.i_servo_mon_pi_sum_raw.eq(aes67_pads.servo_mon_pi_sum_raw),
+        csr.i_servo_mon_effective_gain_shift.eq(aes67_pads.servo_mon_effective_gain_shift),
+        csr.i_servo_mon_lock_counter.eq(aes67_pads.servo_mon_lock_counter),
+        csr.i_servo_mon_sample_count.eq(aes67_pads.servo_mon_sample_count),
+        csr.i_servo_mon_first_lock_achieved.eq(aes67_pads.servo_mon_first_lock_achieved),
+    ]
+    return csr
