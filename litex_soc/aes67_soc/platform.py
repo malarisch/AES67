@@ -141,6 +141,45 @@ _io_common = [
         Subsignal("wr_data", Pins(8)),   # output: write data
     ),
 
+    # eth_buf RX-ready interrupt line, crossing the SoC<->bridge boundary.
+    # The bridge (where eth_buf lives) drives this OUT; the SoC takes it IN and
+    # feeds it to the VexRiscv external interrupt array (so the firmware keeps
+    # its RX IRQ instead of polling rx_ready over the slow Wishbone bus).
+    ("eth_buf_irq", 0, Pins(1)),
+
+    # AES67 external Wishbone window — the bus boundary between the SoC (master)
+    # and the standalone AES67 bridge (slave).  One contiguous 64 KiB window at
+    # 0x90000000 carries the whole AES67 surface (eth_buf buffer, stream RAMs,
+    # and the bridge's WB->CSR sub-bridge for aes67_csr).  Only requested by the
+    # SoC built with aes67_external=True and by the aes67_bridge target.
+    # 30-bit word address (4 GiB / 32-bit words).  Signal directions per the
+    # Wishbone layout: adr/dat_w/sel/cyc/stb/we/cti/bte are M->S, dat_r/ack/err S->M.
+    ("aes67_wb", 0,
+        Subsignal("adr",   Pins(30)),
+        Subsignal("dat_w", Pins(32)),
+        Subsignal("dat_r", Pins(32)),
+        Subsignal("sel",   Pins(4)),
+        Subsignal("cyc",   Pins(1)),
+        Subsignal("stb",   Pins(1)),
+        Subsignal("we",    Pins(1)),
+        Subsignal("cti",   Pins(3)),
+        Subsignal("bte",   Pins(2)),
+        Subsignal("ack",   Pins(1)),
+        Subsignal("err",   Pins(1)),
+    ),
+
+    # SPIBone: 4-wire SPI -> Wishbone bridge (only requested by the spibone
+    # target, where an external host replaces the VexRiscv softcore as the
+    # sole Wishbone master).  Declared here so it is available to any target;
+    # LiteX only emits requested resources as ports, so the 3 CPU targets that
+    # never request it are unaffected.
+    ("spibone", 0,
+        Subsignal("clk",  Pins(1)),
+        Subsignal("cs_n", Pins(1)),
+        Subsignal("mosi", Pins(1)),
+        Subsignal("miso", Pins(1)),
+    ),
+
     # Ethernet packet buffer I/O (directly active to/from external FPGA logic)
     ("eth_buf", 0,
         # RX buffer: FPGA writes, SoC reads
@@ -208,6 +247,22 @@ _io_gowin = [
     ),
 ] + _io_common
 
+# spibone target: CPU-less register bridge.  No main-RAM pins; the MAC clocks
+# (clk_mac_rx/tx, used by eth_buf) already live in _io_common, and clk_sys feeds
+# the sys domain.  The external host drives the bus over the "spibone" SPI pads.
+_io_spibone = [
+    ("clk_sys", 0, Pins(1)),
+] + _io_common
+
+# aes67_bridge target: the AES67 register surface split off as a standalone
+# Wishbone-slave module.  Same IO superset as spibone (clk_sys + MAC clocks +
+# the AES67 direct signals + the aes67_wb_* bus pads); LiteX only emits the
+# resources actually requested by the build, so the unused pads (spiflash, i2c,
+# spi, serial, …) never appear as ports.
+_io_bridge = [
+    ("clk_sys", 0, Pins(1)),
+] + _io_common
+
 
 # -- Shared build helper (HDL-only, no synthesis) -----------------------------
 
@@ -241,6 +296,43 @@ class Cyclone10StubPlatform(AlteraPlatform):
 
     def __init__(self):
         AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_cyclone10, toolchain="quartus")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class SpiboneStubPlatform(AlteraPlatform):
+    """Platform stub for the CPU-less spibone bridge (HDL-only generation).
+
+    The FPGA device is irrelevant for HDL-only generation (no synthesis), so we
+    reuse the Cyclone 10LP part.  The generated bridge is device-agnostic.
+    """
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_spibone, toolchain="quartus")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class BridgeStubPlatform(AlteraPlatform):
+    """Platform stub for the standalone AES67 Wishbone bridge (HDL-only).
+
+    Device is irrelevant for HDL-only generation; reuse the Cyclone 10LP part.
+    """
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_bridge, toolchain="quartus")
 
     def create_programmer(self):
         raise NotImplementedError

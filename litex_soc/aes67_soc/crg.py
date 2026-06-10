@@ -42,6 +42,25 @@ class _CRG_Cyclone10(LiteXModule):
         _bind_mac_clocks(self, platform)
 
 
+# -- CRG (Clock Reset Generator) — spibone bridge (no main RAM) ---------------
+
+class _CRG_Spibone(LiteXModule):
+    """CRG for the CPU-less spibone bridge: sys clock + MAC clocks, no RAM clocks.
+
+    Identical to _CRG_Cyclone10 minus any main-RAM concern — eth_buf still needs
+    the mac_rx/mac_tx domains, so those are bound here too.
+    """
+    def __init__(self, platform, sys_clk_freq):
+        self.rst    = Signal()
+        self.cd_sys = ClockDomain()
+
+        # System clock fed from external (top-level) PLL.
+        self.comb += self.cd_sys.clk.eq(platform.request("clk_sys"))
+        self.specials += AsyncResetSynchronizer(self.cd_sys, self.rst)
+
+        _bind_mac_clocks(self, platform)
+
+
 # -- CRG (Clock Reset Generator) — Cyclone 10LP CYC1000 (SDRAM) ---------------
 
 class _CRG_Cyc1000(LiteXModule):

@@ -24,58 +24,58 @@ entity litex_eth_buffer_bridge is
     -- ================================================================
 
     -- RX buffer: this module writes received frames
-    buf_rx_data_o   : out std_ulogic_vector(7 downto 0);
-    buf_rx_addr_o   : out unsigned(10 downto 0);
-    buf_rx_we_o     : out std_ulogic;
-    buf_rx_len_o    : out unsigned(10 downto 0);
-    buf_rx_valid_o  : out std_ulogic;
-    buf_rx_ack_i    : in  std_ulogic;
+    buf_rx_data_o   : out std_logic_vector(7 downto 0);
+    buf_rx_addr_o   : out std_logic_vector(10 downto 0);
+    buf_rx_we_o     : out std_logic;
+    buf_rx_len_o    : out std_logic_vector(10 downto 0);
+    buf_rx_valid_o  : out std_logic;
+    buf_rx_ack_i    : in  std_logic;
 
     -- TX buffer: this module reads packet data
 
-    buf_tx_addr_o   : out unsigned(10 downto 0);
-    buf_tx_len_i    : in  unsigned(10 downto 0);
-    buf_tx_dat_i    : in STD_ULOGIC_VECTOR(7 downto 0);
+    buf_tx_addr_o   : out std_logic_vector(10 downto 0);
+    buf_tx_len_i    : in  std_logic_vector(10 downto 0);
+    buf_tx_dat_i    : in  std_logic_vector(7 downto 0);
 
 
     -- ================================================================
     -- Control signals from/to SoC pads (SoC sys_clk domain)
     -- CDC into MAC domains where needed.
     -- ================================================================
-    eth_tx_request_i  : in  std_ulogic;   -- level from SoC: send TX
-    eth_tx_done_o     : out std_ulogic;   -- level: TX completed
-    eth_rx_overflow_o : out std_ulogic;   -- level: RX frame dropped
+    eth_tx_request_i  : in  std_logic;   -- level from SoC: send TX
+    eth_tx_done_o     : out std_logic;   -- level: TX completed
+    eth_rx_overflow_o : out std_logic;   -- level: RX frame dropped
 
     -- ================================================================
     -- MAC TX interface (mac_tx_clock_i domain)
     -- ================================================================
-    mac_tx_clock_i     : in  std_ulogic;
-    mac_tx_reset_i     : in  std_ulogic;
-    mac_tx_enable_o    : out std_ulogic;
+    mac_tx_clock_i     : in  std_logic;
+    mac_tx_reset_i     : in  std_logic;
+    mac_tx_enable_o    : out std_logic;
 
-    mac_tx_byte_sent_i : in  std_ulogic;
-    mac_tx_busy_i      : in  std_ulogic;
-    mac_tx_dat_o    : out STD_ULOGIC_VECTOR(7 downto 0);
+    mac_tx_byte_sent_i : in  std_logic;
+    mac_tx_busy_i      : in  std_logic;
+    mac_tx_dat_o    : out std_logic_vector(7 downto 0);
     mac_start_prefetch_i : in std_logic;
-    mac_speed_in        : in STD_LOGIC_VECTOR(1 downto 0);
+    mac_speed_in        : in std_logic_vector(1 downto 0);
 
     -- TX arbitration
-    tx_allow_req_o     : out std_ulogic;
-    tx_allow_i         : in  std_ulogic;
+    tx_allow_req_o     : out std_logic;
+    tx_allow_i         : in  std_logic;
 
     -- ================================================================
     -- RX from eth_ram / packet parser (mac_rx_clock_i domain)
     -- ================================================================
-    mac_rx_clock_i      : in  std_ulogic;
-    mac_rx_reset_i      : in  std_ulogic;
-    parse_mcu_packet_tog_i  : in  std_ulogic;  -- toggles when packet ready
-    pkt_len_i           : in  unsigned(10 downto 0);  -- frame length from ethernet_receive
-    eth_ram_data_i      : in  std_ulogic_vector(7 downto 0);  -- read data from eth_ram read port
-    eth_ram_addr_o      : out unsigned(10 downto 0);  -- read address to eth_ram
+    mac_rx_clock_i      : in  std_logic;
+    mac_rx_reset_i      : in  std_logic;
+    parse_mcu_packet_tog_i  : in  std_logic;  -- toggles when packet ready
+    pkt_len_i           : in  std_logic_vector(10 downto 0);  -- frame length from ethernet_receive
+    eth_ram_data_i      : in  std_logic_vector(7 downto 0);  -- read data from eth_ram read port
+    eth_ram_addr_o      : out std_logic_vector(10 downto 0);  -- read address to eth_ram
 
-    mcu_clk_i         : in STD_ULOGIC;
-    sys_clk_i         : in STD_ULOGIC;
-    packet_length_valid_i : in STD_ULOGIC
+    mcu_clk_i         : in std_logic;
+    sys_clk_i         : in std_logic;
+    packet_length_valid_i : in std_logic
   );
 end entity;
 
@@ -121,6 +121,11 @@ architecture rtl of litex_eth_buffer_bridge is
   signal rx_ack_sync : std_ulogic := '0';
   signal rx_ack_sync_d : std_ulogic := '0';
   signal buf_tx_addr   : unsigned(10 downto 0);
+  -- Internal unsigned working copies of the address/length outputs; the entity
+  -- ports are std_logic_vector and driven from these via concurrent casts.
+  signal eth_ram_addr  : unsigned(10 downto 0);
+  signal buf_rx_addr   : unsigned(10 downto 0);
+  signal buf_rx_len    : unsigned(10 downto 0);
   signal packet_length_latch : UNSIGNED(10 downto 0);
   signal packet_lenght_valid_latch : std_ulogic;
   signal packet_length_valid_counter : unsigned(3 downto 0);
@@ -133,7 +138,10 @@ begin
   -- ================================================================
   -- Output assignments & cdc
   -- ================================================================
-  buf_tx_addr_o <= buf_tx_addr;
+  buf_tx_addr_o  <= std_logic_vector(buf_tx_addr);
+  eth_ram_addr_o <= std_logic_vector(eth_ram_addr);
+  buf_rx_addr_o  <= std_logic_vector(buf_rx_addr);
+  buf_rx_len_o   <= std_logic_vector(buf_rx_len);
   mcu_cdc : process (mcu_clk_i)
   begin
     if (rising_edge(mcu_clk_i)) then
@@ -222,7 +230,7 @@ begin
           if mac_tx_byte_sent_i = '1' then
             mac_tx_dat_o <= buf_tx_dat_i;
             
-            if buf_tx_addr = buf_tx_len_i then
+            if buf_tx_addr = unsigned(buf_tx_len_i) then
               sm_tx <= TX_END;
             else
               buf_tx_addr <= buf_tx_addr + 1;
@@ -256,13 +264,13 @@ begin
       rx_ack_sync      <= '0';
       rx_ack_sync_d    <= '0';
       buf_rx_data_o    <= (others => '0');
-      buf_rx_addr_o    <= (others => '0');
+      buf_rx_addr      <= (others => '0');
       buf_rx_we_o      <= '0';
-      buf_rx_len_o     <= (others => '0');
+      buf_rx_len       <= (others => '0');
       rx_valid_reg     <= '0';
       rx_overflow_reg  <= '0';
       rx_copy_addr     <= (others => '0');
-      eth_ram_addr_o   <= (others => '0');
+      eth_ram_addr     <= (others => '0');
       parse_mcu_d      <= '0';
       sm_rx            <= RX_IDLE;
       packet_lenght_valid_latch <= '0';
@@ -286,7 +294,7 @@ begin
       end if;
       if (packet_length_valid_i = '1') then
         packet_lenght_valid_latch <= '1';
-                packet_length_latch <= pkt_len_i;
+                packet_length_latch <= unsigned(pkt_len_i);
 
       end if;
 
@@ -302,7 +310,7 @@ begin
               -- Latch frame length, present address 0 to RAM
 
               rx_copy_addr   <= (others => '0');
-              eth_ram_addr_o <= (others => '0');
+              eth_ram_addr   <= (others => '0');
               sm_rx          <= RX_WAIT;
             end if;
           end if;
@@ -310,7 +318,7 @@ begin
         when RX_WAIT =>
           -- RAM latency cycle: data for addr 0 will be valid next cycle.
           -- Pre-request address 1 so it's ready when we need it.
-          eth_ram_addr_o <= to_unsigned(1, eth_ram_addr_o'length);
+          eth_ram_addr   <= to_unsigned(1, eth_ram_addr'length);
           rx_copy_addr   <= to_unsigned(1, rx_copy_addr'length);
           sm_rx          <= RX_COPY;
 
@@ -318,7 +326,7 @@ begin
           -- eth_ram_data_i now holds data for the address presented
           -- in the previous cycle (rx_copy_addr - 1).
           buf_rx_data_o  <= eth_ram_data_i;
-          buf_rx_addr_o  <= rx_copy_addr - 1;
+          buf_rx_addr    <= rx_copy_addr - 1;
           buf_rx_we_o    <= '1';
 
           if rx_copy_addr >= packet_length_latch and packet_lenght_valid_latch = '1' then
@@ -326,12 +334,12 @@ begin
             sm_rx <= RX_DONE;
           else
             -- Present next address, advance counter
-            eth_ram_addr_o <= rx_copy_addr + 1;
+            eth_ram_addr   <= rx_copy_addr + 1;
             rx_copy_addr   <= rx_copy_addr + 1;
           end if;
 
         when RX_DONE =>
-          buf_rx_len_o <= packet_length_latch;
+          buf_rx_len <= packet_length_latch;
           rx_valid_reg <= '1';
           sm_rx        <= RX_IDLE;
           packet_lenght_valid_latch <= '0';

@@ -8,6 +8,8 @@ use work.miim_types.all;
 
 ENTITY aes67_top IS  
 	generic (
+		
+		
 		MII_WIDTH : integer := 2;
 		ETHERNET_TYPE : string := "RMII";
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
@@ -19,22 +21,24 @@ ENTITY aes67_top IS
 		RX_BYTE_DEPTH	: natural := 3;
 		TX_BYTE_DEPTH	: natural := 3;
 		RX_SAMPLE_BUFFER_DEPTH : natural := 256;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 64; -- must be power of two (media-clock-derived TX write pointer)
+		TX_SAMPLE_BUFFER_DEPTH : natural := 64;
 		  
     	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
 
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
 		
 
-		AUDIO_INPUT_MODE : string := "tdm8";
-		AUDIO_OUTPUT_MODE : string := "tdm8";
+		
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
-		-- TX TDM frontend: FALSE = demux integrated in tx_sample_buffer (default),
-		-- TRUE = legacy external tdm8_in -> parallel audio_i bus.
+		AUDIO_RX_TDM_OUTPUTS : natural := 2;
+		AUDIO_RX_TDM_CHANNELS : natural  := 8;
+
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
+		AUDIO_TX_TDM_INPUTS : natural := 2;
+		AUDIO_TX_TDM_CHANNELS : natural  := 8;
+
 		USE_EXTERNAL_PLL : BOOLEAN := true;
-		ENABLE_METERING: BOOLEAN := true;
-		DEBUG_PARALLEL_LOOPBACK: BOOLEAN := false
+		ENABLE_METERING: BOOLEAN := true
 
 	);
 	PORT
@@ -170,11 +174,13 @@ ENTITY aes67_top IS
 		audio_rx_cfg_wr_addr_i : IN STD_LOGIC_VECTOR(7 downto 0);
 
 		-- audio outputs
-		tdm8out_o : OUT STD_LOGIC_VECTOR(1 downto 0);
+		tdm8out_o : OUT STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
+		rx_sample_register : OUT STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
 		
 
 		-- audio inputs
-		tdm8in_i : IN STD_LOGIC_VECTOR(3 downto 0)
+		tdm8in_i : IN STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0) := (others => '0');
+		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0) := (others => '0')
 
 	);
 END aes67_top;
@@ -210,13 +216,7 @@ signal mac_linkup : STD_LOGIC;
 
 -- sample registers for in/output
 
-signal rx_sample_register : STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
-signal tx_sample_register : STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0);
 
--- TX TDM frontend is integrated in tx_sample_buffer when in tdm8 mode and the
--- legacy parallel interface is not forced.
-constant TX_TDM_INTEGRATED : boolean := (AUDIO_INPUT_MODE = "tdm8" and AUDIO_TX_USE_PARALLEL_INTERFACE = false);
--- Frame sync feeding the TX buffer: TDM fsync when integrated, else regular fs.
 
 
 
@@ -260,6 +260,9 @@ signal servo_mon_pi_sum_raw_signed            : signed(31 downto 0);
 signal servo_mon_effective_gain_shift_unsigned: unsigned(7 downto 0);
 signal servo_mon_lock_counter_unsigned        : unsigned(15 downto 0);
 signal servo_mon_sample_count_unsigned        : unsigned(15 downto 0);
+
+signal mii_switch_rx_data : STD_LOGIC_VECTOR(7 downto 0);
+signal mii_switch_tx_data : STD_LOGIC_VECTOR(7 downto 0);
 BEGIN
 
 ptp_module_rst_n <= rst_n and not ptp_reset_i;
@@ -320,9 +323,6 @@ end generate;
 
 wc_512fs_o <= clk_512fs;
 
-dbug_parallel_loopback: if DEBUG_PARALLEL_LOOPBACK = true generate
-	tx_sample_register <= rx_sample_register;
-end generate;
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -332,9 +332,9 @@ GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			max_streams => TX_MAX_STREAMS,
 			ENABLE_METERING => ENABLE_METERING,
 			-- TDM demux integrated unless the legacy parallel interface is forced.
-			TDM_INPUT => TX_TDM_INTEGRATED,
-			TDM_INPUTS => TX_CHANNELS / 8,
-			TDM_CHANNELS => 8
+			TDM_INPUT => not AUDIO_TX_USE_PARALLEL_INTERFACE,
+			TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
+			TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ctrl_plane_clk => clk_mcu_i,
@@ -503,7 +503,9 @@ GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			global_channel_count => RX_CHANNELS,
 			max_streams => RX_MAX_STREAMS,
 			ENABLE_METERING => ENABLE_METERING,
-			PARALLEL_OUT => AUDIO_RX_USE_PARALLEL_INTERFACE
+			PARALLEL_OUT => AUDIO_RX_USE_PARALLEL_INTERFACE,
+			TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
+			TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => rst_n,

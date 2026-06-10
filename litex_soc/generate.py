@@ -37,16 +37,19 @@ from aes67_soc import (
     Cyclone10StubPlatform,
     Cyc1000StubPlatform,
     GowinStubPlatform,
+    SpiboneStubPlatform,
+    BridgeStubPlatform,
 )
 
 
 # -- Main ---------------------------------------------------------------------
 
-ALL_TARGETS = ["cyclone10", "cyc1000", "gowin"]
+ALL_TARGETS = ["cyclone10", "cyc1000", "gowin", "spibone", "aes67_bridge"]
 # Default sys clock frequency — must match what the top-level PLL feeds into clk_sys.
 # 75 MHz chosen because the Cyclone 10LP ALTPLL cannot cleanly divide common
 # crystal inputs to 80 MHz; 75 MHz gives clean ratios for all targets.
-DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6}
+DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6,
+                        "spibone": 75e6, "aes67_bridge": 75e6}
 
 
 def _generate_docs_svd(soc, target, output_dir):
@@ -95,7 +98,27 @@ def _build_target(target, args):
     sys_clk_freq = args.sys_clk_freq if args.sys_clk_freq is not None else DEFAULT_SYS_CLK_FREQ[target]
     output_dir   = args.output_dir or os.path.join(os.path.dirname(__file__), "build", target)
 
-    if target == "gowin":
+    # CPU-less targets (spibone / aes67_bridge) have no BIOS to compile, so
+    # software/bios-console options do not apply.
+    is_cpu_less = target in ("spibone", "aes67_bridge")
+
+    if target == "spibone":
+        platform = SpiboneStubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq = int(sys_clk_freq),
+            target       = "spibone",
+        )
+    elif target == "aes67_bridge":
+        # Standalone AES67 Wishbone-slave bridge (no CPU); the only target that
+        # builds the AES67 peripherals.  Every other target is a master to it.
+        platform = BridgeStubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq = int(sys_clk_freq),
+            target       = "aes67_bridge",
+        )
+    elif target == "gowin":
         platform = GowinStubPlatform()
         soc = AES67SoC(
             platform,
@@ -123,7 +146,7 @@ def _build_target(target, args):
 
     builder = Builder(soc,
         output_dir       = output_dir,
-        compile_software = True,
+        compile_software = not is_cpu_less,
         compile_gateware = False,
         csr_json         = os.path.join(output_dir, "csr.json"),
         csr_csv          = os.path.join(output_dir, "csr.csv"),

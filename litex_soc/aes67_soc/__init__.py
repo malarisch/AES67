@@ -12,6 +12,8 @@ from .platform import (
     Cyclone10StubPlatform,
     Cyc1000StubPlatform,
     GowinStubPlatform,
+    SpiboneStubPlatform,
+    BridgeStubPlatform,
 )
 
 __all__ = [
@@ -19,4 +21,6 @@ __all__ = [
     "Cyclone10StubPlatform",
     "Cyc1000StubPlatform",
     "GowinStubPlatform",
+    "SpiboneStubPlatform",
+    "BridgeStubPlatform",
 ]

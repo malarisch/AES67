@@ -188,6 +188,9 @@ def add_eth_buffer(soc, platform, origin):
         eth_buf_pads.tx_len.eq(soc.eth_buf.o_tx_len),
     ]
 
-    # Add IRQ for RX packet received
-    soc.irq.add("eth_buf")
+    # Add IRQ for RX packet received — only on SoCs that have an IRQ controller.
+    # The CPU-less spibone bridge has no IRQs; the external host polls the
+    # rx_ready CSR instead.
+    if soc.irq.enabled:
+        soc.irq.add("eth_buf")
     return soc.eth_buf

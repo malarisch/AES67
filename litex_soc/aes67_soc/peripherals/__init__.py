@@ -10,10 +10,18 @@ from .hyperram import AES67HyperRAM
 from .aes67_csr import AES67CSRs, add_aes67_csr
 from .eth_buffer import EthPacketBuffer, add_eth_buffer
 from .stream_cfg import StreamConfigRAM, add_stream_cfg
+from .spibone import add_spibone
+from .wb_port import (
+    add_external_wb_master, add_external_wb_slave,
+    add_eth_irq_output, add_eth_irq_input,
+)
 
 __all__ = [
     "AES67HyperRAM",
     "AES67CSRs", "add_aes67_csr",
     "EthPacketBuffer", "add_eth_buffer",
     "StreamConfigRAM", "add_stream_cfg",
+    "add_spibone",
+    "add_external_wb_master", "add_external_wb_slave",
+    "add_eth_irq_output", "add_eth_irq_input",
 ]
