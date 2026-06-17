@@ -38,7 +38,8 @@ ENTITY aes67_top IS
 		AUDIO_TX_TDM_CHANNELS : natural  := 8;
 
 		USE_EXTERNAL_PLL : BOOLEAN := true;
-		ENABLE_METERING: BOOLEAN := true
+		ENABLE_METERING: BOOLEAN := true;
+		STATIC_PTP_CONF: BOOLEAN := true
 
 	);
 	PORT
@@ -122,9 +123,7 @@ ENTITY aes67_top IS
 		wallclock_locked_o : OUT STD_LOGIC;
 		wallclock_configured_o : OUT STD_LOGIC;
 
-		-- PTP module reset (active high, async). Combined with global rst_n
-		-- to reset everything time-related (servo, parser, wallclock).
-		ptp_reset_i : IN STD_LOGIC := '0';
+
 
 		-- PTP servo + parser tuning inputs (live-tunable from SoC)
 		servo_kp_gain_i              : IN STD_LOGIC_VECTOR(7 downto 0)  := std_logic_vector(to_signed(40, 8));
@@ -383,7 +382,8 @@ generic map (
 	MII_WIDTH => MII_WIDTH,
 	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
 	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-	ETHERNET_TYPE => ETHERNET_TYPE
+	ETHERNET_TYPE => ETHERNET_TYPE,
+	STATIC_PTP_CONF => STATIC_PTP_CONF
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,

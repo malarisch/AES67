@@ -473,7 +473,6 @@ begin
         ptp_offset_from_master_o => ptp_offset_from_master_o,
         wallclock_locked_o => wallclock_locked_o,
         wallclock_configured_o => wallclock_configured_o,
-        ptp_reset_i => ptp_reset_i,
         servo_kp_gain_i => servo_kp_gain_i,
         servo_ki_gain_i => servo_ki_gain_i,
         servo_gain_shift_i => servo_gain_shift_i,

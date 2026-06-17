@@ -38,12 +38,43 @@ if(_litex_target)
         message(FATAL_ERROR "gen_litex_overlay.py failed (rc=${_gen_rc})")
     endif()
 
-    # Re-run cmake if csr.json or the generator script changes.
+    # ---------- Merge CPU + AES67-bridge generated CSR headers ----------
+    # The Wishbone-compliance refactor split the design into two LiteX SoCs:
+    # the CPU SoC (this target) and the standalone aes67_bridge.  Each emits its
+    # own generated/{csr,mem,soc}.h, but the firmware needs registers from BOTH
+    # (CPU-local SPIFLASH/timer/... here, the AES67 surface in the bridge).  The
+    # bridge is mapped into the CPU address space at the same absolute addresses
+    # its headers use, so we merge them into one include tree the firmware
+    # consumes via <generated/csr.h>.
+    set(LITEX_BRIDGE_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/../../litex_soc/build/aes67_bridge")
+    set(LITEX_BRIDGE_JSON "${LITEX_BRIDGE_DIR}/csr.json")
+    if(NOT EXISTS "${LITEX_BRIDGE_JSON}")
+        message(FATAL_ERROR
+            "LiteX aes67_bridge csr.json not found at ${LITEX_BRIDGE_JSON}.\n"
+            "The AES67 CSRs now live in the standalone bridge SoC.\n"
+            "Run: cd litex_soc && python generate.py --target aes67_bridge")
+    endif()
+
+    set(LITEX_GENERATED_INC "${CMAKE_CURRENT_BINARY_DIR}/litex_merged")
+    execute_process(
+        COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge_litex_csr.py"
+                --cpu-inc    "${LITEX_BUILD_DIR}/software/include"
+                --bridge-inc "${LITEX_BRIDGE_DIR}/software/include"
+                --out-inc    "${LITEX_GENERATED_INC}"
+        RESULT_VARIABLE _merge_rc
+    )
+    if(NOT _merge_rc EQUAL 0)
+        message(FATAL_ERROR "merge_litex_csr.py failed (rc=${_merge_rc})")
+    endif()
+
+    # Re-run cmake if either build's csr.json or a generator script changes.
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${LITEX_CSR_JSON}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_litex_overlay.py")
+        "${LITEX_BRIDGE_JSON}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_litex_overlay.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge_litex_csr.py")
 
-    message(STATUS "AES67: LiteX target = ${_litex_target}")
+    message(STATUS "AES67: LiteX target = ${_litex_target} (CSRs merged with aes67_bridge)")
 endif()
 
 # ---------- Per-board DT overlay ----------

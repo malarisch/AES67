@@ -8,7 +8,8 @@ ENTITY ptp_module IS
         MII_WIDTH : integer := 2;
 		ETHERNET_TYPE : string := "RMII";
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        MII_CLK_NS_PER_TICK : integer := 20 -- 50 MHz
+        MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
+		STATIC_PTP_CONF : BOOLEAN := true
 	);
 	PORT
 	(
@@ -176,6 +177,37 @@ SIGNAL ann_time_source      : STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL ann_log_msg_interval : STD_LOGIC_VECTOR(7 DOWNTO 0);
 
 signal tx_en_switch : std_logic;
+
+		-- ============================================================
+		-- Servo + parser tuningputs (live-tunable from SoC)
+		-- ============================================================
+SIGNAL		servo_kp_gain_reg              : signed(7 downto 0);
+SIGNAL		servo_ki_gain_reg              : signed(7 downto 0);
+SIGNAL		servo_gain_shift_reg           : unsigned(4 downto 0);
+SIGNAL		servo_gain_shift_locked_reg    : unsigned(4 downto 0);
+SIGNAL		servo_ki_extra_shift_reg       : unsigned(4 downto 0);
+SIGNAL		servo_filter_shift_reg         : unsigned(4 downto 0);
+SIGNAL		servo_warmup_samples_reg       : unsigned(7 downto 0);
+SIGNAL		servo_lock_threshold_ns_reg    : unsigned(31 downto 0);
+SIGNAL		servo_unlock_threshold_ns_reg  : unsigned(31 downto 0);
+SIGNAL		servo_lock_count_threshold_reg : unsigned(7 downto 0);
+
+
+		-- IEEE 1588 delayAsymmetry (ns, signed). Compensates PHY/MAC
+		-- TX vs RX latency mismatch. 0 = symmetric link.
+SIGNAL		parser_delay_asymmetry_ns_reg       : signed(31 downto 0) := (others => '0');
+
+		-- ============================================================
+		-- Servo monitoringputs (live PIternal state)
+		-- ============================================================
+SIGNAL		servo_mon_filtered_offset_reg      : signed(31 downto 0);
+SIGNAL		servo_mon_integral_sum_reg         : signed(31 downto 0);
+SIGNAL		servo_mon_pi_proportional_reg      : signed(31 downto 0);
+SIGNAL		servo_mon_pi_sum_raw_reg           : signed(31 downto 0);
+SIGNAL		servo_mon_effective_gain_shift_reg : unsigned(7 downto 0);
+SIGNAL		servo_mon_lock_counter_reg         : unsigned(15 downto 0);
+SIGNAL		servo_mon_sample_count_reg         : unsigned(15 downto 0);
+SIGNAL		servo_mon_first_lock_achieved_reg  : STD_LOGIC;
 
 BEGIN
 
@@ -369,8 +401,49 @@ tx_tsu: entity work.ethernet_timestamp_mii
 	mii_en_in => tx_en_switch
 );
 
+static_ptp_conf_gen: if (STATIC_PTP_CONF) generate
+static_ptp_conf_inst: entity work.static_ptp_conf
+ generic map(
+	ETHERNET_TYPE => ETHERNET_TYPE
+)
+ port map(
+	servo_kp_gain_o => servo_kp_gain_reg,
+	servo_ki_gain_o => servo_ki_gain_reg,
+	servo_gain_shift_o => servo_gain_shift_reg,
+	servo_gain_shift_locked_o => servo_gain_shift_locked_reg,
+	servo_ki_extra_shift_o => servo_ki_extra_shift_reg,
+	servo_filter_shift_o => servo_filter_shift_reg,
+	servo_warmup_samples_o => servo_warmup_samples_reg,
+	servo_lock_threshold_ns_o => servo_lock_threshold_ns_reg,
+	servo_unlock_threshold_ns_o => servo_unlock_threshold_ns_reg,
+	servo_lock_count_threshold_o => servo_lock_count_threshold_reg,
+	parser_delay_asymmetry_ns_o => parser_delay_asymmetry_ns_reg
+);
+ end generate;
+dynamic_ptp_conf_gen: if (NOT STATIC_PTP_CONF) generate
+servo_kp_gain_reg <= servo_kp_gain_i;
+servo_ki_gain_reg <= servo_ki_gain_i;
+servo_gain_shift_reg <= servo_gain_shift_i;
+servo_gain_shift_locked_reg <= servo_gain_shift_locked_i;
+servo_ki_extra_shift_reg <= servo_ki_extra_shift_i;
+servo_filter_shift_reg <= servo_filter_shift_i;
+servo_warmup_samples_reg <= servo_warmup_samples_i;
+servo_lock_threshold_ns_reg <= servo_lock_threshold_ns_i;
+servo_unlock_threshold_ns_reg <= servo_unlock_threshold_ns_i;
+servo_lock_count_threshold_reg <= servo_lock_count_threshold_i;
 
 
+servo_mon_filtered_offset_o <= servo_mon_filtered_offset_reg;
+servo_mon_integral_sum_o <= servo_mon_integral_sum_reg;
+servo_mon_pi_proportional_o <= servo_mon_pi_proportional_reg;
+servo_mon_pi_sum_raw_o <= servo_mon_pi_sum_raw_reg;
+servo_mon_effective_gain_shift_o <= servo_mon_effective_gain_shift_reg;
+servo_mon_sample_count_o <= servo_mon_lock_counter_reg;
+servo_mon_sample_count_o <= servo_mon_sample_count_reg;
+servo_mon_first_lock_achieved_o <= servo_mon_first_lock_achieved_reg;
+end generate;
+
+	
 b2v_servo :  entity work.ptpv2_servo
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
@@ -384,25 +457,25 @@ PORT MAP(clk => sys_clk,
 		 
 		 request_clock_reconfigure_o => servo_request_clock_reconfigure,
 		 -- Live-tuning inputs from top-level
-		 kp_gain_i              => servo_kp_gain_i,
-		 ki_gain_i              => servo_ki_gain_i,
-		 gain_shift_i           => servo_gain_shift_i,
-		 gain_shift_locked_i    => servo_gain_shift_locked_i,
-		 ki_extra_shift_i       => servo_ki_extra_shift_i,
-		 filter_shift_i         => servo_filter_shift_i,
-		 warmup_samples_i       => servo_warmup_samples_i,
-		 lock_threshold_ns_i    => servo_lock_threshold_ns_i,
-		 unlock_threshold_ns_i  => servo_unlock_threshold_ns_i,
-		 lock_count_threshold_i => servo_lock_count_threshold_i,
+		 kp_gain_i              => servo_kp_gain_reg,
+		 ki_gain_i              => servo_ki_gain_reg,
+		 gain_shift_i           => servo_gain_shift_reg,
+		 gain_shift_locked_i    => servo_gain_shift_locked_reg,
+		 ki_extra_shift_i       => servo_ki_extra_shift_reg,
+		 filter_shift_i         => servo_filter_shift_reg,
+		 warmup_samples_i       => servo_warmup_samples_reg,
+		 lock_threshold_ns_i    => servo_lock_threshold_ns_reg,
+		 unlock_threshold_ns_i  => servo_unlock_threshold_ns_reg,
+		 lock_count_threshold_i => servo_lock_count_threshold_reg,
 		 -- Monitoring outputs to top-level
-		 mon_filtered_offset_o      => servo_mon_filtered_offset_o,
-		 mon_integral_sum_o         => servo_mon_integral_sum_o,
-		 mon_pi_proportional_o      => servo_mon_pi_proportional_o,
-		 mon_pi_sum_raw_o           => servo_mon_pi_sum_raw_o,
-		 mon_effective_gain_shift_o => servo_mon_effective_gain_shift_o,
-		 mon_lock_counter_o         => servo_mon_lock_counter_o,
-		 mon_sample_count_o         => servo_mon_sample_count_o,
-		 mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_o);
+		 mon_filtered_offset_o      => servo_mon_filtered_offset_reg,
+		 mon_integral_sum_o         => servo_mon_integral_sum_reg,
+		 mon_pi_proportional_o      => servo_mon_pi_proportional_reg,
+		 mon_pi_sum_raw_o           => servo_mon_pi_sum_raw_reg,
+		 mon_effective_gain_shift_o => servo_mon_effective_gain_shift_reg,
+		 mon_lock_counter_o         => servo_mon_lock_counter_reg,
+		 mon_sample_count_o         => servo_mon_sample_count_reg,
+		 mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_reg);
 
 
 b2v_wallclock :  entity work.wallclock

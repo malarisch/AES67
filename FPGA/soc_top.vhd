@@ -314,7 +314,7 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
   )
    port map(
       clock_i => clock_i,
-      rst_n_i => rst_n,
+      rst_n_i => rst_n_i,
       sys_clk_125MHz_o => sys_clk_125MHz,
       mcu_clk_o => mcu_clk,
       mcu_clk2_o => mcu_clk_90,

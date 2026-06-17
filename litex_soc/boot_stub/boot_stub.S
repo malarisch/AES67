@@ -30,20 +30,40 @@
 .equ BIOS_SRC,      FLASH_BASE + STUB_SIZE
 .equ BIOS_MAX_SIZE, 0x10000
 
-.equ UART_RXTX,     0xF0005800
-.equ UART_TXFULL,   0xF0005804
-
+/*
+ * CSR addresses mirror the LiteX-generated CSR map, which SHIFTS whenever the
+ * SoC's peripheral set changes (e.g. cyclone10 has a hyperram CSR that pushes
+ * uart up by 0x800 vs. cyc1000).  The boot_stub Makefile extracts the live
+ * values from build/<target>/csr.csv and passes them as -D<NAME>_ADDR=...; the
+ * fallbacks below are the values for the current map and are used only if the
+ * csv is unavailable.  UART_TXFULL is always UART_RXTX + 4 in LiteX.
+ */
 #if defined(TARGET_CYC1000)
     /* CYC1000: XIP from flash, no SDRAM copy (BIOS inits SDRAM itself). */
     #define XIP_BOOT 1
     .equ BIOS_DST,      FLASH_BASE + STUB_SIZE   /* = 0x30000200 */
+    #ifndef UART_RXTX_ADDR
+    #define UART_RXTX_ADDR  0xF0004000
+    #endif
 #else
     /* Cyclone10 default: 8 MB HyperRAM, stub copies BIOS to top of RAM. */
     #define USE_HYPERRAM 1
     .equ BIOS_DST,      0x20000000 + 0x800000 - BIOS_MAX_SIZE
-    .equ HYPERRAM_CFG,  0xF0001800
+    #ifndef HYPERRAM_CONFIG_ADDR
+    #define HYPERRAM_CONFIG_ADDR  0xF0000800
+    #endif
+    .equ HYPERRAM_CFG,  HYPERRAM_CONFIG_ADDR
     .equ HR_LATENCY,    6           /* IS66WVH8M8ALL power-on default */
+    #ifndef UART_RXTX_ADDR
+    #define UART_RXTX_ADDR  0xF0004800
+    #endif
 #endif
+
+#ifndef UART_TXFULL_ADDR
+#define UART_TXFULL_ADDR  (UART_RXTX_ADDR + 4)
+#endif
+.equ UART_RXTX,     UART_RXTX_ADDR
+.equ UART_TXFULL,   UART_TXFULL_ADDR
 
 _start:
     li      sp, 0x10001000

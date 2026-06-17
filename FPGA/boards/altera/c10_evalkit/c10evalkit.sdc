@@ -42,7 +42,11 @@ derive_clock_uncertainty
 # Hierarchy paths to PLL outputs we reference below. Quartus encodes the
 # generate-statement label as "\<label>:" in the netlist; the backslash is
 # part of the identifier, not a Tcl escape, so it stays literal in {braces}.
-set sys_pll_clk0      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
+# clk[0] = 125 MHz sys_clk (data plane), clk[1] = mcu_clk (LiteX/CPU, ~75 MHz).
+# These are async to each other (CSR CDC handled in RTL); keep in separate groups.
+# (Both were clk[1] before, which put the same clock in two groups and made
+#  Quartus drop the whole set_clock_groups -> no async separation at all.)
+set sys_pll_clk0      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}
 set sys_pll_clk1      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
 set rgmii_pll_clk0    {soc_top_inst|mii_converters_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
 
@@ -125,8 +129,8 @@ set_false_path -from * -to [get_ports {phy_rgmii_enet_resetn}]
 # User LED (async, visual only)
 set_false_path -from * -to [get_ports {user_led[*]}]
 
-# ADDA board reset (async output to external board)
-set_false_path -from * -to [get_ports {adda_nRST}]
+# ADDA board reset: adda_nRST port is currently disabled in topevalkit.vhd;
+# re-add "set_false_path -from * -to [get_ports {adda_nRST}]" when re-enabled.
 
 # Async reset input
 set_false_path -from [get_ports {rst_n_i}] -to *
@@ -144,9 +148,13 @@ set_false_path -from [get_ports {rst_n_i}] -to *
 # Reference PLL outputs by their atom paths (same set ... above) — this is
 # the only name they are guaranteed to have post-derive_pll_clocks.
 
+# RGMII TX/RX clock objects are named enet_tx_clk_125m / enet_rx_clk_125m
+# (created on the PHY clock ports by constrain_rgmii_*); the port names
+# phy_rgmii_enet_tx_clk / phy_rgmii_enet_rx_clk are NOT clock objects, so they
+# must not appear here (they were silently dropped as "could not be matched").
 set_clock_groups -asynchronous \
     -group [get_clocks [list clock_i $sys_pll_clk0]] \
 	 -group [get_clocks [list $sys_pll_clk1]] \
-    -group [get_clocks [list phy_rgmii_enet_tx_clk $rgmii_pll_clk0 enet_tx_clk_125m]] \
-    -group [get_clocks {enet_clk_125m enet_rx_clk_125m virt_enet_rx_clk_125m phy_rgmii_enet_rx_clk}] \
+    -group [get_clocks [list $rgmii_pll_clk0 enet_tx_clk_125m]] \
+    -group [get_clocks {enet_clk_125m enet_rx_clk_125m virt_enet_rx_clk_125m}] \
     -group [get_clocks {spictrl_clk}]

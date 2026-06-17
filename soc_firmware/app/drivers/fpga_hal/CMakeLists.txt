@@ -21,7 +21,9 @@ if(CONFIG_FPGA_HAL_LITEX)
 
   # LiteX stubs must come before the generated directory.
   target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../eth_litex/litex_stubs)
-  set(LITEX_GENERATED_DIR
-      ${CMAKE_CURRENT_SOURCE_DIR}/../../../../litex_soc/build/${_litex_target}/software/include)
-  target_include_directories(app PRIVATE ${LITEX_GENERATED_DIR})
+  # Merged CPU + aes67_bridge generated headers (see top-level CMakeLists).
+  if(NOT DEFINED LITEX_GENERATED_INC)
+    message(FATAL_ERROR "LITEX_GENERATED_INC is not set — expected from top-level app CMakeLists")
+  endif()
+  target_include_directories(app PRIVATE ${LITEX_GENERATED_INC})
 endif()
