@@ -42,9 +42,9 @@ derive_clock_uncertainty
 # Hierarchy paths to PLL outputs we reference below. Quartus encodes the
 # generate-statement label as "\<label>:" in the netlist; the backslash is
 # part of the identifier, not a Tcl escape, so it stays literal in {braces}.
-set sys_pll_clk0      {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}
-set sys_pll_clk1      {top_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
-set rgmii_pll_clk0    {top_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
+set sys_pll_clk0      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
+set sys_pll_clk1      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
+set rgmii_pll_clk0    {soc_top_inst|mii_converters_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
 
 #**************************************************************
 # 3. Per-feature sub-SDCs (after derive_pll_clocks)

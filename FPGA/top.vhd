@@ -493,12 +493,12 @@ signal mac_tx_start_prefetch : STD_LOGIC;
 -- litex_soc <-> litex_eth_buffer_bridge (buffer interface)
 -- bridge-side signals (matching litex_eth_buffer_bridge types)
 signal buf_rx_data    : STD_ULOGIC_VECTOR(7 downto 0);
-signal buf_rx_addr    : unsigned(10 downto 0);
+signal buf_rx_addr    : STD_LOGIC_VECTOR(10 downto 0);
 signal buf_rx_we      : STD_ULOGIC;
-signal buf_rx_len     : unsigned(10 downto 0);
+signal buf_rx_len     : STD_LOGIC_VECTOR(10 downto 0);
 signal buf_rx_valid   : STD_ULOGIC;
 signal buf_rx_ack     : STD_LOGIC;
-signal buf_tx_addr    : unsigned(10 downto 0);
+signal buf_tx_addr    : STD_LOGIC_VECTOR(10 downto 0);
 -- soc TX buffer outputs (std_logic_vector from litex_soc component)
 signal soc_tx_dat     : STD_LOGIC_VECTOR(7 downto 0);
 signal soc_tx_len     : STD_LOGIC_VECTOR(10 downto 0);
@@ -1041,7 +1041,7 @@ PORT MAP(
 
 	-- LiteX buffer TX (bridge reads packet data)
 	buf_tx_addr_o          => buf_tx_addr,
-	buf_tx_len_i           => unsigned(soc_tx_len),
+	buf_tx_len_i           => soc_tx_len,
 	buf_tx_dat_i           => std_ulogic_vector(soc_tx_dat),
 
 	-- SoC control

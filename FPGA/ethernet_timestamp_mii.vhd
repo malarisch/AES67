@@ -24,6 +24,7 @@ entity ethernet_timestamp_mii is
         timestamp_seconds_o	: out unsigned(3 downto 0);
         timestamp_nanoseconds_o : out unsigned(29 downto 0);
         mii_in : in STD_LOGIC_VECTOR(MII_WIDTH-1 downto 0);
+        gmii_in : in STD_LOGIC_VECTOR(7 downto 0);
         mii_en_in : in STD_LOGIC
 
         
@@ -46,6 +47,8 @@ architecture Behavioral of ethernet_timestamp_mii is
     signal adjusted : integer range -(PIPELINE_LATENCY - MII_LATENCY) to 1e9 + PIPELINE_LATENCY - MII_LATENCY;
     signal mii_en_prev : std_logic;
     signal mii_data_prev : STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+    signal gmii_data_reg : STD_LOGIC_VECTOR(7 downto 0);
+    signal gmii_data_prev : STD_LOGIC_VECTOR(7 downto 0);
 
     type t_rmii_sm is (s_Idle, s_Wait1, s_Wait2, s_Wait3);
     signal rmii_sm : t_rmii_sm := s_Idle;
@@ -84,12 +87,14 @@ rmii_sof_gen: if MII_WIDTH = 2 generate -- rmii
         end if;
     end process;
 end generate;
-gmii_sof_gen: if MII_WIDTH = 8 generate -- rmii
-    rmii_sof_qualifier: process (mii_clk_i)
+gmii_sof_gen: if MII_WIDTH = 4 or MII_WIDTH = 8 generate -- rgmii
+    
+    gmii_sof_qualifier: process (mii_clk_i)
     begin
         if rising_edge(mii_clk_i) then
             mii_en_prev <= mii_en_in;
-            mii_data_prev <= mii_in;
+            gmii_data_reg <= gmii_in;
+            gmii_data_prev <= gmii_data_reg;
             if (mii_en_in = '0') then
                 rmii_sm <= s_Idle;
             end if;
@@ -99,11 +104,11 @@ gmii_sof_gen: if MII_WIDTH = 8 generate -- rmii
                         rmii_sm <= s_Wait1;
                     end if;
                 when s_Wait1 =>
-                    if mii_in = x"55" then
+                    if gmii_data_reg = x"55" then
                         rmii_sm <= s_Wait2;
                     end if;
                 when s_Wait2 =>
-                    if (mii_in = x"D5" and mii_data_prev = x"55") then
+                    if (gmii_data_reg = x"D5" and gmii_data_prev = x"55") then
                         sof_tog <= not sof_tog;
                         rmii_sm <= s_Idle;
                     end if;

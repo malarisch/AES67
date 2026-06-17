@@ -34,7 +34,7 @@ ENTITY aes67_top IS
 		AUDIO_RX_TDM_CHANNELS : natural  := 8;
 
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
-		AUDIO_TX_TDM_INPUTS : natural := 2;
+		AUDIO_TX_TDM_INPUTS : natural := 1;
 		AUDIO_TX_TDM_CHANNELS : natural  := 8;
 
 		USE_EXTERNAL_PLL : BOOLEAN := true;
@@ -218,7 +218,7 @@ signal mac_linkup : STD_LOGIC;
 
 
 
-
+signal mii_txd_o_reg : STD_LOGIC_VECTOR(7 downto 0);
 
 signal mac_tx_clock : STD_LOGIC;
 signal mac_rx_clock : STD_LOGIC;
@@ -261,11 +261,12 @@ signal servo_mon_effective_gain_shift_unsigned: unsigned(7 downto 0);
 signal servo_mon_lock_counter_unsigned        : unsigned(15 downto 0);
 signal servo_mon_sample_count_unsigned        : unsigned(15 downto 0);
 
-signal mii_switch_rx_data : STD_LOGIC_VECTOR(7 downto 0);
-signal mii_switch_tx_data : STD_LOGIC_VECTOR(7 downto 0);
+
 BEGIN
 
-ptp_module_rst_n <= rst_n and not ptp_reset_i;
+
+mii_txd_o <= mii_txd_o_reg;
+ptp_module_rst_n <= '1';--rst_n and not ptp_reset_i;
 
 mac_speed_o <= mac_speed;
 
@@ -346,7 +347,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 fs_halfduty_clk_i => wc_fs_int,
  
 		 bclk_i => pll_256fs_falling,
-		 tdm_in_i => tdm8in_i(TX_CHANNELS/8 - 1 downto 0),
+		 tdm_in_i => tdm8in_i(AUDIO_TX_TDM_INPUTS - 1 downto 0),
 
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
@@ -381,7 +382,8 @@ ptp_inst: entity work.ptp_module
 generic map (
 	MII_WIDTH => MII_WIDTH,
 	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
+	ETHERNET_TYPE => ETHERNET_TYPE
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,
@@ -473,6 +475,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 phy_mii_tx_clk_in => phy_mii_tx_clk_in,
 		 phy_mii_rx_data_in => phy_mii_rx_data_in,
 		 phy_mii_tx_data_in => phy_mii_tx_data_in,
+		 phy_gmii_rx_data_in => mii_rxd_i,
+		 phy_gmii_tx_data_in => mii_txd_o_reg,
 		 phy_mii_tx_en_i => phy_mii_tx_en_i,
 		 phy_mii_rx_en_i => phy_mii_rx_en_i
 		 );
@@ -601,7 +605,7 @@ ethernet_top_inst: entity work.ethernet_top
 	mii_rxd_i => mii_rxd_i,
 	mii_tx_err_o => mii_tx_err_o,
 	mii_tx_en_o => mii_tx_en_o,
-	mii_txd_o => mii_txd_o,
+	mii_txd_o => mii_txd_o_reg,
 	enet_mdio => enet_mdio,
 	enet_mdc => enet_mdc
 );

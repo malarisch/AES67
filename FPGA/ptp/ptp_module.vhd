@@ -6,6 +6,7 @@ USE ieee.numeric_std.all;
 ENTITY ptp_module IS 
 	generic (
         MII_WIDTH : integer := 2;
+		ETHERNET_TYPE : string := "RMII";
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20 -- 50 MHz
 	);
@@ -17,6 +18,8 @@ ENTITY ptp_module IS
 		phy_mii_tx_clk_in : IN STD_LOGIC;
 		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
 		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_gmii_tx_data_in : IN STD_LOGIC_VECTOR(7 downto 0);
+		phy_gmii_rx_data_in : IN STD_LOGIC_VECTOR(7 downto 0);
 		phy_mii_tx_en_i : IN STD_LOGIC;
 		phy_mii_rx_en_i : IN STD_LOGIC;
 		mac_link_up_i :  IN  STD_LOGIC;
@@ -172,6 +175,7 @@ SIGNAL ann_steps_removed    : STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL ann_time_source      : STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL ann_log_msg_interval : STD_LOGIC_VECTOR(7 DOWNTO 0);
 
+signal tx_en_switch : std_logic;
 
 BEGIN
 
@@ -340,9 +344,11 @@ rx_tsu: entity work.ethernet_timestamp_mii
 	timestamp_seconds_o => rx_timestamp_s,
 	timestamp_nanoseconds_o => rx_timestamp_ns,
 	mii_in => phy_mii_rx_data_in,
+	gmii_in => phy_gmii_rx_data_in,
 	mii_en_in => phy_mii_rx_en_i
 );
 
+tx_en_switch <= phy_mii_tx_en_i when ETHERNET_TYPE = "RMII" else mac_tx_busy;
 tx_tsu: entity work.ethernet_timestamp_mii
  generic map(
 	PATH => "TX",
@@ -359,7 +365,8 @@ tx_tsu: entity work.ethernet_timestamp_mii
 	timestamp_seconds_o => tx_timestamp_s,
 	timestamp_nanoseconds_o => tx_timestamp_ns,
 	mii_in => phy_mii_tx_data_in,
-	mii_en_in => phy_mii_tx_en_i
+	gmii_in => phy_gmii_tx_data_in,
+	mii_en_in => tx_en_switch
 );
 
 

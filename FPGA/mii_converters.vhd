@@ -153,6 +153,20 @@ begin
   end generate;
   rmiigen : if (ethernet_type = "RMII" and platform = "ALTERA") generate
 
+    -- MAC-side MII interface mapping (identical to the RGMII path, lines above).
+    -- These were missing: mii_rx_clock_o/mii_tx_clock_o were never driven, so the
+    -- MAC clocks were stuck at GND and every network module was optimized away;
+    -- the MAC TX nibble was likewise undriven (gmii_txd read but never assigned).
+    gmii_tx_en  <= mii_tx_en_i;
+    gmii_txd    <= mii_txd_i;
+    gmii_tx_err <= mii_tx_err_i;
+
+    mii_rx_clock_o <= gmii_rx_clk;
+    mii_rx_err_o   <= gmii_rx_err;
+    mii_rx_dv_o    <= gmii_rx_dv;
+    mii_rxd_o      <= gmii_rxd;
+    mii_tx_clock_o <= gmii_tx_clk;
+
     -- MII TX: MAC outputs 8 bits (GMII), only lower 4 bits are used for MII
     mii_txd <= gmii_txd(3 downto 0);
     -- MII RX: rmii_phy_if drives only the lower nibble; tie off upper nibble

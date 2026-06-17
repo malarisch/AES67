@@ -12,8 +12,8 @@ ENTITY topevalkit IS
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 128; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8; -- must be power of two (media-clock-derived TX write pointer)
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false;
 
@@ -37,7 +37,7 @@ ENTITY topevalkit IS
 		AUDIO_RX_TDM_OUTPUTS : natural := 2;
 		AUDIO_RX_TDM_CHANNELS : natural  := 8;
 
-        TX_CHANNELS		: natural := 16; -- must be multiple of two for i2s, multiple of 8 for tdm8
+        TX_CHANNELS		: natural := 8; -- must be multiple of two for i2s, multiple of 8 for tdm8
         
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
@@ -139,9 +139,9 @@ signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
 begin
 
     tdm_in(0) <= tdm8in_0_i;
-    tdm_in(1) <= tdm8in_1_i;
+    --tdm_in(1) <= tdm8in_1_i;
     tdm8out_0_o <= tdm_out(0);
-    tdm8out_1_o <= tdm_out(1);
+    --tdm8out_1_o <= tdm_out(1);
     soc_top_inst: entity work.soc_top
      generic map(
         clk_in_speed => clk_in_speed,

@@ -187,11 +187,15 @@ signal rst_n : std_logic;
 signal sysclk_pll_locked : std_logic;
 signal eth_buf_irq : std_logic;
 signal phy_mii_enet_tx_d_sig : std_logic_vector(MII_WIDTH - 1 downto 0);
+signal phy_mii_enet_rx_d_sig : std_logic_vector(MII_WIDTH - 1 downto 0);
+
 signal phy_mii_enet_tx_en_sig : std_logic;
 begin
     rst_n <= rst_n_i and sysclk_pll_locked;
     phy_mii_enet_tx_d <= phy_mii_enet_tx_d_sig;
+    phy_mii_enet_rx_d_sig <= phy_mii_enet_rx_d;
     phy_mii_enet_tx_en <= phy_mii_enet_tx_en_sig;
+
 aes67_wb_bridge_inst: entity work.aes67_wb_bridge
  generic map(
     MII_WIDTH => MII_WIDTH,
@@ -225,8 +229,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     mac_resetn_i => rst_n,
     phy_mii_rx_clk_in => mii_rx_clock,
     phy_mii_tx_clk_in => mii_tx_clock,
-    phy_mii_tx_data_in => phy_mii_enet_tx_d_sig,
-    phy_mii_rx_data_in => phy_mii_enet_rx_d,
+    phy_mii_tx_data_in => phy_mii_enet_tx_d_sig(MII_WIDTH -1 downto 0),
+    phy_mii_rx_data_in => phy_mii_enet_rx_d_sig(MII_WIDTH -1 downto 0),
     phy_mii_tx_en_i => phy_mii_enet_tx_en_sig,
     phy_mii_rx_en_i => phy_mii_enet_rx_dv,
     mii_rx_clock_i => mii_rx_clock,
@@ -310,7 +314,7 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
   )
    port map(
       clock_i => clock_i,
-      rst_n_i => rst_n_i,
+      rst_n_i => rst_n,
       sys_clk_125MHz_o => sys_clk_125MHz,
       mcu_clk_o => mcu_clk,
       mcu_clk2_o => mcu_clk_90,

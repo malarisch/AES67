@@ -77,5 +77,5 @@ sysclkgen50_gw: if (platform = "GOWIN" and clk_in_speed = 50) generate
 	);
 end generate;
     
-locked_o <= rst_n_i and sys_clk_locked;
+locked_o <= sys_clk_locked;
 end architecture;
