@@ -75,3 +75,4 @@ datasheets/
 .vscode/**
 *__pycache__*
 
+CLAUDE.md
