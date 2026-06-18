@@ -192,7 +192,6 @@ architecture rtl of aes67_wb_bridge is
 		rx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		rx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		rx_stream_cfg_wr_en		:	 OUT STD_LOGIC;
-		sys_clk_out		:	 OUT STD_LOGIC;
 		tx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		tx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		tx_stream_cfg_wr_en		:	 OUT STD_LOGIC

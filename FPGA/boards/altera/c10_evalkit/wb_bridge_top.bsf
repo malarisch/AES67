@@ -1,0 +1,403 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 2025  Altera Corporation. All rights reserved.
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and any partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, the Altera Quartus Prime License Agreement,
+the Altera IP License Agreement, or other applicable license
+agreement, including, without limitation, that your use is for
+the sole purpose of programming logic devices manufactured by
+Altera and sold by Altera or its authorized distributors.  Please
+refer to the Altera Software License Subscription Agreements 
+on the Quartus Prime software download page.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 576 384)
+	(text "wb_bridge_top" (rect 5 0 62 12)(font "Arial" ))
+	(text "inst" (rect 8 352 20 364)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "rst_n_i" (rect 0 0 28 12)(font "Arial" ))
+		(text "rst_n_i" (rect 21 27 49 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "clock_i" (rect 0 0 27 12)(font "Arial" ))
+		(text "clock_i" (rect 21 43 48 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "phy_refclk_i" (rect 0 0 50 12)(font "Arial" ))
+		(text "phy_refclk_i" (rect 21 59 71 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 1))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "phy_mii_enet_rx_clk" (rect 0 0 84 12)(font "Arial" ))
+		(text "phy_mii_enet_rx_clk" (rect 21 75 105 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 1))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "phy_mii_enet_rx_dv" (rect 0 0 84 12)(font "Arial" ))
+		(text "phy_mii_enet_rx_dv" (rect 21 91 105 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 1))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "phy_mii_enet_rx_d[(mii_width-1)..0]" (rect 0 0 142 12)(font "Arial" ))
+		(text "phy_mii_enet_rx_d[(mii_width-1)..0]" (rect 21 107 163 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "pll_512fs_i" (rect 0 0 41 12)(font "Arial" ))
+		(text "pll_512fs_i" (rect 21 123 62 135)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 1))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "tdm_in[(audio_tx_tdm_inputs-1)..0]" (rect 0 0 138 12)(font "Arial" ))
+		(text "tdm_in[(audio_tx_tdm_inputs-1)..0]" (rect 21 139 159 151)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 3))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "tx_sample_register[(((tx_byte_depth*8)*tx_channels)-1)..0]" (rect 0 0 228 12)(font "Arial" ))
+		(text "tx_sample_register[(((tx_byte_depth*8)*tx_channels)-1)..0]" (rect 21 155 249 167)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160)(line_width 3))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "aes67_wb_adr[29..0]" (rect 0 0 83 12)(font "Arial" ))
+		(text "aes67_wb_adr[29..0]" (rect 21 171 104 183)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176)(line_width 3))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "aes67_wb_bte[1..0]" (rect 0 0 76 12)(font "Arial" ))
+		(text "aes67_wb_bte[1..0]" (rect 21 187 97 199)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 3))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "aes67_wb_cti[2..0]" (rect 0 0 74 12)(font "Arial" ))
+		(text "aes67_wb_cti[2..0]" (rect 21 203 95 215)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208)(line_width 3))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "aes67_wb_cyc" (rect 0 0 61 12)(font "Arial" ))
+		(text "aes67_wb_cyc" (rect 21 219 82 231)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 1))
+	)
+	(port
+		(pt 0 240)
+		(input)
+		(text "aes67_wb_dat_w[31..0]" (rect 0 0 93 12)(font "Arial" ))
+		(text "aes67_wb_dat_w[31..0]" (rect 21 235 114 247)(font "Arial" ))
+		(line (pt 0 240)(pt 16 240)(line_width 3))
+	)
+	(port
+		(pt 0 256)
+		(input)
+		(text "aes67_wb_sel[3..0]" (rect 0 0 76 12)(font "Arial" ))
+		(text "aes67_wb_sel[3..0]" (rect 21 251 97 263)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 3))
+	)
+	(port
+		(pt 0 272)
+		(input)
+		(text "aes67_wb_stb" (rect 0 0 57 12)(font "Arial" ))
+		(text "aes67_wb_stb" (rect 21 267 78 279)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 1))
+	)
+	(port
+		(pt 0 288)
+		(input)
+		(text "aes67_wb_we" (rect 0 0 56 12)(font "Arial" ))
+		(text "aes67_wb_we" (rect 21 283 77 295)(font "Arial" ))
+		(line (pt 0 288)(pt 16 288)(line_width 1))
+	)
+	(port
+		(pt 560 32)
+		(output)
+		(text "phy_mii_enet_resetn" (rect 0 0 84 12)(font "Arial" ))
+		(text "phy_mii_enet_resetn" (rect 455 27 539 39)(font "Arial" ))
+		(line (pt 560 32)(pt 544 32)(line_width 1))
+	)
+	(port
+		(pt 560 48)
+		(output)
+		(text "phy_mii_enet_tx_clk" (rect 0 0 83 12)(font "Arial" ))
+		(text "phy_mii_enet_tx_clk" (rect 456 43 539 55)(font "Arial" ))
+		(line (pt 560 48)(pt 544 48)(line_width 1))
+	)
+	(port
+		(pt 560 64)
+		(output)
+		(text "phy_mii_enet_tx_en" (rect 0 0 82 12)(font "Arial" ))
+		(text "phy_mii_enet_tx_en" (rect 457 59 539 71)(font "Arial" ))
+		(line (pt 560 64)(pt 544 64)(line_width 1))
+	)
+	(port
+		(pt 560 80)
+		(output)
+		(text "phy_mii_enet_tx_d[(mii_width-1)..0]" (rect 0 0 141 12)(font "Arial" ))
+		(text "phy_mii_enet_tx_d[(mii_width-1)..0]" (rect 398 75 539 87)(font "Arial" ))
+		(line (pt 560 80)(pt 544 80)(line_width 3))
+	)
+	(port
+		(pt 560 96)
+		(output)
+		(text "enet_mdc" (rect 0 0 40 12)(font "Arial" ))
+		(text "enet_mdc" (rect 499 91 539 103)(font "Arial" ))
+		(line (pt 560 96)(pt 544 96)(line_width 1))
+	)
+	(port
+		(pt 560 128)
+		(output)
+		(text "audioclk_512fs_o" (rect 0 0 68 12)(font "Arial" ))
+		(text "audioclk_512fs_o" (rect 471 123 539 135)(font "Arial" ))
+		(line (pt 560 128)(pt 544 128)(line_width 1))
+	)
+	(port
+		(pt 560 144)
+		(output)
+		(text "audioclk_256fs_rising_o" (rect 0 0 95 12)(font "Arial" ))
+		(text "audioclk_256fs_rising_o" (rect 444 139 539 151)(font "Arial" ))
+		(line (pt 560 144)(pt 544 144)(line_width 1))
+	)
+	(port
+		(pt 560 160)
+		(output)
+		(text "audioclk_256fs_falling_o" (rect 0 0 96 12)(font "Arial" ))
+		(text "audioclk_256fs_falling_o" (rect 443 155 539 167)(font "Arial" ))
+		(line (pt 560 160)(pt 544 160)(line_width 1))
+	)
+	(port
+		(pt 560 176)
+		(output)
+		(text "audioclk_64fs_o" (rect 0 0 66 12)(font "Arial" ))
+		(text "audioclk_64fs_o" (rect 473 171 539 183)(font "Arial" ))
+		(line (pt 560 176)(pt 544 176)(line_width 1))
+	)
+	(port
+		(pt 560 192)
+		(output)
+		(text "audioclk_lrclk_o" (rect 0 0 62 12)(font "Arial" ))
+		(text "audioclk_lrclk_o" (rect 477 187 539 199)(font "Arial" ))
+		(line (pt 560 192)(pt 544 192)(line_width 1))
+	)
+	(port
+		(pt 560 208)
+		(output)
+		(text "tdm_out[(audio_rx_tdm_outputs-1)..0]" (rect 0 0 151 12)(font "Arial" ))
+		(text "tdm_out[(audio_rx_tdm_outputs-1)..0]" (rect 388 203 539 215)(font "Arial" ))
+		(line (pt 560 208)(pt 544 208)(line_width 3))
+	)
+	(port
+		(pt 560 224)
+		(output)
+		(text "rx_sample_register[(((rx_byte_depth*8)*rx_channels)-1)..0]" (rect 0 0 232 12)(font "Arial" ))
+		(text "rx_sample_register[(((rx_byte_depth*8)*rx_channels)-1)..0]" (rect 307 219 539 231)(font "Arial" ))
+		(line (pt 560 224)(pt 544 224)(line_width 3))
+	)
+	(port
+		(pt 560 240)
+		(output)
+		(text "mcu_clk_o" (rect 0 0 44 12)(font "Arial" ))
+		(text "mcu_clk_o" (rect 495 235 539 247)(font "Arial" ))
+		(line (pt 560 240)(pt 544 240)(line_width 1))
+	)
+	(port
+		(pt 560 256)
+		(output)
+		(text "mcu_clk_90_o" (rect 0 0 60 12)(font "Arial" ))
+		(text "mcu_clk_90_o" (rect 479 251 539 263)(font "Arial" ))
+		(line (pt 560 256)(pt 544 256)(line_width 1))
+	)
+	(port
+		(pt 560 272)
+		(output)
+		(text "mcu_irq_o" (rect 0 0 43 12)(font "Arial" ))
+		(text "mcu_irq_o" (rect 496 267 539 279)(font "Arial" ))
+		(line (pt 560 272)(pt 544 272)(line_width 1))
+	)
+	(port
+		(pt 560 288)
+		(output)
+		(text "aes67_wb_ack" (rect 0 0 60 12)(font "Arial" ))
+		(text "aes67_wb_ack" (rect 479 283 539 295)(font "Arial" ))
+		(line (pt 560 288)(pt 544 288)(line_width 1))
+	)
+	(port
+		(pt 560 304)
+		(output)
+		(text "aes67_wb_dat_r[31..0]" (rect 0 0 90 12)(font "Arial" ))
+		(text "aes67_wb_dat_r[31..0]" (rect 449 299 539 311)(font "Arial" ))
+		(line (pt 560 304)(pt 544 304)(line_width 3))
+	)
+	(port
+		(pt 560 320)
+		(output)
+		(text "aes67_wb_err" (rect 0 0 57 12)(font "Arial" ))
+		(text "aes67_wb_err" (rect 482 315 539 327)(font "Arial" ))
+		(line (pt 560 320)(pt 544 320)(line_width 1))
+	)
+	(port
+		(pt 560 112)
+		(bidir)
+		(text "enet_mdio" (rect 0 0 41 12)(font "Arial" ))
+		(text "enet_mdio" (rect 498 107 539 119)(font "Arial" ))
+		(line (pt 560 112)(pt 544 112)(line_width 1))
+	)
+	(parameter
+		"clk_in_speed"
+		"50"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"platform"
+		"ALTERA"
+		""
+		(type "PARAMETER_STRING")	)
+	(parameter
+		"MII_WIDTH"
+		"2"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"ETHERNET_TYPE"
+		"RMII"
+		""
+		(type "PARAMETER_STRING")	)
+	(parameter
+		"SYS_CLK_NS_PER_TICK"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MII_CLK_NS_PER_TICK"
+		"20"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MIIM_CLOCK_DIVIDER"
+		"50"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"MIIM_PHY_ADDRESS"
+		"00000"
+		""
+		(type "PARAMETER_UNSIGNED_BIN")	)
+	(parameter
+		"RX_MAX_STREAMS"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"RX_CHANNELS"
+		"16"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"RX_SAMPLE_BUFFER_DEPTH"
+		"256"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_RX_USE_PARALLEL_INTERFACE"
+		"false"
+		""
+		(type "PARAMETER_ENUM")	)
+	(parameter
+		"RX_BYTE_DEPTH"
+		"3"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_RX_TDM_OUTPUTS"
+		"2"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_RX_TDM_CHANNELS"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"TX_MAX_STREAMS"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"TX_CHANNELS"
+		"16"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"TX_SAMPLE_BUFFER_DEPTH"
+		"64"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_TX_USE_PARALLEL_INTERFACE"
+		"false"
+		""
+		(type "PARAMETER_ENUM")	)
+	(parameter
+		"TX_BYTE_DEPTH"
+		"3"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_TX_TDM_INPUTS"
+		"2"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"AUDIO_TX_TDM_CHANNELS"
+		"8"
+		""
+		(type "PARAMETER_SIGNED_DEC")	)
+	(parameter
+		"USE_EXTERNAL_PLL"
+		"false"
+		""
+		(type "PARAMETER_ENUM")	)
+	(parameter
+		"ENABLE_METERING"
+		"false"
+		""
+		(type "PARAMETER_ENUM")	)
+	(drawing
+		(rectangle (rect 16 16 544 352)(line_width 1))
+	)
+	(annotation_block (parameter)(rect 576 -64 676 16))
+)

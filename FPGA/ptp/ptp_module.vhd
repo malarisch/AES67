@@ -209,6 +209,16 @@ SIGNAL		servo_mon_lock_counter_reg         : unsigned(15 downto 0);
 SIGNAL		servo_mon_sample_count_reg         : unsigned(15 downto 0);
 SIGNAL		servo_mon_first_lock_achieved_reg  : STD_LOGIC;
 
+
+signal delta_m2s : signed(31 downto 0);
+signal delta_s2m : signed(31 downto 0);
+signal delta_m2s_avg : signed(31 downto 0);
+signal delta_s2m_avg : signed(31 downto 0);
+signal delta_m2s_valid : std_logic;
+signal delta_s2m_valid : std_logic;
+signal delta_m2s_valid_avg : std_logic;
+signal delta_s2m_valid_avg : std_logic;
+
 BEGIN
 
 -- EUI-64 clock identity from MAC (same mapping as ptpv2_parser)
@@ -286,7 +296,38 @@ PORT MAP(sys_clk => sys_clk,
 		 tx_done_sys_o => tx_done_sys,
 		 mac_speed_i => mac_speed_i);
 
+s2m_average_inst: entity work.average
+ generic map(
+	DATA_WIDTH => 32,
+	DEPTH => 16
+)
+ port map(
+	clk_i => sys_clk,
+	rst_n_i => powerGood,
+	data_i => delta_s2m,
+	data_valid_i => delta_s2m_valid,
+	data_o => delta_s2m_avg,
+	data_valid_o => delta_s2m_valid_avg
+);
+m2s_average_inst: entity work.average
+ generic map(
+	DATA_WIDTH => 32,
+	DEPTH => 16
+)
+ port map(
+	clk_i => sys_clk,
+	rst_n_i => powerGood,
+	data_i => delta_m2s,
+	data_valid_i => delta_m2s_valid,
+	data_o => delta_m2s_avg,
+	data_valid_o => delta_m2s_valid_avg
+);
 
+ptp_mean_path_delay_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg + delta_s2m_avg - parser_delay_asymmetry_ns_i, 1) when ptp_locked_ALTERA_SYNTHESIZED = '1' else
+	shift_right(delta_m2s + delta_s2m - parser_delay_asymmetry_ns_i, 1);
+ptp_offset_from_master_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg - delta_s2m_avg + parser_delay_asymmetry_ns_i, 1) when ptp_locked_ALTERA_SYNTHESIZED = '1' else
+	shift_right(delta_m2s - delta_s2m + parser_delay_asymmetry_ns_i, 1);
+ptp_calc_valid <= delta_m2s_valid_avg;
 b2v_ptpparser :  entity work.ptpv2_parser
 
 PORT MAP(clk => sys_clk,
@@ -296,7 +337,6 @@ PORT MAP(clk => sys_clk,
 		 ptp_is_follower_i => eff_is_follower,
 		 ptp_current_leader_id_i => eff_current_leader_id,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
-		 delay_asymmetry_ns_i => parser_delay_asymmetry_ns_i,
 		 rx_timestamp_nanoseconds_i => rx_timestamp_ns,
 		 rx_timestamp_seconds_i => rx_timestamp_s,
 		 src_mac_address => mac_address,
@@ -304,15 +344,18 @@ PORT MAP(clk => sys_clk,
 		 tx_timestamp_seconds_i => tx_timestamp_s,
 		 send_delay_resp_o => rx_send_delay_resp,
 		 send_delay_req_o => rx_send_delay_req,
-		 ptp_calc_valid_o => ptp_calc_valid,
+		 --ptp_calc_valid_o => ptp_calc_valid,
 		 log_msg_interval_valid_o => log_msg_interval_valid,
 		 clock_set_o => wallclock_set,
 		 clock_configured_o => wallclock_configured,
 		 clock_configure_timestamp_nanoseconds_o => wallclock_set_ns,
 		 clock_configure_timestamp_seconds_o => wallclock_set_s,
 		 log_msg_interval_o => log_msg_interval,
-		 mean_path_delay_ns_o => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
-		 offset_from_master_ns_o => ptp_offset_from_master_ALTERA_SYNTHESIZED,
+		 delta_m2s_o => delta_m2s,--, => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
+		 delta_s2m_o => delta_s2m,
+		 delta_m2s_valid_o => delta_m2s_valid,
+		 delta_s2m_valid_o => delta_s2m_valid,
+		 --offset_from_master_ns_o => ptp_offset_from_master_ALTERA_SYNTHESIZED,
 		 rx_follower_identity_o => rx_follower_identity,
 		 rx_timestamp_nanoseconds_o => rx_ts_ns,
 		 rx_timestamp_seconds_o => rx_ts_s,

@@ -49,7 +49,7 @@ ENTITY aes67_top IS
 		enet_clk_i       :  IN  STD_LOGIC;
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
-		mac_resetn_i : IN STD_LOGIC := '1';
+		
 		phy_mii_rx_clk_in : IN STD_LOGIC;
 		phy_mii_tx_clk_in : IN STD_LOGIC;
 		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
@@ -179,7 +179,12 @@ ENTITY aes67_top IS
 
 		-- audio inputs
 		tdm8in_i : IN STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0) := (others => '0');
-		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0) := (others => '0')
+		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0) := (others => '0');
+
+		ptp_reset_i : IN STD_LOGIC := '0';
+		audiotx_reset_i : IN STD_LOGIC := '0';
+		audiorx_reset_i : IN STD_LOGIC := '0';
+		mac_resetn_i : IN STD_LOGIC := '1'
 
 	);
 END aes67_top;
@@ -247,9 +252,10 @@ signal mac_sof_sent_tog : STD_LOGIC;
 signal mac_sof_recv_tog : STD_LOGIC;
 signal mac_speed : STD_LOGIC_VECTOR(1 downto 0);
 
--- PTP module reset: global rst_n AND NOT software-asserted ptp_reset_i.
--- Resets servo, parser, wallclock — everything time-related.
+-- reset signals
 signal ptp_module_rst_n : STD_LOGIC;
+signal audiotx_reset_n : STD_LOGIC;
+signal audiorx_reset_n : STD_LOGIC;
 
 -- Servo monitoring (typed) signals between ptp_module and top-level pads
 signal servo_mon_filtered_offset_signed       : signed(31 downto 0);
@@ -265,7 +271,9 @@ BEGIN
 
 
 mii_txd_o <= mii_txd_o_reg;
-ptp_module_rst_n <= '1';--rst_n and not ptp_reset_i;
+ptp_module_rst_n <= rst_n and not ptp_reset_i;
+audiotx_reset_n <= rst_n and not audiotx_reset_i;
+audiorx_reset_n <= rst_n and not audiorx_reset_i;
 
 mac_speed_o <= mac_speed;
 
@@ -284,15 +292,15 @@ mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
 
 mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
-	clk_512fs <= pll_512fs_i;
-	audioclocks_inst: entity work.audioclock_generator
-	PORT MAP(mclk => clk_512fs,
-		 rst_n => ptp_module_rst_n,
-		 clk_64fs => pll_64fs,
-		 fs => pll_48k_fs,
-		 bclk_r => pll_256fs_rising,
-		 bclk_f => pll_256fs_falling,
-		 fs_pulse => pll_48k_fs_tdm);
+--	clk_512fs <= pll_512fs_i;
+--	audioclocks_inst: entity work.audioclock_generator
+--	PORT MAP(mclk => clk_512fs,
+--		 rst_n => ptp_module_rst_n,
+--		 clk_64fs => pll_64fs,
+--		 fs => pll_48k_fs,
+--		 bclk_r => pll_256fs_rising,
+--		 bclk_f => pll_256fs_falling,
+--		 fs_pulse => pll_48k_fs_tdm);
 	
 	ppb_meter_inst: entity work.clock_ppb_meter
 	PORT MAP(sys_clk => sys_clk_125MHz_i,
@@ -338,7 +346,7 @@ GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ctrl_plane_clk => clk_mcu_i,
-		 rst_n => rst_n,
+		 rst_n => audiotx_reset_n,
 		 -- In integrated TDM mode the buffer's frame sync must be the TDM fsync
 		 -- (pll_48k_fs_tdm), matching what the external tdm8_in used; the parallel
 		 -- capture path uses the regular pll_48k_fs.
@@ -512,7 +520,7 @@ GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
-		 reset_n => rst_n,
+		 reset_n => audiorx_reset_n,
 		 
 
 		 -- network
@@ -562,7 +570,7 @@ ethernet_top_inst: entity work.ethernet_top
 	enet_clk_i => enet_clk_i,
 	mac_rx_clock_o => mac_rx_clock,
 	mac_tx_clock_o => mac_tx_clock,
-	rst_n => rst_n,
+	rst_n => mac_resetn_i,
 	received_packet_length_o => mac_received_packet_length_o,
 	is_ptp_frame_o => mac_is_ptp_frame,
 	mac_rx_data_o => mac_rx_data,

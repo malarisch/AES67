@@ -35,8 +35,10 @@ entity ptpv2_parser is
         src_mac_address		: in std_logic_vector(47 downto 0);
 
         -- PTP calculation outputs
-        mean_path_delay_ns_o       : out signed(31 downto 0);  -- Mean path delay in nanoseconds (signed)
-        offset_from_master_ns_o    : out signed(31 downto 0);  -- Offset from master in nanoseconds (signed)
+        delta_m2s_o       : out signed(31 downto 0);
+        delta_m2s_valid_o : out std_logic;
+        delta_s2m_o    : out signed(31 downto 0);
+        delta_s2m_valid_o : out std_logic;
         ptp_calc_valid_o           : out std_logic;            -- Pulse when calculation is complete
         log_msg_interval_o         : out signed(7 downto 0);   -- PTP logMessageInterval from last Sync/Follow_Up
         log_msg_interval_valid_o   : out std_logic;            -- Pulse when log_msg_interval is updated (from Follow_Up)
@@ -53,12 +55,7 @@ entity ptpv2_parser is
         clock_reconfigure_req_i : in std_logic;
 
 
-        -- IEEE 1588-2008 delayAsymmetry in nanoseconds (signed).
-        -- Positive value = downstream (Master->Slave) path is longer than
-        -- upstream. Used to compensate PHY/MAC TX vs RX latency mismatch
-        -- (e.g. LAN8720A). meanLinkDelay = ((t2-t1)+(t4-t3) - asym)/2,
-        -- offset = ((t2-t1)-(t4-t3) + asym)/2.
-        delay_asymmetry_ns_i       : in signed(31 downto 0) := (others => '0');
+
         
         -- Announce dataset outputs (for BMC)
         announce_valid_o                 : out std_logic;  -- pulse when a valid Announce has been parsed
@@ -89,7 +86,7 @@ architecture Behavioral of ptpv2_parser is
     
     
     -- State machine
-    type t_SM_PtpParser is (s_Idle, s_Prefetch, s_ReadHeader, s_Interpret_Packet, s_Calc_Stage1, s_Output, s_Done);
+    type t_SM_PtpParser is (s_Idle, s_Prefetch, s_ReadHeader, s_Interpret_Packet, s_Calc_m2s, s_Calc_s2m, s_Output, s_Done);
     signal s_SM_PtpParser : t_SM_PtpParser := s_Idle;
 
     type t_SM_ClockConfigurator is (s_Idle, s_ClockSet_Calc, s_ClockSet_Calc2, s_ClockSet_Apply, s_ClockSet_Apply2);
@@ -453,8 +450,10 @@ begin
             send_delay_resp_o <= '0';
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
-            mean_path_delay_ns_o <= (others => '0');
-            offset_from_master_ns_o <= (others => '0');
+            delta_m2s_o <= (others => '0');
+            delta_s2m_o <= (others => '0');
+            delta_m2s_valid_o <= '0';
+            delta_s2m_valid_o <= '0';
             log_msg_interval_o <= (others => '0');
             log_msg_interval_valid_o <= '0';
 
@@ -471,6 +470,8 @@ begin
             
 
         elsif rising_edge(clk) then
+            delta_m2s_valid_o <= '0';
+            delta_s2m_valid_o <= '0';
             send_delay_resp_o <= '0';
             send_delay_req_o <= '0';
             ptp_calc_valid_o <= '0';
@@ -537,7 +538,7 @@ begin
                                         stored_t1_nanoseconds <= unsigned(ptp_origin_timestamp_nanoseconds);
                                         sequence_id_o <= ptp_sequence_id;
                                         send_delay_req_o <= '1';
-                                        s_SM_PtpParser <= s_Done;
+                                        s_SM_PtpParser <= s_Calc_m2s;
                                     end if;
                                 else
                                     s_SM_PtpParser <= s_Done;
@@ -552,7 +553,7 @@ begin
                                 if ptp_sequence_id = active_sequence_id and ptp_requesting_port_identity = my_clock_id then
                                     stored_t4_seconds <= unsigned(ptp_origin_timestamp_seconds(3 downto 0));
                                     stored_t4_nanoseconds <= unsigned(ptp_origin_timestamp_nanoseconds);
-                                    s_SM_PtpParser <= s_Calc_Stage1;
+                                    s_SM_PtpParser <= s_Calc_s2m;
                                 else
                                     s_SM_PtpParser <= s_Done;
                                 end if;
@@ -569,35 +570,32 @@ begin
 
             
 
-            elsif (s_SM_PtpParser = s_Calc_Stage1) then
-                -- ============================================
-                -- CALCULATION Stage 1: Calculate raw deltas
-                -- delta_m2s = T2 - T1 (Master to Slave delay)
-                -- delta_s2m = T4 - T3 (Slave to Master delay)
-                -- ============================================
-                delta_m2s_reg <= timestamp_diff_ns(
+            elsif (s_SM_PtpParser = s_Calc_m2s) then
+
+                delta_m2s_o <= timestamp_diff_ns(
                     stored_t2_seconds, stored_t2_nanoseconds,
                     stored_t1_seconds(3 downto 0), stored_t1_nanoseconds
                 );
+                delta_m2s_valid_o <= '1';
+
+
+
+                s_SM_PtpParser <= s_Done;
+
+
+
+            elsif (s_SM_PtpParser = s_Calc_s2m) then
+
                 
-                delta_s2m_reg <= timestamp_diff_ns(
+                delta_s2m_o <= timestamp_diff_ns(
                     stored_t4_seconds, stored_t4_nanoseconds,
                     stored_t3_seconds, stored_t3_nanoseconds
                 );
+                delta_s2m_valid_o <= '1';
 
-
-                s_SM_PtpParser <= s_Output;
-
-
-
-            elsif (s_SM_PtpParser = s_Output) then
-                -- Min filter disabled: use raw deltas directly.
-                -- meanLinkDelay = ((delta_m2s + delta_s2m) - delayAsymmetry) / 2
-                -- offset        = ((delta_m2s - delta_s2m) + delayAsymmetry) / 2
-                mean_path_delay_ns_o <= shift_right(delta_m2s_reg + delta_s2m_reg - delay_asymmetry_ns_i, 1);
-                offset_from_master_ns_o <= shift_right(delta_m2s_reg - delta_s2m_reg + delay_asymmetry_ns_i, 1);
-                ptp_calc_valid_o <= '1';
                 s_SM_PtpParser <= s_Done;
+
+
 
             elsif (s_SM_PtpParser = s_Done) then
                 

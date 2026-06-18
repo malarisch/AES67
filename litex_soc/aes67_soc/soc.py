@@ -165,9 +165,11 @@ class AES67SoC(SoCCore):
 
         # -- CRG and main RAM (target-specific) --------------------------------
         if cpu_less:
-            # CPU-less bridge (spibone / aes67_bridge): sys + MAC clocks only,
-            # no main RAM.  eth_buf still needs the mac_rx/tx domains.
-            self.crg = _CRG_Spibone(platform, sys_clk_freq)
+            # CPU-less bridge (spibone / aes67_bridge): sys clock only, no main
+            # RAM.  Only aes67_bridge instantiates eth_buf, so only it needs the
+            # mac_rx/tx domains; spibone leaves them unbound.
+            self.crg = _CRG_Spibone(platform, sys_clk_freq,
+                                    with_mac_clocks=is_aes67_bridge)
         elif target == "gowin":
             # Gowin GW2A: external clk_sys + clk_sys2x + DDR3
             self.crg = _CRG_Gowin(platform, sys_clk_freq)
@@ -288,9 +290,6 @@ class AES67SoC(SoCCore):
             self.uart1_phy = RS232PHY(platform.request("serial", 1), clk_freq=sys_clk_freq, baudrate=115200)
             self.uart1 = UART(self.uart1_phy, tx_fifo_depth=16, rx_fifo_depth=16)
             self.irq.add("uart1")
-
-        # -- sys_clk output (for FPGA-side config RAM write clocks) -------------
-        self.comb += platform.request("sys_clk_out").eq(ClockSignal("sys"))
 
         # -- AES67 register surface --------------------------------------------
         # The AES67 surface (aes67_csr + eth_buf + stream RAMs) lives in ONE

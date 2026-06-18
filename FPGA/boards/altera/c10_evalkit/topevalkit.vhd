@@ -4,7 +4,7 @@ USE ieee.numeric_std.all;
 
 ENTITY topevalkit IS 
 	generic (
-		soctype : string := "litex_c10_hram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
+		SOC_TYPE : string := "litex_c10_hram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
 		platform : string := "ALTERA";
         MII_WIDTH : integer := 4; -- 2 for rmii, 8 gmii/rgmii
 		MII_CLK_NS_PER_TICK : integer := 8; -- 20 for rmii, 40 mii, 8 rgmii/gmii
@@ -12,7 +12,7 @@ ENTITY topevalkit IS
 		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 8; -- must be power of two (media-clock-derived TX write pointer)
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
 		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false;
@@ -139,13 +139,14 @@ signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
 begin
 
     tdm_in(0) <= tdm8in_0_i;
-    --tdm_in(1) <= tdm8in_1_i;
+    tdm_in(1) <= tdm8in_1_i;
     tdm8out_0_o <= tdm_out(0);
-    --tdm8out_1_o <= tdm_out(1);
+    tdm8out_1_o <= tdm_out(1);
     soc_top_inst: entity work.soc_top
      generic map(
         clk_in_speed => clk_in_speed,
         platform => platform,
+		SOC_TYPE => SOC_TYPE,
         MII_WIDTH => MII_WIDTH,
         ETHERNET_TYPE => ETHERNET_TYPE,
         SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
@@ -206,7 +207,12 @@ begin
         --audioclk_64fs_o => ,
         audioclk_lrclk_o => lrclk_tdm_o,
         tdm_in => tdm_in,
-        tdm_out => tdm_out
+        tdm_out => tdm_out,
+		spibone_clk => spictrl_clk_i,
+		spibone_cs_n => spictrl_cs_n_i,
+		spibone_miso => spictrl_miso_o,
+		spibone_mosi => spictrl_mosi_i,
+		spibone_irq_o => spictrl_irq_n_o
     );
     
 

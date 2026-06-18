@@ -15,12 +15,9 @@ from litex.build.gowin.platform import GowinPlatform
 # -- Shared I/O: everything except clock and main RAM (identical across targets) --
 
 _io_common = [
-    # MAC clock inputs (directly from FPGA Ethernet MAC)
+    # MAC clock inputs (directly from FPGA Ethernet MAC).
     ("clk_mac_rx", 0, Pins(1)),
     ("clk_mac_tx", 0, Pins(1)),
-
-    # SoC sys_clk output (for FPGA-side config RAM write clocks)
-    ("sys_clk_out", 0, Pins(1)),
 
     # Serial / UART
     ("serial", 0,
@@ -247,9 +244,9 @@ _io_gowin = [
     ),
 ] + _io_common
 
-# spibone target: CPU-less register bridge.  No main-RAM pins; the MAC clocks
-# (clk_mac_rx/tx, used by eth_buf) already live in _io_common, and clk_sys feeds
-# the sys domain.  The external host drives the bus over the "spibone" SPI pads.
+# spibone target: CPU-less register bridge.  No main-RAM pins; clk_sys feeds the
+# sys domain.  The MAC clocks in _io_common stay unrequested here (spibone has no
+# eth_buf).  The external host drives the bus over the "spibone" SPI pads.
 _io_spibone = [
     ("clk_sys", 0, Pins(1)),
 ] + _io_common
