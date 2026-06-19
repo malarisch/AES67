@@ -9,7 +9,8 @@ ENTITY ptp_module IS
 		ETHERNET_TYPE : string := "RMII";
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
-		STATIC_PTP_CONF : BOOLEAN := true
+		STATIC_PTP_CONF : BOOLEAN := true;
+		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8
 	);
 	PORT
 	(
@@ -299,7 +300,7 @@ PORT MAP(sys_clk => sys_clk,
 s2m_average_inst: entity work.average
  generic map(
 	DATA_WIDTH => 32,
-	DEPTH => 16
+	DEPTH => PTP_MOVING_AVERAGE_DEPTH
 )
  port map(
 	clk_i => sys_clk,
@@ -312,7 +313,7 @@ s2m_average_inst: entity work.average
 m2s_average_inst: entity work.average
  generic map(
 	DATA_WIDTH => 32,
-	DEPTH => 16
+	DEPTH => PTP_MOVING_AVERAGE_DEPTH
 )
  port map(
 	clk_i => sys_clk,
@@ -323,11 +324,24 @@ m2s_average_inst: entity work.average
 	data_valid_o => delta_m2s_valid_avg
 );
 
-ptp_mean_path_delay_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg + delta_s2m_avg - parser_delay_asymmetry_ns_i, 1) when ptp_locked_ALTERA_SYNTHESIZED = '1' else
-	shift_right(delta_m2s + delta_s2m - parser_delay_asymmetry_ns_i, 1);
-ptp_offset_from_master_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg - delta_s2m_avg + parser_delay_asymmetry_ns_i, 1) when ptp_locked_ALTERA_SYNTHESIZED = '1' else
-	shift_right(delta_m2s - delta_s2m + parser_delay_asymmetry_ns_i, 1);
-ptp_calc_valid <= delta_m2s_valid_avg;
+ptp_calc_proc: process (sys_clk, rst_n)
+begin
+if (rst_n = '0') then
+	ptp_calc_valid <= '0';
+	ptp_mean_path_delay_ALTERA_SYNTHESIZED <= (others => '0');
+	ptp_offset_from_master_ALTERA_SYNTHESIZED <= (others => '0');
+elsif (rising_edge(sys_clk)) then
+	if (ptp_locked_ALTERA_SYNTHESIZED = '1') then
+		ptp_mean_path_delay_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg + delta_s2m_avg - parser_delay_asymmetry_ns_i, 1);
+		ptp_offset_from_master_ALTERA_SYNTHESIZED <= shift_right(delta_m2s_avg - delta_s2m_avg + parser_delay_asymmetry_ns_i, 1);
+	else
+		ptp_mean_path_delay_ALTERA_SYNTHESIZED <= shift_right(delta_m2s + delta_s2m - parser_delay_asymmetry_ns_i, 1);
+		ptp_offset_from_master_ALTERA_SYNTHESIZED <= shift_right(delta_m2s - delta_s2m + parser_delay_asymmetry_ns_i, 1);
+	end if;
+	ptp_calc_valid <= delta_m2s_valid_avg;
+end if;
+end process;
+
 b2v_ptpparser :  entity work.ptpv2_parser
 
 PORT MAP(clk => sys_clk,

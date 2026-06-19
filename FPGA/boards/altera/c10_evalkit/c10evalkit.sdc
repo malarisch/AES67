@@ -46,9 +46,9 @@ derive_clock_uncertainty
 # These are async to each other (CSR CDC handled in RTL); keep in separate groups.
 # (Both were clk[1] before, which put the same clock in two groups and made
 #  Quartus drop the whole set_clock_groups -> no async separation at all.)
-set sys_pll_clk0      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}
-set sys_pll_clk1      {soc_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
-set rgmii_pll_clk0    {soc_top_inst|mii_converters_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
+set sys_pll_clk0      {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[0]}
+set sys_pll_clk1      {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen50:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[1]}
+set rgmii_pll_clk0    {soc_top_inst|wb_bridge_top_inst|mii_converters_inst|\rgmiigen:rgmiiclks_inst|altpll_component|auto_generated|pll1|clk[0]}
 
 #**************************************************************
 # 3. Per-feature sub-SDCs (after derive_pll_clocks)

@@ -4,41 +4,36 @@ USE ieee.numeric_std.all;
 
 ENTITY topevalkit IS 
 	generic (
-		SOC_TYPE : string := "litex_c10_hram"; -- spi or litex_c10_hram or litex_c10_sdram or litex_tang_primer_20k
-		platform : string := "ALTERA";
-        MII_WIDTH : integer := 4; -- 2 for rmii, 8 gmii/rgmii
-		MII_CLK_NS_PER_TICK : integer := 8; -- 20 for rmii, 40 mii, 8 rgmii/gmii
-		clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
-		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
-		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
+		SOC_TYPE : string := "LITEX_HRAM"; -- LITEX_HRAM, LITEX_SDRAM, SPIBONE; WISHBONE_ONLY
+		platform : string := "ALTERA"; -- ALTERA, GOWIN, LATTICE
 
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
+		-- clocking
 		STATIC_PTP_CONF : 		BOOLEAN := true;
-        ENABLE_METERING: BOOLEAN := false;
-
+        clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        
-		TX_MAX_STREAMS : natural := 8;
-		RX_MAX_STREAMS : natural := 8;
-		
-		
-		
-		  
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
+		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
+		ENABLE_METERING: BOOLEAN := false;
+		PTP_MOVING_AVERAGE_DEPTH : integer := 8;
 
-    	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
+		-- ethernet cfg
+		MII_WIDTH : integer := 4; -- 2 for rmii, 8 gmii, 4 rgmii
+		MII_CLK_NS_PER_TICK : integer := 8; -- 20 for rmii, 40 mii, 8 rgmii/gmii
+		MIIM_CLOCK_DIVIDER : POSITIVE := 50;
+		ethernet_type	 : string := "RGMII"; -- RMII; RGMII
 		
-
-		RX_CHANNELS		: natural := 16;
-        
+		-- audio rx
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256; -- must be power of two
+		RX_MAX_STREAMS : natural := 8; -- max concurrent streams being received
+		RX_CHANNELS		: natural := 16; -- receive channel count
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
-		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		AUDIO_RX_TDM_CHANNELS : natural  := 8;
+		AUDIO_RX_TDM_OUTPUTS : natural := 2; -- tdm pin count
+		AUDIO_RX_TDM_CHANNELS : natural  := 8; -- tdm channel count
 
+		-- audio tx
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two
+		TX_MAX_STREAMS : natural := 8;
         TX_CHANNELS		: natural := 8; -- must be multiple of two for i2s, multiple of 8 for tdm8
-        
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
 		AUDIO_TX_TDM_INPUTS : natural := 2;
@@ -118,7 +113,7 @@ ENTITY topevalkit IS
 		spictrl_clk_i : IN STD_LOGIC;
 		spictrl_mosi_i : IN STD_LOGIC;
 		spictrl_cs_n_i : IN STD_LOGIC;
-		spictrl_miso_o : OUT STD_LOGIC;
+		spictrl_miso_o : INOUT STD_LOGIC;
 		spictrl_irq_n_o : OUT STD_LOGIC;
 		
 		
@@ -167,7 +162,8 @@ begin
         AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
         AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
         USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
-        ENABLE_METERING => ENABLE_METERING
+        ENABLE_METERING => ENABLE_METERING,
+		PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH
     )
      port map(
         rst_n_i => rst_n_i,
