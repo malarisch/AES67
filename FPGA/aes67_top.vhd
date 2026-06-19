@@ -40,7 +40,8 @@ ENTITY aes67_top IS
 		USE_EXTERNAL_PLL : BOOLEAN := true;
 		ENABLE_METERING: BOOLEAN := true;
 		STATIC_PTP_CONF: BOOLEAN := true;
-		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8
+		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
+		TDM_BCLK_MULT : INTEGER := 256
 
 	);
 	PORT
@@ -213,6 +214,8 @@ signal wc_bclk_r_int   : STD_LOGIC;
 signal wc_bclk_f_int   : STD_LOGIC;
 signal wc_fs_pulse     : STD_LOGIC;
 signal wc_fs_tdm_int   : STD_LOGIC;
+signal bclk_int_rx : STD_LOGIC;
+signal bclk_int_tx : STD_LOGIC;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal media_tick : STD_LOGIC;
 signal second_pulse_sys : STD_LOGIC;
@@ -331,7 +334,8 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
 end generate;
 
 wc_512fs_o <= clk_512fs;
-
+bclk_int_rx <= pll_64fs when TDM_BCLK_MULT = 64 else pll_256fs_falling;
+bclk_int_tx <= pll_64fs when TDM_BCLK_MULT = 64 else pll_256fs_rising;
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -354,7 +358,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 fs_tdm_clk_i => pll_48k_fs_tdm,
 		 fs_halfduty_clk_i => wc_fs_int,
  
-		 bclk_i => pll_256fs_falling,
+		 bclk_i => bclk_int_tx,
 		 tdm_in_i => tdm8in_i(AUDIO_TX_TDM_INPUTS - 1 downto 0),
 
 		 mac_tx_clock => mac_tx_clock,
@@ -533,7 +537,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- clocking
 		fs_clk_sync_i => pll_48k_fs_tdm,
 		fs_clk_50duty_i => pll_48k_fs,
-		bclk_sync_i => pll_256fs_rising,
+		bclk_sync_i => bclk_int_rx,
 		media_clock_i => media_clock,
 		 
 		 -- configuration

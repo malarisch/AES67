@@ -25,8 +25,8 @@ ENTITY top_cyc1000 IS
 
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         
-		TX_MAX_STREAMS : natural := 8;
-		RX_MAX_STREAMS : natural := 8;
+		TX_MAX_STREAMS : natural := 2;
+		RX_MAX_STREAMS : natural := 2;
 		
 		
 		
@@ -36,58 +36,57 @@ ENTITY top_cyc1000 IS
     	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
 		
 
-		RX_CHANNELS		: natural := 16;
+		RX_CHANNELS		: natural := 2;
         
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
-		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		AUDIO_RX_TDM_CHANNELS : natural  := 8;
+		AUDIO_RX_TDM_OUTPUTS : natural := 1;
+		AUDIO_RX_TDM_CHANNELS : natural  := 2;
 
-        TX_CHANNELS		: natural := 8; -- must be multiple of two for i2s, multiple of 8 for tdm8
+        TX_CHANNELS		: natural := 2; -- must be multiple of two for i2s, multiple of 8 for tdm8
         
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
-		AUDIO_TX_TDM_INPUTS : natural := 2;
-		AUDIO_TX_TDM_CHANNELS : natural  := 8
+		AUDIO_TX_TDM_INPUTS : natural := 1;
+		AUDIO_TX_TDM_CHANNELS : natural  := 2;
+        TDM_BCLK_MULT : INTEGER := 64
+
+
 	);
 	PORT 
 	(
 		c10_resetn :  IN  STD_LOGIC := '1';
 		c10_clk12m :  IN  STD_LOGIC;
 		
-		enet_mdio :  INOUT  STD_LOGIC; -- pmod 8
-		enet_mdc :  OUT  STD_LOGIC; -- ain7
-		uart0_tx :  OUT  STD_LOGIC; --bdbus1
 
-		pll_256fs_rising : OUT STD_LOGIC;
+		uart0_tx :  OUT  STD_LOGIC; --bdbus1
 		uart0_rx :  IN  STD_LOGIC;  -- bdbus0
-		pll_512fs_i :  IN  STD_LOGIC; -- ain0
-		tdm8in_0_i :  IN  STD_LOGIC; -- d0
-		tdm8in_1_i :  IN  STD_LOGIC; -- d1
-		uart1_rx :  IN  STD_LOGIC; -- d8
-		i2c0_scl :  INOUT  STD_LOGIC; -- a1
-		i2c0_sda :  INOUT  STD_LOGIC; -- a2
-		i2c1_scl :  INOUT  STD_LOGIC; -- d6
-		i2c1_sda :  INOUT  STD_LOGIC; -- d7
-		lrclk_tdm_o :  OUT  STD_LOGIC;
-		pll_256fs_falling :  OUT  STD_LOGIC; -- ain4
-		pll_512fs_o :  OUT  STD_LOGIC; -- ain3
-		tdm8out_0_o :  OUT  STD_LOGIC; -- d2
-		tdm8out_1_o :  OUT  STD_LOGIC; -- d3
-		spiflash_miso :  IN  STD_LOGIC; -- d14
-		spiflash_clk :  OUT  STD_LOGIC; -- d12
-		spiflash_cs :  OUT  STD_LOGIC; -- d11
-		spiflash_mosi :  OUT  STD_LOGIC; -- d13
-		adda_nRST :  OUT  STD_LOGIC; -- d10
-		uart1_tx :  OUT  STD_LOGIC; --d9
 		user_led :  OUT  STD_LOGIC_VECTOR(3 DOWNTO 0);
 
-		
-		phy_rmii_ref_clk : IN  STD_LOGIC; -- pmod6
-		phy_rmii_crsdv   : IN  STD_LOGIC; -- pmod7
-		phy_rmii_rxd     : IN  STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 4,5
-		phy_rmii_txen    : OUT STD_LOGIC; -- pmod3
-		phy_rmii_txd     : OUT STD_LOGIC_VECTOR(1 DOWNTO 0); -- pmod 1,0
+        AIN0 :  OUT STD_LOGIC; -- mosi flash
+        AIN1 : OUT STD_LOGIC; -- sck flash
+        AIN2: IN STD_LOGIC; -- flash MISO
+        AIN3: OUT STD_LOGIC; -- flash cs
+        AIN4: OUT STD_LOGIC; -- lrclk
+        AIN5: OUT STD_LOGIC; -- tdm out
+        AIN6: OUT STD_LOGIC; -- bclk
+        AIN7: OUT STD_LOGIC; -- sclk
+
+        D1 : IN STD_LOGIC; -- n/c tdm in
+        D2: INOUT STD_LOGIC; -- i2c clk 0
+        D3: INOUT STD_LOGIC; -- i2c clk 1
+        D4: INOUT STD_LOGIC; -- i2c data 0
+        D5: INOUT STD_LOGIC; -- i2c data 1
+        D6 : OUT STD_LOGIC; -- mdc
+        D7 : INOUT STD_LOGIC; --mdio
+        D8 : IN STD_LOGIC; -- refclk
+        D9 : IN STD_LOGIC; --crsdv
+        D10 : IN STD_LOGIC; -- rx0
+        D11 : IN STD_LOGIC; -- rx1
+        D12 : OUT STD_LOGIC; -- txen
+        D13 : OUT STD_LOGIC; -- tx0
+        D14 : OUT STD_LOGIC; -- tx1
+
 
 
 		sdram_a                             : OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
@@ -113,11 +112,15 @@ END top_cyc1000;
 ARCHITECTURE bdf_type OF top_cyc1000 IS
 signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);
 signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
+signal mii_txd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
+signal mii_rxd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
 begin
-	    tdm_in(0) <= tdm8in_0_i;
-    tdm_in(1) <= tdm8in_1_i;
-    tdm8out_0_o <= tdm_out(0);
-    tdm8out_1_o <= tdm_out(1);
+	tdm_in(0) <= D1;
+    AIN5 <= tdm_out(0);
+    mii_rxd(0) <= D10;
+    mii_rxd(1) <= D11;
+    D13 <= mii_txd(0);
+    D14 <= mii_txd(1);
 	soc_top_inst : entity work.soc_top
   generic map (
     clk_in_speed => clk_in_speed,
@@ -144,21 +147,22 @@ begin
     AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
     AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
-    ENABLE_METERING => ENABLE_METERING
+    ENABLE_METERING => ENABLE_METERING,
+    TDM_BCLK_MULT => TDM_BCLK_MULT
   )
   port map (
     rst_n_i => c10_resetn,
     clock_i => c10_clk12m,
-    phy_refclk_i => phy_rmii_ref_clk,
-    phy_mii_enet_rx_clk => phy_rmii_ref_clk,
-    phy_mii_enet_rx_dv => phy_rmii_crsdv,
+    phy_refclk_i => D8,
+    phy_mii_enet_rx_clk => '0',
+    phy_mii_enet_rx_dv => D9,
     phy_mii_enet_resetn => open,
-    phy_mii_enet_rx_d => phy_rmii_rxd,
+    phy_mii_enet_rx_d => mii_rxd,
     phy_mii_enet_tx_clk => open,
-    phy_mii_enet_tx_en => phy_rmii_txen,
-    phy_mii_enet_tx_d => phy_rmii_txd,
-    enet_mdc => enet_mdc,
-    enet_mdio => enet_mdio,
+    phy_mii_enet_tx_en => D12,
+    phy_mii_enet_tx_d => mii_txd,
+    enet_mdc => D6,
+    enet_mdio => D7,
     hbus_rwds => open,
     hbus_dq => open,
     hbus_rstn => open,
@@ -167,22 +171,22 @@ begin
     hbus_clk0_n => open,
     uart0_tx => uart0_tx,
     uart0_rx => uart0_rx,
-    uart1_rx => uart1_rx,
-    uart1_tx => uart1_tx,
-    i2c0_scl => i2c0_scl,
-    i2c0_sda => i2c0_sda,
-    i2c1_scl => i2c1_scl,
-    i2c1_sda => i2c1_sda,
-    spiflash_clk => spiflash_clk,
-    spiflash_cs => spiflash_cs,
-    spiflash_mosi => spiflash_mosi,
-    spiflash_miso => spiflash_miso,
-    pll_512fs_i => pll_512fs_i,
-    audioclk_512fs_o => pll_512fs_o,
-    audioclk_256fs_rising_o => pll_256fs_rising,
-    audioclk_256fs_falling_o => pll_256fs_falling,
-    audioclk_64fs_o => open,
-    audioclk_lrclk_o => lrclk_tdm_o,
+    uart1_rx => '0',
+    uart1_tx => open,
+    i2c0_scl => D2,
+    i2c0_sda => D4,
+    i2c1_scl => D3,
+    i2c1_sda => D5,
+    spiflash_clk => AIN1,
+    spiflash_cs => AIN3,
+    spiflash_mosi => AIN0,
+    spiflash_miso => AIN2,
+    pll_512fs_i => '0',
+    audioclk_512fs_o => AIN7,
+    audioclk_256fs_rising_o => open,
+    audioclk_256fs_falling_o => open,
+    audioclk_64fs_o => AIN6,
+    audioclk_lrclk_o => AIN4,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     sdram_a => sdram_a,

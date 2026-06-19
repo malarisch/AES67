@@ -33,7 +33,9 @@ entity aes67_wb_bridge is
 
 		USE_EXTERNAL_PLL : BOOLEAN := true;
 		ENABLE_METERING: BOOLEAN := true;
-    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8
+    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
+    TDM_BCLK_MULT : INTEGER := 256
+
 
 	);
 	PORT
@@ -332,8 +334,8 @@ begin
         aes67_ctrl_ptp_path_delay => ptp_mean_path_delay_o,
         aes67_ctrl_ptp_reset => ptp_reset_i,
         aes67_ctrl_ptp_time_source => ptp_time_source_i,
-        aes67_ctrl_rx_meter_clip => audio_meter_rx_clip_o,
-        aes67_ctrl_rx_meter_signal => audio_meter_rx_signal_o,
+        aes67_ctrl_rx_meter_clip => (others => '0'),
+        aes67_ctrl_rx_meter_signal => (others => '0'),
         aes67_ctrl_servo_filter_shift => servo_filter_shift_i,
         aes67_ctrl_servo_gain_shift => servo_gain_shift_i,
         aes67_ctrl_servo_gain_shift_locked => servo_gain_shift_locked_i,
@@ -411,7 +413,8 @@ begin
         AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
         USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
         ENABLE_METERING => ENABLE_METERING,
-        PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH
+        PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
+        TDM_BCLK_MULT => TDM_BCLK_MULT
     )
      port map(
         sys_clk_125MHz_i => sys_clk_125MHz_i,

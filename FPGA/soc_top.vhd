@@ -37,7 +37,9 @@ generic (
 
 		USE_EXTERNAL_PLL : BOOLEAN := false;
 		ENABLE_METERING: BOOLEAN := false;
-    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8
+    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
+    TDM_BCLK_MULT : INTEGER := 256
+
 
 	);
 	
@@ -124,7 +126,9 @@ generic (
     spibone_cs_n : in std_logic := '1';
     spibone_miso : inout std_logic := '0';
     spibone_mosi : in std_logic := '0';
-	spibone_irq_o : out std_logic := '1'
+	spibone_irq_o : out std_logic := '1';
+  uartbone_rx : IN STD_LOGIC :='0';
+  uartbone_tx : OUT STD_LOGIC :='0'
 	);
 END soc_top;
 
@@ -243,6 +247,24 @@ component litex_soc_spibone
     spibone_mosi : in std_logic
   );
 end component;
+component litex_soc_uartbone
+  port (
+    aes67_wb_ack : in std_logic;
+    aes67_wb_adr : out std_logic_vector    (29 downto 0);
+    aes67_wb_bte : out std_logic_vector     (1 downto 0);
+    aes67_wb_cti : out std_logic_vector     (2 downto 0);
+    aes67_wb_cyc : out std_logic;
+    aes67_wb_dat_r : in std_logic_vector    (31 downto 0);
+    aes67_wb_dat_w : out std_logic_vector    (31 downto 0);
+    aes67_wb_err : in std_logic;
+    aes67_wb_sel : out std_logic_vector     (3 downto 0);
+    aes67_wb_stb : out std_logic;
+    aes67_wb_we : out std_logic;
+    clk_sys : in std_logic;
+    uartbone_rx : in std_logic;
+    uartbone_tx : out std_logic
+  );
+end component;
 signal hbus_clk : std_logic;
 signal mcu_clk : std_logic;
 signal mcu_clk_90 : std_logic;
@@ -275,7 +297,8 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
-    PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH
+    PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
+    TDM_BCLK_MULT => TDM_BCLK_MULT
   )
   port map (
     rst_n_i => rst_n_i,
@@ -426,6 +449,26 @@ litex_soc_spibone_inst : litex_soc_spibone
     spibone_mosi => spibone_mosi
   );
 
+
+end generate;
+litex_soc_gen_uartbone : if (SOC_TYPE = "LITEX_UARTBONE") generate
+litex_soc_uartbone_inst : litex_soc_uartbone
+  port map (
+    aes67_wb_ack => aes67_wb_ack,
+    aes67_wb_adr => aes67_wb_adr,
+    aes67_wb_bte => aes67_wb_bte,
+    aes67_wb_cti => aes67_wb_cti,
+    aes67_wb_cyc => aes67_wb_cyc,
+    aes67_wb_dat_r => aes67_wb_dat_r,
+    aes67_wb_dat_w => aes67_wb_dat_w,
+    aes67_wb_err => aes67_wb_err,
+    aes67_wb_sel => aes67_wb_sel,
+    aes67_wb_stb => aes67_wb_stb,
+    aes67_wb_we => aes67_wb_we,
+    clk_sys => mcu_clk,
+    uartbone_rx => uartbone_rx,
+    uartbone_tx => uartbone_tx
+  );
 
 end generate;
 end architecture;
