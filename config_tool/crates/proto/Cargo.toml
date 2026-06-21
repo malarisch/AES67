@@ -1,0 +1,15 @@
+[package]
+name = "aes67-proto"
+description = "Wire protocol (control API) shared between the AES67 daemon and its clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Intentionally dependency-light: only serde. This crate is the shared contract
+# for the daemon, the CLI client, and any future web UI / ravennakit bridge, so
+# it must NOT pull in the transport (serialport/spidev) or device layers.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# serde_json is used for the newline-delimited JSON framing helpers. Still no
+# transport/device dependency, so clients stay light.
+serde_json = "1"

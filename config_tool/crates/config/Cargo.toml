@@ -1,0 +1,13 @@
+[package]
+name = "aes67-config"
+description = "AES67 FPGA configuration library: LiteX CSR map + typed register access"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes67-transport.workspace = true
+aes67-proto.workspace = true
+thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

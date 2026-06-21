@@ -1,0 +1,23 @@
+[package]
+name = "aes67-transport"
+description = "Transport HAL (uartbone / spibone) for the AES67 FPGA Wishbone bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# In-memory MockTransport for integration tests in other crates.
+mock = []
+
+[dependencies]
+thiserror.workspace = true
+# default-features = false drops the libudev dependency (used only for port
+# *enumeration*, which we don't do — we open a device path directly). This
+# removes the native C link dependency and makes cross-compiling (e.g. to a
+# Raspberry Pi) trivial.
+serialport = { version = "4", default-features = false }
+
+# spidev is Linux-only; the SPI backend is gated on Linux. On other hosts the
+# SpiTransport constructor returns TransportError::Unsupported.
+[target.'cfg(target_os = "linux")'.dependencies]
+spidev = "0.6"

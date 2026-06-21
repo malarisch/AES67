@@ -1,0 +1,16 @@
+[package]
+name = "aes67-config-tool"
+description = "CLI to configure the AES67 FPGA registers over uartbone or spibone"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aes67cfg"
+path = "src/main.rs"
+
+[dependencies]
+aes67-config.workspace = true
+aes67-client.workspace = true
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"

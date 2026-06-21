@@ -1,0 +1,32 @@
+# AES67 FPGA configuration tool — Cargo workspace.
+#
+# Three layered crates, lowest to highest:
+#   aes67-transport  the HAL: a Transport trait + UART (uartbone) / SPI (spibone)
+#                    backends. Knows nothing about registers, only addresses.
+#   aes67-config     the library: loads the LiteX-generated CSR map and exposes
+#                    typed methods to read/write registers on top of a Transport.
+#   aes67-config-tool the CLI: thin front-end that wires a transport + the map
+#                    to argument parsing.
+[workspace]
+resolver = "2"
+members = [
+    "crates/transport",
+    "crates/proto",
+    "crates/config",
+    "crates/client",
+    "crates/daemon",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+repository = "AES67"
+
+[workspace.dependencies]
+aes67-transport = { path = "crates/transport" }
+aes67-proto     = { path = "crates/proto" }
+aes67-config    = { path = "crates/config" }
+aes67-client    = { path = "crates/client" }
+thiserror       = "1"

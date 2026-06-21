@@ -1,0 +1,10 @@
+[package]
+name = "aes67-client"
+description = "Client for the AES67 daemon: ControlApi over the Unix control socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes67-proto.workspace = true
+aes67-config.workspace = true
