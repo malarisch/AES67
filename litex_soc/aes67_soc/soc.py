@@ -24,10 +24,12 @@ from .peripherals import (
     EthPacketBuffer, add_eth_buffer,
     StreamConfigRAM, add_stream_cfg,
     add_spibone,
+    add_uartbone,
     add_external_wb_master, add_external_wb_slave,
     add_eth_irq_output, add_eth_irq_input,
 )
 from litex.soc.cores.spi.spi_bone import SPIBone
+from litex.soc.cores.uart import UARTBone, UARTPHY
 
 
 # -- SoC definition ----------------------------------------------------------
@@ -47,7 +49,8 @@ class AES67SoC(SoCCore):
 
     def __init__(self, platform, sys_clk_freq, target="cyclone10",
                  with_hyperram=False,
-                 integrated_sram_size=4*1024, **kwargs):
+                 integrated_sram_size=4*1024,
+                 with_servo=True, with_metering=True, **kwargs):
 
         # Architecture: the AES67 register surface (CSRs + eth_buf + stream RAMs)
         # lives ONLY in the standalone "aes67_bridge" module.  Every other target
@@ -55,14 +58,16 @@ class AES67SoC(SoCCore):
         #   - cyclone10/cyc1000/gowin: VexRiscv SoC, exposes a Wishbone master to
         #                              the bridge (no AES67 peripherals locally).
         #   - "spibone":               CPU-less SPI->Wishbone master to the bridge.
+        #   - "uartbone":              CPU-less UART->Wishbone master to the bridge.
         #   - "aes67_bridge":          the AES67 peripherals as a Wishbone-slave
         #                              module (the only target that builds them).
         #
-        # Both CPU-less targets drop everything CPU-adjacent (VexRiscv, BIOS/boot,
+        # All CPU-less targets drop everything CPU-adjacent (VexRiscv, BIOS/boot,
         # main RAM, SPI-flash boot, I2C/SPI/UART).
         is_spibone      = (target == "spibone")
+        is_uartbone     = (target == "uartbone")
         is_aes67_bridge = (target == "aes67_bridge")
-        cpu_less        = is_spibone or is_aes67_bridge
+        cpu_less        = is_spibone or is_uartbone or is_aes67_bridge
 
         if is_aes67_bridge:
             # Land the bridge's auto Wishbone->CSR bridge (which carries
@@ -79,6 +84,7 @@ class AES67SoC(SoCCore):
             # sees every slave (SPIBone for spibone; external WB for aes67_bridge).
             ident = {
                 "spibone":      "AES67-LiteX-SoC-spibone",
+                "uartbone":     "AES67-LiteX-SoC-uartbone",
                 "aes67_bridge": "AES67-LiteX-Bridge",
             }[target]
             SoCCore.__init__(self, platform, sys_clk_freq,
@@ -165,9 +171,9 @@ class AES67SoC(SoCCore):
 
         # -- CRG and main RAM (target-specific) --------------------------------
         if cpu_less:
-            # CPU-less bridge (spibone / aes67_bridge): sys clock only, no main
-            # RAM.  Only aes67_bridge instantiates eth_buf, so only it needs the
-            # mac_rx/tx domains; spibone leaves them unbound.
+            # CPU-less bridge (spibone / uartbone / aes67_bridge): sys clock
+            # only, no main RAM.  Only aes67_bridge instantiates eth_buf, so only
+            # it needs the mac_rx/tx domains; spibone/uartbone leave them unbound.
             self.crg = _CRG_Spibone(platform, sys_clk_freq,
                                     with_mac_clocks=is_aes67_bridge)
         elif target == "gowin":
@@ -310,7 +316,7 @@ class AES67SoC(SoCCore):
             # created *in this scope* so Migen names its nets after the SoC
             # attribute (e.g. ``aes67_csr_*`` — the names the Quartus timing
             # constraints in FPGA/sdc/litex_csr.sdc match on), then wired up.
-            self.aes67_csr = AES67CSRs()
+            self.aes67_csr = AES67CSRs(with_servo=with_servo, with_metering=with_metering)
             add_aes67_csr(self, platform)
 
             self.eth_buf = EthPacketBuffer()
@@ -331,18 +337,30 @@ class AES67SoC(SoCCore):
             add_eth_irq_output(self, platform, "eth_buf_irq")
         else:
             # Master-only target: route the AES67 window out to the bridge over a
-            # single external WB slave region.  On spibone the SPIBone master is
-            # added first so the crossbar has a master driving that region.
+            # single external WB slave region.  On the CPU-less *bone masters the
+            # bridge core is added first so the crossbar has a master driving that
+            # region.
             if is_spibone:
                 # SPI->Wishbone master.  Constructed here (not in the helper) so
                 # Migen names its nets ``spibone_*`` after this SoC attribute.
                 self.spibone = SPIBone(platform.request("spibone"))
                 add_spibone(self, platform)
+            elif is_uartbone:
+                # UART->Wishbone master.  Constructed here (not in the helper) so
+                # Migen names its nets ``uartbone_*`` after this SoC attribute.
+                self.uartbone = UARTBone(
+                    phy           = UARTPHY(platform.request("uartbone"),
+                                            clk_freq = sys_clk_freq,
+                                            baudrate = 115200),
+                    clk_freq      = sys_clk_freq,
+                    address_width = self.bus.address_width)
+                add_uartbone(self, platform)
             add_external_wb_slave(self, platform, "aes67_wb",
                 region=SoCRegion(origin=AES67_WIN_ORIGIN, size=AES67_WIN_SIZE, cached=False))
 
             # CPU targets: take the bridge's eth_buf IRQ in and map it to a
             # VexRiscv external interrupt (so the firmware keeps its RX IRQ
-            # instead of polling).  spibone has no CPU / IRQ controller.
-            if not is_spibone:
+            # instead of polling).  The CPU-less *bone masters have no IRQ
+            # controller.
+            if not cpu_less:
                 add_eth_irq_input(self, platform, "eth_buf_irq", name="eth_buf")

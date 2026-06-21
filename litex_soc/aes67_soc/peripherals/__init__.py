@@ -11,6 +11,7 @@ from .aes67_csr import AES67CSRs, add_aes67_csr
 from .eth_buffer import EthPacketBuffer, add_eth_buffer
 from .stream_cfg import StreamConfigRAM, add_stream_cfg
 from .spibone import add_spibone
+from .uartbone import add_uartbone
 from .wb_port import (
     add_external_wb_master, add_external_wb_slave,
     add_eth_irq_output, add_eth_irq_input,
@@ -22,6 +23,7 @@ __all__ = [
     "EthPacketBuffer", "add_eth_buffer",
     "StreamConfigRAM", "add_stream_cfg",
     "add_spibone",
+    "add_uartbone",
     "add_external_wb_master", "add_external_wb_slave",
     "add_eth_irq_output", "add_eth_irq_input",
 ]

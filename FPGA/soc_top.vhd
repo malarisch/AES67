@@ -101,6 +101,7 @@ generic (
 		audioclk_256fs_falling_o :  OUT  STD_LOGIC; -- gpio 12
         audioclk_64fs_o : OUT STD_LOGIC;
 		audioclk_lrclk_o :  OUT  STD_LOGIC;
+    audioclk_lrclk_tdm_o :  OUT  STD_LOGIC;
 		
 
 		tdm_in :  IN  STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
@@ -319,6 +320,7 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     audioclk_256fs_falling_o => audioclk_256fs_falling_o,
     audioclk_64fs_o => audioclk_64fs_o,
     audioclk_lrclk_o => audioclk_lrclk_o,
+    audioclk_lrclk_tdm_o => audioclk_lrclk_tdm_o,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     rx_sample_register => rx_sample_register,

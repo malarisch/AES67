@@ -10,7 +10,7 @@ use work.miim_types.all;
 
 ENTITY top_cyc1000 IS
 	generic (
-		SOC_TYPE : string := "LITEX_SDRAM"; 
+		SOC_TYPE : string := "LITEX_SPIBONE"; 
 		platform : string := "ALTERA";
         MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
@@ -19,7 +19,7 @@ ENTITY top_cyc1000 IS
 		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false;
 
@@ -71,7 +71,7 @@ ENTITY top_cyc1000 IS
         AIN5: OUT STD_LOGIC; -- tdm out
         AIN6: OUT STD_LOGIC; -- bclk
         AIN7: OUT STD_LOGIC; -- sclk
-
+        D0 : OUT STD_LOGIC;
         D1 : IN STD_LOGIC; -- n/c tdm in
         D2: INOUT STD_LOGIC; -- i2c clk 0
         D3: INOUT STD_LOGIC; -- i2c clk 1
@@ -87,7 +87,11 @@ ENTITY top_cyc1000 IS
         D13 : OUT STD_LOGIC; -- tx0
         D14 : OUT STD_LOGIC; -- tx1
 
-
+        PIO_01 : IN STD_LOGIC; -- spictrl clk
+        PIO_02 : IN STD_LOGIC; -- spictrl cs
+        PIO_03 : IN STD_LOGIC; -- spictrl mosi
+        PIO_04 : INOUT STD_LOGIC; -- spictrl miso
+        PIO_05 : OUT STD_LOGIC; -- spictrl irq
 
 		sdram_a                             : OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
 		sdram_ba                            : OUT STD_LOGIC_VECTOR(1 DOWNTO 0);
@@ -114,6 +118,11 @@ signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);
 signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
 signal mii_txd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
 signal mii_rxd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
+signal uart0_tx_reg : std_logic;
+signal uart0_rx_reg : std_logic;
+signal uart_ctrl_rx_reg : std_logic;
+signal uart_ctrl_tx_reg : std_logic;
+
 begin
 	tdm_in(0) <= D1;
     AIN5 <= tdm_out(0);
@@ -121,6 +130,14 @@ begin
     mii_rxd(1) <= D11;
     D13 <= mii_txd(0);
     D14 <= mii_txd(1);
+    uart_uartbone_gen: if SOC_TYPE = "LITEX_UARTBONE" generate
+        uart_ctrl_rx_reg <= uart0_rx;
+        uart0_tx <= uart_ctrl_tx_reg;
+    end generate;
+    uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
+        uart0_rx_reg <= uart0_rx;
+        uart0_tx <= uart0_tx_reg;
+    end generate;
 	soc_top_inst : entity work.soc_top
   generic map (
     clk_in_speed => clk_in_speed,
@@ -169,8 +186,8 @@ begin
     hbus_cs2n => open,
     hbus_clk0_p => open,
     hbus_clk0_n => open,
-    uart0_tx => uart0_tx,
-    uart0_rx => uart0_rx,
+    uart0_tx => uart0_tx_reg,
+    uart0_rx => uart0_rx_reg,
     uart1_rx => '0',
     uart1_tx => open,
     i2c0_scl => D2,
@@ -182,9 +199,9 @@ begin
     spiflash_mosi => AIN0,
     spiflash_miso => AIN2,
     pll_512fs_i => '0',
-    audioclk_512fs_o => AIN7,
+    --audioclk_512fs_o => AIN7,
     audioclk_256fs_rising_o => open,
-    audioclk_256fs_falling_o => open,
+    audioclk_256fs_falling_o => D0,
     audioclk_64fs_o => AIN6,
     audioclk_lrclk_o => AIN4,
     tdm_in => tdm_in,
@@ -199,11 +216,13 @@ begin
     sdram_dq => sdram_dq,
     sdram_ras_n => sdram_ras_n,
     sdram_we_n => sdram_we_n,
-    spibone_clk => open,
-    spibone_cs_n => open,
-    spibone_miso => open,
-    spibone_mosi => open,
-    spibone_irq_o => open
+    spibone_clk => PIO_01,
+    spibone_cs_n => PIO_02,
+    spibone_miso => PIO_04,
+    spibone_mosi => PIO_03,
+    spibone_irq_o => PIO_05,
+    uartbone_rx => uart_ctrl_rx_reg,
+    uartbone_tx => uart_ctrl_tx_reg
   );
 
 END bdf_type;

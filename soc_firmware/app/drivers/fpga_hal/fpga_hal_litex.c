@@ -207,18 +207,14 @@ uint32_t fpga_hal_read_status(void)
 	uint32_t raw = eth_litex_read_status(dev);
 	uint32_t hal = 0;
 
-	/* Map LiteX status bits → HAL status bits */
+	/* Map LiteX status bits → HAL status bits.
+	 * wallclock_phasejump and ptp_sync_lost were removed from the bridge, so
+	 * the corresponding HAL bits are never set by this backend. */
 	if (raw & AES67_STATUS_WC_LOCKED) {
 		hal |= FPGA_HAL_CLK_WC_LOCKED;
 	}
-	if (raw & AES67_STATUS_WC_PHASEJUMP) {
-		hal |= FPGA_HAL_CLK_WC_PHASEJUMP;
-	}
 	if (raw & AES67_STATUS_WC_CONFIGURED) {
 		hal |= FPGA_HAL_CLK_WC_CONFIGURED;
-	}
-	if (raw & AES67_STATUS_PTP_SYNC_LOST) {
-		hal |= FPGA_HAL_CLK_PTP_LEADER_LOST;
 	}
 	if (raw & AES67_STATUS_ETH_LINK_UP) {
 		hal |= FPGA_HAL_ETH_LINK_UP;

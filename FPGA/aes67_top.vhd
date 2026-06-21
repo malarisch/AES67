@@ -334,8 +334,8 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
 end generate;
 
 wc_512fs_o <= clk_512fs;
-bclk_int_rx <= pll_64fs when TDM_BCLK_MULT = 64 else pll_256fs_falling;
-bclk_int_tx <= pll_64fs when TDM_BCLK_MULT = 64 else pll_256fs_rising;
+bclk_int_rx <= wc_clk_64fs_int when TDM_BCLK_MULT = 64 else pll_256fs_rising;
+bclk_int_tx <= wc_clk_64fs_int when TDM_BCLK_MULT = 64 else pll_256fs_rising;
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -535,7 +535,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 eth_read_data_i => eth_ram_data_sys_rtp,
 
 		 -- clocking
-		fs_clk_sync_i => pll_48k_fs_tdm,
+		fs_clk_sync_i => pll_48k_fs,
 		fs_clk_50duty_i => pll_48k_fs,
 		bclk_sync_i => bclk_int_rx,
 		media_clock_i => media_clock,

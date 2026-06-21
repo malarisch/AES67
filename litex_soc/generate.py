@@ -38,18 +38,19 @@ from aes67_soc import (
     Cyc1000StubPlatform,
     GowinStubPlatform,
     SpiboneStubPlatform,
+    UartboneStubPlatform,
     BridgeStubPlatform,
 )
 
 
 # -- Main ---------------------------------------------------------------------
 
-ALL_TARGETS = ["cyclone10", "cyc1000", "gowin", "spibone", "aes67_bridge"]
+ALL_TARGETS = ["cyclone10", "cyc1000", "gowin", "spibone", "uartbone", "aes67_bridge"]
 # Default sys clock frequency — must match what the top-level PLL feeds into clk_sys.
 # 75 MHz chosen because the Cyclone 10LP ALTPLL cannot cleanly divide common
 # crystal inputs to 80 MHz; 75 MHz gives clean ratios for all targets.
 DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6,
-                        "spibone": 75e6, "aes67_bridge": 75e6}
+                        "spibone": 75e6, "uartbone": 75e6, "aes67_bridge": 75e6}
 
 
 def _generate_docs_svd(soc, target, output_dir):
@@ -98,9 +99,9 @@ def _build_target(target, args):
     sys_clk_freq = args.sys_clk_freq if args.sys_clk_freq is not None else DEFAULT_SYS_CLK_FREQ[target]
     output_dir   = args.output_dir or os.path.join(os.path.dirname(__file__), "build", target)
 
-    # CPU-less targets (spibone / aes67_bridge) have no BIOS to compile, so
-    # software/bios-console options do not apply.
-    is_cpu_less = target in ("spibone", "aes67_bridge")
+    # CPU-less targets (spibone / uartbone / aes67_bridge) have no BIOS to
+    # compile, so software/bios-console options do not apply.
+    is_cpu_less = target in ("spibone", "uartbone", "aes67_bridge")
 
     if target == "spibone":
         platform = SpiboneStubPlatform()
@@ -109,14 +110,23 @@ def _build_target(target, args):
             sys_clk_freq = int(sys_clk_freq),
             target       = "spibone",
         )
+    elif target == "uartbone":
+        platform = UartboneStubPlatform()
+        soc = AES67SoC(
+            platform,
+            sys_clk_freq = int(sys_clk_freq),
+            target       = "uartbone",
+        )
     elif target == "aes67_bridge":
         # Standalone AES67 Wishbone-slave bridge (no CPU); the only target that
         # builds the AES67 peripherals.  Every other target is a master to it.
         platform = BridgeStubPlatform()
         soc = AES67SoC(
             platform,
-            sys_clk_freq = int(sys_clk_freq),
-            target       = "aes67_bridge",
+            sys_clk_freq  = int(sys_clk_freq),
+            target        = "aes67_bridge",
+            with_servo    = not args.no_servo_csr,
+            with_metering = not args.no_metering_csr,
         )
     elif target == "gowin":
         platform = GowinStubPlatform()
@@ -174,6 +184,8 @@ def main():
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")
     parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
+    parser.add_argument("--no-servo-csr",       action="store_true", help="aes67_bridge: drop the PTP servo tuning + monitoring CSRs (FPGA configures the servo statically via a generic). Ports stay; logic is optimized away.")
+    parser.add_argument("--no-metering-csr",    action="store_true", help="aes67_bridge: drop the audio metering CSRs (FPGA has metering disabled). Ports stay; logic is optimized away.")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 

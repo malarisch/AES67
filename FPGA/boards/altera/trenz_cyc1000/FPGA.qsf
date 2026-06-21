@@ -380,6 +380,14 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN3
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN4
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN5
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN6
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN7
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to D0
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/spibone/gateware/litex_soc_spibone.v
+set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/uartbone/gateware/litex_soc_uartbone.v
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/aes67_bridge/gateware/litex_soc_aes67_bridge.v
 set_global_assignment -name VHDL_FILE ../../../ptp/average.vhd
 set_global_assignment -name VHDL_FILE ../../../wb_bridge_top.vhd

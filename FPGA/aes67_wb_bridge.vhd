@@ -46,7 +46,6 @@ entity aes67_wb_bridge is
 		clk_mcu_i	   :  IN  STD_LOGIC;
 		rst_n		: IN STD_LOGIC;
 
-		mac_resetn_i : IN STD_LOGIC := '1';
 		
     -- raw mii/rmii/rgmii interface for eth timestamping
     phy_mii_rx_clk_in : IN STD_LOGIC;
@@ -112,94 +111,96 @@ end entity;
 
 architecture rtl of aes67_wb_bridge is
 
-  COMPONENT litex_soc_aes67_bridge
-	PORT
-	(
-		aes67_ctrl_adda_nrst		:	 OUT STD_LOGIC;
-		aes67_ctrl_eth_link_up		:	 IN STD_LOGIC;
-		aes67_ctrl_eth_rx_overflow		:	 IN STD_LOGIC;
-		aes67_ctrl_eth_speed		:	 IN STD_LOGIC_VECTOR(1 DOWNTO 0);
-		aes67_ctrl_eth_tx_done		:	 IN STD_LOGIC;
-		aes67_ctrl_eth_tx_request		:	 OUT STD_LOGIC;
-		aes67_ctrl_ip_addr		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_mac_addr		:	 OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
-		aes67_ctrl_meter_clear		:	 OUT STD_LOGIC;
-		aes67_ctrl_parser_delay_asymmetry_ns		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_parser_min_filter_active_depth		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_parser_min_filter_enable		:	 OUT STD_LOGIC;
-		aes67_ctrl_pll_ppb_pll_count		:	 IN STD_LOGIC_VECTOR(24 DOWNTO 0);
-		aes67_ctrl_pll_ppb_start		:	 OUT STD_LOGIC;
-		aes67_ctrl_pll_ppb_valid		:	 IN STD_LOGIC;
-		aes67_ctrl_pll_ppb_wc_count		:	 IN STD_LOGIC_VECTOR(24 DOWNTO 0);
-		aes67_ctrl_ptp_announce_msg_interval		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_gm_clock_accuracy		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_gm_clock_class		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_gm_priority1		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_gm_priority2		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_is_follower		:	 IN STD_LOGIC;
-		aes67_ctrl_ptp_is_leader		:	 IN STD_LOGIC;
-		aes67_ctrl_ptp_leader_id		:	 IN STD_LOGIC_VECTOR(63 DOWNTO 0);
-		aes67_ctrl_ptp_log_msg_interval		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_ptp_offset		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_ptp_path_delay		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_ptp_reset		:	 OUT STD_LOGIC;
-		aes67_ctrl_ptp_time_source		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_rx_meter_clip		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_rx_meter_signal		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_servo_filter_shift		:	 OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
-		aes67_ctrl_servo_gain_shift		:	 OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
-		aes67_ctrl_servo_gain_shift_locked		:	 OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
-		aes67_ctrl_servo_ki_extra_shift		:	 OUT STD_LOGIC_VECTOR(4 DOWNTO 0);
-		aes67_ctrl_servo_ki_gain		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_servo_kp_gain		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_servo_lock_count_threshold		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_servo_lock_threshold_ns		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_mon_effective_gain_shift		:	 IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_servo_mon_filtered_offset		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_mon_first_lock_achieved		:	 IN STD_LOGIC;
-		aes67_ctrl_servo_mon_integral_sum		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_mon_lock_counter		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_servo_mon_pi_proportional		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_mon_pi_sum_raw		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_mon_sample_count		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_servo_unlock_threshold_ns		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_ctrl_servo_warmup_samples		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		aes67_ctrl_tx_meter_clip		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_tx_meter_signal		:	 IN STD_LOGIC_VECTOR(15 DOWNTO 0);
-		aes67_ctrl_wallclock_configured		:	 IN STD_LOGIC;
-		aes67_ctrl_wallclock_locked		:	 IN STD_LOGIC;
-		aes67_wb_ack		:	 OUT STD_LOGIC;
-		aes67_wb_adr		:	 IN STD_LOGIC_VECTOR(29 DOWNTO 0);
-		aes67_wb_bte		:	 IN STD_LOGIC_VECTOR(1 DOWNTO 0);
-		aes67_wb_cti		:	 IN STD_LOGIC_VECTOR(2 DOWNTO 0);
-		aes67_wb_cyc		:	 IN STD_LOGIC;
-		aes67_wb_dat_r		:	 OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_wb_dat_w		:	 IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-		aes67_wb_err		:	 OUT STD_LOGIC;
-		aes67_wb_sel		:	 IN STD_LOGIC_VECTOR(3 DOWNTO 0);
-		aes67_wb_stb		:	 IN STD_LOGIC;
-		aes67_wb_we		:	 IN STD_LOGIC;
-		clk_mac_rx		:	 IN STD_LOGIC;
-		clk_mac_tx		:	 IN STD_LOGIC;
-		clk_sys		:	 IN STD_LOGIC;
-		eth_buf_irq		:	 OUT STD_LOGIC;
-		eth_buf_rx_ack		:	 OUT STD_LOGIC;
-		eth_buf_rx_addr		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		eth_buf_rx_data		:	 IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-		eth_buf_rx_len		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		eth_buf_rx_valid		:	 IN STD_LOGIC;
-		eth_buf_rx_we		:	 IN STD_LOGIC;
-		eth_buf_tx_addr		:	 IN STD_LOGIC_VECTOR(10 DOWNTO 0);
-		eth_buf_tx_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		eth_buf_tx_len		:	 OUT STD_LOGIC_VECTOR(10 DOWNTO 0);
-		rx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		rx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		rx_stream_cfg_wr_en		:	 OUT STD_LOGIC;
-		tx_stream_cfg_wr_addr		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		tx_stream_cfg_wr_data		:	 OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-		tx_stream_cfg_wr_en		:	 OUT STD_LOGIC
-	);
-END COMPONENT;
+component litex_soc_aes67_bridge
+  port (
+    aes67_ctrl_adda_nrst : out std_logic;
+    aes67_ctrl_eth_link_up : in std_logic;
+    aes67_ctrl_eth_reset : out std_logic;
+    aes67_ctrl_eth_rx_overflow : in std_logic;
+    aes67_ctrl_eth_speed : in std_logic_vector     (1 downto 0);
+    aes67_ctrl_eth_tx_done : in std_logic;
+    aes67_ctrl_eth_tx_request : out std_logic;
+    aes67_ctrl_ip_addr : out std_logic_vector    (31 downto 0);
+    aes67_ctrl_mac_addr : out std_logic_vector    (47 downto 0);
+    aes67_ctrl_meter_clear : out std_logic;
+    aes67_ctrl_parser_delay_asymmetry_ns : out std_logic_vector    (31 downto 0);
+    aes67_ctrl_parser_min_filter_active_depth : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_parser_min_filter_enable : out std_logic;
+    aes67_ctrl_pll_ppb_pll_count : in std_logic_vector    (24 downto 0);
+    aes67_ctrl_pll_ppb_start : out std_logic;
+    aes67_ctrl_pll_ppb_valid : in std_logic;
+    aes67_ctrl_pll_ppb_wc_count : in std_logic_vector    (24 downto 0);
+    aes67_ctrl_ptp_announce_msg_interval : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_gm_clock_accuracy : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_gm_clock_class : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_gm_priority1 : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_gm_priority2 : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_is_follower : in std_logic;
+    aes67_ctrl_ptp_is_leader : in std_logic;
+    aes67_ctrl_ptp_leader_id : in std_logic_vector    (63 downto 0);
+    aes67_ctrl_ptp_log_msg_interval : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_ptp_offset : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_ptp_path_delay : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_ptp_reset : out std_logic;
+    aes67_ctrl_ptp_time_source : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_rx_meter_clip : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_rx_meter_signal : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_rx_reset : out std_logic;
+    aes67_ctrl_servo_filter_shift : out std_logic_vector     (4 downto 0);
+    aes67_ctrl_servo_gain_shift : out std_logic_vector     (4 downto 0);
+    aes67_ctrl_servo_gain_shift_locked : out std_logic_vector     (4 downto 0);
+    aes67_ctrl_servo_ki_extra_shift : out std_logic_vector     (4 downto 0);
+    aes67_ctrl_servo_ki_gain : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_servo_kp_gain : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_servo_lock_count_threshold : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_servo_lock_threshold_ns : out std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_mon_effective_gain_shift : in std_logic_vector     (7 downto 0);
+    aes67_ctrl_servo_mon_filtered_offset : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_mon_first_lock_achieved : in std_logic;
+    aes67_ctrl_servo_mon_integral_sum : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_mon_lock_counter : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_servo_mon_pi_proportional : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_mon_pi_sum_raw : in std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_mon_sample_count : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_servo_unlock_threshold_ns : out std_logic_vector    (31 downto 0);
+    aes67_ctrl_servo_warmup_samples : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_tx_meter_clip : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_tx_meter_signal : in std_logic_vector    (15 downto 0);
+    aes67_ctrl_tx_reset : out std_logic;
+    aes67_ctrl_wallclock_configured : in std_logic;
+    aes67_ctrl_wallclock_locked : in std_logic;
+    aes67_wb_ack : out std_logic;
+    aes67_wb_adr : in std_logic_vector    (29 downto 0);
+    aes67_wb_bte : in std_logic_vector     (1 downto 0);
+    aes67_wb_cti : in std_logic_vector     (2 downto 0);
+    aes67_wb_cyc : in std_logic;
+    aes67_wb_dat_r : out std_logic_vector    (31 downto 0);
+    aes67_wb_dat_w : in std_logic_vector    (31 downto 0);
+    aes67_wb_err : out std_logic;
+    aes67_wb_sel : in std_logic_vector     (3 downto 0);
+    aes67_wb_stb : in std_logic;
+    aes67_wb_we : in std_logic;
+    clk_mac_rx : in std_logic;
+    clk_mac_tx : in std_logic;
+    clk_sys : in std_logic;
+    eth_buf_irq : out std_logic;
+    eth_buf_rx_ack : out std_logic;
+    eth_buf_rx_addr : in std_logic_vector    (10 downto 0);
+    eth_buf_rx_data : in std_logic_vector     (7 downto 0);
+    eth_buf_rx_len : in std_logic_vector    (10 downto 0);
+    eth_buf_rx_valid : in std_logic;
+    eth_buf_rx_we : in std_logic;
+    eth_buf_tx_addr : in std_logic_vector    (10 downto 0);
+    eth_buf_tx_data : out std_logic_vector     (7 downto 0);
+    eth_buf_tx_len : out std_logic_vector    (10 downto 0);
+    rx_stream_cfg_wr_addr : out std_logic_vector     (7 downto 0);
+    rx_stream_cfg_wr_data : out std_logic_vector     (7 downto 0);
+    rx_stream_cfg_wr_en : out std_logic;
+    tx_stream_cfg_wr_addr : out std_logic_vector     (7 downto 0);
+    tx_stream_cfg_wr_data : out std_logic_vector     (7 downto 0);
+    tx_stream_cfg_wr_en : out std_logic
+  );
+end component;
 
 
 signal mac_address_i : STD_LOGIC_VECTOR(47 downto 0);
@@ -300,12 +301,17 @@ signal mcu_buf_rx_len: STD_LOGIC_VECTOR(10 downto 0);
 signal mcu_buf_rx_addr : STD_LOGIC_VECTOR(10 downto 0);
 signal mcu_buf_rx_data : STD_LOGIC_VECTOR(7 downto 0);
 
+signal audiorx_reset : STD_LOGIC;
+signal audiotx_reset : STD_LOGIC;
+signal mac_resetn : STD_LOGIC;
+
+signal mac_reset : STD_LOGIC;
 begin
 
     -- eth-ram read address: litex bridge drives std_logic_vector, ethernet_top
     -- consumes unsigned.
     mcu_ethbuf_ram_addr <= unsigned(mcu_ethbuf_ram_addr_slv);
-
+    mac_resetn <= not mac_reset;
     litex_soc_aes67_bridge_inst: litex_soc_aes67_bridge
      port map(
         aes67_ctrl_eth_link_up => mac_linkup,
@@ -387,7 +393,10 @@ begin
         rx_stream_cfg_wr_en => audio_rx_cfg_wr_en_i,
         tx_stream_cfg_wr_addr => audio_tx_cfg_wr_addr_i,
         tx_stream_cfg_wr_data => audio_tx_cfg_wr_data_i,
-        tx_stream_cfg_wr_en => audio_tx_cfg_wr_en_i
+        tx_stream_cfg_wr_en => audio_tx_cfg_wr_en_i,
+        aes67_ctrl_tx_reset => audiotx_reset,
+        aes67_ctrl_rx_reset => audiorx_reset,
+        aes67_ctrl_eth_reset => mac_reset
     );
     aes67_top_inst: entity work.aes67_top
      generic map(
@@ -421,7 +430,7 @@ begin
         enet_clk_i => enet_clk_i,
         clk_mcu_i => clk_mcu_i,
         rst_n => rst_n,
-        mac_resetn_i => mac_resetn_i,
+        
         phy_mii_rx_clk_in => phy_mii_rx_clk_in,
         phy_mii_tx_clk_in => phy_mii_tx_clk_in,
         phy_mii_tx_data_in => phy_mii_tx_data_in,
@@ -514,7 +523,11 @@ begin
         tdm8out_o => tdm8out_o,
         rx_sample_register => rx_sample_register,
         tdm8in_i => tdm8in_i,
-        tx_sample_register => tx_sample_register
+        tx_sample_register => tx_sample_register,
+        audiorx_reset_i => audiorx_reset,
+        audiotx_reset_i => audiotx_reset,
+        mac_resetn_i => mac_resetn
+        
     );
     litex_eth_buffer_bridge_inst: entity work.litex_eth_buffer_bridge
      port map(

@@ -72,6 +72,7 @@ generic (
 		audioclk_256fs_falling_o :  OUT  STD_LOGIC; -- gpio 12
         audioclk_64fs_o : OUT STD_LOGIC;
 		audioclk_lrclk_o :  OUT  STD_LOGIC;
+        audioclk_lrclk_tdm_o :  OUT  STD_LOGIC;
 		
 
 		tdm_in :  IN  STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
@@ -160,7 +161,6 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     enet_clk_i => phy_refclk_i,
     clk_mcu_i => mcu_clk,
     rst_n => rst_n,
-    mac_resetn_i => rst_n,
     phy_mii_rx_clk_in => mii_rx_clock,
     phy_mii_tx_clk_in => mii_tx_clock,
     phy_mii_tx_data_in => phy_mii_enet_tx_d_sig(MII_WIDTH -1 downto 0),
@@ -180,7 +180,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     pll_512fs_i => pll_512fs_i,
     wc_512fs_o => audioclk_512fs_o,
     pll_64fs_o => audioclk_64fs_o,
-    pll_48k_fs_tdm_o => audioclk_lrclk_o,
+    pll_48k_fs_o => audioclk_lrclk_o,
+    pll_48k_fs_tdm_o => audioclk_lrclk_tdm_o,
     pll_256fs_rising_o => audioclk_256fs_rising_o,
     pll_256fs_falling_o => audioclk_256fs_falling_o,
     aes67_wb_ack => aes67_wb_ack,

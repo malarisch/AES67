@@ -66,9 +66,7 @@ _io_common = [
         Subsignal("pll_ppb_wc_count",   Pins(25)),
         Subsignal("pll_ppb_pll_count",  Pins(25)),
         Subsignal("wallclock_locked",   Pins(1)),
-        Subsignal("wallclock_phasejump", Pins(1)),
         Subsignal("wallclock_configured", Pins(1)),
-        Subsignal("ptp_sync_lost",      Pins(1)),
         Subsignal("eth_link_up",        Pins(1)),
         Subsignal("eth_speed",          Pins(2)),
         Subsignal("ptp_path_delay",     Pins(32)),
@@ -92,7 +90,12 @@ _io_common = [
         Subsignal("ptp_gm_clock_accuracy", Pins(8)),
         Subsignal("eth_tx_request",     Pins(1)),
         Subsignal("adda_nrst",          Pins(1)),   # AD/DA card nRST (output, active-high release)
-        Subsignal("ptp_reset",          Pins(1)),   # SoC -> FPGA: reset PTP module + wallclock
+        # Reset outputs (SoC -> FPGA, active high). Driven by the single "reset"
+        # CSR bitmask (bit0=ptp, bit1=tx, bit2=rx, bit3=eth).
+        Subsignal("ptp_reset",          Pins(1)),   # reset PTP module + wallclock
+        Subsignal("tx_reset",           Pins(1)),   # reset audio TX path
+        Subsignal("rx_reset",           Pins(1)),   # reset audio RX path
+        Subsignal("eth_reset",          Pins(1)),   # reset Ethernet MAC/PHY path
         # PTP servo / parser tuning (SoC -> FPGA)
         Subsignal("servo_kp_gain",              Pins(8)),
         Subsignal("servo_ki_gain",              Pins(8)),
@@ -177,6 +180,16 @@ _io_common = [
         Subsignal("miso", Pins(1)),
     ),
 
+    # UARTBone: 2-wire async serial -> Wishbone bridge (only requested by the
+    # uartbone target, where an external host replaces the VexRiscv softcore as
+    # the sole Wishbone master).  Declared here so it is available to any target;
+    # LiteX only emits requested resources as ports, so targets that never
+    # request it are unaffected.
+    ("uartbone", 0,
+        Subsignal("tx", Pins(1)),
+        Subsignal("rx", Pins(1)),
+    ),
+
     # Ethernet packet buffer I/O (directly active to/from external FPGA logic)
     ("eth_buf", 0,
         # RX buffer: FPGA writes, SoC reads
@@ -251,6 +264,14 @@ _io_spibone = [
     ("clk_sys", 0, Pins(1)),
 ] + _io_common
 
+# uartbone target: CPU-less register bridge, serial counterpart of spibone.  No
+# main-RAM pins; clk_sys feeds the sys domain.  The MAC clocks in _io_common stay
+# unrequested here (uartbone has no eth_buf).  The external host drives the bus
+# over the "uartbone" serial pads.
+_io_uartbone = [
+    ("clk_sys", 0, Pins(1)),
+] + _io_common
+
 # aes67_bridge target: the AES67 register surface split off as a standalone
 # Wishbone-slave module.  Same IO superset as spibone (clk_sys + MAC clocks +
 # the AES67 direct signals + the aes67_wb_* bus pads); LiteX only emits the
@@ -312,6 +333,26 @@ class SpiboneStubPlatform(AlteraPlatform):
 
     def __init__(self):
         AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_spibone, toolchain="quartus")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class UartboneStubPlatform(AlteraPlatform):
+    """Platform stub for the CPU-less uartbone bridge (HDL-only generation).
+
+    Serial counterpart of :class:`SpiboneStubPlatform`.  The FPGA device is
+    irrelevant for HDL-only generation (no synthesis), so we reuse the Cyclone
+    10LP part.  The generated bridge is device-agnostic.
+    """
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_uartbone, toolchain="quartus")
 
     def create_programmer(self):
         raise NotImplementedError

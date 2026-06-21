@@ -414,7 +414,17 @@ void eth_litex_read_ptp_monitor(const struct device *dev,
 int eth_litex_set_ptp_reset(const struct device *dev, bool held_in_reset)
 {
 	ARG_UNUSED(dev);
-	litex_csr_write(CSR_AES67_CSR_PTP_RESET_ADDR, held_in_reset ? 1 : 0);
+	/* The PTP reset is bit 0 of the unified "reset" CSR (bits: ptp, tx, rx,
+	 * eth). Read-modify-write so we don't disturb the other reset domains. */
+	uint32_t reg = litex_csr_read(CSR_AES67_CSR_RESET_ADDR);
+
+	if (held_in_reset) {
+		reg |= (1u << CSR_AES67_CSR_RESET_PTP_OFFSET);
+	} else {
+		reg &= ~(1u << CSR_AES67_CSR_RESET_PTP_OFFSET);
+	}
+
+	litex_csr_write(CSR_AES67_CSR_RESET_ADDR, reg);
 	return 0;
 }
 
