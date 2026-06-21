@@ -192,10 +192,10 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # high, held while the bit is set).  Replaces the former standalone
         # ptp_reset register.
         self.reset = CSRStorage(32, fields=[
-            CSRField("ptp", size=1, offset=0, description="Reset PTP module + wallclock (1 = held in reset)"),
-            CSRField("tx",  size=1, offset=1, description="Reset audio TX path (1 = held in reset)"),
-            CSRField("rx",  size=1, offset=2, description="Reset audio RX path (1 = held in reset)"),
-            CSRField("eth", size=1, offset=3, description="Reset Ethernet MAC/PHY path (1 = held in reset)"),
+            CSRField("ptp", size=1, offset=0, reset=1, description="Reset PTP module + wallclock (1 = held in reset)"),
+            CSRField("tx",  size=1, offset=1, reset=1, description="Reset audio TX path (1 = held in reset)"),
+            CSRField("rx",  size=1, offset=2, reset=1, description="Reset audio RX path (1 = held in reset)"),
+            CSRField("eth", size=1, offset=3, reset=1, description="Reset Ethernet MAC/PHY path (1 = held in reset)"),
         ])
 
         # =====================================================================
