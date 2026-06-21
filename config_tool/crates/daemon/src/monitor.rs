@@ -24,8 +24,12 @@ use std::time::Duration;
 
 use aes67_config::ControlApi;
 
-use crate::persist::NetworkCfg;
+use crate::igmp::IgmpManager;
+use crate::persist::{NetworkCfg, Settings};
 use crate::{netif, startup, SharedConfig, SharedDevice};
+
+/// PTP (IEEE 1588) primary multicast group — Sync/Follow_Up/Announce/Delay.
+const PTP_PRIMARY: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
 
 /// How often to reconcile link state and address.
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -68,6 +72,18 @@ fn run(
     // link-up must not re-trigger DHCP — only a genuine link recovery (a
     // down→up after a real link-down) should. A down edge clears this.
     let mut suppress_dhcp_on_up = warm;
+
+    // IGMP membership for the FPGA's multicast groups (PTP + RX/TX streams) on
+    // the TAP. Joined once a valid IP exists; re-reported after every link-up.
+    let mut igmp = match IgmpManager::new(&tap_name) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            eprintln!("aes67d: igmp: cannot manage groups on {tap_name}: {e}");
+            None
+        }
+    };
+    let mut igmp_rejoin_pending = true; // force a fresh join at startup
+
     if verbose >= 1 {
         eprintln!("aes67d: monitor: watching FPGA link and {tap_name} address");
     }
@@ -93,6 +109,7 @@ fn run(
             // the recovery's link-up (a later real down→up still triggers it).
             last_link = None;
             suppress_dhcp_on_up = true;
+            igmp_rejoin_pending = true; // the bounce dropped switch forwarding
         }
 
         // On the link-up edge (cold start or recovery from a link-down), kick
@@ -100,6 +117,9 @@ fn run(
         // A warm restart / reset-recovery suppresses only the first up.
         match reconcile_link(&device, &carrier_tap, &mut last_link) {
             Some(true) => {
+                // Link came up — the switch flushed memberships; re-report once
+                // we have a valid IP.
+                igmp_rejoin_pending = true;
                 if suppress_dhcp_on_up {
                     suppress_dhcp_on_up = false;
                     if verbose >= 1 {
@@ -118,7 +138,48 @@ fn run(
             None => {}
         }
         reconcile_ip(&device, &tap_name, &mut last_ip);
+        reconcile_igmp(&mut igmp, &config, &tap_name, &mut igmp_rejoin_pending, verbose);
     }
+}
+
+/// Join the FPGA's multicast groups (PTP + RX/TX streams) on the TAP, but only
+/// once a valid IP exists (the IGMP report needs a proper source). With a
+/// pending re-report (startup, link-up, reset recovery) all groups are re-joined
+/// to emit fresh reports; otherwise membership is reconciled incrementally so a
+/// newly configured RX/TX stream's group is picked up.
+fn reconcile_igmp(
+    igmp: &mut Option<IgmpManager>,
+    config: &SharedConfig,
+    tap_name: &str,
+    pending: &mut bool,
+    verbose: u8,
+) {
+    let Some(mgr) = igmp.as_mut() else { return };
+    // Gate on a usable IP — without one the kernel can't source IGMP reports.
+    if interface_ipv4(tap_name).filter(|ip| usable(*ip)).is_none() {
+        return;
+    }
+    let settings = config.lock().unwrap().settings.clone();
+    let desired = desired_groups(&settings);
+    mgr.apply(&desired, *pending, verbose);
+    *pending = false;
+}
+
+/// The multicast groups the FPGA needs forwarded, in join order: PTP first, then
+/// every RX stream, then every TX stream.
+fn desired_groups(settings: &Settings) -> Vec<Ipv4Addr> {
+    let mut groups = vec![PTP_PRIMARY];
+    for rx in settings.rx_streams.values() {
+        if let Ok(ip) = rx.dst_ip.parse::<Ipv4Addr>() {
+            groups.push(ip);
+        }
+    }
+    for tx in settings.tx_streams.values() {
+        if let Ok(ip) = tx.dst_ip.parse::<Ipv4Addr>() {
+            groups.push(ip);
+        }
+    }
+    groups
 }
 
 /// FPGA PHY link → TAP carrier. Returns `Some(true)`/`Some(false)` on a link
@@ -242,5 +303,44 @@ fn interface_ipv4(name: &str) -> Option<Ipv4Addr> {
         }
         libc::freeifaddrs(ifap);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes67_proto::{RxStreamParams, TxStreamParams};
+
+    #[test]
+    fn desired_groups_orders_ptp_then_rx_then_tx() {
+        let mut s = Settings::default();
+        s.rx_streams.insert(
+            0,
+            RxStreamParams {
+                id: 0,
+                dst_ip: "239.69.2.1".into(),
+                dst_port: 5004,
+                ch_map: vec![],
+                channels: None,
+                output_delay: 0,
+                samples_per_channel: 0,
+            },
+        );
+        s.tx_streams.insert(
+            0,
+            TxStreamParams {
+                id: 0,
+                dst_ip: "239.69.1.1".into(),
+                channels: None,
+                samples_per_packet: 0,
+                ch_ids: vec![],
+                ssrc: 0,
+            },
+        );
+
+        assert_eq!(
+            desired_groups(&s),
+            vec![PTP_PRIMARY, Ipv4Addr::new(239, 69, 2, 1), Ipv4Addr::new(239, 69, 1, 1)]
+        );
     }
 }

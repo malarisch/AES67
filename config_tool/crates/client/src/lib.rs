@@ -81,6 +81,15 @@ impl RemoteDevice {
             other => Err(unexpected(&other)),
         }
     }
+
+    /// Fetch the daemon's persisted config snapshot (configured RX/TX streams).
+    /// Daemon-specific, so it is not part of [`ControlApi`].
+    pub fn get_config(&mut self) -> Result<proto::ConfigSnapshot, ConfigError> {
+        match self.call(proto::Request::GetConfig)? {
+            proto::Response::Config(c) => Ok(c),
+            other => Err(unexpected(&other)),
+        }
+    }
 }
 
 fn map_rpc_error(e: proto::RpcError) -> ConfigError {

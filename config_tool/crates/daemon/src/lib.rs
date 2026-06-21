@@ -16,6 +16,7 @@ use aes67_proto::{self as proto, framing};
 
 pub mod bridge;
 pub mod gpio;
+pub mod igmp;
 pub mod monitor;
 pub mod netif;
 pub mod persist;
@@ -94,7 +95,10 @@ pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<(
     while let Some(env) = framing::read_line::<_, proto::RequestEnvelope>(&mut reader)? {
         // Keep a copy for persistence only if there's a sink to record into.
         let to_record = server.persist.as_ref().map(|_| env.request.clone());
-        let result = {
+        // GetConfig is answered from the persisted config, not the device.
+        let result = if matches!(env.request, proto::Request::GetConfig) {
+            Ok(config_snapshot(&server))
+        } else {
             let mut dev = server.device.lock().expect("device mutex poisoned");
             dispatch(&mut dev, env.request)
         };
@@ -196,7 +200,26 @@ fn dispatch(
             dev.write_rx_stream(&s).map(ok).map_err(err)
         }
         Req::Reset(m) => dev.reset(m.ptp, m.tx, m.rx, m.eth).map(ok).map_err(err),
+
+        // Answered in serve_connection (needs the persisted config, not the bus).
+        Req::GetConfig => Err(rpc(proto::ErrorCode::Internal, "GetConfig not dispatchable".into())),
     }
+}
+
+/// Build a [`proto::Response::Config`] from the persisted config (empty when
+/// persistence is disabled).
+fn config_snapshot(server: &Server) -> proto::Response {
+    let snapshot = match &server.persist {
+        Some(p) => {
+            let cfg = p.config.lock().expect("config mutex poisoned");
+            proto::ConfigSnapshot {
+                tx_streams: cfg.settings.tx_streams.values().cloned().collect(),
+                rx_streams: cfg.settings.rx_streams.values().cloned().collect(),
+            }
+        }
+        None => proto::ConfigSnapshot::default(),
+    };
+    proto::Response::Config(snapshot)
 }
 
 fn rpc(code: proto::ErrorCode, message: String) -> proto::RpcError {

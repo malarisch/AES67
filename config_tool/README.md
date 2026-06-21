@@ -179,6 +179,18 @@ left alone (a subsequent down→up recovery still triggers it). Set the command 
 reacts to the carrier the daemon already drives). Idempotent clients like
 `dhcpcd` simply rebind when re-invoked.
 
+**IGMP membership.** The FPGA's audio/PTP data plane is in hardware, but an
+upstream switch only forwards a multicast group to the FPGA's port if a member
+reports interest. The daemon joins the relevant groups **on the TAP** (the Linux
+host is the IGMP speaker), so the switch forwards them to the FPGA MAC — the
+Linux stack does not consume the audio, it only steers switch forwarding. Each
+second the monitor reconciles memberships against the live config, in order:
+the PTP group (`224.0.1.129`), then every RX stream's group, then every TX
+stream's. Joins happen only once the TAP has a **valid IP** (the kernel needs a
+source for the report). A newly configured RX/TX stream's group is picked up
+within ~1 s; after every link-up (and FPGA-reset recovery) all groups are
+re-reported so the switch re-learns them.
+
 **Auto-recovery.** The monitor (once per second) also watches the reset CSR: if
 it reads all-domains-held again during normal operation, the FPGA was reset or
 reconfigured out from under the daemon. The daemon then rebuilds the whole
@@ -217,10 +229,59 @@ control API**:
 }
 ```
 
+### Web dashboard (`aes67web`)
+
+A small monitoring web server, itself just another **client** of the daemon (it
+reads CSRs by name over the control socket — no protocol or daemon changes). It
+serves a self-contained one-page dashboard plus a tiny REST API:
+
+```bash
+aes67web --socket /run/aes67d.sock --listen 0.0.0.0:8080
+# then open http://<pi>:8080/
+```
+
+| Route                 | Method | Effect                                                  |
+|-----------------------|--------|---------------------------------------------------------|
+| `/`                   | GET    | the dashboard (single embedded HTML page, refreshes 2 s) |
+| `/api/status`         | GET    | decoded snapshot: link/speed, PTP role+offset+path-delay+leader, wallclock lock, IP/MAC, RX overflow |
+| `/api/registers`      | GET    | the full CSR map with current values                    |
+| `/api/ptp`            | GET    | current PTP params (pre-fills the form) / POST sets them |
+| `/api/streams`        | GET    | the daemon's configured RX/TX streams                   |
+| `/api/ptp`            | POST   | set PTP grandmaster params + sync/announce intervals    |
+| `/api/tx-stream`      | POST   | configure a transmit stream                             |
+| `/api/rx-stream`      | POST   | configure a receive stream                              |
+
+The dashboard shows the active RX/TX streams and pre-fills the PTP form from the
+current values. Stream config can't be read back from the write-only FPGA RAMs,
+so `/api/streams` returns the daemon's **persisted** stream config (via a
+`GetConfig` request — the live source of truth), while `/api/ptp` (GET) reads the
+PTP grandmaster/interval CSRs directly.
+
+The dashboard polls `/api/status` (and has forms for the three POST endpoints);
+if the daemon is down the API returns a `503` JSON error and the page shows
+"daemon unreachable". The config POSTs take a JSON body with the same fields as
+the CLI's `ptp` / `tx-stream` / `rx-stream` commands (all optional except stream
+`id`/`dst_ip`/`dst_port`); each returns `{"ok":bool,"message":...}`. Because they
+go through the daemon's `ControlApi`, writes are persisted and replayed on an
+FPGA reset, and new stream groups are picked up by the IGMP reconciler — exactly
+like CLI writes.
+
+```bash
+curl -X POST http://<pi>:8080/api/ptp -d '{"priority1":128,"sync_interval":-3}'
+curl -X POST http://<pi>:8080/api/rx-stream \
+     -d '{"id":0,"dst_ip":"239.69.2.1","dst_port":5004,"ch_map":[0,1]}'
+```
+
+The HTML/JS is compiled into the binary, so the server is fully standalone (no
+static files to ship). It has no native C deps, so it cross-compiles to the Pi
+like the CLI. **Note:** the API is unauthenticated and now allows configuration
+writes — serve it on a trusted network (or bind `--listen 127.0.0.1:8080` and
+front it with a reverse proxy) rather than exposing it openly.
+
 Crates: `aes67-transport` (HAL + bursts) · `aes67-proto` (wire protocol) ·
 `aes67-config` (device/CSR/streams/`eth_buf` + `ControlApi`) · `aes67-client`
 (`RemoteDevice`) · `aes67d` (daemon: control server + TAP bridge) · `aes67cfg`
-(CLI).
+(CLI) · `aes67web` (monitoring dashboard + REST API).
 
 ## Usage
 

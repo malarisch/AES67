@@ -16,6 +16,7 @@ members = [
     "crates/client",
     "crates/daemon",
     "crates/cli",
+    "crates/web",
 ]
 
 [workspace.package]

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 /// Protocol version. Bumped on any breaking change to the message set.
-pub const PROTO_VERSION: u32 = 2;
+pub const PROTO_VERSION: u32 = 3;
 
 /// Newline-delimited JSON framing, shared by the daemon and every client so the
 /// wire format has a single source of truth.
@@ -88,6 +88,10 @@ pub enum Request {
     SetRxStream(RxStreamParams),
     /// Pulse the selected reset domains.
     Reset(ResetMask),
+
+    /// Read the daemon's persisted config (e.g. the configured RX/TX streams,
+    /// which the write-only FPGA stream RAMs cannot report back).
+    GetConfig,
 }
 
 /// Server → client successful results.
@@ -101,8 +105,18 @@ pub enum Response {
     Mac([u8; 6]),
     /// IPv4 address as a dotted string.
     Ip(String),
+    /// The daemon's persisted config snapshot.
+    Config(ConfigSnapshot),
     /// A successful operation with no payload.
     Ok,
+}
+
+/// The daemon's persisted configuration relevant to clients — currently the
+/// configured RX/TX streams (the write-only FPGA RAMs can't be read back).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ConfigSnapshot {
+    pub tx_streams: Vec<TxStreamParams>,
+    pub rx_streams: Vec<RxStreamParams>,
 }
 
 /// An error result. `code` groups failures for programmatic handling.

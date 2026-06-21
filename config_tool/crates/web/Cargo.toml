@@ -1,0 +1,20 @@
+[package]
+name = "aes67-web"
+description = "AES67 monitoring web server: REST API + one-page dashboard, served from the daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aes67web"
+path = "src/main.rs"
+
+[dependencies]
+aes67-config.workspace = true
+aes67-client.workspace = true
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Small synchronous HTTP server, pure Rust (cross-compiles to ARM cleanly).
+tiny_http = "0.12"
