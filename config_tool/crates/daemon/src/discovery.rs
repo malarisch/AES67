@@ -47,54 +47,90 @@ const RTP_PORT: u16 = 5004;
 /// Poll cadence while waiting for the TAP to acquire an address.
 const IP_WAIT_TICK: Duration = Duration::from_millis(500);
 
-/// A stream learned from the network, with bookkeeping.
+/// The transport a stream was discovered over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Transport {
+    /// SAP/SDP announcement.
+    Sap,
+    /// mDNS browse + RTSP DESCRIBE.
+    Mdns,
+}
+
+/// A stream learned from the network, with bookkeeping. The same RTP flow seen
+/// over several transports is collapsed into one entry (see [`Registry::snapshot`]).
 #[derive(Clone)]
 pub struct DiscoveredEntry {
     pub stream: AudioStream,
     pub source: Ipv4Addr,
     pub age: Duration,
+    /// Discovered via SAP.
+    pub via_sap: bool,
+    /// Discovered via mDNS/RTSP.
+    pub via_mdns: bool,
 }
 
-/// The set of streams currently discovered on the network, keyed by the SAP
-/// session identity `(source, msg_id_hash)`.
+/// The streams currently discovered on the network, stored one entry per
+/// *sighting* keyed by a transport-namespaced string (`sap:<source>:<hash>` or
+/// `mdns:<fullname>`). [`snapshot`](Registry::snapshot) collapses sightings of the
+/// same RTP flow (same multicast group + port) into one merged result.
 #[derive(Default)]
 pub struct Registry {
-    streams: HashMap<(Ipv4Addr, u16), Stored>,
+    streams: HashMap<String, Stored>,
 }
 
 struct Stored {
     stream: AudioStream,
     source: Ipv4Addr,
     last_seen: Instant,
+    transport: Transport,
 }
 
 impl Registry {
-    fn upsert(&mut self, key: (Ipv4Addr, u16), stream: AudioStream, source: Ipv4Addr) {
-        self.streams.insert(key, Stored { stream, source, last_seen: Instant::now() });
+    pub(crate) fn upsert(&mut self, key: String, stream: AudioStream, source: Ipv4Addr, transport: Transport) {
+        self.streams.insert(key, Stored { stream, source, last_seen: Instant::now(), transport });
     }
 
-    fn remove(&mut self, key: &(Ipv4Addr, u16)) {
+    pub(crate) fn remove(&mut self, key: &str) {
         self.streams.remove(key);
     }
 
-    /// Drop entries older than `after`.
+    /// Drop SAP sightings not refreshed within `after` (they are re-announced
+    /// periodically); mDNS sightings are managed by explicit add/remove events.
     fn expire(&mut self, after: Duration) {
         let now = Instant::now();
-        self.streams.retain(|_, s| now.duration_since(s.last_seen) < after);
+        self.streams
+            .retain(|_, s| s.transport != Transport::Sap || now.duration_since(s.last_seen) < after);
     }
 
-    /// An owned, age-stamped snapshot for the control API.
+    /// An owned, age-stamped snapshot for the control API, with sightings of the
+    /// same RTP flow (multicast group + port) merged into one entry that records
+    /// every transport it was seen over. The freshest sighting supplies the
+    /// representative description, source and age.
     pub fn snapshot(&self) -> Vec<DiscoveredEntry> {
         let now = Instant::now();
-        let mut out: Vec<DiscoveredEntry> = self
-            .streams
-            .values()
-            .map(|s| DiscoveredEntry {
+        let mut merged: HashMap<(Ipv4Addr, u16), DiscoveredEntry> = HashMap::new();
+        for s in self.streams.values() {
+            let age = now.duration_since(s.last_seen);
+            let id = (s.stream.dst_addr, s.stream.dst_port);
+            let entry = merged.entry(id).or_insert_with(|| DiscoveredEntry {
                 stream: s.stream.clone(),
                 source: s.source,
-                age: now.duration_since(s.last_seen),
-            })
-            .collect();
+                age,
+                via_sap: false,
+                via_mdns: false,
+            });
+            match s.transport {
+                Transport::Sap => entry.via_sap = true,
+                Transport::Mdns => entry.via_mdns = true,
+            }
+            // Keep the freshest sighting as the representative.
+            if age < entry.age {
+                entry.stream = s.stream.clone();
+                entry.source = s.source;
+                entry.age = age;
+            }
+        }
+        let mut out: Vec<DiscoveredEntry> = merged.into_values().collect();
         out.sort_by(|a, b| {
             a.stream.session_name.cmp(&b.stream.session_name).then(a.source.cmp(&b.source))
         });
@@ -152,7 +188,7 @@ fn run(
 }
 
 /// Block until the TAP has a usable IPv4 address.
-fn wait_for_ip(tap_name: &str) -> Ipv4Addr {
+pub(crate) fn wait_for_ip(tap_name: &str) -> Ipv4Addr {
     loop {
         if let Some(ip) = interface_ipv4(tap_name).filter(|ip| !ip.is_unspecified() && !ip.is_loopback())
         {
@@ -188,17 +224,17 @@ fn run_listener(socket: UdpSocket, registry: SharedDiscovery, local_ip: Ipv4Addr
         match listener.recv() {
             Ok(Some(pkt)) if pkt.source == local_ip => {} // our own announcement
             Ok(Some(pkt)) => {
-                let key = (pkt.source, pkt.msg_id_hash);
+                let key = format!("sap:{}:{}", pkt.source, pkt.msg_id_hash);
                 match pkt.kind {
                     SapKind::Announce => match AudioStream::from_sdp(&pkt.sdp) {
                         Ok(stream) => {
                             if verbose >= 1 {
                                 eprintln!(
-                                    "aes67d: discovery: + '{}' {} from {}",
+                                    "aes67d: discovery: + '{}' {} from {} (sap)",
                                     stream.session_name, stream.dst_addr, pkt.source
                                 );
                             }
-                            registry.lock().unwrap().upsert(key, stream, pkt.source);
+                            registry.lock().unwrap().upsert(key, stream, pkt.source, Transport::Sap);
                         }
                         Err(e) if verbose >= 2 => {
                             eprintln!("aes67d: discovery: ignoring SDP from {}: {e}", pkt.source);
@@ -207,7 +243,7 @@ fn run_listener(socket: UdpSocket, registry: SharedDiscovery, local_ip: Ipv4Addr
                     },
                     SapKind::Delete => {
                         if verbose >= 1 {
-                            eprintln!("aes67d: discovery: - session from {}", pkt.source);
+                            eprintln!("aes67d: discovery: - session from {} (sap)", pkt.source);
                         }
                         registry.lock().unwrap().remove(&key);
                     }
@@ -274,10 +310,26 @@ fn run_announcer(sender: SapSender, device: SharedDevice, config: SharedConfig, 
     }
 }
 
-/// Build an AES67 [`AudioStream`] for a configured TX stream. `None` if the
-/// destination IP does not parse. `gmid` is the elected PTP grandmaster identity
-/// (EUI-64), advertised as `ts-refclk` when known.
-fn tx_to_stream(p: &TxStreamParams, origin: Ipv4Addr, gmid: Option<&str>) -> Option<AudioStream> {
+/// The session name for a TX stream: its configured name, or a default derived
+/// from the slot. Used as the SDP `s=` line, the SAP/mDNS instance name, and the
+/// RTSP `by-name` key, so all three agree.
+pub(crate) fn session_name(p: &TxStreamParams) -> String {
+    match &p.name {
+        Some(n) if !n.is_empty() => n.clone(),
+        _ => format!("AES67 TX {}", p.id),
+    }
+}
+
+/// The PTPv2 domain advertised in the RAVENNA `a=clock-domain` SDP attribute.
+/// RAVENNA requires the domain; we use the default media domain 0 (no dedicated
+/// CSR exposes it yet).
+pub(crate) const PTP_DOMAIN: u8 = 0;
+
+/// Build an AES67/RAVENNA [`AudioStream`] for a configured TX stream. `None` if
+/// the destination IP does not parse. `gmid` is the elected PTP grandmaster
+/// identity (EUI-64), advertised as `ts-refclk` when known. Shared by the SAP
+/// announcer and the RTSP server.
+pub(crate) fn tx_to_stream(p: &TxStreamParams, origin: Ipv4Addr, gmid: Option<&str>) -> Option<AudioStream> {
     let dst: Ipv4Addr = p.dst_ip.parse().ok()?;
     let channels = p
         .channels
@@ -285,16 +337,13 @@ fn tx_to_stream(p: &TxStreamParams, origin: Ipv4Addr, gmid: Option<&str>) -> Opt
         .unwrap_or(p.ch_ids.len() as u8)
         .max(1);
 
-    let name = match &p.name {
-        Some(n) if !n.is_empty() => n.clone(),
-        _ => format!("AES67 TX {}", p.id),
-    };
-    let mut s = AudioStream::new(name, origin, dst);
+    let mut s = AudioStream::new(session_name(p), origin, dst);
     s.dst_port = RTP_PORT;
     s.channels = channels;
     // 48 samples = 1 ms at 48 kHz; fall back to AES67's 1 ms default.
     s.ptime_ms = if p.samples_per_packet > 0 { p.samples_per_packet as f32 / 48.0 } else { 1.0 };
     s.ptp_gmid = gmid.map(str::to_string);
+    s.ptp_domain = Some(PTP_DOMAIN);
     // A per-stream stable id (origin + slot) and a version that changes whenever
     // the announced parameters change, so receivers can spot modifications.
     s.session_id = (u32::from(origin) as u64) << 8 | p.id as u64;
@@ -304,8 +353,9 @@ fn tx_to_stream(p: &TxStreamParams, origin: Ipv4Addr, gmid: Option<&str>) -> Opt
 
 /// Read the elected PTP grandmaster's clock identity from the FPGA and format it
 /// as an EUI-64 (`00-1D-C1-FF-FE-01-02-03`) for SDP `ts-refclk`. `None` when the
-/// registers are unreadable or the id is still zero (no grandmaster yet).
-fn read_leader_gmid(dev: &mut impl ControlApi) -> Option<String> {
+/// registers are unreadable or the id is still zero (no grandmaster yet). Shared
+/// by the SAP announcer and the RTSP server.
+pub(crate) fn read_leader_gmid(dev: &mut impl ControlApi) -> Option<String> {
     let lo = dev.read_register(REG_LEADER_ID_LO).ok()?;
     let hi = dev.read_register(REG_LEADER_ID_HI).ok()?;
     let id = (hi << 32) | (lo & 0xffff_ffff);
@@ -419,17 +469,40 @@ mod tests {
     #[test]
     fn registry_upsert_remove_and_expire() {
         let mut reg = Registry::default();
-        let s = tx_to_stream(&tx(0, "239.69.1.0"), Ipv4Addr::new(10, 0, 0, 1), None).unwrap();
-        let key = (Ipv4Addr::new(10, 0, 0, 1), 42);
-        reg.upsert(key, s, key.0);
+        let src = Ipv4Addr::new(10, 0, 0, 1);
+        let s = tx_to_stream(&tx(0, "239.69.1.0"), src, None).unwrap();
+        reg.upsert("sap:10.0.0.1:42".into(), s, src, Transport::Sap);
         assert_eq!(reg.snapshot().len(), 1);
 
-        reg.expire(Duration::from_secs(0)); // everything is "older than 0"
+        reg.expire(Duration::from_secs(0)); // SAP + "older than 0" → dropped
         assert!(reg.snapshot().is_empty());
 
-        let s = tx_to_stream(&tx(1, "239.69.1.1"), Ipv4Addr::new(10, 0, 0, 1), None).unwrap();
-        reg.upsert(key, s, key.0);
-        reg.remove(&key);
+        // mDNS sightings survive expiry and go only on remove.
+        let s = tx_to_stream(&tx(1, "239.69.1.1"), src, None).unwrap();
+        reg.upsert("mdns:Line._rtsp._tcp.local.".into(), s, src, Transport::Mdns);
+        reg.expire(Duration::from_secs(0));
+        assert_eq!(reg.snapshot().len(), 1);
+        reg.remove("mdns:Line._rtsp._tcp.local.");
         assert!(reg.snapshot().is_empty());
+    }
+
+    #[test]
+    fn same_flow_over_sap_and_mdns_is_merged() {
+        let mut reg = Registry::default();
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        // Same destination group:port discovered over both transports.
+        let s_sap = tx_to_stream(&tx(0, "239.69.1.0"), a, None).unwrap();
+        let s_mdns = tx_to_stream(&tx(0, "239.69.1.0"), a, None).unwrap();
+        reg.upsert("sap:10.0.0.1:42".into(), s_sap, a, Transport::Sap);
+        reg.upsert("mdns:Line._rtsp._tcp.local.".into(), s_mdns, a, Transport::Mdns);
+
+        let snap = reg.snapshot();
+        assert_eq!(snap.len(), 1); // collapsed into one entry
+        assert!(snap[0].via_sap && snap[0].via_mdns);
+
+        // A different group:port stays a separate entry.
+        let other = tx_to_stream(&tx(1, "239.69.1.9"), a, None).unwrap();
+        reg.upsert("sap:10.0.0.1:99".into(), other, a, Transport::Sap);
+        assert_eq!(reg.snapshot().len(), 2);
     }
 }

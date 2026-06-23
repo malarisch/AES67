@@ -72,6 +72,14 @@ pub struct NetworkCfg {
     /// SAP/SDP discovery on the TAP: announce local TX streams and learn remote
     /// ones. `None`/`true` ⇒ enabled when a TAP exists; `false` disables it.
     pub discovery: Option<bool>,
+    /// RAVENNA RTSP server (serves TX streams + `_rtsp._tcp` mDNS). `None`/`true`
+    /// ⇒ enabled when a TAP exists; `false` disables it.
+    pub rtsp: Option<bool>,
+    /// RTSP server TCP port. Default 554 (RFC 2326).
+    pub rtsp_port: Option<u16>,
+    /// User-defined node name, advertised as the `_rtsp._tcp` mDNS instance.
+    /// Default "AES67".
+    pub node_name: Option<String>,
     /// Command run when the link comes up (cold start and link recovery) to
     /// (re)start DHCP. `{iface}` is replaced with the TAP name. Absent ⇒ default
     /// `["dhcpcd", "{iface}"]`; an empty list disables it (rely on the system's
@@ -233,6 +241,7 @@ mod tests {
             channels: None,
             output_delay: 0,
             samples_per_channel: 0,
+            name: None,
         }));
         assert!(cfg.settings.rx_streams.contains_key(&3));
 

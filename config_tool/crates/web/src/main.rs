@@ -37,6 +37,12 @@ struct Cli {
     /// Address to serve the dashboard / REST API on.
     #[arg(long, value_name = "ADDR", default_value = "0.0.0.0:8080")]
     listen: String,
+    /// mDNS/DNS-SD instance name to advertise the dashboard under (`_http._tcp`).
+    #[arg(long, value_name = "NAME", default_value = "AES67 Configuration")]
+    mdns_name: String,
+    /// Disable the mDNS/DNS-SD announcement of the dashboard.
+    #[arg(long)]
+    no_mdns: bool,
 }
 
 fn main() -> Result<()> {
@@ -44,6 +50,13 @@ fn main() -> Result<()> {
     let server = Server::http(&cli.listen)
         .map_err(|e| anyhow!("binding HTTP server on {}: {e}", cli.listen))?;
     eprintln!("aes67web: serving dashboard on http://{}/ (daemon {})", cli.listen, cli.socket.display());
+
+    // Advertise the dashboard over mDNS/DNS-SD so it is discoverable as
+    // `_http._tcp` without hunting for an IP. Best-effort: runs on its own thread.
+    if !cli.no_mdns {
+        let port = listen_port(&cli.listen);
+        aes67_mdns::spawn(aes67_mdns::Service::http(cli.mdns_name.clone(), port));
+    }
 
     // One lazily-(re)connected daemon link; requests are served sequentially.
     let mut dev: Option<RemoteDevice> = None;
@@ -90,6 +103,17 @@ fn main() -> Result<()> {
         let _ = req.respond(response);
     }
     Ok(())
+}
+
+/// The TCP port from a `--listen` address (e.g. `0.0.0.0:8080` → 8080), so the
+/// mDNS record points at the right port. Defaults to 8080 if unparseable.
+fn listen_port(listen: &str) -> u16 {
+    listen
+        .parse::<std::net::SocketAddr>()
+        .map(|a| a.port())
+        .ok()
+        .or_else(|| listen.rsplit_once(':').and_then(|(_, p)| p.parse().ok()))
+        .unwrap_or(8080)
 }
 
 /// Run `f` against a connected daemon, lazily connecting and reconnecting once

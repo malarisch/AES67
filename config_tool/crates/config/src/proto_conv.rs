@@ -80,6 +80,7 @@ impl TryFrom<proto::RxStreamParams> for RxStream {
             channels: p.channels,
             output_delay: p.output_delay,
             samples_per_channel: p.samples_per_channel,
+            name: p.name,
         })
     }
 }
@@ -94,6 +95,7 @@ impl From<&RxStream> for proto::RxStreamParams {
             channels: s.channels,
             output_delay: s.output_delay,
             samples_per_channel: s.samples_per_channel,
+            name: s.name.clone(),
         }
     }
 }

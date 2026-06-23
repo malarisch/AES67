@@ -41,8 +41,27 @@ later:
 * `aes67-sap` — the Session Announcement Protocol (RFC 2974) packet codec plus a
   `SapSender` / `SapListener` over a `UdpSocket`.
 
-The daemon announces its configured TX streams and registers remote streams it
-hears; clients read them with `aes67cfg discovered` or `GET /api/discovered`.
+The daemon announces its configured TX streams (over SAP **and** mDNS) and
+registers remote streams it learns — from SAP announcements and from browsing
+`ravenna_session` mDNS instances (each RTSP-`DESCRIBE`d for its SDP) — into one
+registry. Clients read it with `aes67cfg discovered` or `GET /api/discovered`.
+
+* `aes67-mdns` — mDNS/DNS-SD over the pure-Rust `mdns-sd` (no C libraries to link,
+  no `avahi-daemon` needed, so the cross-compile stays clean). A `Responder`
+  registers/unregisters services (with DNS-SD subtypes) and browses for them. The
+  web server advertises `_http._tcp` ("AES67 Configuration"); the daemon advertises
+  its `_rtsp._tcp` node service **and** each TX stream as a
+  `<name>._rtsp._tcp`/`ravenna_session` session (RAVENNA §3.5.2), and browses
+  remote `ravenna_session` instances. Disable the web one with `aes67web
+  --no-mdns`; rename with `--mdns-name`.
+* `aes67-rtsp` — RAVENNA RTSP connection management (§3.4) over the pure-Rust
+  `rtsp-types` codec. The daemon runs the **server** (a transmitting node), serving
+  each TX stream's SDP under `/by-id/<id>` and `/by-name/<name>`, replying `404`
+  with the connection kept open and pushing an `ANNOUNCE` once a session appears.
+  The **client** (`aes67cfg subscribe rtsp://… --rx-id N`) DESCRIBEs a remote
+  session and configures it into an RX slot. SDP carries both the AES67
+  (`ts-refclk`/`mediaclk`) and RAVENNA (`clock-domain`/`sync-time`) clocking
+  attributes.
 
 ## Build
 

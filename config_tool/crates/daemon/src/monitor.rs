@@ -327,6 +327,7 @@ mod tests {
                 channels: None,
                 output_delay: 0,
                 samples_per_channel: 0,
+                name: None,
             },
         );
         s.tx_streams.insert(

@@ -1,0 +1,13 @@
+[package]
+name = "aes67-rtsp"
+description = "RAVENNA-style RTSP connection management: a minimal server + client over rtsp-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes67-sdp.workspace = true
+thiserror.workspace = true
+# Pure-Rust RTSP message codec (nom + cookie-factory); no C deps, cross-compiles
+# cleanly. We layer the RAVENNA server/client behaviour on top.
+rtsp-types = "0.1"

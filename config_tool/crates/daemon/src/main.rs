@@ -16,7 +16,7 @@ use clap::Parser;
 use aes67_config::{CsrMap, Device, SpiTransport, Transport, UartTransport};
 use aes67_daemon::discovery::{self, Registry, SharedDiscovery};
 use aes67_daemon::persist::{DaemonConfig, TransportCfg};
-use aes67_daemon::{startup, Persist, Server};
+use aes67_daemon::{mdns, rtsp, startup, Persist, Server};
 
 /// Default config-file path (overridable with `--config`).
 const DEFAULT_CONFIG: &str = "/etc/aes67d.json";
@@ -132,30 +132,48 @@ fn main() -> Result<()> {
         }
     });
 
-    // SAP/SDP discovery on the TAP (announce local TX streams, learn remote ones),
-    // when a TAP is configured and discovery is not disabled. It waits for the TAP
-    // address itself, so it need not be sequenced with the startup thread.
-    let (tap_name, discovery_on) = {
+    // Network services that need the TAP. Read the relevant config once.
+    let (has_tap, discovery_on, rtsp_on, rtsp_port, node_name) = {
         let c = config.lock().unwrap();
-        (c.network.tap.clone(), c.network.discovery != Some(false))
-    };
-    let discovery = match (tap_name, discovery_on) {
-        (Some(tap), true) => {
-            let registry: SharedDiscovery = Arc::new(Mutex::new(Registry::default()));
-            discovery::spawn(
-                Arc::clone(&device),
-                Arc::clone(&config),
-                tap,
-                Arc::clone(&registry),
-                verbose,
-            );
-            Some(registry)
-        }
-        _ => None,
+        (
+            c.network.tap.is_some(),
+            c.network.discovery != Some(false),
+            c.network.rtsp != Some(false),
+            c.network.rtsp_port.unwrap_or(rtsp::DEFAULT_RTSP_PORT),
+            c.network.node_name.clone().unwrap_or_else(|| "AES67".to_string()),
+        )
     };
 
+    // One shared discovery registry (exists when a TAP does), fed by both SAP and
+    // mDNS, and read by the control API.
+    let registry: Option<SharedDiscovery> =
+        has_tap.then(|| Arc::new(Mutex::new(Registry::default())));
+    let tap_name = || config.lock().unwrap().network.tap.clone().unwrap();
+
+    // SAP/SDP discovery on the TAP (announce local TX streams, learn remote ones).
+    // It waits for the TAP address itself, so it need not be sequenced with startup.
+    if let (Some(reg), true) = (&registry, discovery_on) {
+        discovery::spawn(Arc::clone(&device), Arc::clone(&config), tap_name(), Arc::clone(reg), verbose);
+    }
+
+    // RAVENNA RTSP server (transmitting node serves its TX streams) plus mDNS:
+    // the `_rtsp._tcp` node service, per-session `ravenna_session` advertisements,
+    // and browsing remote sessions into the same registry.
+    if let (Some(reg), true) = (&registry, rtsp_on) {
+        rtsp::spawn(Arc::clone(&device), Arc::clone(&config), rtsp_port, verbose);
+        mdns::spawn(
+            Arc::clone(&device),
+            Arc::clone(&config),
+            Arc::clone(reg),
+            tap_name(),
+            rtsp_port,
+            node_name,
+            verbose,
+        );
+    }
+
     // Hand the same config to the server so control-API mutations are persisted.
-    let server = Server::new(device, Some(Persist::new(cli.config.clone(), config)), discovery);
+    let server = Server::new(device, Some(Persist::new(cli.config.clone(), config)), registry);
     aes67_daemon::run(listener, server);
     Ok(())
 }

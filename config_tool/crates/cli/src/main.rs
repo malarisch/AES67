@@ -139,6 +139,15 @@ enum Command {
     },
     /// List AES67 streams discovered on the network (SAP/SDP). Daemon only.
     Discovered,
+    /// Subscribe to a remote RAVENNA session over RTSP and configure it into an RX
+    /// slot. Daemon only.
+    Subscribe {
+        /// RTSP URL, e.g. rtsp://192.168.1.5/by-id/0 or .../by-name/Line.
+        url: String,
+        /// RX stream slot (0..7) to configure.
+        #[arg(long)]
+        rx_id: u8,
+    },
 }
 
 #[derive(Args)]
@@ -190,6 +199,9 @@ struct RxStreamArgs {
     /// Samples per channel per packet.
     #[arg(long, default_value_t = 0)]
     spc: u8,
+    /// Optional human-readable stream name (metadata only).
+    #[arg(long)]
+    name: Option<String>,
 }
 
 #[derive(Args)]
@@ -227,14 +239,30 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // `discovered` queries daemon-side state, so it needs the daemon backend
-    // (a direct --uart/--spi transport has no discovery service).
+    // `discovered`/`subscribe` use daemon-side services, so they need the daemon
+    // backend (a direct --uart/--spi transport has no discovery/RTSP service).
     if let Command::Discovered = cli.command {
         return list_discovered(&cli);
+    }
+    if let Command::Subscribe { url, rx_id } = &cli.command {
+        return subscribe_rtsp(&cli, url, *rx_id);
     }
 
     let mut backend = build_backend(&cli)?;
     dispatch(backend.as_mut(), cli.command)
+}
+
+/// Connect to the daemon and subscribe to a remote RTSP session.
+fn subscribe_rtsp(cli: &Cli, url: &str, rx_id: u8) -> Result<()> {
+    let t = &cli.transport;
+    if t.uart.is_some() || t.spi.is_some() {
+        bail!("`subscribe` needs the daemon (drop --uart/--spi): RTSP runs in aes67d");
+    }
+    let mut dev = RemoteDevice::connect(&t.socket)
+        .with_context(|| format!("connecting to daemon at {}", t.socket.display()))?;
+    dev.subscribe_rtsp(url, rx_id)?;
+    println!("subscribed {url} -> rx stream {rx_id}");
+    Ok(())
 }
 
 /// Connect to the daemon and print the streams it has discovered via SAP/SDP.
@@ -252,8 +280,9 @@ fn list_discovered(cli: &Cli) -> Result<()> {
     }
     println!("{} stream(s) discovered:", streams.len());
     for s in streams {
+        let via = if s.transports.is_empty() { "?".to_string() } else { s.transports.join("+") };
         println!(
-            "  {:<24} {}:{}  {} {}ch/{}Hz  pt{}  ptime {}ms  from {}  ({}s ago){}",
+            "  {:<24} {}:{}  {} {}ch/{}Hz  pt{}  ptime {}ms  from {}  via {}  ({}s ago){}",
             s.session_name,
             s.dst_ip,
             s.dst_port,
@@ -263,6 +292,7 @@ fn list_discovered(cli: &Cli) -> Result<()> {
             s.payload_type,
             s.ptime_ms,
             s.origin,
+            via,
             s.age_secs,
             s.ptp_gmid.map(|g| format!("  gm {g}")).unwrap_or_default(),
         );
@@ -307,6 +337,7 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
     match cmd {
         Command::Regs => unreachable!("handled before backend construction"),
         Command::Discovered => unreachable!("handled before backend construction"),
+        Command::Subscribe { .. } => unreachable!("handled before backend construction"),
 
         Command::Dump => {
             for reg in dev.list_registers()? {
@@ -430,6 +461,7 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
                 channels: a.channels,
                 output_delay: a.delay,
                 samples_per_channel: a.spc,
+                name: a.name.clone(),
             })?;
             println!("rx stream {} configured <- {}:{}", a.id, a.dst_ip, a.dst_port);
         }

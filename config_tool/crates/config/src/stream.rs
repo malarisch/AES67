@@ -86,6 +86,10 @@ pub struct RxStream {
     pub output_delay: u8,
     /// Samples per channel per packet.
     pub samples_per_channel: u8,
+    /// Human-readable stream name (from the SAP/SDP `s=` line when subscribed via
+    /// discovery). Metadata only — it is not part of the FPGA RAM layout (see
+    /// [`encode`](RxStream::encode)); `None` for a manually configured stream.
+    pub name: Option<String>,
 }
 
 impl TxStream {
@@ -267,6 +271,7 @@ mod tests {
             channels: Some(3),
             output_delay: 16,
             samples_per_channel: 48,
+            name: None,
         };
         let b = s.encode().unwrap();
         assert_eq!(&b[0..4], &[239, 69, 2, 1]);

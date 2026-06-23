@@ -18,9 +18,11 @@ pub mod bridge;
 pub mod discovery;
 pub mod gpio;
 pub mod igmp;
+pub mod mdns;
 pub mod monitor;
 pub mod netif;
 pub mod persist;
+pub mod rtsp;
 pub mod startup;
 
 use discovery::SharedDiscovery;
@@ -103,11 +105,13 @@ pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<(
     while let Some(env) = framing::read_line::<_, proto::RequestEnvelope>(&mut reader)? {
         // Keep a copy for persistence only if there's a sink to record into.
         let to_record = server.persist.as_ref().map(|_| env.request.clone());
-        // GetConfig and GetDiscovered are answered from daemon-side state, not the
-        // device/bus.
+        // GetConfig/GetDiscovered are answered from daemon-side state; SubscribeRtsp
+        // does its own network I/O and persistence — none hold the bus lock for the
+        // whole request.
         let result = match env.request {
             proto::Request::GetConfig => Ok(config_snapshot(&server)),
             proto::Request::GetDiscovered => Ok(discovered_snapshot(&server)),
+            proto::Request::SubscribeRtsp { url, rx_id } => subscribe_rtsp(&server, &url, rx_id),
             request => {
                 let mut dev = server.device.lock().expect("device mutex poisoned");
                 dispatch(&mut dev, request)
@@ -221,7 +225,41 @@ fn dispatch(
         Req::GetDiscovered => {
             Err(rpc(proto::ErrorCode::Internal, "GetDiscovered not dispatchable".into()))
         }
+        Req::SubscribeRtsp { .. } => {
+            Err(rpc(proto::ErrorCode::Internal, "SubscribeRtsp not dispatchable".into()))
+        }
     }
+}
+
+/// Subscribe to a remote RAVENNA session over RTSP: DESCRIBE the URL (network I/O,
+/// no bus lock), map the returned SDP to an RX stream, write it to the FPGA, and
+/// persist it as a normal RX stream (so it survives restarts and the monitor joins
+/// its multicast group).
+fn subscribe_rtsp(server: &Server, url: &str, rx_id: u8) -> Result<proto::Response, proto::RpcError> {
+    let stream = aes67_rtsp::describe(url)
+        .map_err(|e| rpc(proto::ErrorCode::Transport, format!("RTSP DESCRIBE {url}: {e}")))?;
+
+    let channels = stream.channels.max(1);
+    // ptime (ms) × samples/ms (= rate/1000) → samples per channel per packet.
+    let spc = (stream.ptime_ms * stream.sample_rate as f32 / 1000.0).round() as u32;
+    let params = proto::RxStreamParams {
+        id: rx_id,
+        dst_ip: stream.dst_addr.to_string(),
+        dst_port: stream.dst_port,
+        ch_map: (0..channels).collect(),
+        channels: Some(channels),
+        output_delay: 0,
+        samples_per_channel: spc.clamp(1, 255) as u8,
+        name: Some(stream.session_name.clone()).filter(|n| !n.is_empty()),
+    };
+
+    let rx = RxStream::try_from(params.clone()).map_err(err)?;
+    server.device.lock().expect("device mutex poisoned").write_rx_stream(&rx).map_err(err)?;
+
+    if let Some(p) = &server.persist {
+        p.record(&proto::Request::SetRxStream(params));
+    }
+    Ok(proto::Response::Ok)
 }
 
 /// Build a [`proto::Response::Config`] from the persisted config (empty when
@@ -263,6 +301,11 @@ fn discovered_snapshot(server: &Server) -> proto::Response {
                     ptime_ms: s.ptime_ms,
                     ptp_gmid: s.ptp_gmid.clone(),
                     age_secs: e.age.as_secs(),
+                    transports: [(e.via_sap, "SAP"), (e.via_mdns, "RTSP")]
+                        .iter()
+                        .filter(|(seen, _)| *seen)
+                        .map(|(_, label)| label.to_string())
+                        .collect(),
                 }
             })
             .collect(),

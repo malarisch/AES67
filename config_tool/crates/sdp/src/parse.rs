@@ -74,6 +74,18 @@ pub fn from_sdp(sdp: &str) -> Result<AudioStream, SdpError> {
         _ => None,
     });
 
+    // RAVENNA `a=clock-domain:PTPv2 <domain>` (session-level) and
+    // `a=sync-time:<rtp-timestamp>` (stream-level), accepted alongside the AES67
+    // `ts-refclk`/`mediaclk` attributes above.
+    let ptp_domain = attrs(media, &sd).find_map(|a| match a {
+        Attribute::Other(k, Some(v)) if k.eq_ignore_ascii_case("clock-domain") => parse_clock_domain(v),
+        _ => None,
+    });
+    let sync_time = attrs(media, &sd).find_map(|a| match a {
+        Attribute::Other(k, Some(v)) if k.eq_ignore_ascii_case("sync-time") => v.trim().parse().ok(),
+        _ => None,
+    });
+
     Ok(AudioStream {
         session_name: sd.session_name.value().to_string(),
         origin_addr,
@@ -88,7 +100,19 @@ pub fn from_sdp(sdp: &str) -> Result<AudioStream, SdpError> {
         channels,
         ptime_ms,
         ptp_gmid,
+        ptp_domain,
+        sync_time,
     })
+}
+
+/// Parse the domain out of `a=clock-domain:PTPv2 <domain>`. Only the PTPv2 sync
+/// source is defined by RAVENNA; anything else yields `None`.
+fn parse_clock_domain(v: &str) -> Option<u8> {
+    let mut parts = v.split_whitespace();
+    match parts.next() {
+        Some(src) if src.eq_ignore_ascii_case("PTPv2") => parts.next()?.parse().ok(),
+        _ => None,
+    }
 }
 
 /// Media-level attributes followed by session-level ones (media takes priority
@@ -160,14 +184,16 @@ mod tests {
         s=AES67 stream 0\r\n\
         c=IN IP4 239.69.1.0/32\r\n\
         t=0 0\r\n\
+        a=clock-domain:PTPv2 0\r\n\
         m=audio 5004 RTP/AVP 97\r\n\
         a=rtpmap:97 L24/48000/2\r\n\
         a=ptime:1\r\n\
         a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-01-02-03:0\r\n\
-        a=mediaclk:direct=0\r\n";
+        a=mediaclk:direct=0\r\n\
+        a=sync-time:1234567\r\n";
 
     #[test]
-    fn parses_the_aes67_fields() {
+    fn parses_the_aes67_and_ravenna_fields() {
         let s = from_sdp(SAMPLE).unwrap();
         assert_eq!(s.session_name, "AES67 stream 0");
         assert_eq!(s.origin_addr, Ipv4Addr::new(192, 168, 1, 1));
@@ -181,6 +207,8 @@ mod tests {
         assert_eq!(s.channels, 2);
         assert_eq!(s.ptime_ms, 1.0);
         assert_eq!(s.ptp_gmid.as_deref(), Some("00-1D-C1-FF-FE-01-02-03"));
+        assert_eq!(s.ptp_domain, Some(0));
+        assert_eq!(s.sync_time, Some(1234567));
     }
 
     #[test]

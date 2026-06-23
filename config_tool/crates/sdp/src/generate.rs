@@ -22,6 +22,11 @@ pub fn to_sdp(s: &AudioStream) -> String {
     let _ = write!(out, "s={}\r\n", s.session_name);
     let _ = write!(out, "c=IN IP4 {}/{}\r\n", s.dst_addr, s.ttl);
     let _ = write!(out, "t=0 0\r\n");
+    // RAVENNA session-level synchronisation source (3.3.3.1). Session-level
+    // attributes precede the `m=` line.
+    if let Some(domain) = s.ptp_domain {
+        let _ = write!(out, "a=clock-domain:PTPv2 {domain}\r\n");
+    }
     let _ = write!(out, "m=audio {} RTP/AVP {}\r\n", s.dst_port, s.payload_type);
     let _ = write!(
         out,
@@ -36,6 +41,10 @@ pub fn to_sdp(s: &AudioStream) -> String {
         let _ = write!(out, "a=ts-refclk:ptp=IEEE1588-2008:{gmid}:0\r\n");
     }
     let _ = write!(out, "a=mediaclk:direct=0\r\n");
+    // RAVENNA stream-level timestamp association (3.3.3.2).
+    if let Some(ts) = s.sync_time {
+        let _ = write!(out, "a=sync-time:{ts}\r\n");
+    }
     out
 }
 
@@ -72,30 +81,39 @@ mod tests {
             channels: 2,
             ptime_ms: 1.0,
             ptp_gmid: Some("00-1D-C1-FF-FE-01-02-03".into()),
+            ptp_domain: Some(0),
+            sync_time: Some(1234567),
         }
     }
 
     #[test]
-    fn renders_canonical_aes67_sdp() {
+    fn renders_canonical_ravenna_sdp() {
         let sdp = to_sdp(&sample());
         let expected = "v=0\r\n\
             o=- 1311738121 1311738121 IN IP4 192.168.1.1\r\n\
             s=AES67 stream 0\r\n\
             c=IN IP4 239.69.1.0/32\r\n\
             t=0 0\r\n\
+            a=clock-domain:PTPv2 0\r\n\
             m=audio 5004 RTP/AVP 97\r\n\
             a=rtpmap:97 L24/48000/2\r\n\
             a=ptime:1\r\n\
             a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-01-02-03:0\r\n\
-            a=mediaclk:direct=0\r\n";
+            a=mediaclk:direct=0\r\n\
+            a=sync-time:1234567\r\n";
         assert_eq!(sdp, expected);
     }
 
     #[test]
-    fn omits_ts_refclk_without_a_grandmaster() {
+    fn omits_optional_clocking_attributes_when_absent() {
         let mut s = sample();
         s.ptp_gmid = None;
-        assert!(!to_sdp(&s).contains("ts-refclk"));
+        s.ptp_domain = None;
+        s.sync_time = None;
+        let sdp = to_sdp(&s);
+        assert!(!sdp.contains("ts-refclk"));
+        assert!(!sdp.contains("clock-domain"));
+        assert!(!sdp.contains("sync-time"));
     }
 
     #[test]

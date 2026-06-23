@@ -99,6 +99,12 @@ impl RemoteDevice {
             other => Err(unexpected(&other)),
         }
     }
+
+    /// Subscribe to a remote RAVENNA session over RTSP: the daemon DESCRIBEs `url`
+    /// and configures the returned stream into RX slot `rx_id`. Daemon-specific.
+    pub fn subscribe_rtsp(&mut self, url: &str, rx_id: u8) -> Result<(), ConfigError> {
+        self.call_ok(proto::Request::SubscribeRtsp { url: url.to_string(), rx_id })
+    }
 }
 
 fn map_rpc_error(e: proto::RpcError) -> ConfigError {

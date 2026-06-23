@@ -111,6 +111,14 @@ pub struct AudioStream {
     /// PTP grandmaster identity from `a=ts-refclk:ptp=...`, if announced (the
     /// EUI-64/clock-identity string, e.g. `00-1D-C1-FF-FE-01-02-03`).
     pub ptp_gmid: Option<String>,
+    /// RAVENNA session-level synchronisation source: the PTPv2 domain number
+    /// (`a=clock-domain:PTPv2 <domain>`). RAVENNA SHALL always carry this; AES67
+    /// streams may omit it (then `None`).
+    pub ptp_domain: Option<u8>,
+    /// RAVENNA stream-level timestamp association (`a=sync-time:<rtp-timestamp>`):
+    /// the 32-bit RTP timestamp that aligns with the sync source's epoch, for
+    /// reproducible phase across receivers. Optional.
+    pub sync_time: Option<u32>,
 }
 
 impl AudioStream {
@@ -132,6 +140,8 @@ impl AudioStream {
             channels: 2,
             ptime_ms: 1.0,
             ptp_gmid: None,
+            ptp_domain: None,
+            sync_time: None,
         }
     }
 

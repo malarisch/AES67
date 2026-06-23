@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 /// Protocol version. Bumped on any breaking change to the message set.
-pub const PROTO_VERSION: u32 = 5;
+pub const PROTO_VERSION: u32 = 8;
 
 /// Newline-delimited JSON framing, shared by the daemon and every client so the
 /// wire format has a single source of truth.
@@ -91,6 +91,9 @@ pub enum Request {
     /// Tear down a receive stream slot (stops receiving it and leaves its
     /// multicast group).
     StopRxStream { id: u8 },
+    /// Subscribe to a remote RAVENNA session over RTSP: DESCRIBE the given
+    /// `rtsp://…` URL and configure the returned stream into RX slot `rx_id`.
+    SubscribeRtsp { url: String, rx_id: u8 },
     /// Pulse the selected reset domains.
     Reset(ResetMask),
 
@@ -142,6 +145,10 @@ pub struct DiscoveredStream {
     pub ptp_gmid: Option<String>,
     /// Seconds since this stream was last heard announced.
     pub age_secs: u64,
+    /// Discovery transports this stream was seen over, e.g. `["SAP"]`,
+    /// `["RTSP"]`, or `["SAP", "RTSP"]`.
+    #[serde(default)]
+    pub transports: Vec<String>,
 }
 
 /// The daemon's persisted configuration relevant to clients — currently the
@@ -240,6 +247,11 @@ pub struct RxStreamParams {
     pub output_delay: u8,
     #[serde(default)]
     pub samples_per_channel: u8,
+    /// Human-readable name of the subscribed stream (from the SAP/SDP `s=` line
+    /// when it was discovered). Metadata only — not written to the FPGA. `None`
+    /// for a stream configured manually without a name.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[cfg(test)]

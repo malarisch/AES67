@@ -14,6 +14,8 @@ aes67-proto.workspace = true
 aes67-config.workspace = true
 aes67-sdp.workspace = true
 aes67-sap.workspace = true
+aes67-rtsp.workspace = true
+aes67-mdns.workspace = true
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 libc = "0.2"

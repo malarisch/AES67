@@ -52,6 +52,8 @@ pub struct RxReq {
     pub channels: Option<u8>,
     pub output_delay: Option<u8>,
     pub samples_per_channel: Option<u8>,
+    /// Stream name (metadata only).
+    pub name: Option<String>,
 }
 
 /// `POST /api/tx-stream/stop` and `/api/rx-stream/stop` body — the slot to clear.
@@ -104,6 +106,7 @@ pub fn apply_rx(dev: &mut dyn ControlApi, req: &RxReq) -> Result<(), ConfigError
         channels: req.channels,
         output_delay: req.output_delay.unwrap_or(0),
         samples_per_channel: req.samples_per_channel.unwrap_or(0),
+        name: req.name.clone().filter(|n| !n.is_empty()),
     })
 }
 
