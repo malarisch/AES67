@@ -512,7 +512,7 @@ begin
             metering_clear_i_sync1 <= metering_clear_i;
             metering_clear_i_sync2 <= metering_clear_i_sync1;
 
-            zaudio_sync <= audioclocks_i.fsclk_tdm;
+            zaudio_sync <= audioclocks_i.fsclk_i2s_tdm;
             zbclk <= audioclocks_i.bclk;
             
 
@@ -669,7 +669,7 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                     tdm_channel_counter <= tdm_channel_counter + 1;
                 end if;
             end if;
-            if (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
+            if (audioclocks_i.fsclk_i2s_tdm = '1' and zaudio_sync = '0') then
                 tdm_channel_bit_counter <= (others => '0');
                 tdm_channel_counter <= (others => '0');
             end if;
@@ -757,11 +757,11 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
             end case;
 
             if tdm_commit_tick = '1'
-               and not (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
+               and not (audioclocks_i.fsclk_i2s_tdm = '1' and zaudio_sync = '0') then
                 tdm_byte_latch <= tdm_byte_shadow;
             end if;
 
-            if (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
+            if (audioclocks_i.fsclk_i2s_tdm = '1' and zaudio_sync = '0') then
                 tdm_byte_in_slot  <= to_unsigned(3, 2);
                 tdm_fetch_ch      <= (others => '1');
                 tdm_fetch_pin_idx <= 0;
@@ -773,8 +773,12 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
     -- Serial output: shift MSB-first out of each latched byte.
     tdmoutgen : for i in 0 to TDM_OUTPUTS - 1 generate
-
+            process (audioclocks_i.bclk)
+            begin
+                if (rising_edge(audioclocks_i.bclk)) then
                 tdm_out(i) <= tdm_byte_latch(i)(7 - to_integer(tdm_channel_bit_counter(2 downto 0)));
+                end if;
+            end process;
 
     end generate;
 end generate;
