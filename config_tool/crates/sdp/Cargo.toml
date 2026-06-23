@@ -1,0 +1,12 @@
+[package]
+name = "aes67-sdp"
+description = "AES67 audio SDP model: generate and parse session descriptions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+# Robust RFC 4566/8866 tokeniser/parser; used for the parse path. Generation is
+# hand-rolled so the output is exactly the canonical AES67 profile.
+sdp-rs = "0.2.1"

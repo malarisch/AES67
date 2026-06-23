@@ -32,6 +32,18 @@ crates/transport   aes67-transport   HAL: Transport trait + UART / SPI backends
   (`drivers/eth_litex/eth_litex.c`).
 * `aes67-config-tool` wires arguments to the library; it holds no addresses.
 
+The daemon (`aes67-daemon`) additionally runs **SAP/SDP discovery** on the TAP,
+built from two transport-agnostic crates so the SDP layer can be reused for mDNS
+later:
+
+* `aes67-sdp` — the `AudioStream` model with an AES67 SDP generator (hand-rolled,
+  canonical) and parser (via `sdp-rs`). Knows nothing about sockets.
+* `aes67-sap` — the Session Announcement Protocol (RFC 2974) packet codec plus a
+  `SapSender` / `SapListener` over a `UdpSocket`.
+
+The daemon announces its configured TX streams and registers remote streams it
+hears; clients read them with `aes67cfg discovered` or `GET /api/discovered`.
+
 ## Build
 
 Requires a Rust toolchain (`cargo`, stable). From this directory:

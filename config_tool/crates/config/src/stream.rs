@@ -46,6 +46,9 @@ const REGION_RX: &str = "rx_stream_cfg";
 pub const MAX_STREAMS: u8 = 8;
 pub const MAX_CHANNELS: usize = 8;
 
+/// Bytes per stream slot in either config RAM (`stream_id * SLOT_BYTES`).
+const SLOT_BYTES: usize = 32;
+
 /// A transmit (sender) audio stream.
 #[derive(Debug, Clone)]
 pub struct TxStream {
@@ -61,6 +64,9 @@ pub struct TxStream {
     pub ch_ids: Vec<u8>,
     /// RTP SSRC (must match the SDP announcement).
     pub ssrc: u32,
+    /// Session name announced over SAP/SDP. Metadata only — it is not part of the
+    /// FPGA RAM layout (see [`encode`](TxStream::encode)); `None` ⇒ daemon default.
+    pub name: Option<String>,
 }
 
 /// A receive audio stream.
@@ -159,6 +165,13 @@ pub trait Aes67Streams {
     fn write_tx_stream(&mut self, stream: &TxStream) -> Result<(), ConfigError>;
     /// Configure a receive stream.
     fn write_rx_stream(&mut self, stream: &RxStream) -> Result<(), ConfigError>;
+    /// Tear down a transmit stream: zero its config slot so the gateware stops
+    /// sending it (`samples_per_packet` = 0 marks the slot inactive).
+    fn clear_tx_stream(&mut self, id: u8) -> Result<(), ConfigError>;
+    /// Tear down a receive stream: zero its config slot so no incoming packet
+    /// matches (cleared destination IP/port). The caller is responsible for
+    /// dropping the corresponding IGMP multicast membership.
+    fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError>;
 }
 
 impl<T: Transport> Aes67Streams for Device<T> {
@@ -171,6 +184,31 @@ impl<T: Transport> Aes67Streams for Device<T> {
         let buf = stream.encode()?;
         write_stream_ram(self, REGION_RX, stream.id, &buf)
     }
+
+    fn clear_tx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        clear_stream_ram(self, REGION_TX, id)
+    }
+
+    fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        clear_stream_ram(self, REGION_RX, id)
+    }
+}
+
+/// Zero a stream's whole 32-byte config slot, disabling it. For TX this clears
+/// `samples_per_packet` (offset 6), which the gateware uses as the active flag;
+/// for RX it clears the destination IP/port, so no incoming packet matches.
+fn clear_stream_ram<T: Transport>(
+    dev: &mut Device<T>,
+    region: &str,
+    stream_id: u8,
+) -> Result<(), ConfigError> {
+    if stream_id >= MAX_STREAMS {
+        return Err(ConfigError::Unsupported(format!(
+            "stream id {stream_id} out of range (0..{})",
+            MAX_STREAMS - 1
+        )));
+    }
+    write_stream_ram(dev, region, stream_id, &[0u8; SLOT_BYTES])
 }
 
 /// Write `buf` into a stream config RAM at slot `stream_id`: one byte per 32-bit
@@ -208,6 +246,7 @@ mod tests {
             samples_per_packet: 48,
             ch_ids: vec![0, 1],
             ssrc: 0x1234_5678,
+            name: None,
         };
         let b = s.encode().unwrap();
         assert_eq!(b[0], 3);
@@ -247,7 +286,58 @@ mod tests {
             samples_per_packet: 0,
             ch_ids: vec![],
             ssrc: 0,
+            name: None,
         };
         assert!(s.encode().is_err());
+    }
+
+    /// Minimal in-test Wishbone: a flat addr→word map (the shared `MockTransport`
+    /// lives behind a feature this crate does not enable).
+    #[derive(Default)]
+    struct MapTransport(std::collections::HashMap<u32, u32>);
+    impl aes67_transport::Transport for MapTransport {
+        fn peek(&mut self, addr: u32) -> Result<u32, aes67_transport::TransportError> {
+            Ok(*self.0.get(&addr).unwrap_or(&0))
+        }
+        fn poke(&mut self, addr: u32, value: u32) -> Result<(), aes67_transport::TransportError> {
+            self.0.insert(addr, value);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn clear_zeros_the_slot() {
+        use crate::device::Device;
+
+        let map = crate::csr::CsrMap::from_csv(
+            "csr_register,aes67_csr_scratch,0x0,1,rw\n\
+             memory_region,tx_stream_cfg,0x1000,256,linker\n\
+             memory_region,rx_stream_cfg,0x2000,256,linker\n",
+        )
+        .unwrap();
+        let mut dev = Device::new(MapTransport::default(), map);
+
+        // Configure TX slot 2, then clear it; the active byte (offset 6,
+        // samples_per_packet) and the destination IP must read back as zero.
+        dev.write_tx_stream(&TxStream {
+            id: 2,
+            dst_ip: Ipv4Addr::new(239, 69, 1, 1),
+            channels: Some(2),
+            samples_per_packet: 48,
+            ch_ids: vec![0, 1],
+            ssrc: 0xdead_beef,
+            name: None,
+        })
+        .unwrap();
+        dev.clear_tx_stream(2).unwrap();
+
+        let (base, _) = dev.map().region("tx_stream_cfg").unwrap();
+        let slot = 2u32 * 32;
+        for off in 0..SLOT_BYTES as u32 {
+            assert_eq!(dev.peek(base + ((slot + off) << 2)).unwrap(), 0);
+        }
+
+        // Out-of-range id is rejected.
+        assert!(dev.clear_rx_stream(MAX_STREAMS).is_err());
     }
 }

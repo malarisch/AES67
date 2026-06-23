@@ -10,7 +10,7 @@ ENTITY soc_top IS
 generic (
     	clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
 		platform : string := "ALTERA"; -- "ALTERA" or "GOWIN"
-        SOC_TYPE : STRING := "LITEX"; -- LITEX_SDRAM or LITEX_HRAM or SPIBONE
+        SOC_TYPE : STRING := "LITEX"; -- LITEX_SDRAM or LITEX_HRAM or LITX_SPIBONE or LITEX_UARTBONE
 		MII_WIDTH : integer := 2;
 		ETHERNET_TYPE : string := "RMII";
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz

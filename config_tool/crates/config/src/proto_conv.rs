@@ -50,6 +50,7 @@ impl TryFrom<proto::TxStreamParams> for TxStream {
             samples_per_packet: p.samples_per_packet,
             ch_ids: p.ch_ids,
             ssrc: p.ssrc,
+            name: p.name,
         })
     }
 }
@@ -63,6 +64,7 @@ impl From<&TxStream> for proto::TxStreamParams {
             samples_per_packet: s.samples_per_packet,
             ch_ids: s.ch_ids.clone(),
             ssrc: s.ssrc,
+            name: s.name.clone(),
         }
     }
 }

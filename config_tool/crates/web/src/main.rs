@@ -66,6 +66,9 @@ fn main() -> Result<()> {
             (Method::Get, "/api/streams") => {
                 json(with_dev(&cli.socket, &mut dev, |d| d.get_config()))
             }
+            (Method::Get, "/api/discovered") => {
+                json(with_dev(&cli.socket, &mut dev, |d| d.get_discovered()))
+            }
             (Method::Post, "/api/ptp") => {
                 post(&cli.socket, &mut dev, &mut req, apply::apply_ptp)
             }
@@ -74,6 +77,12 @@ fn main() -> Result<()> {
             }
             (Method::Post, "/api/rx-stream") => {
                 post(&cli.socket, &mut dev, &mut req, apply::apply_rx)
+            }
+            (Method::Post, "/api/tx-stream/stop") => {
+                post(&cli.socket, &mut dev, &mut req, apply::stop_tx)
+            }
+            (Method::Post, "/api/rx-stream/stop") => {
+                post(&cli.socket, &mut dev, &mut req, apply::stop_rx)
             }
             (Method::Get, _) => text(404, "not found"),
             _ => text(405, "method not allowed"),

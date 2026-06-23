@@ -90,6 +90,15 @@ impl RemoteDevice {
             other => Err(unexpected(&other)),
         }
     }
+
+    /// List the AES67 streams discovered on the network (via SAP/SDP).
+    /// Daemon-specific, so it is not part of [`ControlApi`].
+    pub fn get_discovered(&mut self) -> Result<Vec<proto::DiscoveredStream>, ConfigError> {
+        match self.call(proto::Request::GetDiscovered)? {
+            proto::Response::Discovered(v) => Ok(v),
+            other => Err(unexpected(&other)),
+        }
+    }
 }
 
 fn map_rpc_error(e: proto::RpcError) -> ConfigError {
@@ -169,6 +178,14 @@ impl ControlApi for RemoteDevice {
 
     fn write_rx_stream(&mut self, stream: &RxStream) -> Result<(), ConfigError> {
         self.call_ok(proto::Request::SetRxStream(stream.into()))
+    }
+
+    fn clear_tx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        self.call_ok(proto::Request::StopTxStream { id })
+    }
+
+    fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        self.call_ok(proto::Request::StopRxStream { id })
     }
 
     fn reset(&mut self, ptp: bool, tx: bool, rx: bool, eth: bool) -> Result<(), ConfigError> {

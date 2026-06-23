@@ -124,6 +124,21 @@ enum Command {
     TxStream(TxStreamArgs),
     /// Configure a receive audio stream.
     RxStream(RxStreamArgs),
+    /// Tear down a transmit stream slot (stops sending it).
+    TxStop {
+        /// Stream slot (0..7).
+        #[arg(long)]
+        id: u8,
+    },
+    /// Tear down a receive stream slot (stops receiving it and leaves its
+    /// multicast group).
+    RxStop {
+        /// Stream slot (0..7).
+        #[arg(long)]
+        id: u8,
+    },
+    /// List AES67 streams discovered on the network (SAP/SDP). Daemon only.
+    Discovered,
 }
 
 #[derive(Args)]
@@ -134,6 +149,10 @@ struct TxStreamArgs {
     /// Destination (multicast) IPv4 address.
     #[arg(long)]
     dst_ip: Ipv4Addr,
+    /// Session name announced over SAP/SDP (daemon only). Defaults to
+    /// "AES67 TX <id>".
+    #[arg(long)]
+    name: Option<String>,
     /// Channel count (default: number of --ch-ids).
     #[arg(long)]
     channels: Option<u8>,
@@ -208,8 +227,47 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `discovered` queries daemon-side state, so it needs the daemon backend
+    // (a direct --uart/--spi transport has no discovery service).
+    if let Command::Discovered = cli.command {
+        return list_discovered(&cli);
+    }
+
     let mut backend = build_backend(&cli)?;
     dispatch(backend.as_mut(), cli.command)
+}
+
+/// Connect to the daemon and print the streams it has discovered via SAP/SDP.
+fn list_discovered(cli: &Cli) -> Result<()> {
+    let t = &cli.transport;
+    if t.uart.is_some() || t.spi.is_some() {
+        bail!("`discovered` needs the daemon (drop --uart/--spi): discovery runs in aes67d");
+    }
+    let mut dev = RemoteDevice::connect(&t.socket)
+        .with_context(|| format!("connecting to daemon at {}", t.socket.display()))?;
+    let streams = dev.get_discovered()?;
+    if streams.is_empty() {
+        println!("no streams discovered");
+        return Ok(());
+    }
+    println!("{} stream(s) discovered:", streams.len());
+    for s in streams {
+        println!(
+            "  {:<24} {}:{}  {} {}ch/{}Hz  pt{}  ptime {}ms  from {}  ({}s ago){}",
+            s.session_name,
+            s.dst_ip,
+            s.dst_port,
+            s.encoding,
+            s.channels,
+            s.sample_rate,
+            s.payload_type,
+            s.ptime_ms,
+            s.origin,
+            s.age_secs,
+            s.ptp_gmid.map(|g| format!("  gm {g}")).unwrap_or_default(),
+        );
+    }
+    Ok(())
 }
 
 /// Build the backend: a direct transport `Device` when `--uart`/`--spi` is set,
@@ -248,6 +306,7 @@ fn load_map(cli: &Cli) -> Result<CsrMap> {
 fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
     match cmd {
         Command::Regs => unreachable!("handled before backend construction"),
+        Command::Discovered => unreachable!("handled before backend construction"),
 
         Command::Dump => {
             for reg in dev.list_registers()? {
@@ -357,6 +416,7 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
                 samples_per_packet: a.spp,
                 ch_ids: a.ch_ids,
                 ssrc: a.ssrc,
+                name: a.name,
             })?;
             println!("tx stream {} configured -> {}", a.id, a.dst_ip);
         }
@@ -372,6 +432,16 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
                 samples_per_channel: a.spc,
             })?;
             println!("rx stream {} configured <- {}:{}", a.id, a.dst_ip, a.dst_port);
+        }
+
+        Command::TxStop { id } => {
+            dev.clear_tx_stream(id)?;
+            println!("tx stream {id} stopped");
+        }
+
+        Command::RxStop { id } => {
+            dev.clear_rx_stream(id)?;
+            println!("rx stream {id} stopped");
         }
     }
     Ok(())

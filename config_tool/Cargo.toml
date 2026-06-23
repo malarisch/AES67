@@ -12,6 +12,8 @@ resolver = "2"
 members = [
     "crates/transport",
     "crates/proto",
+    "crates/sdp",
+    "crates/sap",
     "crates/config",
     "crates/client",
     "crates/daemon",
@@ -28,6 +30,8 @@ repository = "AES67"
 [workspace.dependencies]
 aes67-transport = { path = "crates/transport" }
 aes67-proto     = { path = "crates/proto" }
+aes67-sdp       = { path = "crates/sdp" }
+aes67-sap       = { path = "crates/sap" }
 aes67-config    = { path = "crates/config" }
 aes67-client    = { path = "crates/client" }
 thiserror       = "1"

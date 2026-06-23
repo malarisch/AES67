@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 /// Protocol version. Bumped on any breaking change to the message set.
-pub const PROTO_VERSION: u32 = 3;
+pub const PROTO_VERSION: u32 = 5;
 
 /// Newline-delimited JSON framing, shared by the daemon and every client so the
 /// wire format has a single source of truth.
@@ -86,12 +86,21 @@ pub enum Request {
     SetGrandmaster(GrandmasterParams),
     SetTxStream(TxStreamParams),
     SetRxStream(RxStreamParams),
+    /// Tear down a transmit stream slot (stops sending it).
+    StopTxStream { id: u8 },
+    /// Tear down a receive stream slot (stops receiving it and leaves its
+    /// multicast group).
+    StopRxStream { id: u8 },
     /// Pulse the selected reset domains.
     Reset(ResetMask),
 
     /// Read the daemon's persisted config (e.g. the configured RX/TX streams,
     /// which the write-only FPGA stream RAMs cannot report back).
     GetConfig,
+
+    /// List the AES67 streams discovered on the network (via SAP/SDP), so a
+    /// client can offer them as RX subscription candidates.
+    GetDiscovered,
 }
 
 /// Server → client successful results.
@@ -107,8 +116,32 @@ pub enum Response {
     Ip(String),
     /// The daemon's persisted config snapshot.
     Config(ConfigSnapshot),
+    /// The streams discovered on the network (via SAP/SDP).
+    Discovered(Vec<DiscoveredStream>),
     /// A successful operation with no payload.
     Ok,
+}
+
+/// A remote AES67 stream learned from a SAP/SDP announcement. IPs travel as
+/// dotted strings (like the rest of the wire DTOs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredStream {
+    pub session_name: String,
+    /// Originating (sender) node address.
+    pub origin: String,
+    /// Destination multicast group and UDP port.
+    pub dst_ip: String,
+    pub dst_port: u16,
+    pub channels: u8,
+    pub sample_rate: u32,
+    /// PCM encoding name, e.g. "L24".
+    pub encoding: String,
+    pub payload_type: u8,
+    pub ptime_ms: f32,
+    /// PTP grandmaster identity from `ts-refclk`, if announced.
+    pub ptp_gmid: Option<String>,
+    /// Seconds since this stream was last heard announced.
+    pub age_secs: u64,
 }
 
 /// The daemon's persisted configuration relevant to clients — currently the
@@ -187,6 +220,10 @@ pub struct TxStreamParams {
     pub ch_ids: Vec<u8>,
     #[serde(default)]
     pub ssrc: u32,
+    /// Session name announced over SAP/SDP. Metadata only — not written to the
+    /// FPGA. `None` ⇒ the daemon uses a default ("AES67 TX <id>").
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Receive stream parameters (IP as a dotted string on the wire).

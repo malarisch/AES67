@@ -14,6 +14,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 
 use aes67_config::{CsrMap, Device, SpiTransport, Transport, UartTransport};
+use aes67_daemon::discovery::{self, Registry, SharedDiscovery};
 use aes67_daemon::persist::{DaemonConfig, TransportCfg};
 use aes67_daemon::{startup, Persist, Server};
 
@@ -131,8 +132,30 @@ fn main() -> Result<()> {
         }
     });
 
+    // SAP/SDP discovery on the TAP (announce local TX streams, learn remote ones),
+    // when a TAP is configured and discovery is not disabled. It waits for the TAP
+    // address itself, so it need not be sequenced with the startup thread.
+    let (tap_name, discovery_on) = {
+        let c = config.lock().unwrap();
+        (c.network.tap.clone(), c.network.discovery != Some(false))
+    };
+    let discovery = match (tap_name, discovery_on) {
+        (Some(tap), true) => {
+            let registry: SharedDiscovery = Arc::new(Mutex::new(Registry::default()));
+            discovery::spawn(
+                Arc::clone(&device),
+                Arc::clone(&config),
+                tap,
+                Arc::clone(&registry),
+                verbose,
+            );
+            Some(registry)
+        }
+        _ => None,
+    };
+
     // Hand the same config to the server so control-API mutations are persisted.
-    let server = Server::new(device, Some(Persist::new(cli.config.clone(), config)));
+    let server = Server::new(device, Some(Persist::new(cli.config.clone(), config)), discovery);
     aes67_daemon::run(listener, server);
     Ok(())
 }

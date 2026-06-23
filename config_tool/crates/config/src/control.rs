@@ -47,6 +47,11 @@ pub trait ControlApi {
     fn set_grandmaster(&mut self, gm: PtpGrandmaster) -> Result<(), ConfigError>;
     fn write_tx_stream(&mut self, stream: &TxStream) -> Result<(), ConfigError>;
     fn write_rx_stream(&mut self, stream: &RxStream) -> Result<(), ConfigError>;
+    /// Tear down a transmit stream (zero its config slot).
+    fn clear_tx_stream(&mut self, id: u8) -> Result<(), ConfigError>;
+    /// Tear down a receive stream (zero its config slot). The daemon also drops
+    /// the stream's IGMP multicast membership.
+    fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError>;
 
     /// Pulse the selected reset domains: assert the bits, then release them.
     fn reset(&mut self, ptp: bool, tx: bool, rx: bool, eth: bool) -> Result<(), ConfigError>;
@@ -108,6 +113,14 @@ impl<T: Transport> ControlApi for Device<T> {
 
     fn write_rx_stream(&mut self, stream: &RxStream) -> Result<(), ConfigError> {
         Aes67Streams::write_rx_stream(self, stream)
+    }
+
+    fn clear_tx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        Aes67Streams::clear_tx_stream(self, id)
+    }
+
+    fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
+        Aes67Streams::clear_rx_stream(self, id)
     }
 
     fn reset(&mut self, ptp: bool, tx: bool, rx: bool, eth: bool) -> Result<(), ConfigError> {

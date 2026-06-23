@@ -15,6 +15,7 @@ use aes67_config::{ControlApi, Device, RxStream, Transport, TxStream};
 use aes67_proto::{self as proto, framing};
 
 pub mod bridge;
+pub mod discovery;
 pub mod gpio;
 pub mod igmp;
 pub mod monitor;
@@ -22,6 +23,7 @@ pub mod netif;
 pub mod persist;
 pub mod startup;
 
+use discovery::SharedDiscovery;
 use persist::{DaemonConfig, Settings};
 
 /// A device whose transport is chosen at runtime, shared across connections.
@@ -56,16 +58,22 @@ impl Persist {
     }
 }
 
-/// The serving context shared across connections: the device arbiter plus an
-/// optional persistence sink (absent in tests with no config file).
+/// The serving context shared across connections: the device arbiter, an
+/// optional persistence sink (absent in tests with no config file), and an
+/// optional discovery registry (absent when networking/discovery is off).
 pub struct Server {
     pub device: SharedDevice,
     pub persist: Option<Persist>,
+    pub discovery: Option<SharedDiscovery>,
 }
 
 impl Server {
-    pub fn new(device: SharedDevice, persist: Option<Persist>) -> Arc<Self> {
-        Arc::new(Self { device, persist })
+    pub fn new(
+        device: SharedDevice,
+        persist: Option<Persist>,
+        discovery: Option<SharedDiscovery>,
+    ) -> Arc<Self> {
+        Arc::new(Self { device, persist, discovery })
     }
 }
 
@@ -95,12 +103,15 @@ pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<(
     while let Some(env) = framing::read_line::<_, proto::RequestEnvelope>(&mut reader)? {
         // Keep a copy for persistence only if there's a sink to record into.
         let to_record = server.persist.as_ref().map(|_| env.request.clone());
-        // GetConfig is answered from the persisted config, not the device.
-        let result = if matches!(env.request, proto::Request::GetConfig) {
-            Ok(config_snapshot(&server))
-        } else {
-            let mut dev = server.device.lock().expect("device mutex poisoned");
-            dispatch(&mut dev, env.request)
+        // GetConfig and GetDiscovered are answered from daemon-side state, not the
+        // device/bus.
+        let result = match env.request {
+            proto::Request::GetConfig => Ok(config_snapshot(&server)),
+            proto::Request::GetDiscovered => Ok(discovered_snapshot(&server)),
+            request => {
+                let mut dev = server.device.lock().expect("device mutex poisoned");
+                dispatch(&mut dev, request)
+            }
         };
         if result.is_ok() {
             if let (Some(p), Some(req)) = (&server.persist, &to_record) {
@@ -199,10 +210,17 @@ fn dispatch(
             let s = p.try_into().map_err(err)?;
             dev.write_rx_stream(&s).map(ok).map_err(err)
         }
+        Req::StopTxStream { id } => dev.clear_tx_stream(id).map(ok).map_err(err),
+        // The IGMP leave is handled by the monitor once persist drops the stream
+        // from the live config (see persist::record / monitor::reconcile_igmp).
+        Req::StopRxStream { id } => dev.clear_rx_stream(id).map(ok).map_err(err),
         Req::Reset(m) => dev.reset(m.ptp, m.tx, m.rx, m.eth).map(ok).map_err(err),
 
-        // Answered in serve_connection (needs the persisted config, not the bus).
+        // Answered in serve_connection (need daemon-side state, not the bus).
         Req::GetConfig => Err(rpc(proto::ErrorCode::Internal, "GetConfig not dispatchable".into())),
+        Req::GetDiscovered => {
+            Err(rpc(proto::ErrorCode::Internal, "GetDiscovered not dispatchable".into()))
+        }
     }
 }
 
@@ -220,6 +238,37 @@ fn config_snapshot(server: &Server) -> proto::Response {
         None => proto::ConfigSnapshot::default(),
     };
     proto::Response::Config(snapshot)
+}
+
+/// Build a [`proto::Response::Discovered`] from the discovery registry (empty when
+/// discovery is disabled).
+fn discovered_snapshot(server: &Server) -> proto::Response {
+    let streams = match &server.discovery {
+        Some(reg) => reg
+            .lock()
+            .expect("discovery mutex poisoned")
+            .snapshot()
+            .into_iter()
+            .map(|e| {
+                let s = &e.stream;
+                proto::DiscoveredStream {
+                    session_name: s.session_name.clone(),
+                    origin: s.origin_addr.to_string(),
+                    dst_ip: s.dst_addr.to_string(),
+                    dst_port: s.dst_port,
+                    channels: s.channels,
+                    sample_rate: s.sample_rate,
+                    encoding: s.encoding.name().to_string(),
+                    payload_type: s.payload_type,
+                    ptime_ms: s.ptime_ms,
+                    ptp_gmid: s.ptp_gmid.clone(),
+                    age_secs: e.age.as_secs(),
+                }
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    proto::Response::Discovered(streams)
 }
 
 fn rpc(code: proto::ErrorCode, message: String) -> proto::RpcError {

@@ -92,10 +92,11 @@ fn warm_resume(
     apply_ptp_and_streams(device, settings, verbose);
 
     if network.tap.is_some() {
-        // Use the FPGA's current MAC for the TAP; do not reprogram it. `warm` so
-        // the initial link-up does not re-trigger DHCP (the lease still stands).
+        // Use the FPGA's current MAC for the TAP; do not reprogram it. The TAP is
+        // recreated fresh (it died with the previous daemon process), so its DHCP
+        // lease is gone — the monitor must re-run DHCP on the first link-up.
         let mac = device.lock().unwrap().get_mac().context("reading MAC for TAP")?;
-        bring_up_network(device, config, network, mac, true, verbose)
+        bring_up_network(device, config, network, mac, verbose)
             .context("bringing up TAP bridge")?;
     }
     eprintln!("aes67d: startup: warm restart complete");
@@ -142,8 +143,8 @@ fn cold_start(
             Some(m) => m,
             None => device.lock().unwrap().get_mac().context("reading MAC for TAP")?,
         };
-        // Cold start (warm = false): the first link-up should trigger DHCP.
-        bring_up_network(device, config, network, mac, false, verbose)
+        // Cold start: the first link-up should trigger DHCP.
+        bring_up_network(device, config, network, mac, verbose)
             .context("bringing up TAP bridge")?;
         // Step 3: wait until the monitor has programmed an IP from the lease.
         wait_for_ip(device, verbose);
@@ -320,7 +321,6 @@ fn bring_up_network(
     config: &SharedConfig,
     net: &NetworkCfg,
     mac: [u8; 6],
-    warm: bool,
     verbose: u8,
 ) -> Result<()> {
     let tap_name = net.tap.as_deref().expect("bring_up_network without a tap name");
@@ -372,7 +372,6 @@ fn bring_up_network(
         tap.name().to_string(),
         carrier_tap,
         Arc::clone(config),
-        warm,
         verbose,
     );
     Ok(())

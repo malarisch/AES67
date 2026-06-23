@@ -38,6 +38,8 @@ pub struct TxReq {
     pub samples_per_packet: Option<u8>,
     pub ch_ids: Option<Vec<u8>>,
     pub ssrc: Option<u32>,
+    /// Session name announced over SAP/SDP.
+    pub name: Option<String>,
 }
 
 /// `POST /api/rx-stream` body.
@@ -50,6 +52,12 @@ pub struct RxReq {
     pub channels: Option<u8>,
     pub output_delay: Option<u8>,
     pub samples_per_channel: Option<u8>,
+}
+
+/// `POST /api/tx-stream/stop` and `/api/rx-stream/stop` body — the slot to clear.
+#[derive(Deserialize)]
+pub struct StopReq {
+    pub id: u8,
 }
 
 /// Apply PTP grandmaster params and message intervals.
@@ -82,6 +90,7 @@ pub fn apply_tx(dev: &mut dyn ControlApi, req: &TxReq) -> Result<(), ConfigError
         samples_per_packet: req.samples_per_packet.unwrap_or(0),
         ch_ids: req.ch_ids.clone().unwrap_or_default(),
         ssrc: req.ssrc.unwrap_or(0),
+        name: req.name.clone().filter(|n| !n.is_empty()),
     })
 }
 
@@ -96,6 +105,16 @@ pub fn apply_rx(dev: &mut dyn ControlApi, req: &RxReq) -> Result<(), ConfigError
         output_delay: req.output_delay.unwrap_or(0),
         samples_per_channel: req.samples_per_channel.unwrap_or(0),
     })
+}
+
+/// Tear down a transmit stream.
+pub fn stop_tx(dev: &mut dyn ControlApi, req: &StopReq) -> Result<(), ConfigError> {
+    dev.clear_tx_stream(req.id)
+}
+
+/// Tear down a receive stream (the daemon also leaves its multicast group).
+pub fn stop_rx(dev: &mut dyn ControlApi, req: &StopReq) -> Result<(), ConfigError> {
+    dev.clear_rx_stream(req.id)
 }
 
 fn parse_ip(s: &str) -> Result<Ipv4Addr, ConfigError> {

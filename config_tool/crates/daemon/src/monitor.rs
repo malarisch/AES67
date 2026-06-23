@@ -50,10 +50,9 @@ pub fn spawn(
     tap_name: String,
     carrier_tap: File,
     config: SharedConfig,
-    warm: bool,
     verbose: u8,
 ) {
-    std::thread::spawn(move || run(device, tap_name, carrier_tap, config, warm, verbose));
+    std::thread::spawn(move || run(device, tap_name, carrier_tap, config, verbose));
 }
 
 fn run(
@@ -61,17 +60,19 @@ fn run(
     tap_name: String,
     carrier_tap: File,
     config: SharedConfig,
-    warm: bool,
     verbose: u8,
 ) {
     // Seed the IP from the FPGA's current value so a daemon restart doesn't
     // re-write an address that already matches.
     let mut last_ip = device.lock().unwrap().get_ip().ok().filter(|ip| usable(*ip));
     let mut last_link: Option<bool> = None;
-    // On a warm restart the system was already operational, so the initial
-    // link-up must not re-trigger DHCP — only a genuine link recovery (a
-    // down→up after a real link-down) should. A down edge clears this.
-    let mut suppress_dhcp_on_up = warm;
+    // DHCP must run on the first link-up. Even on a warm restart (FPGA still
+    // running, only the daemon restarted) the TAP is created fresh — it is
+    // owned by the daemon process and not IFF_PERSIST, so its DHCP lease and
+    // address vanished with the old process. Only a *reset recovery* (the TAP
+    // kept running while the FPGA was reset under us) leaves the lease standing,
+    // and that path sets this in the loop below. A down edge clears it.
+    let mut suppress_dhcp_on_up = false;
 
     // IGMP membership for the FPGA's multicast groups (PTP + RX/TX streams) on
     // the TAP. Joined once a valid IP exists; re-reported after every link-up.
@@ -112,9 +113,9 @@ fn run(
             igmp_rejoin_pending = true; // the bounce dropped switch forwarding
         }
 
-        // On the link-up edge (cold start or recovery from a link-down), kick
-        // off DHCP: the kernel has no DHCP client, so a userspace one must run.
-        // A warm restart / reset-recovery suppresses only the first up.
+        // On the link-up edge (cold start, daemon warm restart, or recovery from
+        // a link-down), kick off DHCP: the kernel has no DHCP client, so a
+        // userspace one must run. A reset-recovery suppresses only the first up.
         match reconcile_link(&device, &carrier_tap, &mut last_link) {
             Some(true) => {
                 // Link came up — the switch flushed memberships; re-report once
@@ -124,7 +125,7 @@ fn run(
                     suppress_dhcp_on_up = false;
                     if verbose >= 1 {
                         eprintln!(
-                            "aes67d: monitor: warm restart — link up, leaving the existing lease alone"
+                            "aes67d: monitor: reset recovery — link up, leaving the existing lease alone"
                         );
                     }
                 } else {
@@ -165,10 +166,12 @@ fn reconcile_igmp(
     *pending = false;
 }
 
-/// The multicast groups the FPGA needs forwarded, in join order: PTP first, then
-/// every RX stream, then every TX stream.
+/// The multicast groups the FPGA needs forwarded, in join order: PTP and the SAP
+/// discovery group first, then every RX stream, then every TX stream. (The SAP
+/// listener socket also joins the group itself; including it here re-reports the
+/// membership after a link-up so switch forwarding survives a bounce.)
 fn desired_groups(settings: &Settings) -> Vec<Ipv4Addr> {
-    let mut groups = vec![PTP_PRIMARY];
+    let mut groups = vec![PTP_PRIMARY, aes67_sap::SAP_GROUP];
     for rx in settings.rx_streams.values() {
         if let Ok(ip) = rx.dst_ip.parse::<Ipv4Addr>() {
             groups.push(ip);
@@ -278,7 +281,7 @@ fn usable(ip: Ipv4Addr) -> bool {
 }
 
 /// Read the first IPv4 address bound to `name`, or `None` if it has none.
-fn interface_ipv4(name: &str) -> Option<Ipv4Addr> {
+pub(crate) fn interface_ipv4(name: &str) -> Option<Ipv4Addr> {
     unsafe {
         let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
         if libc::getifaddrs(&mut ifap) != 0 {
@@ -335,12 +338,18 @@ mod tests {
                 samples_per_packet: 0,
                 ch_ids: vec![],
                 ssrc: 0,
+                name: None,
             },
         );
 
         assert_eq!(
             desired_groups(&s),
-            vec![PTP_PRIMARY, Ipv4Addr::new(239, 69, 2, 1), Ipv4Addr::new(239, 69, 1, 1)]
+            vec![
+                PTP_PRIMARY,
+                aes67_sap::SAP_GROUP,
+                Ipv4Addr::new(239, 69, 2, 1),
+                Ipv4Addr::new(239, 69, 1, 1)
+            ]
         );
     }
 }

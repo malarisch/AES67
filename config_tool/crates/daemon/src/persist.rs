@@ -69,6 +69,9 @@ pub struct NetworkCfg {
     /// RX IRQ GPIO line, as "CHIP:LINE".
     pub irq_gpio: Option<String>,
     pub poll_ms: Option<u64>,
+    /// SAP/SDP discovery on the TAP: announce local TX streams and learn remote
+    /// ones. `None`/`true` ⇒ enabled when a TAP exists; `false` disables it.
+    pub discovery: Option<bool>,
     /// Command run when the link comes up (cold start and link recovery) to
     /// (re)start DHCP. `{iface}` is replaced with the TAP name. Absent ⇒ default
     /// `["dhcpcd", "{iface}"]`; an empty list disables it (rely on the system's
@@ -152,6 +155,18 @@ impl DaemonConfig {
                 self.settings.rx_streams.insert(p.id, p.clone());
                 true
             }
+            // Torn-down streams are dropped from the persisted set so they are not
+            // replayed on the next start. Removing an RX stream here also makes the
+            // monitor's IGMP reconciler leave its multicast group (it reads this
+            // same live config). `true` even if absent → harmless re-save.
+            R::StopTxStream { id } => {
+                self.settings.tx_streams.remove(id);
+                true
+            }
+            R::StopRxStream { id } => {
+                self.settings.rx_streams.remove(id);
+                true
+            }
             // Not persisted: IP is DHCP-owned; resets are transient; raw address
             // writes aren't reproducible by name here.
             _ => false,
@@ -205,6 +220,27 @@ mod tests {
         assert!(!cfg.record(&Request::SetIp { ip: "192.168.1.2".into() }));
         assert!(!cfg.record(&Request::Reset(Default::default())));
         assert!(cfg.settings.registers.len() == 1);
+    }
+
+    #[test]
+    fn stopping_a_stream_drops_it_from_settings() {
+        let mut cfg = DaemonConfig::default();
+        cfg.record(&Request::SetRxStream(RxStreamParams {
+            id: 3,
+            dst_ip: "239.69.2.1".into(),
+            dst_port: 5004,
+            ch_map: vec![],
+            channels: None,
+            output_delay: 0,
+            samples_per_channel: 0,
+        }));
+        assert!(cfg.settings.rx_streams.contains_key(&3));
+
+        // Stop removes it and reports a persistable change.
+        assert!(cfg.record(&Request::StopRxStream { id: 3 }));
+        assert!(!cfg.settings.rx_streams.contains_key(&3));
+        // Idempotent: stopping an absent slot still re-saves harmlessly.
+        assert!(cfg.record(&Request::StopTxStream { id: 0 }));
     }
 
     #[test]

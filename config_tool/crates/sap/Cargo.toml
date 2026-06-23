@@ -1,0 +1,9 @@
+[package]
+name = "aes67-sap"
+description = "Session Announcement Protocol (RFC 2974) codec + listener/sender for AES67 discovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true

@@ -33,8 +33,8 @@ fn daemon_client_round_trip() {
 
     let transport: Box<dyn Transport + Send> = Box::new(MockTransport::new());
     let device = Arc::new(Mutex::new(Device::new(transport, test_map())));
-    // No persistence in this test (no config file).
-    let server = aes67_daemon::Server::new(device, None);
+    // No persistence or discovery in this test (no config file / network).
+    let server = aes67_daemon::Server::new(device, None, None);
 
     // Serve connections in the background (detached; the harness reaps it).
     let srv = Arc::clone(&server);
