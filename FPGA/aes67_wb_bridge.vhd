@@ -2,6 +2,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
+
+use work.audioclks_pkg.all;
 entity aes67_wb_bridge is
   generic (
 		MII_WIDTH : integer := 2;
@@ -74,13 +76,8 @@ entity aes67_wb_bridge is
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
-		wc_512fs_o : OUT STD_LOGIC;
-		pll_64fs_o : OUT STD_LOGIC;
-		pll_48k_fs_o : OUT STD_LOGIC;
-		pll_48k_fs_tdm_o : OUT STD_LOGIC;
-
-		pll_256fs_rising_o : OUT STD_LOGIC;
-		pll_256fs_falling_o : OUT STD_LOGIC; -- 50% phase shift - some ADC/DACs require it
+    audioclocks_o: OUT t_audio_clocks;
+    selected_audio_clock_o : OUT t_audio_clocks_selected;
 
 
 
@@ -464,12 +461,8 @@ begin
         mac_received_packet_length_o => mcu_received_packet_length,
         mac_tx_start_prefetch_o => mcu_tx_start_prefetch,
         pll_512fs_i => pll_512fs_i,
-        wc_512fs_o => wc_512fs_o,
-        pll_64fs_o => pll_64fs_o,
-        pll_48k_fs_o => pll_48k_fs_o,
-        pll_48k_fs_tdm_o => pll_48k_fs_tdm_o,
-        pll_256fs_rising_o => pll_256fs_rising_o,
-        pll_256fs_falling_o => pll_256fs_falling_o,
+        audioclocks_o => audioclocks_o,
+        selected_audio_clock_o => selected_audio_clock_o,
         mac_address_i => mac_address_i,
         ip_address_i => ip_address_i,
         ptp_announce_interval_i => ptp_announce_interval_i,

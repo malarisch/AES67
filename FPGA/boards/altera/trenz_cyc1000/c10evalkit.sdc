@@ -87,7 +87,7 @@ create_generated_clock -name {mac_mii_txc} \
 # 3. Per-feature sub-SDCs (after derive_pll_clocks)
 #**************************************************************
 
-#source ../../../sdc/audioclocks.sdc
+source ../../../sdc/audioclocks.sdc
 
 source ../../../sdc/ptp.sdc
 source ../../../sdc/litex_csr.sdc

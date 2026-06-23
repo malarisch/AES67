@@ -2,6 +2,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+use work.audioclks_pkg.all;
+
 entity wallclock is
     generic(
         -- nanoseconds added per clock tick (125 MHz -> 8 ns)
@@ -30,32 +32,18 @@ entity wallclock is
         second_pulse_o          : out std_logic;
 
         -- ============================================
-        -- PTP-disciplined master audio clock (NCO-direct, no PLL)
-        -- Output is register-driven from sys_clk domain.
-        -- Jitter: ±1 sys_clk period (±8ns @125MHz).
-        -- The NCO is disciplined via freq_correction_ppb, so this
-        -- clock tracks PTP time with sub-PPB accuracy.
-        -- ============================================
-        audio_mclk_o            : out std_logic;  -- Master clock, fs*512 = 24.576 MHz
-
-        -- ============================================
         -- Media clock for RTP packets (32-bit, from PTP epoch)
         -- Computed from wallclock: media_clock = (sec*48000 + sample_in_sec)
         -- ============================================
         media_clock_o           : out unsigned(31 downto 0);
+        audio_mclk_o : out std_logic;
         -- Pulse at fs rate in sys_clk domain (rising edge of LRCK)
         sample_pulse_o          : out std_logic;
         -- 1 ms tick in sys_clk domain (derived from sample_pulse, audio_fs/1000 samples)
         ms_pulse_o              : out std_logic;
 
 
-        clk_256fs_o             : out std_logic;  -- fs * 256
-        clk_128fs_o             : out std_logic;  -- fs * 128
-        clk_64fs_o              : out std_logic;  -- fs * 64  (= BCLK for I2S)
-        fs_o                    : out std_logic;  -- fs       (= LRCK, 50 % duty)
-        bclk_r_o                : out std_logic;  -- 256fs sampled on NCO rising  edge
-        bclk_f_o                : out std_logic;  -- 256fs sampled on NCO falling edge
-        fs_tdm_pulse_o          : out std_logic;   -- fs frame sync, 1 BCLK wide
+        clocks_o : out t_audio_clocks := AUDIO_CLOCKS_RESET;
         phase_locked_o : out std_logic;
 
         -- Diagnostic outputs for SignalTap / TB monitoring of the
@@ -184,14 +172,7 @@ architecture Behavioral of wallclock is
     signal mclk_cnt      : unsigned(8 downto 0) := (others => '0');
     signal sample_pulse_int : std_logic := '0';
 
-    signal clk_256fs_r   : std_logic := '0';
-    signal clk_128fs_r   : std_logic := '0';
-    signal clk_64fs_r    : std_logic := '0';
-    signal fs_r          : std_logic := '0';
-    signal bclk_r_r      : std_logic := '0';
-    signal bclk_f_r      : std_logic := '0';
-    -- TDM frame sync: held high for 2 NCO rising edges (= 1 BCLK).
-    signal fs_tdm_r      : std_logic := '0';
+    signal audioclks_reg : t_audio_clocks := AUDIO_CLOCKS_RESET;
     signal fs_tdm_cnt    : unsigned(1 downto 0) := (others => '0');
 
     -- NCO MSB edge detection (sys_clk domain — phase already exists in
@@ -275,18 +256,13 @@ begin
     wallclock_nanoseconds_o <= resize(unsigned(nsec_reg), 30);
     wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
-    audio_mclk_o            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
+    audioclks_reg.mclk            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
+    audio_mclk_o <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
     media_clock_o           <= media_clock_reg;
     sample_pulse_o          <= sample_pulse_int;
     ms_pulse_o              <= ms_pulse_int;
 
-    clk_256fs_o    <= clk_256fs_r;
-    clk_128fs_o    <= clk_128fs_r;
-    clk_64fs_o     <= clk_64fs_r;
-    fs_o           <= fs_r;
-    bclk_r_o       <= bclk_r_r;
-    bclk_f_o       <= bclk_f_r;
-    fs_tdm_pulse_o <= fs_tdm_r;
+    clocks_o <= audioclks_reg;
 
     -- Diagnostic outputs (see port declaration)
     mclk_cnt_o         <= mclk_cnt;
@@ -444,7 +420,6 @@ end generate;
     
 
     nco_proc: process(clk, reset_n)
-        variable v_new_cnt : unsigned(8 downto 0);
     begin
         if reset_n = '0' then
             nco_phase          <= (others => '0');
@@ -452,41 +427,11 @@ end generate;
             mclk_cnt           <= (others => '0');
             sample_pulse_int   <= '0';
             media_clock_prev   <= (others => '0');
-            clk_256fs_r        <= '0';
-            clk_128fs_r        <= '0';
-            clk_64fs_r         <= '0';
-            fs_r               <= '0';
-            bclk_r_r           <= '0';
-            fs_tdm_r           <= '0';
             fs_tdm_cnt         <= (others => '0');
         elsif rising_edge(clk) then
             sample_pulse_int <= '0';
             media_clock_prev <= media_clock_reg;
 
-            -- ===== Phase-pull bias (computed in nco_bias_proc) =====
-            -- nco_phase_bias is a one-shot signed bias added to
-            -- nco_increment for one cycle on every media_edge_tick. The
-            -- magnitude is proportional to the phase error (see
-            -- nco_bias_proc). Sign convention:
-            --   mclk_cnt in [3..255]   -> NCO AHEAD  -> bias < 0
-            --   mclk_cnt in [256..508] -> NCO BEHIND -> bias > 0
-            -- The dead band {0,1,2,509,510,511} sets phase_locked='1'.
-
-            -- nco_increment = base + ppb-correction + phase-pull-bias.
-            -- All three are recomputed every cycle so the phase-pull
-            -- bias is a true one-shot kick — adding it to the previous
-            -- nco_increment instead would let the bias accumulate
-            -- across cycles whenever ppb_adj_reg's update was held off
-            -- by nco_ppb_adj_wait, producing a phase-dependent
-            -- frequency offset. ppb_adj_reg itself only changes every
-            -- other cycle (see nco_ppb_adj_proc) but reading the held
-            -- value here is fine.
-            
-            -- ===== Hard resync on wallclock_set / phase_jump =====
-            -- These are large-step events. A pull loop would take too
-            -- long to converge from arbitrary phase, so reset the NCO
-            -- to align with the wallclock fs edge that media_proc will
-            -- produce ~3 cycles later. The pull loop then maintains it.
             if wallclock_set_i = '1' then
                 nco_phase      <= (others => '0');
                 nco_phase_prev <= '0';
@@ -496,50 +441,86 @@ end generate;
                 nco_phase_prev <= std_logic(nco_phase(NCO_PHASE_BITS - 1));
                 if nco_phase_prev = '0' and nco_phase(NCO_PHASE_BITS - 1) = '1' then
                     -- NCO rising edge: advance divider counter.
+                    mclk_cnt <= mclk_cnt + 1;
                     if mclk_cnt = 511 then
-                        v_new_cnt        := (others => '0');
+                        
                         sample_pulse_int <= '1';
-                        -- Frame boundary: arm TDM frame sync for 1 BCLK.
-                        fs_tdm_r   <= '1';
-                        fs_tdm_cnt <= to_unsigned(2, 2);
-                    else
-                        v_new_cnt := mclk_cnt + 1;
-                        if fs_tdm_cnt /= 0 then
-                            fs_tdm_cnt <= fs_tdm_cnt - 1;
-                            if fs_tdm_cnt = 1 then
-                                fs_tdm_r <= '0';
-                            end if;
-                        end if;
                     end if;
-                    mclk_cnt <= v_new_cnt;
-
-                    -- Drive sub-clocks from the post-increment counter.
-                    -- fs rises with sample_pulse (cnt = 0 → fs = '1'),
-                    -- so fs is the inverted MSB of v_new_cnt.
-                    clk_256fs_r <= v_new_cnt(0);
-                    clk_128fs_r <= v_new_cnt(1);
-                    clk_64fs_r  <= v_new_cnt(2);
-                    fs_r        <= not v_new_cnt(8);
-                    bclk_r_r    <= v_new_cnt(0);
+                    
                 end if;
             end if;
         end if;
-    end process nco_proc;
+    
 
-    -- bclk_f: like bclk_r_r but updated on NCO falling edges
-    -- (half-period shift), giving a phase-shifted 256fs for DACs that
-    -- want data captured on the opposite BCLK edge.
-    bclk_f_proc: process(clk, reset_n)
+    end process nco_proc;
+    process (clk)
     begin
-        if reset_n = '0' then
-            bclk_f_r <= '0';
-        elsif rising_edge(clk) then
-            if nco_falling_tick = '1' then
-                bclk_f_r <= mclk_cnt(0);
+        if rising_edge(clk) then
+                audioclks_reg.clk_256fs.bclk <= not mclk_cnt(0);
+    audioclks_reg.clk_128fs.bclk <= not mclk_cnt(1);
+    audioclks_reg.clk_64fs.bclk  <= not mclk_cnt(2);
+    audioclks_reg.fsclk_50 <= not mclk_cnt(8);
+        end if;
+    end process;
+
+    process (clk)
+
+    begin
+        if rising_edge(clk) then
+            if (mclk_cnt = 0) then
+                        audioclks_reg.clk_256fs.fsclk_tdm <= '1';
+                        audioclks_reg.clk_128fs.fsclk_tdm <= '1';
+                        audioclks_reg.clk_64fs.fsclk_tdm <= '1';
+                    elsif (mclk_cnt = 2) then
+                        audioclks_reg.clk_256fs.fsclk_tdm <= '0';
+                    elsif (mclk_cnt = 4) then
+                        audioclks_reg.clk_128fs.fsclk_tdm <= '0';
+                    elsif (mclk_cnt = 8) then
+                        audioclks_reg.clk_64fs.fsclk_tdm <= '0';
+                    end if;
+        end if;
+    end process;
+
+    
+    process (clk)
+        variable cntsub : unsigned(8 downto 0);
+    begin
+        if rising_edge(clk) then
+            cntsub := mclk_cnt + 2;
+            audioclks_reg.clk_256fs.fsclk_i2s_50 <= not cntsub(8);
+            if (cntsub = 0) then
+                audioclks_reg.clk_256fs.fsclk_i2s_tdm <= '1';
+            elsif (cntsub = 2) then
+                audioclks_reg.clk_256fs.fsclk_i2s_tdm <= '0';
             end if;
         end if;
-    end process bclk_f_proc;
-
+    end process;
+    process (clk)
+        variable cntsub : unsigned(8 downto 0);
+    begin
+        if rising_edge(clk) then
+            cntsub := mclk_cnt + 4;
+            audioclks_reg.clk_128fs.fsclk_i2s_50 <= not cntsub(8);
+            if (cntsub = 0) then
+                audioclks_reg.clk_128fs.fsclk_i2s_tdm <= '1';
+            elsif (cntsub = 4) then
+                audioclks_reg.clk_128fs.fsclk_i2s_tdm <= '0';
+            end if;
+        end if;
+    end process;
+    process (clk)
+        variable cntsub : unsigned(8 downto 0);
+    begin
+        if rising_edge(clk) then
+            cntsub := mclk_cnt + 8;
+            audioclks_reg.clk_64fs.fsclk_i2s_50 <= not cntsub(8);
+            if (cntsub = 0) then
+                audioclks_reg.clk_64fs.fsclk_i2s_tdm <= '1';
+            elsif (cntsub = 8) then
+                audioclks_reg.clk_64fs.fsclk_i2s_tdm <= '0';
+            end if;
+        end if;
+    end process;
     -- ============================================================
     -- Millisecond Pulse Process
     -- Counts audio_fs/1000 sample pulses (48 @ 48 kHz) and emits a

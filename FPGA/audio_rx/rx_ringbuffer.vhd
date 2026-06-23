@@ -2,6 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
 
+use work.audioclks_pkg.all;
 entity rx_ringbuffer is
     generic
     (
@@ -21,6 +22,8 @@ entity rx_ringbuffer is
         -- parser and the playout paths independently. See rx_ringbuffer_tb.
         SIM_SAMPLE_RAM_BACKDOOR : boolean := false
 
+        
+
     );
 	port
 	(
@@ -29,9 +32,8 @@ entity rx_ringbuffer is
 
         audio_out :             out std_logic_vector(bytes_per_sample * 8 * global_channel_count - 1 downto 0);
         tdm_out : out std_logic_vector(TDM_OUTPUTS - 1 downto 0);
-		fs_clk_sync_i      				: in std_logic;
-        fs_clk_50duty_i                 : in std_logic;
-        bclk_sync_i : in std_logic;
+		
+        audioclocks_i : in t_audio_clocks_selected;
 
 		media_clock_i: in std_logic_vector(31 downto 0);
 
@@ -182,7 +184,7 @@ architecture Behavioral of rx_ringbuffer is
     signal tdm_byte_tick    : std_logic := '0';  -- pulse: start prefetching next byte
     signal tdm_commit_tick  : std_logic := '0';  -- pulse: copy shadow -> latch
     signal tdm_byte_off     : unsigned(1 downto 0) := (others => '0'); -- captured offset for in-flight burst
-    signal fs_clk_50duty_sync : std_logic := '0';
+
     
     -- Metering
     constant SAMPLE_BITS : integer := bytes_per_sample * 8;
@@ -504,14 +506,14 @@ begin
 
             metering_clear_i_sync1 <= '0';
             metering_clear_i_sync2 <= '0';
-            
+            zbclk <= '0';
             zaudio_sync <= '0';
         elsif (rising_edge(sys_clk)) then
             metering_clear_i_sync1 <= metering_clear_i;
             metering_clear_i_sync2 <= metering_clear_i_sync1;
 
-            zaudio_sync <= fs_clk_sync_i;
-            zbclk <= bclk_sync_i;
+            zaudio_sync <= audioclocks_i.fsclk_tdm;
+            zbclk <= audioclocks_i.bclk;
             
 
             -- CDC synchronizer for toggle signal from mac_rx_clock domain
@@ -543,7 +545,7 @@ parellel_out_proc_gen: if (PARALLEL_OUT = true) generate
             end if;
 
 
-            if zaudio_sync = '0' and fs_clk_sync_i = '1' then
+            if zaudio_sync = '0' and audioclocks_i.fsclk_tdm = '1' then
                 output_next_sample <= '1';
                 -- Derive read pointer directly from media clock (same as write side, but without delay)
                 -- This keeps read-write distance constant at exactly the configured delay
@@ -652,7 +654,7 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
         if rising_edge(sys_clk) then
             tdm_byte_tick   <= '0';
             tdm_commit_tick <= '0';
-            if (bclk_sync_i = '1' and zbclk = '0') then
+            if (audioclocks_i.bclk = '1' and zbclk = '0') then
                 tdm_channel_bit_counter <= tdm_channel_bit_counter + 1;
 
                 if tdm_channel_bit_counter(2 downto 0) = "000" then
@@ -667,7 +669,7 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                     tdm_channel_counter <= tdm_channel_counter + 1;
                 end if;
             end if;
-            if (fs_clk_sync_i = '1' and zaudio_sync = '0') then
+            if (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
                 tdm_channel_bit_counter <= (others => '0');
                 tdm_channel_counter <= (others => '0');
             end if;
@@ -755,11 +757,11 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
             end case;
 
             if tdm_commit_tick = '1'
-               and not (fs_clk_sync_i = '1' and zaudio_sync = '0') then
+               and not (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
                 tdm_byte_latch <= tdm_byte_shadow;
             end if;
 
-            if (fs_clk_sync_i = '1' and zaudio_sync = '0') then
+            if (audioclocks_i.fsclk_tdm = '1' and zaudio_sync = '0') then
                 tdm_byte_in_slot  <= to_unsigned(3, 2);
                 tdm_fetch_ch      <= (others => '1');
                 tdm_fetch_pin_idx <= 0;

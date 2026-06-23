@@ -5,6 +5,7 @@ USE ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 
+use work.audioclks_pkg.all;
 
 ENTITY aes67_top IS  
 	generic (
@@ -95,13 +96,8 @@ ENTITY aes67_top IS
 		-- audio clocks
 
 		pll_512fs_i : IN STD_LOGIC;
-		wc_512fs_o : OUT STD_LOGIC;
-		pll_64fs_o : OUT STD_LOGIC;
-		pll_48k_fs_o : OUT STD_LOGIC;
-		pll_48k_fs_tdm_o : OUT STD_LOGIC;
-
-		pll_256fs_rising_o : OUT STD_LOGIC;
-		pll_256fs_falling_o : OUT STD_LOGIC; -- 50% phase shift - some ADC/DACs require it
+		audioclocks_o : out t_audio_clocks;
+		selected_audio_clock_o : out t_audio_clocks_selected;
 
 
 		-- control registers - basic
@@ -193,29 +189,8 @@ END aes67_top;
 
 ARCHITECTURE rtl OF aes67_top IS 
 
-
--- audio clocks
-SIGNAL pll_64fs : STD_LOGIC;
-SIGNAL pll_48k_fs : STD_LOGIC;
-SIGNAL pll_48k_fs_tdm : STD_LOGIC;
-
-signal pll_256fs_falling : STD_LOGIC;
-signal pll_256fs_rising : STD_LOGIC;
-signal clk_512fs : STD_LOGIC;
-signal wc_mclk : STD_LOGIC; -- 512·fs NCO generated from wallclock
-
--- Wallclock-NCO-derived audio sub-clocks (phase-coherent with fs epoch).
--- Used in the internal-NCO path; the external-PLL path uses pll_* directly.
-signal wc_clk_256fs   : STD_LOGIC;
-signal wc_clk_128fs   : STD_LOGIC;
-signal wc_clk_64fs_int : STD_LOGIC;
-signal wc_fs_int       : STD_LOGIC;
-signal wc_bclk_r_int   : STD_LOGIC;
-signal wc_bclk_f_int   : STD_LOGIC;
-signal wc_fs_pulse     : STD_LOGIC;
-signal wc_fs_tdm_int   : STD_LOGIC;
-signal bclk_int_rx : STD_LOGIC;
-signal bclk_int_tx : STD_LOGIC;
+signal audioclks : t_audio_clocks := AUDIO_CLOCKS_RESET;
+signal selected_audio_clock : t_audio_clocks_selected := AUDIO_CLOCKS_RESET_SELECTED;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal media_tick : STD_LOGIC;
 signal second_pulse_sys : STD_LOGIC;
@@ -223,6 +198,7 @@ signal mac_linkup : STD_LOGIC;
 -- mac_linkup_o is driven from internal mac_linkup below
 
 -- sample registers for in/output
+
 
 
 
@@ -273,7 +249,8 @@ signal servo_mon_sample_count_unsigned        : unsigned(15 downto 0);
 
 BEGIN
 
-
+audioclocks_o <= audioclks;
+selected_audio_clock_o <= selected_audio_clock;
 mii_txd_o <= mii_txd_o_reg;
 ptp_module_rst_n <= rst_n and not ptp_reset_i;
 audiotx_reset_n <= rst_n and not audiotx_reset_i;
@@ -281,11 +258,6 @@ audiorx_reset_n <= rst_n and not audiorx_reset_i;
 
 mac_speed_o <= mac_speed;
 
-pll_64fs_o <= pll_64fs;
-pll_48k_fs_o <= pll_48k_fs;
-pll_48k_fs_tdm_o <= pll_48k_fs_tdm;
-pll_256fs_rising_o <= pll_256fs_rising;
-pll_256fs_falling_o <= pll_256fs_falling;
 
 mac_tx_clock_o <= mac_tx_clock;
 mac_reset <= not mac_resetn_i;
@@ -294,7 +266,7 @@ mac_rx_clock_o <= mac_rx_clock;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
-
+selected_audio_clock <= audioclks.clk_256fs when TDM_BCLK_MULT = 256 else audioclks.clk_128fs when TDM_BCLK_MULT = 128 else audioclks.clk_64fs WHEN TDM_BCLK_MULT = 64;
 mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 --	clk_512fs <= pll_512fs_i;
 --	audioclocks_inst: entity work.audioclock_generator
@@ -309,7 +281,7 @@ mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 	ppb_meter_inst: entity work.clock_ppb_meter
 	PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => rst_n,
-		 wallclock_512fs_in => wc_mclk,
+		 wallclock_512fs_in => audioclks.mclk,
 		 pll_512fs_in => pll_512fs_i,
 		 wallclock_second_pulse_i => second_pulse_sys,
 		 start_i => ppb_meter_start_i,
@@ -319,23 +291,12 @@ mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 end generate;
 
 mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
-	-- Sub-clocks come straight from the wallclock NCO (ptp_module).
-	-- They are sys_clk-synchronous, phase-coherent with fs/sample_pulse,
-	-- and reset cleanly on PTP resync — no separate divider needed.
-	clk_512fs         <= wc_mclk;
-	pll_64fs          <= wc_clk_64fs_int;
-	pll_48k_fs        <= wc_fs_int;
-	pll_256fs_rising  <= wc_bclk_r_int;
-	pll_256fs_falling <= wc_bclk_f_int;
-	pll_48k_fs_tdm    <= wc_fs_tdm_int;
 	wc_counter_o <= (others => '0');
 	pll_counter_o <= (others => '0');
 	pll_meas_valid_o <= '0';
 end generate;
 
-wc_512fs_o <= clk_512fs;
-bclk_int_rx <= wc_clk_64fs_int when TDM_BCLK_MULT = 64 else pll_256fs_rising;
-bclk_int_tx <= wc_clk_64fs_int when TDM_BCLK_MULT = 64 else pll_256fs_rising;
+
 
 
 audiotx_inst: entity work.audio_tx_module
@@ -355,10 +316,9 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- In integrated TDM mode the buffer's frame sync must be the TDM fsync
 		 -- (pll_48k_fs_tdm), matching what the external tdm8_in used; the parallel
 		 -- capture path uses the regular pll_48k_fs.
-		 fs_tdm_clk_i => pll_48k_fs_tdm,
-		 fs_halfduty_clk_i => wc_fs_int,
+		 audioclocks_i => selected_audio_clock,
+		 fs_halfduty_clk_i => audioclks.fsclk_50,
  
-		 bclk_i => bclk_int_tx,
 		 tdm_in_i => tdm8in_i(AUDIO_TX_TDM_INPUTS - 1 downto 0),
 
 		 mac_tx_clock => mac_tx_clock,
@@ -444,19 +404,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ptp_offset_from_master => ptp_offset_from_master_o,
 		 
 
-		 -- generated clocks
-		 wc_mclk => wc_mclk,
-		 -- Audio sub-clocks straight from the wallclock NCO. Phase-coherent
-		 -- with the fs/sample epoch (replaces the divider in
-		 -- audioclock_generator(_sysclk) for the internal-NCO path).
-		 wc_clk_256fs    => wc_clk_256fs,
-		 wc_clk_128fs    => wc_clk_128fs,
-		 wc_clk_64fs     => wc_clk_64fs_int,
-		 wc_fs           => wc_fs_int,
-		 wc_bclk_r       => wc_bclk_r_int,
-		 wc_bclk_f       => wc_bclk_f_int,
-		 wc_fs_pulse     => wc_fs_pulse,
-		 wc_fs_tdm_pulse => wc_fs_tdm_int,
+		 audioclocks_o => audioclks,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
 		 media_tick => media_tick,
@@ -535,9 +483,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 eth_read_data_i => eth_ram_data_sys_rtp,
 
 		 -- clocking
-		fs_clk_sync_i => pll_48k_fs,
-		fs_clk_50duty_i => pll_48k_fs,
-		bclk_sync_i => bclk_int_rx,
+		audioclocks_i => selected_audio_clock,
 		media_clock_i => media_clock,
 		 
 		 -- configuration

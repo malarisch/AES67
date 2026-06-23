@@ -36,6 +36,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+use work.audioclks_pkg.all;
+
 entity wallclock_tb is
 end entity;
 
@@ -57,11 +59,11 @@ architecture sim of wallclock_tb is
     signal reset_n    : std_logic := '0';
 
     signal wc_sec_o   : unsigned(47 downto 0);
-    signal wc_ns_o    : unsigned(31 downto 0);
+    signal wc_ns_o    : unsigned(29 downto 0);
 
     signal wc_set     : std_logic := '0';
     signal wc_sec_i   : unsigned(47 downto 0) := (others => '0');
-    signal wc_ns_i    : unsigned(31 downto 0) := (others => '0');
+    signal wc_ns_i    : unsigned(29 downto 0) := (others => '0');
 
     signal freq_corr  : signed(19 downto 0) := (others => '0');
 
@@ -71,8 +73,7 @@ architecture sim of wallclock_tb is
     signal sample_pulse  : std_logic;
     signal ms_pulse      : std_logic;
 
-    signal clk_256fs, clk_128fs, clk_64fs, fs_sig : std_logic;
-    signal bclk_r, bclk_f, fs_tdm                 : std_logic;
+    signal clocks                                 : t_audio_clocks;
     signal phase_locked                           : std_logic;
 
     -- Diagnostic taps
@@ -140,13 +141,7 @@ begin
             media_clock_o           => media_clock,
             sample_pulse_o          => sample_pulse,
             ms_pulse_o              => ms_pulse,
-            clk_256fs_o             => clk_256fs,
-            clk_128fs_o             => clk_128fs,
-            clk_64fs_o              => clk_64fs,
-            fs_o                    => fs_sig,
-            bclk_r_o                => bclk_r,
-            bclk_f_o                => bclk_f,
-            fs_tdm_pulse_o          => fs_tdm,
+            clocks_o                => clocks,
             phase_locked_o          => phase_locked,
             mclk_cnt_o              => mclk_cnt_dbg,
             media_edge_tick_o       => media_edge_dbg,
@@ -188,7 +183,7 @@ begin
 
     -- Main stimulus / checks
     stim: process
-        variable ns_start         : unsigned(31 downto 0);
+        variable ns_start         : unsigned(29 downto 0);
         variable sec_start        : unsigned(47 downto 0);
         variable t_mark           : time;
         variable mc_prev_v        : unsigned(31 downto 0);
@@ -218,7 +213,7 @@ begin
         for i in 1 to 100 loop
             wait until rising_edge(clk);
         end loop;
-        assert (wc_ns_o - ns_start) = to_unsigned(100 * INCREMENT_INTERVAL_C, 32)
+        assert (wc_ns_o - ns_start) = to_unsigned(100 * INCREMENT_INTERVAL_C, 30)
             report "ns increment over 100 cycles wrong: got "
                  & integer'image(to_integer(wc_ns_o - ns_start))
                  & " expected " & integer'image(100 * INCREMENT_INTERVAL_C)
@@ -354,7 +349,7 @@ begin
         variable servo_idx  : natural := 0;
 
         variable ppb        : integer;
-        variable ns_a, ns_b : unsigned(31 downto 0);
+        variable ns_a, ns_b : unsigned(29 downto 0);
         variable sec_a, sec_b : unsigned(47 downto 0);
         variable mc_a, mc_b   : unsigned(31 downto 0);
         variable mclk_a, mclk_b : integer;
@@ -519,7 +514,7 @@ begin
              & integer'image(TARGET_SEC)
              & " ns=" & integer'image(TARGET_NS);
         wc_sec_i <= to_unsigned(TARGET_SEC, 48);
-        wc_ns_i  <= to_unsigned(TARGET_NS, 32);
+        wc_ns_i  <= to_unsigned(TARGET_NS, 30);
         wc_set   <= '1';
         wait until rising_edge(clk);
         wc_set   <= '0';
@@ -539,8 +534,8 @@ begin
             severity error;
         -- ns has advanced a few cycles since the set. Check it's in
         -- the expected range (TARGET_NS .. TARGET_NS + 100).
-        assert wc_ns_o >= to_unsigned(TARGET_NS, 32)
-           and wc_ns_o <= to_unsigned(TARGET_NS + 100, 32)
+        assert wc_ns_o >= to_unsigned(TARGET_NS, 30)
+           and wc_ns_o <= to_unsigned(TARGET_NS + 100, 30)
             report "wallclock_set: ns out of range, got "
                  & integer'image(to_integer(wc_ns_o))
                  & " expected ~" & integer'image(TARGET_NS)

@@ -25,7 +25,7 @@ create_clock -name {audio_mclk} -period 40.690 -waveform { 0.000 20.345 } \
 # nco_phase[31] is a register bit, but it fans out as a logic clock when
 # USE_EXTERNAL_PLL = "false". Naming it as a clock here both stops Quartus
 # from treating it as unconstrained and gives us a name to use elsewhere.
-set nco_reg {*ptp_module:ptp_inst|wallclock:b2v_wallclock|nco_phase[31]}
+set nco_reg {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.mclk}
 
 create_clock -name {nco_mclk} -period 40.690 [get_registers $nco_reg]
 
@@ -40,31 +40,20 @@ create_clock -name {nco_mclk} -period 40.690 [get_registers $nco_reg]
 create_generated_clock -name {clk_256fs} \
     -source [get_registers $nco_reg] -master_clock {nco_mclk} \
     -divide_by 2 \
-    [get_registers {*audioclock_generator:audioclocks_inst|cnt[0]}]
+    [get_registers {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_256fs.bclk}]
 
 # cnt(1) -> clk_128fs : 6.144 MHz (mclk / 4)
 create_generated_clock -name {clk_128fs} \
     -source [get_registers $nco_reg] -master_clock {nco_mclk} \
     -divide_by 4 \
-    [get_registers {*audioclock_generator:audioclocks_inst|cnt[1]}]
+    [get_registers {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_128fs.bclk}]
 
 # cnt(2) -> clk_64fs : 3.072 MHz (mclk / 8)
 create_generated_clock -name {clk_64fs} \
     -source [get_registers $nco_reg] -master_clock {nco_mclk} \
     -divide_by 8 \
-    [get_registers {*audioclock_generator:audioclocks_inst|cnt[2]}]
+    [get_registers {*soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_64fs.bclk}]
 
-# cnt(8) -> fs : 48 kHz (mclk / 512)
-create_generated_clock -name {fs} \
-    -source [get_registers $nco_reg] -master_clock {nco_mclk} \
-    -divide_by 512 \
-    [get_registers {*audioclock_generator:audioclocks_inst|cnt[8]}]
-
-# bclk_f_r : 12.288 MHz, registered on the falling edge of mclk
-create_generated_clock -name {bclk_f} \
-    -source [get_registers $nco_reg] -master_clock {nco_mclk} \
-    -divide_by 2 -invert \
-    [get_registers {*audioclock_generator:audioclocks_inst|bclk_f_r}]
 
 # ----------------------------------------------------------------------------
 # Cross-domain handling.

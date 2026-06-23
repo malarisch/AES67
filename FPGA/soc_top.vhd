@@ -5,6 +5,7 @@ USE ieee.numeric_std.all;
 
 use work.miim_types.all;
 
+use work.audioclks_pkg.all;
 ENTITY soc_top IS
 generic (
     	clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
@@ -38,7 +39,10 @@ generic (
 		USE_EXTERNAL_PLL : BOOLEAN := false;
 		ENABLE_METERING: BOOLEAN := false;
     PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-    TDM_BCLK_MULT : INTEGER := 256
+    TDM_BCLK_MULT : INTEGER := 256;
+    TDM_I2S_MODE : BOOLEAN := false;
+    TDM_FSCLK_50DUTY : BOOLEAN := false
+
 
 
 	);
@@ -96,12 +100,10 @@ generic (
 		pll_512fs_i :  IN  STD_LOGIC := '0'; -- gpio 1
 
 		-- audio clocks outputs
-		audioclk_512fs_o :  OUT  STD_LOGIC;
-		audioclk_256fs_rising_o : OUT STD_LOGIC;
-		audioclk_256fs_falling_o :  OUT  STD_LOGIC; -- gpio 12
-        audioclk_64fs_o : OUT STD_LOGIC;
+		audioclk_mclk_o :  OUT  STD_LOGIC;
+		audioclk_bclk_o : OUT STD_LOGIC;
 		audioclk_lrclk_o :  OUT  STD_LOGIC;
-    audioclk_lrclk_tdm_o :  OUT  STD_LOGIC;
+    
 		
 
 		tdm_in :  IN  STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
@@ -270,8 +272,16 @@ signal hbus_clk : std_logic;
 signal mcu_clk : std_logic;
 signal mcu_clk_90 : std_logic;
 signal eth_buf_irq : std_logic;
-
+signal audioclocks : t_audio_clocks;
+signal selected_audio_clock : t_audio_clocks_selected;
 begin
+
+  audioclk_mclk_o <= audioclocks.mclk WHEN TDM_BCLK_MULT /= 64 ELSE audioclocks.clk_256fs.bclk;
+  audioclk_bclk_o <= selected_audio_clock.bclk;
+  audioclk_lrclk_o <= audioclocks.fsclk_50 when TDM_I2S_MODE = false and TDM_FSCLK_50DUTY = true
+else selected_audio_clock.fsclk_i2s_50 when TDM_I2S_MODE = true and TDM_FSCLK_50DUTY = true
+  else selected_audio_clock.fsclk_tdm when TDM_I2S_MODE = false and TDM_FSCLK_50DUTY = false
+    else selected_audio_clock.fsclk_i2s_tdm when TDM_I2S_MODE = true and TDM_FSCLK_50DUTY = false;
 wb_bridge_top_inst : entity work.wb_bridge_top
   generic map (
     clk_in_speed => clk_in_speed,
@@ -315,12 +325,8 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     enet_mdc => enet_mdc,
     enet_mdio => enet_mdio,
     pll_512fs_i => pll_512fs_i,
-    audioclk_512fs_o => audioclk_512fs_o,
-    audioclk_256fs_rising_o => audioclk_256fs_rising_o,
-    audioclk_256fs_falling_o => audioclk_256fs_falling_o,
-    audioclk_64fs_o => audioclk_64fs_o,
-    audioclk_lrclk_o => audioclk_lrclk_o,
-    audioclk_lrclk_tdm_o => audioclk_lrclk_tdm_o,
+    audioclocks_o => audioclocks,
+    selected_audio_clock_o => selected_audio_clock,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     rx_sample_register => rx_sample_register,

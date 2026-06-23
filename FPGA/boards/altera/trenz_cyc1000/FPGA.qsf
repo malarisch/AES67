@@ -386,6 +386,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN5
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN6
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN7
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to D0
+set_global_assignment -name VHDL_FILE ../../../packages/audioclks_pkg.vhd
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/spibone/gateware/litex_soc_spibone.v
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/uartbone/gateware/litex_soc_uartbone.v
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/aes67_bridge/gateware/litex_soc_aes67_bridge.v

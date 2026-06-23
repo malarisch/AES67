@@ -49,7 +49,9 @@ ENTITY top_cyc1000 IS
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
 		AUDIO_TX_TDM_INPUTS : natural := 1;
 		AUDIO_TX_TDM_CHANNELS : natural  := 2;
-        TDM_BCLK_MULT : INTEGER := 64
+        TDM_BCLK_MULT : INTEGER := 64;
+            TDM_I2S_MODE : BOOLEAN := false;
+    TDM_FSCLK_50DUTY : BOOLEAN := true
 
 
 	);
@@ -165,7 +167,9 @@ begin
     AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
-    TDM_BCLK_MULT => TDM_BCLK_MULT
+    TDM_BCLK_MULT => TDM_BCLK_MULT,
+    TDM_FSCLK_50DUTY => TDM_FSCLK_50DUTY,
+    TDM_I2S_MODE => TDM_I2S_MODE
   )
   port map (
     rst_n_i => c10_resetn,
@@ -200,9 +204,8 @@ begin
     spiflash_miso => AIN2,
     pll_512fs_i => '0',
     --audioclk_512fs_o => AIN7,
-    audioclk_256fs_rising_o => open,
-    audioclk_256fs_falling_o => D0,
-    audioclk_64fs_o => AIN6,
+    audioclk_mclk_o => D0,
+    audioclk_bclk_o => AIN6,
     audioclk_lrclk_o => AIN4,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
