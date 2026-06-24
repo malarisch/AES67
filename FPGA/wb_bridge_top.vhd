@@ -38,7 +38,8 @@ generic (
 		USE_EXTERNAL_PLL : BOOLEAN := false;
 		ENABLE_METERING: BOOLEAN := false;
         PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-        TDM_BCLK_MULT : INTEGER := 256
+        TDM_BCLK_MULT : INTEGER := 256;
+        PTP_IN_SOFTWARE : BOOLEAN := false
 
 
 	);
@@ -151,7 +152,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-    TDM_BCLK_MULT => TDM_BCLK_MULT
+    TDM_BCLK_MULT => TDM_BCLK_MULT,
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
 )
  port map(
     sys_clk_125MHz_i => sys_clk_125MHz,

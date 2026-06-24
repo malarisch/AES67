@@ -3,6 +3,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 use work.audioclks_pkg.all;
+use work.wallclock_signals_pkg.all;
 
 entity wallclock is
     generic(
@@ -18,15 +19,7 @@ entity wallclock is
         clk                     : in  std_logic;
         reset_n                 : in  std_logic;
 
-        wallclock_seconds_o     : out unsigned(47 downto 0);
-        wallclock_nanoseconds_o : out unsigned(29 downto 0);
-
-        wallclock_set_i         : in  std_logic;
-        wallclock_seconds_i     : in  unsigned(47 downto 0);
-        wallclock_nanoseconds_i : in  unsigned(29 downto 0);
-
-        -- PTP Servo correction inputs
-        freq_correction_ppb_i   : in  signed(19 downto 0);  -- PPB correction (parts per billion, clamped to ±500_000 by servo)
+        wallclock_signals : inout t_wallclock_signals;
 
 
         second_pulse_o          : out std_logic;
@@ -77,27 +70,6 @@ architecture Behavioral of wallclock is
     -- ~4 bits worth of LUT delay -- the dominant critical path here.
     signal frac_ns_accum : signed(27 downto 0) := (others => '0');
     signal new_frac : signed (28 downto 0) := (others => '0');
-    -- Fractional accumulator overflow threshold.
-    --
-    -- Per cycle we add ppb to frac_ns_accum. Per real second there are
-    -- sys_clk_hz cycles. For 1 ppb to translate into exactly 1 ns/s of
-    -- correction (the definition of ppb), we need:
-    --   (sys_clk_hz * 1) / FRAC_OVERFLOW = 1 ns/s
-    --   → FRAC_OVERFLOW = sys_clk_hz = 125e6.
-    --
-    -- (Previously both sides carried a factor of increment_interval (= 8),
-    -- which cancelled out: the per-cycle increment was 8*ppb and the
-    -- threshold was sys_clk_hz*8 = 1e9. Removing the common factor leaves
-    -- the same ppb-to-ns/s ratio but shrinks operand widths -- the adder,
-    -- compare and subtractor on the critical path drop from 32 to 28 bit
-    -- in their effective range, and Quartus has a much easier time.)
-    --
-    -- Historical note: the very first threshold was 2^30, which was off
-    -- by 2^30/1e9 ≈ 1.0737 vs the correct value. The PI servo locked the
-    -- wallclock anyway (by overshooting the ppb output by ~7.4 %), but
-    -- the NCO uses NCO_PPB_SCALE = NCO_BASE_INC_48 / 1e9 (correct ppb
-    -- scaling), so it received the overshot value at face value and ran
-    -- 7.4 % of the XO drift fast/slow relative to the master.
 
     constant FRAC_OVERFLOW  : signed(27 downto 0) :=
         to_signed(sys_clk_hz, 28);
@@ -253,8 +225,8 @@ begin
     -- unsigned(nsec_reg)(29 downto 0) slice -- but slicing the result of a
     -- type conversion is illegal in strict VHDL (GHDL rejects it), whereas
     -- resize() is portable across GHDL / ModelSim / Quartus.
-    wallclock_nanoseconds_o <= resize(unsigned(nsec_reg), 30);
-    wallclock_seconds_o     <= sec_reg;
+    wallclock_signals.wallclock_nanoseconds_o <= resize(unsigned(nsec_reg), 30);
+    wallclock_signals.wallclock_seconds_o     <= sec_reg;
     second_pulse_o          <= second_pulse_int;
     audioclks_reg.mclk            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
     audio_mclk_o <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
@@ -316,7 +288,7 @@ begin
                 -- within the 38-bit native width. Fits in a single Cyclone-
                 -- 10LP 18×18 DSP with a small extension instead of the
                 -- two-DSP build the old 32×18 needed.
-                ppb_adj_reg <= resize(freq_correction_ppb_i * NCO_PPB_SCALE,
+                ppb_adj_reg <= resize(wallclock_signals.freq_correction_ppb_i * NCO_PPB_SCALE,
                                       NCO_PHASE_BITS);
             else
                 nco_ppb_adj_wait <= '0';
@@ -387,7 +359,7 @@ begin
 
             ppb_trim       <= (others => '0');
         elsif rising_edge(clk) then
-            if wallclock_set_i = '1' then
+            if wallclock_signals.wallclock_set_i = '1' then
                 -- Hard resync zeroes the NCO; clear the integrator too so
                 -- it doesn't carry old drift compensation across the jump.
                 ppb_trim <= (others => '0');
@@ -432,7 +404,7 @@ end generate;
             sample_pulse_int <= '0';
             media_clock_prev <= media_clock_reg;
 
-            if wallclock_set_i = '1' then
+            if wallclock_signals.wallclock_set_i = '1' then
                 nco_phase      <= (others => '0');
                 nco_phase_prev <= '0';
                 mclk_cnt       <= (others => '0');
@@ -616,7 +588,7 @@ end generate;
             new_frac <= (others => '0');
         elsif rising_edge(clk) then
             new_frac <= resize(frac_ns_accum, 29)
-                          + resize(freq_correction_ppb_i, 29);
+                          + resize(wallclock_signals.freq_correction_ppb_i, 29);
         end if;
     end process;
 
@@ -679,16 +651,23 @@ end generate;
 
 
             -- ===== OVERRIDE PATHS =====
-            if wallclock_set_i = '1' then
+            if wallclock_signals.wallclock_set_i = '1' then
                 -- Hard set of time — overrides everything
-                nsec_reg      <= signed(resize(wallclock_nanoseconds_i, 32));
-                sec_reg       <= wallclock_seconds_i;
-                new_nsec_pipe  <= signed(resize(wallclock_nanoseconds_i, 32));
-                new_nsec_minus_sec <= signed(resize(wallclock_nanoseconds_i, 32)) - NS_PER_SEC;
-                new_nsec_plus_sec  <= signed(resize(wallclock_nanoseconds_i, 32)) + NS_PER_SEC;
+                nsec_reg      <= resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
+                sec_reg       <= unsigned(wallclock_signals.wallclock_seconds_i);
+                new_nsec_pipe  <= resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
+                new_nsec_minus_sec <= resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32) - NS_PER_SEC;
+                new_nsec_plus_sec  <= resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32) + NS_PER_SEC;
                 sec_adj_pipe   <= 0;
 
             
+            elsif wallclock_signals.wallclock_do_phasejump_i = '1' then
+                nsec_reg      <= nsec_reg + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
+                sec_reg       <= unsigned(signed(sec_reg) + signed(wallclock_signals.wallclock_seconds_i));
+                new_nsec_pipe  <= new_nsec_pipe + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
+                new_nsec_minus_sec <= new_nsec_minus_sec + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32) - NS_PER_SEC;
+                new_nsec_plus_sec  <= new_nsec_plus_sec + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32) + NS_PER_SEC;
+                sec_adj_pipe   <= 0;
 
             else
                 -- ===== STAGE 2: Fractional accumulation + overflow =====

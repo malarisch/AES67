@@ -45,8 +45,8 @@ entity ptpv2_parser is
 
         clock_set_o            : out std_logic;
         clock_configured_o   : out std_logic;
-        clock_configure_timestamp_seconds_o     : out unsigned(47 downto 0);
-        clock_configure_timestamp_nanoseconds_o : out unsigned(29 downto 0); 
+        clock_configure_timestamp_seconds_o     : out STD_LOGIC_VECTOR(47 downto 0);
+        clock_configure_timestamp_nanoseconds_o : out STD_LOGIC_VECTOR(29 downto 0); 
         ptp_current_leader_id_i : in std_logic_vector(63 downto 0);
         ptp_is_follower_i : in std_logic;
 
@@ -276,15 +276,15 @@ begin
                     when s_ClockSet_Apply =>
                         -- Split T1 + elapsed into ns/sec with 1e9 carry
                         if ns_sum >= unsigned(ONE_SECOND_NS_POS) then
-                            clock_configure_timestamp_nanoseconds_o <=
-                                resize(ns_sum - unsigned(ONE_SECOND_NS_POS), 30);
-                            clock_configure_timestamp_seconds_o <=
-                                unsigned(stored_t1_seconds) + 1;
+                            clock_configure_timestamp_nanoseconds_o <= STD_LOGIC_VECTOR(
+                                resize(ns_sum - unsigned(ONE_SECOND_NS_POS), 30));
+                            clock_configure_timestamp_seconds_o <= STD_LOGIC_VECTOR(
+                                unsigned(stored_t1_seconds) + 1);
                         else
                             clock_configure_timestamp_nanoseconds_o <=
-                                resize(ns_sum, 30);
+                                STD_LOGIC_VECTOR(resize(ns_sum, 30));
                             clock_configure_timestamp_seconds_o <=
-                                stored_t1_seconds;
+                                STD_LOGIC_VECTOR(stored_t1_seconds);
                         end if;
                         s_SM_ClockConfigurator <= s_ClockSet_Apply2;
 

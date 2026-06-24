@@ -6,7 +6,7 @@ use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 
 use work.audioclks_pkg.all;
-
+use work.wallclock_signals_pkg.all;
 ENTITY aes67_top IS  
 	generic (
 		
@@ -42,7 +42,8 @@ ENTITY aes67_top IS
 		ENABLE_METERING: BOOLEAN := true;
 		STATIC_PTP_CONF: BOOLEAN := true;
 		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-		TDM_BCLK_MULT : INTEGER := 256
+		TDM_BCLK_MULT : INTEGER := 256;
+		PTP_IN_SOFTWARE : BOOLEAN := false
 
 	);
 	PORT
@@ -182,7 +183,10 @@ ENTITY aes67_top IS
 		ptp_reset_i : IN STD_LOGIC := '0';
 		audiotx_reset_i : IN STD_LOGIC := '0';
 		audiorx_reset_i : IN STD_LOGIC := '0';
-		mac_resetn_i : IN STD_LOGIC := '1'
+		mac_resetn_i : IN STD_LOGIC := '1';
+
+		wallclock_signals : INOUT t_wallclock_signals;
+		timestamps : OUT t_eth_timestamps
 
 	);
 END aes67_top;
@@ -357,7 +361,8 @@ generic map (
 	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
 	ETHERNET_TYPE => ETHERNET_TYPE,
 	STATIC_PTP_CONF => STATIC_PTP_CONF,
-	PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH
+	PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
+	PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,
@@ -405,6 +410,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 
 
 		 audioclocks_o => audioclks,
+		 wallclock_signals_io => wallclock_signals,
+		 timestamps_o => timestamps,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
 		 media_tick => media_tick,

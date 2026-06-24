@@ -1,7 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-
+use work.wallclock_signals_pkg.all;
 -- ============================================================
 -- Ethernet Timestamp latcher
 -- ============================================================
@@ -19,15 +19,11 @@ entity ethernet_timestamp_mii is
         
         reset_n			: in std_logic;
         
-        wallclock_seconds_i : in unsigned(3 downto 0);
-        wallclock_nanoseconds_i : in unsigned(29 downto 0);
-        timestamp_seconds_o	: out unsigned(3 downto 0);
-        timestamp_nanoseconds_o : out unsigned(29 downto 0);
+        wallclock_i : in t_wallclock_signals;
+        timestamp_o : out t_eth_timestamp;
         mii_in : in STD_LOGIC_VECTOR(MII_WIDTH-1 downto 0);
         gmii_in : in STD_LOGIC_VECTOR(7 downto 0);
         mii_en_in : in STD_LOGIC
-
-        
     );
 end ethernet_timestamp_mii;
 
@@ -134,15 +130,15 @@ end generate;
             sof_tog_i_meta <= sof_tog;
             sof_tog_i_sync <= sof_tog_i_meta;
             sof_tog_i_prev <= sof_tog_i_sync;
-
+            
             stamp_valid <= '0';
             if (sof_tog_i_prev /= sof_tog_i_sync) then
                 if (PATH = "TX") then
-                    adjusted   <= to_integer(wallclock_nanoseconds_i) - PIPELINE_LATENCY + MII_LATENCY;
+                    adjusted   <= to_integer(wallclock_i.wallclock_nanoseconds_o) - PIPELINE_LATENCY + MII_LATENCY;
                 else
-                    adjusted   <= to_integer(wallclock_nanoseconds_i) - PIPELINE_LATENCY - MII_LATENCY;
+                    adjusted   <= to_integer(wallclock_i.wallclock_nanoseconds_o) - PIPELINE_LATENCY - MII_LATENCY;
                 end if;
-                s_reg <= wallclock_seconds_i;
+                s_reg <= wallclock_i.wallclock_seconds_o(3 downto 0);
                 stamp_valid <= '1';
             end if;
 
@@ -153,14 +149,14 @@ end generate;
         if rising_edge(sys_clk_i) then
             if (stamp_valid = '1') then
                 if adjusted >= 1000000000 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted - 1000000000, 30);
-                    timestamp_seconds_o     <= s_reg + 1;
+                    timestamp_o.nanoseconds <= to_unsigned(adjusted - 1000000000, 30);
+                    timestamp_o.seconds     <= s_reg + 1;
                 elsif adjusted < 0 then
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted + 1000000000, 30);
-                    timestamp_seconds_o     <= s_reg - 1;
+                    timestamp_o.nanoseconds <= to_unsigned(adjusted + 1000000000, 30);
+                    timestamp_o.seconds     <= s_reg - 1;
                 else
-                    timestamp_nanoseconds_o <= to_unsigned(adjusted, 30);
-                    timestamp_seconds_o     <= s_reg;
+                    timestamp_o.nanoseconds <= to_unsigned(adjusted, 30);
+                    timestamp_o.seconds     <= s_reg;
                 end if;
             end if;
         end if;

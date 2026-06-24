@@ -50,7 +50,7 @@ class AES67SoC(SoCCore):
     def __init__(self, platform, sys_clk_freq, target="cyclone10",
                  with_hyperram=False,
                  integrated_sram_size=4*1024,
-                 with_servo=True, with_metering=True, **kwargs):
+                 with_servo=True, with_metering=True, with_ptp_sw=False, **kwargs):
 
         # Architecture: the AES67 register surface (CSRs + eth_buf + stream RAMs)
         # lives ONLY in the standalone "aes67_bridge" module.  Every other target
@@ -316,7 +316,8 @@ class AES67SoC(SoCCore):
             # created *in this scope* so Migen names its nets after the SoC
             # attribute (e.g. ``aes67_csr_*`` — the names the Quartus timing
             # constraints in FPGA/sdc/litex_csr.sdc match on), then wired up.
-            self.aes67_csr = AES67CSRs(with_servo=with_servo, with_metering=with_metering)
+            self.aes67_csr = AES67CSRs(with_servo=with_servo, with_metering=with_metering,
+                                       with_ptp_sw=with_ptp_sw)
             add_aes67_csr(self, platform)
 
             self.eth_buf = EthPacketBuffer()

@@ -3,6 +3,7 @@ USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
 use work.audioclks_pkg.all;
+use work.wallclock_signals_pkg.all;
 
 ENTITY ptp_module IS 
 	generic (
@@ -11,7 +12,8 @@ ENTITY ptp_module IS
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		STATIC_PTP_CONF : BOOLEAN := true;
-		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8
+		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8; 
+		PTP_IN_SOFTWARE : BOOLEAN := false
 	);
 	PORT
 	(
@@ -56,6 +58,8 @@ ENTITY ptp_module IS
 		wallclock_configured :  OUT  STD_LOGIC;
 		
 		audioclocks_o : OUT t_audio_clocks;
+		wallclock_signals_io : INOUT t_wallclock_signals;
+		timestamps_o : OUT t_eth_timestamps;
 
 		second_pulse_sys :  OUT  STD_LOGIC;
 		media_clock :  OUT  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -106,7 +110,6 @@ ARCHITECTURE bdf_type OF ptp_module IS
 
 
 
-SIGNAL	freq_correction :  SIGNED(19 DOWNTO 0);
 SIGNAL	log_msg_interval :  SIGNED(7 DOWNTO 0);
 SIGNAL	log_msg_interval_valid :  STD_LOGIC;
 SIGNAL	powerGood :  STD_LOGIC;
@@ -119,8 +122,7 @@ SIGNAL	rx_follower_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	rx_send_delay_req :  STD_LOGIC;
 SIGNAL	rx_send_delay_resp :  STD_LOGIC;
 SIGNAL	rx_sequence_id :  STD_LOGIC_VECTOR(15 DOWNTO 0);
-SIGNAL	rx_timestamp_ns :  UNSIGNED(29 DOWNTO 0);
-SIGNAL	rx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
+
 SIGNAL	rx_ts_ns :  unsigned(29 DOWNTO 0);
 SIGNAL	rx_ts_s :  UNSIGNED(3 DOWNTO 0);
 SIGNAL	second_pulse_sys_ALTERA_SYNTHESIZED :  STD_LOGIC;
@@ -131,18 +133,12 @@ SIGNAL	tx_ptp_log_interval :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_req_port_identity :  STD_LOGIC_VECTOR(79 DOWNTO 0);
 SIGNAL	tx_seq_id :  UNSIGNED(15 DOWNTO 0);
 SIGNAL	tx_t3_valid :  STD_LOGIC;
-SIGNAL	tx_timestamp_ns :  UNSIGNED(29 DOWNTO 0);
-SIGNAL	tx_timestamp_s :  UNSIGNED(3 DOWNTO 0);
+
 SIGNAL	timestamp_ns :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	timestamp_s :  UNSIGNED(47 DOWNTO 0);
-SIGNAL	wallclock_nanoseconds :  UNSIGNED(29 DOWNTO 0);
 SIGNAL	ptp_ram_addr_u :  UNSIGNED(10 DOWNTO 0);
 SIGNAL	media_clock_u :  UNSIGNED(31 DOWNTO 0);
 SIGNAL	servo_request_clock_reconfigure :  STD_LOGIC;
-SIGNAL	wallclock_seconds :  UNSIGNED(47 DOWNTO 0);
-SIGNAL	wallclock_set :  STD_LOGIC;
-SIGNAL	wallclock_set_ns :  unsigned(29 DOWNTO 0);
-SIGNAL	wallclock_set_s :  unsigned(47 DOWNTO 0);
 
 SIGNAL tx_done_sys: STD_LOGIC := '0';
 SIGNAL ms_pulse_sys : STD_LOGIC;
@@ -213,8 +209,55 @@ signal delta_s2m_valid : std_logic;
 signal delta_m2s_valid_avg : std_logic;
 signal delta_s2m_valid_avg : std_logic;
 
+signal eth_timestamps : t_eth_timestamps;
+
+signal wallclock_signals : t_wallclock_signals;
+
 BEGIN
 
+
+rx_tsu: entity work.ethernet_timestamp_mii
+ generic map(
+	PATH => "RX",
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
+)
+ port map(
+	sys_clk_i => sys_clk,
+	mii_clk_i => phy_mii_rx_clk_in,
+	reset_n => powerGood,
+	wallclock_i => wallclock_signals,
+	timestamp_o => eth_timestamps.rx,
+	mii_in => phy_mii_rx_data_in,
+	gmii_in => phy_gmii_rx_data_in,
+	mii_en_in => phy_mii_rx_en_i
+);
+
+tx_en_switch <= phy_mii_tx_en_i when ETHERNET_TYPE = "RMII" else mac_tx_busy;
+tx_tsu: entity work.ethernet_timestamp_mii
+ generic map(
+	PATH => "TX",
+	MII_WIDTH => MII_WIDTH,
+	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
+)
+ port map(
+	sys_clk_i => sys_clk,
+	mii_clk_i => phy_mii_tx_clk_in,
+	reset_n => powerGood,
+	wallclock_i => wallclock_signals,
+	timestamp_o => eth_timestamps.tx,
+	mii_in => phy_mii_tx_data_in,
+	gmii_in => phy_gmii_tx_data_in,
+	mii_en_in => tx_en_switch
+);
+ptp_sw_gen: if (PTP_IN_SOFTWARE = true) generate
+	wallclock_signals_io <= wallclock_signals;
+	timestamps_o <= eth_timestamps;
+end generate;
+
+ptp_hw_gen: if (PTP_IN_SOFTWARE = false) generate
 -- EUI-64 clock identity from MAC (same mapping as ptpv2_parser)
 my_clock_identity <= (mac_address(47 downto 40) XOR x"02")
                    & mac_address(39 downto 24)
@@ -245,8 +288,8 @@ PORT MAP(clk => sys_clk,
 		 rx_timestamp_nanoseconds_i => rx_ts_ns,
 		 rx_timestamp_seconds_i => rx_ts_s,
 		 sequence_id_i => unsigned(rx_sequence_id),
-		 wallclock_nanoseconds_i => wallclock_nanoseconds,
-		 wallclock_seconds_i => wallclock_seconds,
+		 wallclock_nanoseconds_i => wallclock_signals.wallclock_nanoseconds_o,
+		 wallclock_seconds_i => wallclock_signals.wallclock_seconds_o,
 		 frame_start_o => tx_frame_start,
 		 t3_valid_o => tx_t3_valid,
 		 ptp_log_interval_o => tx_ptp_log_interval,
@@ -254,8 +297,8 @@ PORT MAP(clk => sys_clk,
 		 sequence_id_o => tx_seq_id,
 		 timestamp_nanoseconds_o => timestamp_ns,
 		 timestamp_seconds_o => timestamp_s,
-		 tx_timestamp_nanoseconds_i => tx_timestamp_ns,
-		 tx_timestamp_seconds_i => tx_timestamp_s,
+		 tx_timestamp_nanoseconds_i => eth_timestamps.tx.nanoseconds,
+		 tx_timestamp_seconds_i => eth_timestamps.tx.seconds,
 		 tx_message_type_o => tx_msg_type,
 		 tx_done_sys_i => tx_done_sys,
 		 parser_log_msg_interval_i => STD_LOGIC_VECTOR(log_msg_interval));
@@ -344,19 +387,19 @@ PORT MAP(clk => sys_clk,
 		 ptp_is_follower_i => eff_is_follower,
 		 ptp_current_leader_id_i => eff_current_leader_id,
 		 clock_reconfigure_req_i => servo_request_clock_reconfigure,
-		 rx_timestamp_nanoseconds_i => rx_timestamp_ns,
-		 rx_timestamp_seconds_i => rx_timestamp_s,
+		 rx_timestamp_nanoseconds_i => eth_timestamps.rx.nanoseconds,
+		 rx_timestamp_seconds_i => eth_timestamps.rx.seconds,
 		 src_mac_address => mac_address,
-		 tx_timestamp_nanoseconds_i => tx_timestamp_ns,
-		 tx_timestamp_seconds_i => tx_timestamp_s,
+		 tx_timestamp_nanoseconds_i => eth_timestamps.tx.nanoseconds,
+		 tx_timestamp_seconds_i => eth_timestamps.tx.seconds,
 		 send_delay_resp_o => rx_send_delay_resp,
 		 send_delay_req_o => rx_send_delay_req,
 		 --ptp_calc_valid_o => ptp_calc_valid,
 		 log_msg_interval_valid_o => log_msg_interval_valid,
-		 clock_set_o => wallclock_set,
+		 clock_set_o => wallclock_signals.wallclock_set_i,
 		 clock_configured_o => wallclock_configured,
-		 clock_configure_timestamp_nanoseconds_o => wallclock_set_ns,
-		 clock_configure_timestamp_seconds_o => wallclock_set_s,
+		 clock_configure_timestamp_nanoseconds_o => wallclock_signals.wallclock_nanoseconds_i,
+		 clock_configure_timestamp_seconds_o => wallclock_signals.wallclock_seconds_i,
 		 log_msg_interval_o => log_msg_interval,
 		 delta_m2s_o => delta_m2s,--, => ptp_mean_path_delay_ALTERA_SYNTHESIZED,
 		 delta_s2m_o => delta_s2m,
@@ -410,46 +453,6 @@ PORT MAP(clk => sys_clk,
 		 current_leader_id_o => bmc_current_leader_id);
 
 
-rx_tsu: entity work.ethernet_timestamp_mii
- generic map(
-	PATH => "RX",
-	MII_WIDTH => MII_WIDTH,
-	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
-)
- port map(
-	sys_clk_i => sys_clk,
-	mii_clk_i => phy_mii_rx_clk_in,
-	reset_n => powerGood,
-	wallclock_seconds_i => wallclock_seconds(3 downto 0),
-	wallclock_nanoseconds_i => wallclock_nanoseconds,
-	timestamp_seconds_o => rx_timestamp_s,
-	timestamp_nanoseconds_o => rx_timestamp_ns,
-	mii_in => phy_mii_rx_data_in,
-	gmii_in => phy_gmii_rx_data_in,
-	mii_en_in => phy_mii_rx_en_i
-);
-
-tx_en_switch <= phy_mii_tx_en_i when ETHERNET_TYPE = "RMII" else mac_tx_busy;
-tx_tsu: entity work.ethernet_timestamp_mii
- generic map(
-	PATH => "TX",
-	MII_WIDTH => MII_WIDTH,
-	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK
-)
- port map(
-	sys_clk_i => sys_clk,
-	mii_clk_i => phy_mii_tx_clk_in,
-	reset_n => powerGood,
-	wallclock_seconds_i => wallclock_seconds(3 downto 0),
-	wallclock_nanoseconds_i => wallclock_nanoseconds,
-	timestamp_seconds_o => tx_timestamp_s,
-	timestamp_nanoseconds_o => tx_timestamp_ns,
-	mii_in => phy_mii_tx_data_in,
-	gmii_in => phy_gmii_tx_data_in,
-	mii_en_in => tx_en_switch
-);
 
 static_ptp_conf_gen: if (STATIC_PTP_CONF) generate
 static_ptp_conf_inst: entity work.static_ptp_conf
@@ -503,7 +506,7 @@ PORT MAP(clk => sys_clk,
 		 offset_from_master_i => ptp_offset_from_master_ALTERA_SYNTHESIZED,
 		 
 		 locked_o => ptp_locked_ALTERA_SYNTHESIZED,
-		 freq_correction_o => freq_correction,
+		 freq_correction_o => wallclock_signals.freq_correction_ppb_i,
 		 
 		 request_clock_reconfigure_o => servo_request_clock_reconfigure,
 		 -- Live-tuning inputs from top-level
@@ -527,6 +530,16 @@ PORT MAP(clk => sys_clk,
 		 mon_sample_count_o         => servo_mon_sample_count_reg,
 		 mon_first_lock_achieved_o  => servo_mon_first_lock_achieved_reg);
 
+tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
+ptp_allow <= mac_tx_allow_i;
+ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
+second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
+media_clock <= std_logic_vector(media_clock_u);
+ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
+ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);
+ptp_ram_addr <= std_logic_vector(ptp_ram_addr_u);
+end generate;
+
 
 b2v_wallclock :  entity work.wallclock
 GENERIC MAP(audio_fs => 48000,
@@ -535,19 +548,11 @@ GENERIC MAP(audio_fs => 48000,
 			)
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
-		 wallclock_set_i => wallclock_set,
-		 --phase_jump_valid_i => wallclock_phasejump_ALTERA_SYNTHESIZED,
-		 
-		 freq_correction_ppb_i => freq_correction,
-		 --phase_jump_ns_i => phase_jump,
-		 wallclock_nanoseconds_i => unsigned(wallclock_set_ns),
-		 wallclock_seconds_i => unsigned(wallclock_set_s),
+		 wallclock_signals => wallclock_signals,
 		 second_pulse_o => second_pulse_sys_ALTERA_SYNTHESIZED,
 		 ms_pulse_o => ms_pulse_sys,
 		 clocks_o => audioclocks_o,
 		 media_clock_o => media_clock_u,
-		 wallclock_nanoseconds_o => wallclock_nanoseconds,
-		 wallclock_seconds_o => wallclock_seconds,
 		 mclk_cnt_o => open,
 		 media_edge_tick_o => media_tick,
 		 ppb_adj_dbg_o => open,
@@ -557,15 +562,8 @@ PORT MAP(clk => sys_clk,
 		 nco_phase_dbg_o => open,
 		 nco_inc_dbg_o => open);
 
-tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 powerGood <= rst_n;
 
-ptp_allow <= mac_tx_allow_i;
-ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
-second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
-media_clock <= std_logic_vector(media_clock_u);
-ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
-ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);
-ptp_ram_addr <= std_logic_vector(ptp_ram_addr_u);
+
 
 END bdf_type;

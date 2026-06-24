@@ -51,7 +51,8 @@ ENTITY top_cyc1000 IS
 		AUDIO_TX_TDM_CHANNELS : natural  := 2;
         TDM_BCLK_MULT : INTEGER := 64;
             TDM_I2S_MODE : BOOLEAN := false;
-    TDM_FSCLK_50DUTY : BOOLEAN := true
+    TDM_FSCLK_50DUTY : BOOLEAN := true;
+    PTP_IN_SOFTWARE : BOOLEAN := true
 
 
 	);
@@ -169,7 +170,8 @@ begin
     ENABLE_METERING => ENABLE_METERING,
     TDM_BCLK_MULT => TDM_BCLK_MULT,
     TDM_FSCLK_50DUTY => TDM_FSCLK_50DUTY,
-    TDM_I2S_MODE => TDM_I2S_MODE
+    TDM_I2S_MODE => TDM_I2S_MODE,
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
   )
   port map (
     rst_n_i => c10_resetn,

@@ -15,6 +15,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+use work.wallclock_signals_pkg.all;
 
 entity litex_eth_buffer_bridge is
   port (
@@ -30,7 +31,8 @@ entity litex_eth_buffer_bridge is
     buf_rx_len_o    : out std_logic_vector(10 downto 0);
     buf_rx_valid_o  : out std_logic;
     buf_rx_ack_i    : in  std_logic;
-
+    timestamps_i : in t_eth_timestamps;
+    tx_timestamp_o : out t_eth_timestamp;
     -- TX buffer: this module reads packet data
 
     buf_tx_addr_o   : out std_logic_vector(10 downto 0);
@@ -103,7 +105,7 @@ architecture rtl of litex_eth_buffer_bridge is
   -- RX signals (mac_rx_clock domain)
   -- ================================================================
 
-  type t_rx_sm is (RX_IDLE, RX_WAIT, RX_COPY, RX_DONE);
+  type t_rx_sm is (RX_IDLE, RX_WAIT, RX_COPY, RX_WRITE_SECONDS, RX_WRITE_NANOSECONDS, RX_DONE);
   signal sm_rx : t_rx_sm := RX_IDLE;
 
   signal rx_copy_addr    : unsigned(10 downto 0) := (others => '0');
@@ -129,10 +131,8 @@ architecture rtl of litex_eth_buffer_bridge is
   signal packet_length_latch : UNSIGNED(10 downto 0);
   signal packet_lenght_valid_latch : std_ulogic;
   signal packet_length_valid_counter : unsigned(3 downto 0);
-  signal tx_byte_prefetch : STD_ULOGIC_VECTOR(7 downto 0);
-  signal tx_byte_prefetch2 : STD_ULOGIC_VECTOR(7 downto 0);
-  signal tx_is_first_byte : STD_ULOGIC := '0';
   signal tx_zsof : STD_LOGIC := '0';
+  signal ts_write_index : integer range 0 to 3;
 begin
 
   -- ================================================================
@@ -232,6 +232,7 @@ begin
             
             if buf_tx_addr = unsigned(buf_tx_len_i) then
               sm_tx <= TX_END;
+              tx_timestamp_o <= timestamps_i.tx;
             else
               buf_tx_addr <= buf_tx_addr + 1;
             end if;
@@ -332,12 +333,34 @@ begin
           if rx_copy_addr >= packet_length_latch and packet_lenght_valid_latch = '1' then
             -- Last byte written this cycle
             sm_rx <= RX_DONE;
-          else
+          end if;
             -- Present next address, advance counter
             eth_ram_addr   <= rx_copy_addr + 1;
             rx_copy_addr   <= rx_copy_addr + 1;
-          end if;
+          
+        when RX_WRITE_SECONDS =>
+          buf_rx_data_o <= "0000" & std_logic_vector(timestamps_i.rx.seconds);
+          buf_rx_addr    <= rx_copy_addr - 1;
+          buf_rx_we_o    <= '1';
+          eth_ram_addr   <= rx_copy_addr + 1;
+          rx_copy_addr   <= rx_copy_addr + 1;
+          sm_rx <= RX_WRITE_NANOSECONDS;
+        when RX_WRITE_NANOSECONDS =>
+        ts_write_index <= ts_write_index + 1;
+          if (ts_write_index = 3) then
+           buf_rx_data_o <= "00" & std_logic_vector(timestamps_i.rx.nanoseconds(29 downto 24));
+            sm_rx <= RX_WRITE_NANOSECONDS;
+            ts_write_index <= 0;
+          else
+            buf_rx_data_o <= std_logic_vector(timestamps_i.rx.nanoseconds(ts_write_index * 8 + 7 downto ts_write_index * 8));
 
+          end if;
+          
+
+          buf_rx_addr    <= rx_copy_addr - 1;
+          buf_rx_we_o    <= '1';
+          eth_ram_addr   <= rx_copy_addr + 1;
+          rx_copy_addr   <= rx_copy_addr + 1;
         when RX_DONE =>
           buf_rx_len <= packet_length_latch;
           rx_valid_reg <= '1';

@@ -41,7 +41,8 @@ generic (
     PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
     TDM_BCLK_MULT : INTEGER := 256;
     TDM_I2S_MODE : BOOLEAN := false;
-    TDM_FSCLK_50DUTY : BOOLEAN := false
+    TDM_FSCLK_50DUTY : BOOLEAN := false;
+    PTP_IN_SOFTWARE : BOOLEAN := false
 
 
 
@@ -309,7 +310,8 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-    TDM_BCLK_MULT => TDM_BCLK_MULT
+    TDM_BCLK_MULT => TDM_BCLK_MULT,
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
   )
   port map (
     rst_n_i => rst_n_i,

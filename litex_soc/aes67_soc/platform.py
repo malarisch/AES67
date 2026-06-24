@@ -125,6 +125,17 @@ _io_common = [
         Subsignal("tx_meter_signal",    Pins(16)),  # TX signal detect (1 bit per channel)
         Subsignal("tx_meter_clip",      Pins(16)),  # TX clip detect (1 bit per channel)
         Subsignal("meter_clear",        Pins(1)),   # Metering clear toggle (SoC -> FPGA)
+        # PTP-in-software wallclock interface (FPGA -> SoC)
+        Subsignal("wallclock_seconds_in",     Pins(48)),
+        Subsignal("wallclock_nanoseconds_in", Pins(30)),
+        Subsignal("tx_timestamp_sec_in",      Pins(4)),
+        Subsignal("tx_timestamp_nsec_in",     Pins(30)),
+        # PTP-in-software wallclock control (SoC -> FPGA)
+        Subsignal("wallclock_seconds_out",     Pins(48)),
+        Subsignal("wallclock_nanoseconds_out", Pins(30)),
+        Subsignal("wallclock_set",             Pins(1)),
+        Subsignal("wallclock_phasejump",       Pins(1)),
+        Subsignal("wallclock_ppb",             Pins(20)),
     ),
 
     # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)

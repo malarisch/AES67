@@ -4,6 +4,7 @@ use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 
 use work.audioclks_pkg.all;
+use work.wallclock_signals_pkg.all;
 entity aes67_wb_bridge is
   generic (
 		MII_WIDTH : integer := 2;
@@ -36,8 +37,8 @@ entity aes67_wb_bridge is
 		USE_EXTERNAL_PLL : BOOLEAN := true;
 		ENABLE_METERING: BOOLEAN := true;
     PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-    TDM_BCLK_MULT : INTEGER := 256
-
+    TDM_BCLK_MULT : INTEGER := 256;
+    PTP_IN_SOFTWARE : BOOLEAN := false
 
 	);
 	PORT
@@ -164,8 +165,17 @@ component litex_soc_aes67_bridge
     aes67_ctrl_tx_meter_clip : in std_logic_vector    (15 downto 0);
     aes67_ctrl_tx_meter_signal : in std_logic_vector    (15 downto 0);
     aes67_ctrl_tx_reset : out std_logic;
+    aes67_ctrl_tx_timestamp_nsec_in : in std_logic_vector    (29 downto 0);
+    aes67_ctrl_tx_timestamp_sec_in : in std_logic_vector     (3 downto 0);
     aes67_ctrl_wallclock_configured : in std_logic;
     aes67_ctrl_wallclock_locked : in std_logic;
+    aes67_ctrl_wallclock_nanoseconds_in : in std_logic_vector    (29 downto 0);
+    aes67_ctrl_wallclock_nanoseconds_out : out std_logic_vector    (29 downto 0);
+    aes67_ctrl_wallclock_phasejump : out std_logic;
+    aes67_ctrl_wallclock_ppb : out std_logic_vector    (19 downto 0);
+    aes67_ctrl_wallclock_seconds_in : in std_logic_vector    (47 downto 0);
+    aes67_ctrl_wallclock_seconds_out : out std_logic_vector    (47 downto 0);
+    aes67_ctrl_wallclock_set : out std_logic;
     aes67_wb_ack : out std_logic;
     aes67_wb_adr : in std_logic_vector    (29 downto 0);
     aes67_wb_bte : in std_logic_vector     (1 downto 0);
@@ -303,6 +313,11 @@ signal audiotx_reset : STD_LOGIC;
 signal mac_resetn : STD_LOGIC;
 
 signal mac_reset : STD_LOGIC;
+
+signal wallclock_signals : t_wallclock_signals;
+signal timestamps : t_eth_timestamps;
+signal tx_timestamp : t_eth_timestamp;
+signal aes67_ctrl_wallclock_ppb_reg : STD_LOGIC_VECTOR(19 downto 0);
 begin
 
     -- eth-ram read address: litex bridge drives std_logic_vector, ethernet_top
@@ -393,8 +408,19 @@ begin
         tx_stream_cfg_wr_en => audio_tx_cfg_wr_en_i,
         aes67_ctrl_tx_reset => audiotx_reset,
         aes67_ctrl_rx_reset => audiorx_reset,
-        aes67_ctrl_eth_reset => mac_reset
+        aes67_ctrl_eth_reset => mac_reset,
+        aes67_ctrl_tx_timestamp_nsec_in => STD_LOGIC_VECTOR(tx_timestamp.nanoseconds),
+        aes67_ctrl_tx_timestamp_sec_in => STD_LOGIC_VECTOR(tx_timestamp.seconds),
+        aes67_ctrl_wallclock_seconds_in => STD_LOGIC_VECTOR(wallclock_signals.wallclock_seconds_o),
+        aes67_ctrl_wallclock_nanoseconds_in => STD_LOGIC_VECTOR(wallclock_signals.wallclock_nanoseconds_o),
+        aes67_ctrl_wallclock_nanoseconds_out => wallclock_signals.wallclock_nanoseconds_i,
+        aes67_ctrl_wallclock_seconds_out => wallclock_signals.wallclock_seconds_i,
+        aes67_ctrl_wallclock_set => wallclock_signals.wallclock_set_i,
+        aes67_ctrl_wallclock_phasejump => wallclock_signals.wallclock_do_phasejump_i,
+        aes67_ctrl_wallclock_ppb => aes67_ctrl_wallclock_ppb_reg
+        
     );
+    wallclock_signals.freq_correction_ppb_i <= signed(aes67_ctrl_wallclock_ppb_reg);
     aes67_top_inst: entity work.aes67_top
      generic map(
         MII_WIDTH => MII_WIDTH,
@@ -420,7 +446,8 @@ begin
         USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
         ENABLE_METERING => ENABLE_METERING,
         PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-        TDM_BCLK_MULT => TDM_BCLK_MULT
+        TDM_BCLK_MULT => TDM_BCLK_MULT,
+        PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
     )
      port map(
         sys_clk_125MHz_i => sys_clk_125MHz_i,
@@ -519,11 +546,15 @@ begin
         tx_sample_register => tx_sample_register,
         audiorx_reset_i => audiorx_reset,
         audiotx_reset_i => audiotx_reset,
-        mac_resetn_i => mac_resetn
+        mac_resetn_i => mac_resetn,
+        wallclock_signals => wallclock_signals,
+        timestamps => timestamps
         
     );
     litex_eth_buffer_bridge_inst: entity work.litex_eth_buffer_bridge
      port map(
+        timestamps_i => timestamps,
+        tx_timestamp_o => tx_timestamp,
         buf_rx_data_o => mcu_buf_rx_data,
         buf_rx_addr_o => mcu_buf_rx_addr,
         buf_rx_we_o => mcu_buf_rx_we,
