@@ -1,0 +1,11 @@
+# Kernel out-of-tree build artifacts
+*.o
+*.o.*
+*.ko
+*.mod
+*.mod.c
+*.cmd
+*.symvers
+*.order
+.tmp_versions/
+dts/*.dtbo

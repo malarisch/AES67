@@ -1,0 +1,4 @@
+# Out-of-tree build for the AES67 FPGA Ethernet + PHC driver.
+# Module name differs from every component object (Kbuild requirement).
+obj-m += aes67_eth_drv.o
+aes67_eth_drv-objs := aes67_eth.o aes67_bus.o aes67_phc.o

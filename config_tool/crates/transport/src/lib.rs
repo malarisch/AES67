@@ -28,6 +28,9 @@ pub use uart::{UartTransport, DEFAULT_BAUD_RATE};
 mod spi;
 pub use spi::{SpiTransport, DEFAULT_SPI_HZ};
 
+mod kernel;
+pub use kernel::{KernelTransport, DEFAULT_CTL_PATH};
+
 #[cfg(feature = "mock")]
 pub use mock::MockTransport;
 

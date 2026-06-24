@@ -1,0 +1,43 @@
+/*
+ * Example device-tree overlay binding the AES67 FPGA to an SPI controller on
+ * the host SoC. Adjust the SPI bus phandle, chip-select, clock rate, and the
+ * RX-ready interrupt GPIO to match your board's wiring.
+ *
+ * Build:  dtc -@ -I dts -O dtb -o aes67-overlay.dtbo aes67-overlay.dts
+ *
+ * The driver binds on compatible = "aes67,spibone". If `interrupts` is present
+ * (eth_buf_irq wired to a GPIO), RX is interrupt-driven; otherwise the driver
+ * falls back to polling (module param poll_ms).
+ *
+ * Raspberry Pi note: with `dtparam=spi=on` the firmware already attaches the
+ * userspace `spidev` driver to CS0 (spi0.0), which then OWNS the chip-select —
+ * adding our device at the same CS fails with "chipselect 0 already in use"
+ * (-EBUSY). The first fragment disables that spidev node so our driver can claim
+ * CS0. Keep SPI itself enabled (the controller must stay on). On other boards
+ * that do not pre-bind spidev, the &spidev0 fragment is simply ignored.
+ */
+/dts-v1/;
+/plugin/;
+
+/* Release CS0 from the default spidev binding (Raspberry Pi). */
+&spidev0 {
+	status = "disabled";
+};
+
+&spi0 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	aes67@0 {
+		compatible = "aes67,spibone";
+		reg = <0>;                       /* chip-select 0 */
+		spi-max-frequency = <1000000>;   /* spibone max is sys_clk/4 (~18.75 MHz @ 75 MHz); 1 MHz is safe for bring-up. Tune up via module param spi_hz. */
+		/* SPI mode 0 (CPOL=0, CPHA=0): drive NEITHER spi-cpol NOR spi-cpha. */
+
+		/* RX-ready IRQ from eth_buf_irq. Example: GPIO25 on a Pi-style
+		 * gpio controller, rising edge. Remove this property to poll. */
+		interrupt-parent = <&gpio>;
+		interrupts = <25 1>;             /* 1 = IRQ_TYPE_EDGE_RISING */
+	};
+};

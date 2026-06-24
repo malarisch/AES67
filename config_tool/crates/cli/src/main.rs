@@ -14,8 +14,8 @@ use clap::{Args, Parser, Subcommand};
 
 use aes67_client::RemoteDevice;
 use aes67_config::{
-    ControlApi, CsrMap, Device, PtpGrandmaster, RxStream, SpiTransport, Transport, TxStream,
-    UartTransport,
+    ControlApi, CsrMap, Device, KernelTransport, PtpGrandmaster, RxStream, SpiTransport, Transport,
+    TxStream, UartTransport,
 };
 
 /// Register name constants used by the convenience subcommands.
@@ -64,6 +64,11 @@ struct TransportArgs {
     /// SPI clock in Hz for --spi (default: 1 MHz).
     #[arg(long, global = true, value_name = "HZ")]
     spi_speed: Option<u32>,
+
+    /// Direct aes67_eth kernel control device, e.g. /dev/aes67ctl (bypasses the
+    /// daemon; used when the kernel module owns the bus).
+    #[arg(long, global = true, value_name = "DEV", conflicts_with_all = ["uart", "spi"])]
+    kernel: Option<String>,
 
     /// Daemon control socket (used when neither --uart nor --spi is given).
     #[arg(long, global = true, value_name = "PATH", default_value = "/run/aes67d.sock")]
@@ -304,6 +309,14 @@ fn list_discovered(cli: &Cli) -> Result<()> {
 /// otherwise a `RemoteDevice` connected to the daemon. Both are `ControlApi`.
 fn build_backend(cli: &Cli) -> Result<Box<dyn ControlApi>> {
     let t = &cli.transport;
+    if let Some(dev) = &t.kernel {
+        let map = load_map(cli)?;
+        let transport: Box<dyn Transport> = Box::new(
+            KernelTransport::open(dev)
+                .with_context(|| format!("opening kernel control device {dev}"))?,
+        );
+        return Ok(Box::new(Device::new(transport, map)));
+    }
     match (&t.uart, &t.spi) {
         (Some(dev), None) => {
             let map = load_map(cli)?;

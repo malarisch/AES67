@@ -38,7 +38,8 @@ pub use stream::{Aes67Streams, RxStream, TxStream};
 // Re-export the transport surface so downstream users (the CLI) need only
 // depend on this crate.
 pub use aes67_transport::{
-    SpiTransport, Transport, TransportError, UartTransport, DEFAULT_BAUD_RATE, DEFAULT_SPI_HZ,
+    KernelTransport, SpiTransport, Transport, TransportError, UartTransport, DEFAULT_BAUD_RATE,
+    DEFAULT_CTL_PATH, DEFAULT_SPI_HZ,
 };
 
 /// Errors from the configuration library.

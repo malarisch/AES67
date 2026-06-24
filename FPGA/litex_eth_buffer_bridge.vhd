@@ -18,6 +18,14 @@ use ieee.numeric_std.all;
 use work.wallclock_signals_pkg.all;
 
 entity litex_eth_buffer_bridge is
+  generic (
+    -- When true, append a 5-byte RX hardware-timestamp trailer after each frame
+    -- (1 byte seconds[3:0], then 4 bytes little-endian nanoseconds[29:0]) and
+    -- count it in buf_rx_len. Used by the software-PTP path (the kernel netdev
+    -- driver parses it). Default false keeps the buffer format unchanged for the
+    -- firmware / hardware-PTP builds.
+    ADD_RX_TIMESTAMP : boolean := false
+  );
   port (
     -- ================================================================
     -- LiteX EthPacketBuffer FPGA-side signals
@@ -133,6 +141,13 @@ architecture rtl of litex_eth_buffer_bridge is
   signal packet_length_valid_counter : unsigned(3 downto 0);
   signal tx_zsof : STD_LOGIC := '0';
   signal ts_write_index : integer range 0 to 3;
+
+  -- RX hardware-timestamp trailer (only when ADD_RX_TIMESTAMP).
+  constant TS_TRAILER_LEN : natural := 5;  -- 1 byte seconds + 4 bytes nanoseconds
+  -- Latched at frame detection so the 5-cycle trailer write can't be torn by a
+  -- newer frame's timestamp arriving mid-write.
+  signal rx_ts_sec_latch : unsigned(3 downto 0)  := (others => '0');
+  signal rx_ts_ns_latch  : unsigned(29 downto 0) := (others => '0');
 begin
 
   -- ================================================================
@@ -312,6 +327,10 @@ begin
 
               rx_copy_addr   <= (others => '0');
               eth_ram_addr   <= (others => '0');
+              -- Capture this frame's RX timestamp now (the TSU updates it only
+              -- at the next frame's SOF, so it is stable for the trailer write).
+              rx_ts_sec_latch <= timestamps_i.rx.seconds;
+              rx_ts_ns_latch  <= timestamps_i.rx.nanoseconds;
               sm_rx          <= RX_WAIT;
             end if;
           end if;
@@ -331,38 +350,53 @@ begin
           buf_rx_we_o    <= '1';
 
           if rx_copy_addr >= packet_length_latch and packet_lenght_valid_latch = '1' then
-            -- Last byte written this cycle
-            sm_rx <= RX_DONE;
+            -- Last payload byte written this cycle. Append the timestamp trailer
+            -- only in the software-PTP build; otherwise finish immediately.
+            if ADD_RX_TIMESTAMP then
+              sm_rx <= RX_WRITE_SECONDS;
+            else
+              sm_rx <= RX_DONE;
+            end if;
           end if;
             -- Present next address, advance counter
             eth_ram_addr   <= rx_copy_addr + 1;
             rx_copy_addr   <= rx_copy_addr + 1;
-          
+
+        -- Trailer byte 0: seconds[3:0] in the low nibble.
         when RX_WRITE_SECONDS =>
-          buf_rx_data_o <= "0000" & std_logic_vector(timestamps_i.rx.seconds);
+          buf_rx_data_o  <= "0000" & std_logic_vector(rx_ts_sec_latch);
           buf_rx_addr    <= rx_copy_addr - 1;
           buf_rx_we_o    <= '1';
-          eth_ram_addr   <= rx_copy_addr + 1;
           rx_copy_addr   <= rx_copy_addr + 1;
-          sm_rx <= RX_WRITE_NANOSECONDS;
+          ts_write_index <= 0;
+          sm_rx          <= RX_WRITE_NANOSECONDS;
+
+        -- Trailer bytes 1..4: nanoseconds[29:0], little-endian (top byte's high
+        -- 2 bits zero). One byte per cycle, each with write-enable asserted.
         when RX_WRITE_NANOSECONDS =>
-        ts_write_index <= ts_write_index + 1;
-          if (ts_write_index = 3) then
-           buf_rx_data_o <= "00" & std_logic_vector(timestamps_i.rx.nanoseconds(29 downto 24));
-            sm_rx <= RX_WRITE_NANOSECONDS;
+          buf_rx_addr  <= rx_copy_addr - 1;
+          buf_rx_we_o  <= '1';
+          rx_copy_addr <= rx_copy_addr + 1;
+          case ts_write_index is
+            when 0      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(7 downto 0));
+            when 1      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(15 downto 8));
+            when 2      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(23 downto 16));
+            when others => buf_rx_data_o <= "00" & std_logic_vector(rx_ts_ns_latch(29 downto 24));
+          end case;
+          if ts_write_index = 3 then
             ts_write_index <= 0;
+            sm_rx          <= RX_DONE;
           else
-            buf_rx_data_o <= std_logic_vector(timestamps_i.rx.nanoseconds(ts_write_index * 8 + 7 downto ts_write_index * 8));
-
+            ts_write_index <= ts_write_index + 1;
           end if;
-          
 
-          buf_rx_addr    <= rx_copy_addr - 1;
-          buf_rx_we_o    <= '1';
-          eth_ram_addr   <= rx_copy_addr + 1;
-          rx_copy_addr   <= rx_copy_addr + 1;
         when RX_DONE =>
-          buf_rx_len <= packet_length_latch;
+          if ADD_RX_TIMESTAMP then
+            buf_rx_len <= packet_length_latch
+                          + to_unsigned(TS_TRAILER_LEN, packet_length_latch'length);
+          else
+            buf_rx_len <= packet_length_latch;
+          end if;
           rx_valid_reg <= '1';
           sm_rx        <= RX_IDLE;
           packet_lenght_valid_latch <= '0';

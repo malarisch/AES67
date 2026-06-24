@@ -523,7 +523,8 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 ethernet_top_inst: entity work.ethernet_top
  GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
  MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
- ETHERNET_TYPE => ETHERNET_TYPE)
+ ETHERNET_TYPE => ETHERNET_TYPE,
+ PTP_IN_SOFTWARE => PTP_IN_SOFTWARE)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,

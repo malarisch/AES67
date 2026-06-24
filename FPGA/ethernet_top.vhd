@@ -8,7 +8,8 @@ entity ethernet_top is
   generic (
     MIIM_CLOCK_DIVIDER : POSITIVE := 50;
     MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-    ETHERNET_TYPE : STRING := "RGMII"
+    ETHERNET_TYPE : STRING := "RGMII";
+    PTP_IN_SOFTWARE: BOOLEAN := false
   );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
@@ -145,7 +146,8 @@ begin
 
 b2v_eth_buf : entity work.eth_ram
     generic map(
-      lastAddress => 1532
+      lastAddress => 1532,
+      PTP_TO_MCU => PTP_IN_SOFTWARE
       )
     port map
     (

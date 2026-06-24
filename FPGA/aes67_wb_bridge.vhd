@@ -552,6 +552,9 @@ begin
         
     );
     litex_eth_buffer_bridge_inst: entity work.litex_eth_buffer_bridge
+     generic map(
+        ADD_RX_TIMESTAMP => PTP_IN_SOFTWARE
+     )
      port map(
         timestamps_i => timestamps,
         tx_timestamp_o => tx_timestamp,

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 
-use aes67_config::{CsrMap, Device, SpiTransport, Transport, UartTransport};
+use aes67_config::{CsrMap, Device, KernelTransport, SpiTransport, Transport, UartTransport};
 use aes67_daemon::discovery::{self, Registry, SharedDiscovery};
 use aes67_daemon::persist::{DaemonConfig, TransportCfg};
 use aes67_daemon::{mdns, rtsp, startup, Persist, Server};
@@ -45,11 +45,16 @@ struct Cli {
     #[arg(long)]
     baud: Option<u32>,
     /// spibone SPI device, e.g. /dev/spidev0.0
-    #[arg(long, value_name = "DEV")]
+    #[arg(long, value_name = "DEV", conflicts_with = "uart")]
     spi: Option<String>,
     /// SPI clock in Hz for --spi.
     #[arg(long, value_name = "HZ")]
     spi_speed: Option<u32>,
+    /// aes67_eth kernel control device, e.g. /dev/aes67ctl. Bus access goes
+    /// through the kernel module (which also owns the netdev + PHC), so the TAP
+    /// bridge is disabled in this mode.
+    #[arg(long, value_name = "DEV", conflicts_with_all = ["uart", "spi"])]
+    kernel: Option<String>,
 
     /// Unix socket to listen on for the control API.
     #[arg(long, value_name = "PATH")]
@@ -181,11 +186,13 @@ fn main() -> Result<()> {
 /// Apply CLI overrides onto the loaded config, filling defaults where neither the
 /// CLI nor the file supplied a value.
 fn resolve_config(config: &mut DaemonConfig, cli: &Cli) -> Result<()> {
-    // Transport: a CLI --uart/--spi replaces the stored transport entirely.
+    // Transport: a CLI --uart/--spi/--kernel replaces the stored transport entirely.
     if let Some(dev) = &cli.uart {
         config.transport = Some(TransportCfg::Uart { device: dev.clone(), baud: cli.baud });
     } else if let Some(dev) = &cli.spi {
         config.transport = Some(TransportCfg::Spi { device: dev.clone(), speed_hz: cli.spi_speed });
+    } else if let Some(dev) = &cli.kernel {
+        config.transport = Some(TransportCfg::Kernel { device: dev.clone() });
     }
 
     if let Some(p) = &cli.csr {
@@ -223,6 +230,12 @@ fn resolve_config(config: &mut DaemonConfig, cli: &Cli) -> Result<()> {
     }
     net.poll_ms.get_or_insert(DEFAULT_POLL_MS);
 
+    // In kernel mode the aes67_eth netdev carries frames itself, so the daemon
+    // must not also run the userspace TAP bridge — clear any configured tap.
+    if matches!(config.transport, Some(TransportCfg::Kernel { .. })) {
+        config.network.tap = None;
+    }
+
     Ok(())
 }
 
@@ -237,6 +250,10 @@ fn open_transport(cfg: &TransportCfg) -> Result<Box<dyn Transport + Send>> {
         }
         TransportCfg::Spi { device, speed_hz } => Box::new(
             SpiTransport::open(device, *speed_hz).with_context(|| format!("opening SPI {device}"))?,
+        ),
+        TransportCfg::Kernel { device } => Box::new(
+            KernelTransport::open(device)
+                .with_context(|| format!("opening kernel control device {device}"))?,
         ),
     })
 }

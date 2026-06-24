@@ -253,8 +253,25 @@ tx_tsu: entity work.ethernet_timestamp_mii
 	mii_en_in => tx_en_switch
 );
 ptp_sw_gen: if (PTP_IN_SOFTWARE = true) generate
-	wallclock_signals_io <= wallclock_signals;
+	-- wallclock_signals is a mixed-direction record. The wallclock OUTPUTS (_o)
+	-- flow out to the bridge (gettime / RX-TX timestamping); the control INPUTS
+	-- (_i) come back from the bridge CSRs (settime / phasejump / ppb). Each
+	-- direction must be assigned explicitly: a single `io <= internal` would
+	-- drive the _i fields the wrong way, leaving the wallclock inputs unsourced
+	-- (Quartus warning 12161: "stuck at GND ... node is in wire loop").
+	wallclock_signals_io.wallclock_seconds_o     <= wallclock_signals.wallclock_seconds_o;
+	wallclock_signals_io.wallclock_nanoseconds_o <= wallclock_signals.wallclock_nanoseconds_o;
+
+	wallclock_signals.wallclock_seconds_i      <= wallclock_signals_io.wallclock_seconds_i;
+	wallclock_signals.wallclock_nanoseconds_i  <= wallclock_signals_io.wallclock_nanoseconds_i;
+	wallclock_signals.wallclock_set_i          <= wallclock_signals_io.wallclock_set_i;
+	wallclock_signals.wallclock_do_phasejump_i <= wallclock_signals_io.wallclock_do_phasejump_i;
+	wallclock_signals.freq_correction_ppb_i    <= wallclock_signals_io.freq_correction_ppb_i;
+
 	timestamps_o <= eth_timestamps;
+	tx_en_ptpfu <= '0';
+	ptp_allow_req <= '0';
+	tx_data_ptpfu <= (others => '0');
 end generate;
 
 ptp_hw_gen: if (PTP_IN_SOFTWARE = false) generate
