@@ -19,12 +19,9 @@ use work.wallclock_signals_pkg.all;
 
 entity litex_eth_buffer_bridge is
   generic (
-    -- When true, append a 5-byte RX hardware-timestamp trailer after each frame
-    -- (1 byte seconds[3:0], then 4 bytes little-endian nanoseconds[29:0]) and
-    -- count it in buf_rx_len. Used by the software-PTP path (the kernel netdev
-    -- driver parses it). Default false keeps the buffer format unchanged for the
-    -- firmware / hardware-PTP builds.
-    ADD_RX_TIMESTAMP : boolean := false
+    
+    ADD_RX_TIMESTAMP : boolean := false;
+    RX_NUM_SLOTS : integer := 2
   );
   port (
     -- ================================================================
@@ -113,8 +110,13 @@ architecture rtl of litex_eth_buffer_bridge is
   -- RX signals (mac_rx_clock domain)
   -- ================================================================
 
-  type t_rx_sm is (RX_IDLE, RX_WAIT, RX_COPY, RX_WRITE_SECONDS, RX_WRITE_NANOSECONDS, RX_DONE);
-  signal sm_rx : t_rx_sm := RX_IDLE;
+  -- Two independent state machines share the mac_rx_clock domain (no CDC):
+  --   FILL  : eth_ram -> internal frame FIFO  (runs at each parser toggle)
+  --   DRAIN : frame FIFO -> LiteX single buffer (runs as the SoC acks)
+  type t_fill_sm is (FILL_IDLE, FILL_WAIT, FILL_COPY, FILL_TS_SEC, FILL_TS_NS, FILL_COMMIT);
+  signal sm_fill : t_fill_sm := FILL_IDLE;
+  type t_drain_sm is (DR_IDLE, DR_PRIME, DR_COPY, DR_SET_VALID, DR_WAIT_ACK);
+  signal sm_drain : t_drain_sm := DR_IDLE;
 
   signal rx_copy_addr    : unsigned(10 downto 0) := (others => '0');
   signal rx_valid_reg    : std_ulogic := '0';
@@ -148,6 +150,20 @@ architecture rtl of litex_eth_buffer_bridge is
   -- newer frame's timestamp arriving mid-write.
   signal rx_ts_sec_latch : unsigned(3 downto 0)  := (others => '0');
   signal rx_ts_ns_latch  : unsigned(29 downto 0) := (others => '0');
+
+  -- Internal RX frame FIFO (mac_rx_clock domain only).
+  constant SLOT_SIZE : integer := 2048;  -- bytes per slot (>= 1518 + trailer)
+  type t_fifo_ram is array(0 to RX_NUM_SLOTS * SLOT_SIZE - 1) of std_logic_vector(7 downto 0);
+  signal fifo_ram   : t_fifo_ram;
+  signal fifo_raddr : integer range 0 to RX_NUM_SLOTS * SLOT_SIZE - 1 := 0;
+  signal fifo_rdata : std_logic_vector(7 downto 0) := (others => '0');
+  type t_len_arr is array(0 to RX_NUM_SLOTS - 1) of unsigned(10 downto 0);
+  signal slot_len   : t_len_arr := (others => (others => '0'));
+  signal wr_slot    : integer range 0 to RX_NUM_SLOTS - 1 := 0;
+  signal rd_slot    : integer range 0 to RX_NUM_SLOTS - 1 := 0;
+  signal fifo_count : integer range 0 to RX_NUM_SLOTS := 0;
+  signal drain_addr : unsigned(10 downto 0) := (others => '0');
+  signal drain_len  : unsigned(10 downto 0) := (others => '0');
 begin
 
   -- ================================================================
@@ -274,6 +290,8 @@ begin
   -- We use RX_WAIT to absorb that latency before entering RX_COPY.
   -- ================================================================
   p_rx : process(mac_rx_clock_i, mac_rx_reset_i)
+    variable v_commit : boolean;   -- a frame was committed to the FIFO this cycle
+    variable v_pop    : boolean;   -- a frame was released from the FIFO this cycle
   begin
     if mac_rx_reset_i = '1' then
       rx_ack_meta      <= '0';
@@ -288,11 +306,19 @@ begin
       rx_copy_addr     <= (others => '0');
       eth_ram_addr     <= (others => '0');
       parse_mcu_d      <= '0';
-      sm_rx            <= RX_IDLE;
+      sm_fill          <= FILL_IDLE;
+      sm_drain         <= DR_IDLE;
+      wr_slot          <= 0;
+      rd_slot          <= 0;
+      fifo_count       <= 0;
+      fifo_raddr       <= 0;
+      drain_addr       <= (others => '0');
+      drain_len        <= (others => '0');
       packet_lenght_valid_latch <= '0';
       packet_length_latch <= (others => '0');
-      packet_length_valid_counter <= (others =>  '0' );
     elsif rising_edge(mac_rx_clock_i) then
+      v_commit := false;
+      v_pop    := false;
       buf_rx_we_o <= '0';
 
       -- Edge detection for parse_mcu_packet toggle
@@ -303,106 +329,152 @@ begin
       rx_ack_sync   <= rx_ack_meta;
       rx_ack_sync_d <= rx_ack_sync;
 
-      -- SoC acknowledged: release buffer
-      if rx_ack_sync = '1' and rx_ack_sync_d = '0' then
-        rx_valid_reg    <= '0';
-        rx_overflow_reg <= '0';
-      end if;
       if (packet_length_valid_i = '1') then
         packet_lenght_valid_latch <= '1';
-                packet_length_latch <= unsigned(pkt_len_i);
-
+        packet_length_latch <= unsigned(pkt_len_i);
       end if;
 
-      
-      case sm_rx is
-        when RX_IDLE =>
+      -- Internal FIFO RAM read port (1-cycle latency). The write port is driven
+      -- inline from the FILL states below; Quartus infers a simple dual-port RAM.
+      fifo_rdata <= fifo_ram(fifo_raddr);
 
+      -- ============================================================
+      -- FILL: copy a completed frame from eth_ram into the next free FIFO slot.
+      -- Same eth_ram read timing as the legacy single-buffer copy; only the
+      -- write destination changed. Drops (overflow) only when all slots are full.
+      -- ============================================================
+      case sm_fill is
+        when FILL_IDLE =>
           if parse_mcu_packet_tog_i /= parse_mcu_d then
-            if rx_valid_reg = '1' then
-              -- Previous frame not yet consumed by SoC -> overflow
-              rx_overflow_reg <= '1';
+            if fifo_count >= RX_NUM_SLOTS then
+              rx_overflow_reg <= '1';   -- no free slot: drop the frame
             else
-              -- Latch frame length, present address 0 to RAM
-
-              rx_copy_addr   <= (others => '0');
-              eth_ram_addr   <= (others => '0');
+              rx_copy_addr    <= (others => '0');
+              eth_ram_addr    <= (others => '0');
               -- Capture this frame's RX timestamp now (the TSU updates it only
               -- at the next frame's SOF, so it is stable for the trailer write).
               rx_ts_sec_latch <= timestamps_i.rx.seconds;
               rx_ts_ns_latch  <= timestamps_i.rx.nanoseconds;
-              sm_rx          <= RX_WAIT;
+              sm_fill         <= FILL_WAIT;
             end if;
           end if;
 
-        when RX_WAIT =>
-          -- RAM latency cycle: data for addr 0 will be valid next cycle.
-          -- Pre-request address 1 so it's ready when we need it.
-          eth_ram_addr   <= to_unsigned(1, eth_ram_addr'length);
-          rx_copy_addr   <= to_unsigned(1, rx_copy_addr'length);
-          sm_rx          <= RX_COPY;
+        when FILL_WAIT =>
+          -- RAM latency cycle: data for addr 0 valid next cycle; prefetch addr 1.
+          eth_ram_addr <= to_unsigned(1, eth_ram_addr'length);
+          rx_copy_addr <= to_unsigned(1, rx_copy_addr'length);
+          sm_fill      <= FILL_COPY;
 
-        when RX_COPY =>
-          -- eth_ram_data_i now holds data for the address presented
-          -- in the previous cycle (rx_copy_addr - 1).
-          buf_rx_data_o  <= eth_ram_data_i;
-          buf_rx_addr    <= rx_copy_addr - 1;
-          buf_rx_we_o    <= '1';
-
+        when FILL_COPY =>
+          -- eth_ram_data_i holds the byte for (rx_copy_addr - 1).
+          fifo_ram(wr_slot * SLOT_SIZE + to_integer(rx_copy_addr) - 1) <= eth_ram_data_i;
           if rx_copy_addr >= packet_length_latch and packet_lenght_valid_latch = '1' then
-            -- Last payload byte written this cycle. Append the timestamp trailer
-            -- only in the software-PTP build; otherwise finish immediately.
             if ADD_RX_TIMESTAMP then
-              sm_rx <= RX_WRITE_SECONDS;
+              sm_fill <= FILL_TS_SEC;
             else
-              sm_rx <= RX_DONE;
+              sm_fill <= FILL_COMMIT;
             end if;
           end if;
-            -- Present next address, advance counter
-            eth_ram_addr   <= rx_copy_addr + 1;
-            rx_copy_addr   <= rx_copy_addr + 1;
+          eth_ram_addr <= rx_copy_addr + 1;
+          rx_copy_addr <= rx_copy_addr + 1;
 
         -- Trailer byte 0: seconds[3:0] in the low nibble.
-        when RX_WRITE_SECONDS =>
-          buf_rx_data_o  <= "0000" & std_logic_vector(rx_ts_sec_latch);
-          buf_rx_addr    <= rx_copy_addr - 1;
-          buf_rx_we_o    <= '1';
+        when FILL_TS_SEC =>
+          fifo_ram(wr_slot * SLOT_SIZE + to_integer(rx_copy_addr) - 1) <=
+            "0000" & std_logic_vector(rx_ts_sec_latch);
           rx_copy_addr   <= rx_copy_addr + 1;
           ts_write_index <= 0;
-          sm_rx          <= RX_WRITE_NANOSECONDS;
+          sm_fill        <= FILL_TS_NS;
 
         -- Trailer bytes 1..4: nanoseconds[29:0], little-endian (top byte's high
-        -- 2 bits zero). One byte per cycle, each with write-enable asserted.
-        when RX_WRITE_NANOSECONDS =>
-          buf_rx_addr  <= rx_copy_addr - 1;
-          buf_rx_we_o  <= '1';
-          rx_copy_addr <= rx_copy_addr + 1;
+        -- 2 bits zero), one byte per cycle.
+        when FILL_TS_NS =>
           case ts_write_index is
-            when 0      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(7 downto 0));
-            when 1      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(15 downto 8));
-            when 2      => buf_rx_data_o <= std_logic_vector(rx_ts_ns_latch(23 downto 16));
-            when others => buf_rx_data_o <= "00" & std_logic_vector(rx_ts_ns_latch(29 downto 24));
+            when 0      => fifo_ram(wr_slot*SLOT_SIZE + to_integer(rx_copy_addr) - 1) <= std_logic_vector(rx_ts_ns_latch(7 downto 0));
+            when 1      => fifo_ram(wr_slot*SLOT_SIZE + to_integer(rx_copy_addr) - 1) <= std_logic_vector(rx_ts_ns_latch(15 downto 8));
+            when 2      => fifo_ram(wr_slot*SLOT_SIZE + to_integer(rx_copy_addr) - 1) <= std_logic_vector(rx_ts_ns_latch(23 downto 16));
+            when others => fifo_ram(wr_slot*SLOT_SIZE + to_integer(rx_copy_addr) - 1) <= "00" & std_logic_vector(rx_ts_ns_latch(29 downto 24));
           end case;
+          rx_copy_addr <= rx_copy_addr + 1;
           if ts_write_index = 3 then
             ts_write_index <= 0;
-            sm_rx          <= RX_DONE;
+            sm_fill        <= FILL_COMMIT;
           else
             ts_write_index <= ts_write_index + 1;
           end if;
 
-        when RX_DONE =>
+        when FILL_COMMIT =>
           if ADD_RX_TIMESTAMP then
-            buf_rx_len <= packet_length_latch
-                          + to_unsigned(TS_TRAILER_LEN, packet_length_latch'length);
+            slot_len(wr_slot) <= packet_length_latch
+                                 + to_unsigned(TS_TRAILER_LEN, packet_length_latch'length);
           else
-            buf_rx_len <= packet_length_latch;
+            slot_len(wr_slot) <= packet_length_latch;
           end if;
-          rx_valid_reg <= '1';
-          sm_rx        <= RX_IDLE;
+          if wr_slot = RX_NUM_SLOTS - 1 then
+            wr_slot <= 0;
+          else
+            wr_slot <= wr_slot + 1;
+          end if;
+          v_commit := true;
           packet_lenght_valid_latch <= '0';
-
-
+          sm_fill <= FILL_IDLE;
       end case;
+
+      -- ============================================================
+      -- DRAIN: feed the head FIFO slot into the LiteX single buffer, one frame
+      -- at a time, advancing only when the SoC acks the previous frame.
+      -- ============================================================
+      case sm_drain is
+        when DR_IDLE =>
+          if fifo_count > 0 and rx_valid_reg = '0' then
+            drain_len  <= slot_len(rd_slot);
+            drain_addr <= (others => '0');
+            fifo_raddr <= rd_slot * SLOT_SIZE;        -- present byte 0
+            sm_drain   <= DR_PRIME;
+          end if;
+
+        when DR_PRIME =>
+          fifo_raddr <= rd_slot * SLOT_SIZE + 1;      -- prefetch byte 1
+          drain_addr <= to_unsigned(1, drain_addr'length);
+          sm_drain   <= DR_COPY;
+
+        when DR_COPY =>
+          -- fifo_rdata holds the byte for (drain_addr - 1).
+          buf_rx_data_o <= fifo_rdata;
+          buf_rx_addr   <= drain_addr - 1;
+          buf_rx_we_o   <= '1';
+          if drain_addr >= drain_len then
+            sm_drain <= DR_SET_VALID;
+          end if;
+          fifo_raddr <= rd_slot * SLOT_SIZE + to_integer(drain_addr) + 1;
+          drain_addr <= drain_addr + 1;
+
+        when DR_SET_VALID =>
+          buf_rx_len   <= drain_len;
+          rx_valid_reg <= '1';
+          sm_drain     <= DR_WAIT_ACK;
+
+        when DR_WAIT_ACK =>
+          if rx_ack_sync = '1' and rx_ack_sync_d = '0' then
+            rx_valid_reg    <= '0';
+            rx_overflow_reg <= '0';
+            if rd_slot = RX_NUM_SLOTS - 1 then
+              rd_slot <= 0;
+            else
+              rd_slot <= rd_slot + 1;
+            end if;
+            v_pop    := true;
+            sm_drain <= DR_IDLE;
+          end if;
+      end case;
+
+      -- Single update of the shared occupancy counter (handles simultaneous
+      -- commit + pop as a no-op).
+      if v_commit and not v_pop then
+        fifo_count <= fifo_count + 1;
+      elsif v_pop and not v_commit then
+        fifo_count <= fifo_count - 1;
+      end if;
     end if;
   end process;
 

@@ -277,6 +277,20 @@ void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t);
 void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m);
 int  fpga_hal_set_ptp_reset(bool held_in_reset);
 
+/* Reset domains of the unified "reset" CSR. The FPGA powers up with every
+ * domain held (CSR resets to all-ones), so the firmware must release them in a
+ * staged order at boot (and after an FPGA-reset recovery). */
+#define FPGA_HAL_RESET_PTP  BIT(0)
+#define FPGA_HAL_RESET_TX   BIT(1)
+#define FPGA_HAL_RESET_RX   BIT(2)
+#define FPGA_HAL_RESET_ETH  BIT(3)
+#define FPGA_HAL_RESET_AUDIO (FPGA_HAL_RESET_TX | FPGA_HAL_RESET_RX)
+#define FPGA_HAL_RESET_ALL \
+	(FPGA_HAL_RESET_PTP | FPGA_HAL_RESET_AUDIO | FPGA_HAL_RESET_ETH)
+
+/** Release (held=false) or assert (held=true) the given reset domains. */
+int  fpga_hal_set_resets(uint32_t domains, bool held);
+
 /* ========================================================================
  * Audio metering
  * ======================================================================== */

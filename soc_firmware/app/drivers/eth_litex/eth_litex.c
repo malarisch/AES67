@@ -340,6 +340,10 @@ int eth_litex_write_ptp_tuning(const struct device *dev,
 		return -EINVAL;
 	}
 
+	/* Servo tuning CSRs exist only when the aes67_bridge is built with the
+	 * servo (default for software PTP; dropped via --no-servo-csr when the FPGA
+	 * configures the servo statically). The parser CSRs below are always present. */
+#ifdef CSR_AES67_CSR_SERVO_KP_GAIN_ADDR
 	litex_csr_write(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR, (uint8_t)t->kp_gain);
 	litex_csr_write(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR, (uint8_t)t->ki_gain);
 	litex_csr_write(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR, t->gain_shift & 0x1F);
@@ -350,6 +354,7 @@ int eth_litex_write_ptp_tuning(const struct device *dev,
 	litex_csr_write(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR, t->lock_threshold_ns);
 	litex_csr_write(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR, t->unlock_threshold_ns);
 	litex_csr_write(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR, t->lock_count_threshold);
+#endif
 
 	uint32_t mf = (t->min_filter_enable ? 1u : 0u) |
 		      ((uint32_t)t->min_filter_active_depth << 8);
@@ -370,6 +375,9 @@ void eth_litex_read_ptp_tuning(const struct device *dev,
 		return;
 	}
 
+	/* Servo CSRs absent in a --no-servo-csr (static-servo) bridge build: report
+	 * zeros for the servo tuning so callers see a defined value. */
+#ifdef CSR_AES67_CSR_SERVO_KP_GAIN_ADDR
 	t->kp_gain              = (int8_t)litex_csr_read(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR);
 	t->ki_gain              = (int8_t)litex_csr_read(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR);
 	t->gain_shift           = (uint8_t)(litex_csr_read(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR) & 0x1F);
@@ -380,6 +388,18 @@ void eth_litex_read_ptp_tuning(const struct device *dev,
 	t->lock_threshold_ns    = litex_csr_read(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR);
 	t->unlock_threshold_ns  = litex_csr_read(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR);
 	t->lock_count_threshold = (uint8_t)litex_csr_read(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR);
+#else
+	t->kp_gain = 0;
+	t->ki_gain = 0;
+	t->gain_shift = 0;
+	t->gain_shift_locked = 0;
+	t->ki_extra_shift = 0;
+	t->filter_shift = 0;
+	t->warmup_samples = 0;
+	t->lock_threshold_ns = 0;
+	t->unlock_threshold_ns = 0;
+	t->lock_count_threshold = 0;
+#endif
 
 	uint32_t mf = litex_csr_read(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR);
 	t->min_filter_enable       = (mf & 0x1) != 0;
@@ -398,6 +418,9 @@ void eth_litex_read_ptp_monitor(const struct device *dev,
 		return;
 	}
 
+	/* Servo monitoring CSRs share the servo gate; absent in a --no-servo-csr
+	 * bridge build. Report a zeroed snapshot so callers see defined values. */
+#ifdef CSR_AES67_CSR_SERVO_MON_STATUS_ADDR
 	m->filtered_offset = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_FILTERED_OFFSET_ADDR);
 	m->integral_sum    = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_INTEGRAL_SUM_ADDR);
 	m->pi_proportional = (int32_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_PI_PROPORTIONAL_ADDR);
@@ -409,6 +432,16 @@ void eth_litex_read_ptp_monitor(const struct device *dev,
 	m->first_lock_achieved  = ((status >> 24) & 0x1) != 0;
 
 	m->sample_count = (uint16_t)litex_csr_read(CSR_AES67_CSR_SERVO_MON_SAMPLE_COUNT_ADDR);
+#else
+	m->filtered_offset = 0;
+	m->integral_sum = 0;
+	m->pi_proportional = 0;
+	m->pi_sum_raw = 0;
+	m->effective_gain_shift = 0;
+	m->lock_counter = 0;
+	m->first_lock_achieved = false;
+	m->sample_count = 0;
+#endif
 }
 
 int eth_litex_set_ptp_reset(const struct device *dev, bool held_in_reset)

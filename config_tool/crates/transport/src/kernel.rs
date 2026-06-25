@@ -38,7 +38,7 @@ mod linux {
     // struct is 8 bytes.
     const fn ioc(dir: u32, nr: u32) -> libc::c_ulong {
         let size = core::mem::size_of::<WbXfer>() as u32;
-        (((dir << 30) | (size << 16) | (0xA6u32 << 8) | nr)) as libc::c_ulong
+        ((dir << 30) | (size << 16) | (0xA6u32 << 8) | nr) as libc::c_ulong
     }
     const AES67_IOC_PEEK: libc::c_ulong = ioc(3, 1); // _IOWR(0xA6, 1, xfer)
     const AES67_IOC_POKE: libc::c_ulong = ioc(1, 2); // _IOW (0xA6, 2, xfer)

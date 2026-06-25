@@ -28,8 +28,10 @@ use anyhow::{anyhow, Context, Result};
 
 use aes67_config::{ConfigError, ControlApi, RxStream, TxStream};
 
-use crate::persist::{NetworkCfg, Settings};
-use crate::{bridge, gpio::IrqLine, monitor, netif::Tap, replay_settings, SharedConfig, SharedDevice};
+use crate::persist::{NetworkCfg, Settings, TransportCfg};
+use crate::{
+    bridge, gpio::IrqLine, monitor, netif, netif::Tap, replay_settings, SharedConfig, SharedDevice,
+};
 
 /// Unified reset CSR (active-high, 1 = held in reset).
 const REG_RESET: &str = "aes67_csr_reset";
@@ -65,14 +67,15 @@ const IP_WAIT_LOG_EVERY: Duration = Duration::from_secs(5);
 pub fn run(device: SharedDevice, config: SharedConfig, verbose: u8) -> Result<()> {
     // Snapshot of the run config for this bring-up; the monitor keeps the shared
     // handle so later config changes are picked up on FPGA-reset recovery.
-    let (network, settings) = {
+    let (network, settings, kernel) = {
         let c = config.lock().unwrap();
-        (c.network.clone(), c.settings.clone())
+        let kernel = matches!(c.transport, Some(TransportCfg::Kernel { .. }));
+        (c.network.clone(), c.settings.clone(), kernel)
     };
     if is_warm_restart(&device) {
-        warm_resume(&device, &config, &network, &settings, verbose)
+        warm_resume(&device, &config, &network, &settings, kernel, verbose)
     } else {
-        cold_start(&device, &config, &network, &settings, verbose)
+        cold_start(&device, &config, &network, &settings, kernel, verbose)
     }
 }
 
@@ -83,6 +86,7 @@ fn warm_resume(
     config: &SharedConfig,
     network: &NetworkCfg,
     settings: &Settings,
+    kernel: bool,
     verbose: u8,
 ) -> Result<()> {
     eprintln!(
@@ -91,13 +95,14 @@ fn warm_resume(
     );
     apply_ptp_and_streams(device, settings, verbose);
 
-    if network.tap.is_some() {
-        // Use the FPGA's current MAC for the TAP; do not reprogram it. The TAP is
+    if network.tap.is_some() || kernel {
+        // Use the FPGA's current MAC; do not reprogram it. In TAP mode the TAP is
         // recreated fresh (it died with the previous daemon process), so its DHCP
-        // lease is gone — the monitor must re-run DHCP on the first link-up.
-        let mac = device.lock().unwrap().get_mac().context("reading MAC for TAP")?;
-        bring_up_network(device, config, network, mac, verbose)
-            .context("bringing up TAP bridge")?;
+        // lease is gone — the monitor re-runs DHCP on the first link-up. In kernel
+        // mode the netdev keeps running; the monitor just re-attaches IP/IGMP.
+        let mac = device.lock().unwrap().get_mac().context("reading MAC")?;
+        bring_up_network(device, config, network, kernel, mac, verbose)
+            .context("bringing up network services")?;
     }
     eprintln!("aes67d: startup: warm restart complete");
     Ok(())
@@ -109,6 +114,7 @@ fn cold_start(
     config: &SharedConfig,
     network: &NetworkCfg,
     settings: &Settings,
+    kernel: bool,
     verbose: u8,
 ) -> Result<()> {
     // Step 0: known state — hold everything in reset.
@@ -137,19 +143,22 @@ fn cold_start(
     // Step 2: Ethernet out of reset, then bring up the network so DHCP can run.
     release(device, RESET_ETH, "Ethernet").context("releasing Ethernet reset")?;
 
-    if network.tap.is_some() {
+    if network.tap.is_some() || kernel {
         // Fall back to the FPGA's current MAC if programming above failed.
         let mac = match mac {
             Some(m) => m,
-            None => device.lock().unwrap().get_mac().context("reading MAC for TAP")?,
+            None => device.lock().unwrap().get_mac().context("reading MAC")?,
         };
-        // Cold start: the first link-up should trigger DHCP.
-        bring_up_network(device, config, network, mac, verbose)
-            .context("bringing up TAP bridge")?;
-        // Step 3: wait until the monitor has programmed an IP from the lease.
-        wait_for_ip(device, verbose);
+        // Cold start: the first link-up should trigger DHCP (TAP mode); in kernel
+        // mode the system network manager owns DHCP.
+        let networked = bring_up_network(device, config, network, kernel, mac, verbose)
+            .context("bringing up network services")?;
+        if networked {
+            // Step 3: wait until the monitor has programmed an IP from the lease.
+            wait_for_ip(device, verbose);
+        }
     } else {
-        eprintln!("aes67d: startup: no TAP configured — skipping IP wait");
+        eprintln!("aes67d: startup: no TAP / kernel netdev configured — skipping IP wait");
     }
 
     // Step 4: PTP out of reset.
@@ -162,13 +171,20 @@ fn cold_start(
     Ok(())
 }
 
-/// A warm restart is when the FPGA is already fully out of reset *and* has an IP
-/// configured: the FPGA kept running while only the daemon restarted.
+/// A warm restart is when the FPGA already has **every** reset domain released:
+/// the FPGA kept running while only the daemon restarted, so we must not disturb
+/// it. The gateware powers up with all resets held (`reset` CSR resets to
+/// all-ones), and only a daemon ever releases them in the staged bring-up — so a
+/// fully-released state unambiguously means "already brought up". The IP is *not*
+/// part of this test: it is mirrored asynchronously (DHCP + monitor), so a running
+/// FPGA may momentarily read no IP, and resetting it then would needlessly glitch
+/// audio/PTP — exactly the daemon-restart wipe we want to avoid. A partially
+/// released state (interrupted bring-up) still reads as cold and is rebuilt.
 fn is_warm_restart(device: &SharedDevice) -> bool {
-    let mut d = device.lock().unwrap();
-    let resets_released = matches!(d.read_register(REG_RESET), Ok(v) if v & RESET_ALL == 0);
-    let has_ip = matches!(d.get_ip(), Ok(ip) if !ip.is_unspecified());
-    resets_released && has_ip
+    matches!(
+        device.lock().unwrap().read_register(REG_RESET),
+        Ok(v) if v & RESET_ALL == 0
+    )
 }
 
 /// True once the FPGA's reset CSR reads all-domains-held again. Since the daemon
@@ -315,15 +331,73 @@ fn wait_for_ip(device: &SharedDevice, verbose: u8) {
     }
 }
 
-/// Create the TAP, configure it, and spawn the bridge + monitor services.
+/// Bring up the network backing for the FPGA's Ethernet and spawn the monitor.
+/// Returns `true` if a backing was started (so the caller should wait for an IP),
+/// `false` if neither a TAP nor a kernel netdev applies.
+///
+/// * **TAP mode** (`net.tap` set): create the TAP, bridge frames, and run the
+///   monitor with carrier + DHCP driving.
+/// * **Kernel mode**: the `aes67_eth` netdev carries frames and owns its carrier;
+///   the monitor only mirrors the IP and joins IGMP on that interface (resolved
+///   from `net.iface` or the FPGA MAC).
 fn bring_up_network(
+    device: &SharedDevice,
+    config: &SharedConfig,
+    net: &NetworkCfg,
+    kernel: bool,
+    mac: [u8; 6],
+    verbose: u8,
+) -> Result<bool> {
+    if net.tap.is_some() {
+        bring_up_tap(device, config, net, mac, verbose)?;
+        return Ok(true);
+    }
+    if kernel {
+        match resolve_kernel_iface(net, mac) {
+            Some(iface) => {
+                eprintln!(
+                    "aes67d: startup: kernel netdev mode — mirroring IP and joining IGMP on {iface}"
+                );
+                monitor::spawn(
+                    Arc::clone(device),
+                    iface,
+                    monitor::NetLink::Kernel,
+                    Arc::clone(config),
+                    verbose,
+                );
+                return Ok(true);
+            }
+            None => {
+                eprintln!(
+                    "aes67d: startup: WARNING — kernel mode but no netdev interface found \
+                     (set network.iface / --iface, or ensure the FPGA MAC matches a NIC); \
+                     FPGA IP mirroring and IGMP are disabled"
+                );
+                return Ok(false);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Resolve the kernel-transport netdev interface: the explicitly configured name,
+/// else the interface whose MAC matches the FPGA's (the `aes67_eth` netdev).
+pub fn resolve_kernel_iface(net: &NetworkCfg, mac: [u8; 6]) -> Option<String> {
+    if let Some(iface) = net.iface.clone() {
+        return Some(iface);
+    }
+    netif::interface_by_mac(mac)
+}
+
+/// Create the TAP, configure it, and spawn the bridge + monitor services.
+fn bring_up_tap(
     device: &SharedDevice,
     config: &SharedConfig,
     net: &NetworkCfg,
     mac: [u8; 6],
     verbose: u8,
 ) -> Result<()> {
-    let tap_name = net.tap.as_deref().expect("bring_up_network without a tap name");
+    let tap_name = net.tap.as_deref().expect("bring_up_tap without a tap name");
     let mtu = net.mtu.unwrap_or(DEFAULT_MTU);
     let poll_ms = net.poll_ms.unwrap_or(DEFAULT_POLL_MS);
 
@@ -370,7 +444,7 @@ fn bring_up_network(
     monitor::spawn(
         Arc::clone(device),
         tap.name().to_string(),
-        carrier_tap,
+        monitor::NetLink::Tap(carrier_tap),
         Arc::clone(config),
         verbose,
     );
@@ -451,18 +525,20 @@ csr_register,aes67_csr_ip_addr,0x18,1,rw
     }
 
     #[test]
-    fn warm_restart_needs_released_resets_and_an_ip() {
+    fn warm_restart_is_decided_by_released_resets_alone() {
         let d = mock_device();
 
-        // Fresh mock: resets read 0, but no IP yet → cold.
+        // Fresh power-on: the FPGA holds every reset domain → cold start.
+        hold_all_resets(&d).unwrap();
         assert!(!is_warm_restart(&d));
 
-        // IP configured, resets released → warm (FPGA running, daemon restarted).
-        d.lock().unwrap().write_register("aes67_csr_ip_addr", 0xC0A8_012A).unwrap();
+        // A prior daemon released every domain → warm, regardless of IP (the FPGA
+        // is running; a restart must not reset it even before the IP is mirrored).
+        d.lock().unwrap().write_register(REG_RESET, 0).unwrap();
         assert!(is_warm_restart(&d));
 
-        // Resets asserted again → cold even with an IP.
-        hold_all_resets(&d).unwrap();
+        // Partially released (interrupted bring-up) → still cold, gets rebuilt.
+        d.lock().unwrap().write_register(REG_RESET, RESET_PTP).unwrap();
         assert!(!is_warm_restart(&d));
     }
 

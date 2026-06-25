@@ -15,6 +15,13 @@
 //!
 //! Polling (rather than rtnetlink) keeps this dependency-free; a once-per-second
 //! check is invisible next to DHCP and link-state timing.
+//!
+//! Two link backings are supported via [`NetLink`]: the userspace **TAP** bridge
+//! (the daemon drives the TAP carrier from the FPGA link and runs DHCP), and the
+//! **kernel** `aes67_eth` netdev (the module drives its own carrier and the
+//! system network manager runs DHCP — the monitor then only mirrors the IP, joins
+//! IGMP groups, and recovers from FPGA resets). The IP/IGMP/reset-recovery logic
+//! is identical for both; only carrier driving and DHCP triggering differ.
 
 use std::ffi::CStr;
 use std::fs::File;
@@ -41,27 +48,47 @@ const STATUS_ETH_LINK_UP: u64 = 1 << 4;
 const STATUS_ETH_SPEED_SHIFT: u32 = 5;
 const STATUS_ETH_SPEED_MASK: u64 = 0b11;
 
-/// Spawn the monitor thread. It runs for the life of the daemon. `carrier_tap`
-/// is a tap fd handle used only to drive the carrier state. `config` is the live
-/// shared config, read at need so an FPGA-reset recovery rebuilds the *current*
-/// state (including config made after startup) and DHCP uses the current command.
+/// How the FPGA's Ethernet is presented to Linux, and thus what the monitor must
+/// drive itself.
+pub enum NetLink {
+    /// Userspace TAP bridge: the daemon drives the TAP carrier from the FPGA PHY
+    /// link and triggers DHCP on link-up. Carries the tap fd handle.
+    Tap(File),
+    /// Kernel `aes67_eth` netdev: the module drives its own carrier and the
+    /// system runs DHCP. The monitor only mirrors the IP, joins IGMP, and
+    /// recovers from FPGA resets.
+    Kernel,
+}
+
+/// Spawn the monitor thread. It runs for the life of the daemon. `iface` is the
+/// interface whose address is mirrored into the FPGA and on which IGMP groups are
+/// joined (the TAP in TAP mode, the kernel netdev in kernel mode). `config` is the
+/// live shared config, read at need so an FPGA-reset recovery rebuilds the
+/// *current* state (including config made after startup) and DHCP uses the current
+/// command.
 pub fn spawn(
     device: SharedDevice,
-    tap_name: String,
-    carrier_tap: File,
+    iface: String,
+    link: NetLink,
     config: SharedConfig,
     verbose: u8,
 ) {
-    std::thread::spawn(move || run(device, tap_name, carrier_tap, config, verbose));
+    std::thread::spawn(move || run(device, iface, link, config, verbose));
 }
 
 fn run(
     device: SharedDevice,
     tap_name: String,
-    carrier_tap: File,
+    link: NetLink,
     config: SharedConfig,
     verbose: u8,
 ) {
+    // TAP mode drives the carrier from the FPGA link and runs DHCP itself; the
+    // kernel netdev does both on its own, so the monitor only mirrors IP/IGMP.
+    let (carrier, drive_dhcp) = match link {
+        NetLink::Tap(f) => (Some(f), true),
+        NetLink::Kernel => (None, false),
+    };
     // Seed the IP from the FPGA's current value so a daemon restart doesn't
     // re-write an address that already matches.
     let mut last_ip = device.lock().unwrap().get_ip().ok().filter(|ip| usable(*ip));
@@ -116,12 +143,14 @@ fn run(
         // On the link-up edge (cold start, daemon warm restart, or recovery from
         // a link-down), kick off DHCP: the kernel has no DHCP client, so a
         // userspace one must run. A reset-recovery suppresses only the first up.
-        match reconcile_link(&device, &carrier_tap, &mut last_link) {
+        match reconcile_link(&device, carrier.as_ref(), &mut last_link) {
             Some(true) => {
                 // Link came up — the switch flushed memberships; re-report once
                 // we have a valid IP.
                 igmp_rejoin_pending = true;
-                if suppress_dhcp_on_up {
+                if !drive_dhcp {
+                    // Kernel netdev mode: the system network manager owns DHCP.
+                } else if suppress_dhcp_on_up {
                     suppress_dhcp_on_up = false;
                     if verbose >= 1 {
                         eprintln!(
@@ -185,9 +214,16 @@ fn desired_groups(settings: &Settings) -> Vec<Ipv4Addr> {
     groups
 }
 
-/// FPGA PHY link → TAP carrier. Returns `Some(true)`/`Some(false)` on a link
-/// up/down transition, or `None` if the state was unchanged.
-fn reconcile_link(device: &SharedDevice, carrier_tap: &File, last: &mut Option<bool>) -> Option<bool> {
+/// FPGA PHY link → carrier. Returns `Some(true)`/`Some(false)` on a link
+/// up/down transition, or `None` if the state was unchanged. With `carrier_tap`
+/// (TAP mode) the transition also drives the TAP carrier; without it (kernel
+/// netdev mode, which manages its own carrier) the edge is only tracked, so the
+/// IGMP re-report still fires on link-up.
+fn reconcile_link(
+    device: &SharedDevice,
+    carrier_tap: Option<&File>,
+    last: &mut Option<bool>,
+) -> Option<bool> {
     let status = match device.lock().unwrap().read_register(REG_STATUS) {
         Ok(s) => s,
         Err(e) => {
@@ -200,6 +236,16 @@ fn reconcile_link(device: &SharedDevice, carrier_tap: &File, last: &mut Option<b
         return None;
     }
     let speed = link_speed(status);
+    let Some(carrier_tap) = carrier_tap else {
+        // Kernel netdev mode: the driver owns the carrier; just note the edge.
+        if up {
+            eprintln!("aes67d: monitor: FPGA link up ({speed})");
+        } else {
+            eprintln!("aes67d: monitor: FPGA link down");
+        }
+        *last = Some(up);
+        return Some(up);
+    };
     match netif::set_carrier(carrier_tap, up) {
         Ok(()) => {
             if up {

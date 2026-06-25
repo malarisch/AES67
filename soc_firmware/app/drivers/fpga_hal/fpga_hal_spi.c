@@ -535,3 +535,10 @@ int fpga_hal_set_ptp_reset(bool held_in_reset)
 	ARG_UNUSED(held_in_reset);
 	return -ENOTSUP;
 }
+
+int fpga_hal_set_resets(uint32_t domains, bool held)
+{
+	ARG_UNUSED(domains);
+	ARG_UNUSED(held);
+	return -ENOTSUP;
+}

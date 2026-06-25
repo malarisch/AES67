@@ -144,6 +144,10 @@ static void fpga_reconfigure(void *user_data)
 		}
 	}
 
+	/* A reset FPGA comes back with every domain held (reset CSR = all-ones);
+	 * the node is already configured, so release them all to resume operation. */
+	fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
+
 	ptp_bmc_notify_fpga_ready();
 
 	LOG_INF("FPGA recovery complete");
@@ -395,6 +399,12 @@ int main(void)
 	}
 #endif
 
+	/* The FPGA powers up with every module held in reset (reset CSR = all-ones).
+	 * Release Ethernet first so the MAC/PHY bring the link up; PTP and the audio
+	 * paths are released later, once their prerequisites are in place (mirrors the
+	 * staged bring-up the aes67d daemon does on the SoC path). */
+	fpga_hal_set_resets(FPGA_HAL_RESET_ETH, false);
+
 	fpga_wait_for_link_up(30000);
 
 	k_msleep(500);
@@ -410,11 +420,17 @@ int main(void)
 	g_dhcp_running = true;
 
 	/* ---- Start PTPv2 Best Master Clock algorithm ---- */
+	/* PTP out of reset now that the network identity is up; then the audio TX/RX
+	 * paths last, so they only run on a configured, time-synced node. */
+	fpga_hal_set_resets(FPGA_HAL_RESET_PTP, false);
+
 	ptp_bmc_register_change_cb(on_bmc_change);
 	int bmc_ret = ptp_bmc_start(iface);
 	if (bmc_ret < 0) {
 		LOG_ERR("Failed to start PTP BMC: %d", bmc_ret);
 	}
+
+	fpga_hal_set_resets(FPGA_HAL_RESET_AUDIO, false);
 
 	/* ---- Start AES67 SAP/SDP announcements ---- */
 	int sap_ret = sap_sdp_start(iface);

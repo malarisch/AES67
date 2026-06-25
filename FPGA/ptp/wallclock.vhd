@@ -217,7 +217,29 @@ architecture Behavioral of wallclock is
     signal nco_ppb_adj_wait : std_logic := '0';
     signal media_clock_proc_wait : std_logic := '0';
 
+    signal wallclock_set_1 : std_logic;
+    signal wallclock_set_2 : std_logic;
+    signal wallclock_set_3 : std_logic;
+
+    signal wallclock_phasejump_1 : std_logic;
+    signal wallclock_phasejump_2 : std_logic;
+    signal wallclock_phasejump_3 : std_logic;
+
 begin
+
+
+    process (clk)
+
+    begin
+        if (rising_edge(clk)) then
+            wallclock_set_1 <= wallclock_signals.wallclock_set_i;
+            wallclock_set_2 <= wallclock_set_1;
+            wallclock_set_3 <= wallclock_set_2;
+            wallclock_phasejump_1 <= wallclock_signals.wallclock_do_phasejump_i;
+            wallclock_phasejump_2 <= wallclock_phasejump_1;
+            wallclock_phasejump_3 <= wallclock_phasejump_2;
+        end if;
+    end process;
 
     -- Output assignments
     -- Take the low 30 bits of nsec_reg. resize() of an unsigned keeps the
@@ -359,7 +381,7 @@ begin
 
             ppb_trim       <= (others => '0');
         elsif rising_edge(clk) then
-            if wallclock_signals.wallclock_set_i = '1' then
+            if wallclock_set_3 = '0' and wallclock_set_2 = '1' then
                 -- Hard resync zeroes the NCO; clear the integrator too so
                 -- it doesn't carry old drift compensation across the jump.
                 ppb_trim <= (others => '0');
@@ -404,7 +426,7 @@ end generate;
             sample_pulse_int <= '0';
             media_clock_prev <= media_clock_reg;
 
-            if wallclock_signals.wallclock_set_i = '1' then
+            if wallclock_set_3 = '0' and wallclock_set_2 = '1' then
                 nco_phase      <= (others => '0');
                 nco_phase_prev <= '0';
                 mclk_cnt       <= (others => '0');
@@ -651,7 +673,7 @@ end generate;
 
 
             -- ===== OVERRIDE PATHS =====
-            if wallclock_signals.wallclock_set_i = '1' then
+            if wallclock_set_3 = '0' and wallclock_set_2 = '1' then
                 -- Hard set of time — overrides everything
                 nsec_reg      <= resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
                 sec_reg       <= unsigned(wallclock_signals.wallclock_seconds_i);
@@ -661,7 +683,7 @@ end generate;
                 sec_adj_pipe   <= 0;
 
             
-            elsif wallclock_signals.wallclock_do_phasejump_i = '1' then
+            elsif wallclock_phasejump_2 = '1' and wallclock_phasejump_3 = '0' then
                 nsec_reg      <= nsec_reg + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);
                 sec_reg       <= unsigned(signed(sec_reg) + signed(wallclock_signals.wallclock_seconds_i));
                 new_nsec_pipe  <= new_nsec_pipe + resize(signed(wallclock_signals.wallclock_nanoseconds_i), 32);

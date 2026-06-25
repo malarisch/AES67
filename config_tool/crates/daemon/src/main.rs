@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 
-use aes67_config::{CsrMap, Device, KernelTransport, SpiTransport, Transport, UartTransport};
+use aes67_config::{
+    ControlApi, CsrMap, Device, KernelTransport, SpiTransport, Transport, UartTransport,
+};
 use aes67_daemon::discovery::{self, Registry, SharedDiscovery};
 use aes67_daemon::persist::{DaemonConfig, TransportCfg};
 use aes67_daemon::{mdns, rtsp, startup, Persist, Server};
@@ -65,6 +67,12 @@ struct Cli {
     /// Omit to run the control server only (no networking). Needs CAP_NET_ADMIN.
     #[arg(long, value_name = "NAME")]
     tap: Option<String>,
+    /// Kernel-transport netdev interface the `aes67_eth` module creates (e.g.
+    /// eth1). Used only with --kernel: the daemon mirrors this interface's IP
+    /// into the FPGA and joins multicast on it. Auto-detected by FPGA MAC if
+    /// omitted.
+    #[arg(long, value_name = "NAME")]
+    iface: Option<String>,
     /// MTU for the TAP interface.
     #[arg(long)]
     mtu: Option<u32>,
@@ -137,40 +145,67 @@ fn main() -> Result<()> {
         }
     });
 
-    // Network services that need the TAP. Read the relevant config once.
-    let (has_tap, discovery_on, rtsp_on, rtsp_port, node_name) = {
+    // Network services bind to the FPGA's network interface, which is the TAP in
+    // TAP mode and the `aes67_eth` kernel netdev in kernel mode. Read the relevant
+    // config once.
+    let (discovery_on, rtsp_on, rtsp_port, node_name, kernel) = {
         let c = config.lock().unwrap();
         (
-            c.network.tap.is_some(),
             c.network.discovery != Some(false),
             c.network.rtsp != Some(false),
             c.network.rtsp_port.unwrap_or(rtsp::DEFAULT_RTSP_PORT),
             c.network.node_name.clone().unwrap_or_else(|| "AES67".to_string()),
+            matches!(c.transport, Some(TransportCfg::Kernel { .. })),
         )
     };
 
-    // One shared discovery registry (exists when a TAP does), fed by both SAP and
-    // mDNS, and read by the control API.
-    let registry: Option<SharedDiscovery> =
-        has_tap.then(|| Arc::new(Mutex::new(Registry::default())));
-    let tap_name = || config.lock().unwrap().network.tap.clone().unwrap();
+    // The interface the discovery services run on: the TAP, or the kernel netdev
+    // (explicit `network.iface`/--iface, else resolved from the FPGA MAC). Resolve
+    // the network config without nesting the device lock under the config lock.
+    let net_iface: Option<String> = {
+        let (tap, kernel_net) = {
+            let c = config.lock().unwrap();
+            (c.network.tap.clone(), kernel.then(|| c.network.clone()))
+        };
+        match (tap, kernel_net) {
+            (Some(tap), _) => Some(tap),
+            (None, Some(net)) => device
+                .lock()
+                .unwrap()
+                .get_mac()
+                .ok()
+                .and_then(|mac| startup::resolve_kernel_iface(&net, mac)),
+            (None, None) => None,
+        }
+    };
+    if kernel && net_iface.is_none() {
+        eprintln!(
+            "aes67d: WARNING — kernel mode but no netdev interface resolved; \
+             discovery/RTSP/mDNS disabled (set network.iface / --iface)"
+        );
+    }
 
-    // SAP/SDP discovery on the TAP (announce local TX streams, learn remote ones).
-    // It waits for the TAP address itself, so it need not be sequenced with startup.
-    if let (Some(reg), true) = (&registry, discovery_on) {
-        discovery::spawn(Arc::clone(&device), Arc::clone(&config), tap_name(), Arc::clone(reg), verbose);
+    // One shared discovery registry (exists when a network interface does), fed by
+    // both SAP and mDNS, and read by the control API.
+    let registry: Option<SharedDiscovery> =
+        net_iface.as_ref().map(|_| Arc::new(Mutex::new(Registry::default())));
+
+    // SAP/SDP discovery (announce local TX streams, learn remote ones). It waits
+    // for the interface address itself, so it need not be sequenced with startup.
+    if let (Some(reg), Some(iface), true) = (&registry, &net_iface, discovery_on) {
+        discovery::spawn(Arc::clone(&device), Arc::clone(&config), iface.clone(), Arc::clone(reg), verbose);
     }
 
     // RAVENNA RTSP server (transmitting node serves its TX streams) plus mDNS:
     // the `_rtsp._tcp` node service, per-session `ravenna_session` advertisements,
     // and browsing remote sessions into the same registry.
-    if let (Some(reg), true) = (&registry, rtsp_on) {
+    if let (Some(reg), Some(iface), true) = (&registry, &net_iface, rtsp_on) {
         rtsp::spawn(Arc::clone(&device), Arc::clone(&config), rtsp_port, verbose);
         mdns::spawn(
             Arc::clone(&device),
             Arc::clone(&config),
             Arc::clone(reg),
-            tap_name(),
+            iface.clone(),
             rtsp_port,
             node_name,
             verbose,
@@ -214,6 +249,9 @@ fn resolve_config(config: &mut DaemonConfig, cli: &Cli) -> Result<()> {
     let net = &mut config.network;
     if cli.tap.is_some() {
         net.tap = cli.tap.clone();
+    }
+    if cli.iface.is_some() {
+        net.iface = cli.iface.clone();
     }
     if cli.mtu.is_some() {
         net.mtu = cli.mtu;

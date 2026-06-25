@@ -69,6 +69,11 @@ pub enum TransportCfg {
 #[serde(default)]
 pub struct NetworkCfg {
     pub tap: Option<String>,
+    /// Kernel-transport netdev interface (e.g. "eth1") created by the
+    /// `aes67_eth` module. In kernel mode there is no TAP: the daemon mirrors
+    /// *this* interface's address into the FPGA IP CSR and joins the FPGA's
+    /// multicast groups on it. Auto-detected from the FPGA MAC when unset.
+    pub iface: Option<String>,
     pub mtu: Option<u32>,
     /// MAC for the FPGA + TAP (e.g. "02:00:00:12:34:56").
     pub mac: Option<String>,

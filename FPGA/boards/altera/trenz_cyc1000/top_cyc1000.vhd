@@ -10,7 +10,7 @@ use work.miim_types.all;
 
 ENTITY top_cyc1000 IS
 	generic (
-		SOC_TYPE : string := "LITEX_SPIBONE"; 
+		SOC_TYPE : string := "LITEX_SDRAM"; 
 		platform : string := "ALTERA";
         MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
@@ -52,7 +52,7 @@ ENTITY top_cyc1000 IS
         TDM_BCLK_MULT : INTEGER := 64;
             TDM_I2S_MODE : BOOLEAN := false;
     TDM_FSCLK_50DUTY : BOOLEAN := true;
-    PTP_IN_SOFTWARE : BOOLEAN := true
+    PTP_IN_SOFTWARE : BOOLEAN := false
 
 
 	);

@@ -362,9 +362,43 @@ int fpga_hal_set_ptp_reset(bool held_in_reset)
 	return eth_litex_set_ptp_reset(dev, held_in_reset);
 }
 
+int fpga_hal_set_resets(uint32_t domains, bool held)
+{
+	/* Map the backend-independent domain bits onto the reset CSR layout, then
+	 * read-modify-write so untouched domains keep their state. */
+	uint32_t csr_bits = 0;
+
+	if (domains & FPGA_HAL_RESET_PTP) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_PTP_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_TX) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_TX_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_RX) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_RX_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_ETH) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_ETH_OFFSET);
+	}
+
+	uint32_t reg = litex_csr_read(CSR_AES67_CSR_RESET_ADDR);
+
+	if (held) {
+		reg |= csr_bits;
+	} else {
+		reg &= ~csr_bits;
+	}
+	litex_csr_write(CSR_AES67_CSR_RESET_ADDR, reg);
+	return 0;
+}
+
 void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 			    uint16_t *tx_signal, uint16_t *tx_clip)
 {
+	/* Metering CSRs exist only when the aes67_bridge is built with metering
+	 * (dropped via --no-metering-csr when the FPGA has metering disabled).
+	 * Without them, report zeros so callers see a defined value. */
+#ifdef CSR_AES67_CSR_RX_METER_SIGNAL_ADDR
 	/* Read all four metering status registers */
 	*rx_signal = (uint16_t)litex_csr_read(CSR_AES67_CSR_RX_METER_SIGNAL_ADDR);
 	*rx_clip   = (uint16_t)litex_csr_read(CSR_AES67_CSR_RX_METER_CLIP_ADDR);
@@ -374,4 +408,10 @@ void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 	/* Toggle the clear bit so FPGA resets its sticky detectors */
 	uint32_t cur = litex_csr_read(CSR_AES67_CSR_METER_CLEAR_ADDR);
 	litex_csr_write(CSR_AES67_CSR_METER_CLEAR_ADDR, cur ^ 1);
+#else
+	*rx_signal = 0;
+	*rx_clip   = 0;
+	*tx_signal = 0;
+	*tx_clip   = 0;
+#endif
 }

@@ -104,6 +104,41 @@ pub fn set_carrier(tap: &File, on: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// Find the name of the network interface whose hardware (MAC) address matches
+/// `mac`, or `None` if none does. Used in kernel-transport mode to locate the
+/// `aes67_eth` netdev (whose kernel-assigned name, e.g. `eth1`, is not fixed)
+/// from the FPGA MAC the daemon already knows.
+pub fn interface_by_mac(mac: [u8; 6]) -> Option<String> {
+    use std::ffi::CStr;
+    // SAFETY: getifaddrs allocates a list we free with freeifaddrs; each node is
+    // read only while the list is alive.
+    unsafe {
+        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifap) != 0 {
+            return None;
+        }
+        let mut result = None;
+        let mut cur = ifap;
+        while !cur.is_null() {
+            let ifa = &*cur;
+            if !ifa.ifa_addr.is_null()
+                && (*ifa.ifa_addr).sa_family as i32 == libc::AF_PACKET
+            {
+                let sll = std::ptr::read_unaligned(ifa.ifa_addr as *const libc::sockaddr_ll);
+                if sll.sll_halen == 6 && sll.sll_addr[..6] == mac[..] {
+                    result = Some(
+                        CStr::from_ptr(ifa.ifa_name).to_string_lossy().into_owned(),
+                    );
+                    break;
+                }
+            }
+            cur = ifa.ifa_next;
+        }
+        libc::freeifaddrs(ifap);
+        result
+    }
+}
+
 fn run_ip(args: &[&str]) -> io::Result<()> {
     let status = Command::new("ip").args(args).status()?;
     if !status.success() {
