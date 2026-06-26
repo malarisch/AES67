@@ -46,6 +46,19 @@
 /* adjfine: the wallclock_ppb output is signed 20-bit (parts-per-billion). */
 #define AES67_MAX_PPB              ((1 << 19) - 1)   /* +/- 524287 ppb */
 
+/* --- SPI burst transfers (spibone burst read/write) ----------------------- *
+ * The frame RX/TX hot paths move one eth_buf byte per 32-bit word. spibone's
+ * burst commands (0x02 write / 0x03 read) stream many words in a single SPI
+ * transfer, auto-incrementing the word address in gateware, instead of one
+ * spi_sync round-trip per word. A per-device DMA-safe scratch pair holds one
+ * chunk; bus_lock serialises their use. The chunk sizes keep every transfer
+ * within AES67_BURST_BUF including framing + response slack:
+ *   write: 7 (cmd+addr+count) + 4*N (data) + 8  (ack slack)
+ *   read:  7 (header echo)    + 7*N (<=pad+sync+4 data) + 16 (slack) */
+#define AES67_BURST_BUF        2048u
+#define AES67_BURST_WR_CHUNK   256u   /* 7 + 4*256 + 8  = 1039 B */
+#define AES67_BURST_RD_CHUNK   240u   /* 7 + 7*240 + 16 = 1703 B */
+
 /* --- Driver private state ------------------------------------------------- */
 struct aes67_priv {
 	struct spi_device   *spi;
@@ -65,6 +78,11 @@ struct aes67_priv {
 
 	/* Scratch buffer for one RX frame (payload + FCS + timestamp trailer). */
 	u8 rx_buf[AES67_MAX_FRAME + AES67_FCS_LEN + AES67_RX_TS_TRAILER_LEN];
+
+	/* DMA-safe scratch for SPI burst transfers (devm_kmalloc'd, not embedded
+	 * here so they never land in vmalloc'd netdev priv memory). */
+	u8 *spi_tx;
+	u8 *spi_rx;
 
 	/* PHC */
 	struct ptp_clock      *ptp_clock;
@@ -87,6 +105,14 @@ int  aes67_wb_read_locked(struct aes67_priv *p, u32 addr, u32 *val);
 int  aes67_wb_write_locked(struct aes67_priv *p, u32 addr, u32 val);
 int  aes67_wb_read(struct aes67_priv *p, u32 addr, u32 *val);
 int  aes67_wb_write(struct aes67_priv *p, u32 addr, u32 val);
+
+/* Burst variants for the frame hot paths (bus_lock held). Each moves `n`
+ * consecutive 32-bit words (eth_buf stores one byte per word) in a single SPI
+ * transfer via the spibone burst commands, chunked to the per-device scratch. */
+int  aes67_wb_write_burst_locked(struct aes67_priv *p, u32 addr,
+				 const u8 *bytes, unsigned int n);
+int  aes67_wb_read_burst_locked(struct aes67_priv *p, u32 addr,
+				u8 *bytes, unsigned int n);
 
 int  aes67_ctl_register(struct aes67_priv *p);
 void aes67_ctl_unregister(struct aes67_priv *p);

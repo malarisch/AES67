@@ -23,12 +23,11 @@ from .peripherals import (
     AES67CSRs, add_aes67_csr,
     EthPacketBuffer, add_eth_buffer,
     StreamConfigRAM, add_stream_cfg,
-    add_spibone,
+    SPIBone, add_spibone,
     add_uartbone,
     add_external_wb_master, add_external_wb_slave,
     add_eth_irq_output, add_eth_irq_input,
 )
-from litex.soc.cores.spi.spi_bone import SPIBone
 from litex.soc.cores.uart import UARTBone, UARTPHY
 
 
@@ -344,7 +343,10 @@ class AES67SoC(SoCCore):
             if is_spibone:
                 # SPI->Wishbone master.  Constructed here (not in the helper) so
                 # Migen names its nets ``spibone_*`` after this SoC attribute.
-                self.spibone = SPIBone(platform.request("spibone"))
+                # with_burst=True enables the auto-incrementing burst read/write
+                # commands (repo-local fork) the Linux daemon uses to stream
+                # whole frames in one SPI transfer.
+                self.spibone = SPIBone(platform.request("spibone"), with_burst=True)
                 add_spibone(self, platform)
             elif is_uartbone:
                 # UART->Wishbone master.  Constructed here (not in the helper) so

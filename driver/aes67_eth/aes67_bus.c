@@ -13,6 +13,11 @@
  * spibone drops the low two address bits in gateware, so the full byte address
  * goes on the wire. Each transaction is one full-duplex SPI transfer with
  * trailing 0xff padding clocked out to capture the variable-latency response.
+ *
+ * For the frame hot paths we also use the repo-local spibone fork's burst
+ * commands (aes67_wb_{write,read}_burst_locked): [0x02|0x03][addr BE][count
+ * BE16][...] streams many auto-incrementing words per SPI transfer instead of
+ * one round-trip per word. The single-word ops above are unchanged.
  */
 #include <linux/fs.h>
 #include <linux/module.h>
@@ -24,9 +29,17 @@
 
 #define CMD_WRITE 0x00
 #define CMD_READ  0x01
+/* Burst variants (repo-local spibone fork): auto-incrementing multi-word
+ * transfers framed as [cmd][addr BE][count BE16][...]. */
+#define CMD_BURST_WRITE 0x02
+#define CMD_BURST_READ  0x03
 /* Padding bytes clocked out to capture the device response; spibone answers
  * within a couple of bytes at any sane clock, so this is generous. */
 #define RESPONSE_SLACK 24
+/* Burst response slack: a few extra 0xff bytes to clock out the write ack /
+ * the last read word's tail. */
+#define BURST_WR_SLACK 8
+#define BURST_RD_SLACK 16
 
 /* Per-transfer SPI clock override (Hz). 0 = use the DT spi-max-frequency.
  * spibone tops out at sys_clk/4 (~18.75 MHz at 75 MHz); keep below that. The
@@ -34,6 +47,14 @@
 static unsigned int spi_hz = 1000000;
 module_param(spi_hz, uint, 0644);
 MODULE_PARM_DESC(spi_hz, "SPI clock in Hz (0 = DT default). Must stay below spibone's sys_clk/4.");
+
+/* Use the spibone burst commands (0x02/0x03) on the frame hot paths. Requires a
+ * burst-capable bitstream (litex_soc/spi_bone.py with_burst). Set to 0 to fall
+ * back to single-word transfers — necessary when the loaded FPGA gateware
+ * predates burst support (every burst would otherwise time out). */
+static bool use_burst = true;
+module_param(use_burst, bool, 0644);
+MODULE_PARM_DESC(use_burst, "Use spibone burst transfers (0 = single-word fallback for pre-burst gateware)");
 
 static int aes67_spi_xfer(struct aes67_priv *p, const u8 *tx, u8 *rx, size_t len)
 {
@@ -103,6 +124,136 @@ int aes67_wb_write_locked(struct aes67_priv *p, u32 addr, u32 val)
 			return -EIO;
 	}
 	return -ETIMEDOUT;
+}
+
+/*
+ * Burst write: store `n` bytes as `n` consecutive 32-bit words starting at word
+ * address `addr` (eth_buf packs one byte per word, in the low byte). The device
+ * commits each word as it streams in (auto-incrementing the address) and clocks
+ * out a single 0x00 ack at the end. One SPI transfer replaces `n` single-word
+ * round-trips; we chunk to the per-device scratch buffer.
+ */
+int aes67_wb_write_burst_locked(struct aes67_priv *p, u32 addr,
+				const u8 *bytes, unsigned int n)
+{
+	lockdep_assert_held(&p->bus_lock);
+
+	/* Fallback for gateware without burst support: one word per byte. */
+	if (!use_burst) {
+		unsigned int i;
+		int ret;
+
+		for (i = 0; i < n; i++) {
+			ret = aes67_wb_write_locked(p, addr + 4 * i, bytes[i]);
+			if (ret)
+				return ret;
+		}
+		return 0;
+	}
+
+	while (n) {
+		unsigned int chunk = min(n, AES67_BURST_WR_CHUNK);
+		u8 *tx = p->spi_tx;
+		u8 *rx = p->spi_rx;
+		unsigned int len, i;
+		int ret;
+
+		tx[0] = CMD_BURST_WRITE;
+		put_unaligned_be32(addr, &tx[1]);
+		put_unaligned_be16((u16)chunk, &tx[5]);
+		for (i = 0; i < chunk; i++) {
+			tx[7 + 4 * i + 0] = 0;
+			tx[7 + 4 * i + 1] = 0;
+			tx[7 + 4 * i + 2] = 0;
+			tx[7 + 4 * i + 3] = bytes[i];
+		}
+		len = 7 + 4 * chunk;
+		memset(&tx[len], 0xff, BURST_WR_SLACK);
+		len += BURST_WR_SLACK;
+
+		ret = aes67_spi_xfer(p, tx, rx, len);
+		if (ret)
+			return ret;
+
+		/* Confirm the device clocked out its 0x00 completion ack. */
+		for (i = 7 + 4 * chunk; i < len; i++) {
+			if (rx[i] == CMD_WRITE)   /* 0x00 ack */
+				break;
+			if (rx[i] != 0xff)
+				return -EIO;
+		}
+		if (i == len)
+			return -ETIMEDOUT;
+
+		addr  += 4 * chunk;
+		bytes += chunk;
+		n     -= chunk;
+	}
+	return 0;
+}
+
+/*
+ * Burst read: fetch `n` consecutive 32-bit words starting at word address
+ * `addr`, returning the low byte of each (the eth_buf payload byte) into
+ * `bytes`. Per word the device drives 0xff until the read completes, then a
+ * 0x01 sync byte and the big-endian value; we scan for each sync exactly like a
+ * single read. Chunked to the per-device scratch buffer.
+ */
+int aes67_wb_read_burst_locked(struct aes67_priv *p, u32 addr,
+			       u8 *bytes, unsigned int n)
+{
+	lockdep_assert_held(&p->bus_lock);
+
+	/* Fallback for gateware without burst support: one word per byte. */
+	if (!use_burst) {
+		unsigned int i;
+		int ret;
+		u32 word;
+
+		for (i = 0; i < n; i++) {
+			ret = aes67_wb_read_locked(p, addr + 4 * i, &word);
+			if (ret)
+				return ret;
+			bytes[i] = word & 0xff;
+		}
+		return 0;
+	}
+
+	while (n) {
+		unsigned int chunk = min(n, AES67_BURST_RD_CHUNK);
+		u8 *tx = p->spi_tx;
+		u8 *rx = p->spi_rx;
+		unsigned int len, i, w;
+		int ret;
+
+		tx[0] = CMD_BURST_READ;
+		put_unaligned_be32(addr, &tx[1]);
+		put_unaligned_be16((u16)chunk, &tx[5]);
+		/* 7-byte header echo + up to 7 bytes/word ([pad][sync][4 data]) +
+		 * slack; clock 0xff across the whole response window. */
+		len = 7 + 7 * chunk + BURST_RD_SLACK;
+		memset(&tx[7], 0xff, len - 7);
+
+		ret = aes67_spi_xfer(p, tx, rx, len);
+		if (ret)
+			return ret;
+
+		i = 7;
+		for (w = 0; w < chunk; w++) {
+			/* Skip the 0xff the device drives during read latency. */
+			while (i < len && rx[i] == 0xff)
+				i++;
+			if (i + 5 > len || rx[i] != CMD_READ)  /* 0x01 + 4 data */
+				return -ETIMEDOUT;
+			bytes[w] = rx[i + 4];   /* low byte of the BE32 word */
+			i += 5;
+		}
+
+		addr  += 4 * chunk;
+		bytes += chunk;
+		n     -= chunk;
+	}
+	return 0;
 }
 
 int aes67_wb_read(struct aes67_priv *p, u32 addr, u32 *val)

@@ -32,7 +32,7 @@
 	aes67@0 {
 		compatible = "aes67,spibone";
 		reg = <0>;                       /* chip-select 0 */
-		spi-max-frequency = <1000000>;   /* spibone max is sys_clk/4 (~18.75 MHz @ 75 MHz); 1 MHz is safe for bring-up. Tune up via module param spi_hz. */
+		spi-max-frequency = <8000000>;   /* spibone max is sys_clk/4 (~18.75 MHz @ 75 MHz); 1 MHz is safe for bring-up. Tune up via module param spi_hz. */
 		/* SPI mode 0 (CPOL=0, CPHA=0): drive NEITHER spi-cpol NOR spi-cpha. */
 
 		/* RX-ready IRQ from eth_buf_irq. Example: GPIO25 on a Pi-style

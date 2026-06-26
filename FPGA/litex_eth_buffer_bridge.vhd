@@ -21,7 +21,7 @@ entity litex_eth_buffer_bridge is
   generic (
     
     ADD_RX_TIMESTAMP : boolean := false;
-    RX_NUM_SLOTS : integer := 2
+    RX_NUM_SLOTS : integer := 8
   );
   port (
     -- ================================================================
@@ -164,6 +164,8 @@ architecture rtl of litex_eth_buffer_bridge is
   signal fifo_count : integer range 0 to RX_NUM_SLOTS := 0;
   signal drain_addr : unsigned(10 downto 0) := (others => '0');
   signal drain_len  : unsigned(10 downto 0) := (others => '0');
+  signal is_ptp_tx : std_logic := '0';
+  signal is_ptp_reg : std_logic;
 begin
 
   -- ================================================================
@@ -193,6 +195,7 @@ begin
   -- ================================================================
   -- TX process (mac_tx_clock domain)
   -- ================================================================
+
   p_tx : process(mac_tx_clock_i, mac_tx_reset_i)
   variable tx_preamble_bytes : UNSIGNED(4 downto 0);
   begin
@@ -264,6 +267,7 @@ begin
             if buf_tx_addr = unsigned(buf_tx_len_i) then
               sm_tx <= TX_END;
               tx_timestamp_o <= timestamps_i.tx;
+
             else
               buf_tx_addr <= buf_tx_addr + 1;
             end if;

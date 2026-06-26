@@ -550,13 +550,14 @@ PORT MAP(clk => sys_clk,
 tx_en_ptpfu <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 ptp_allow <= mac_tx_allow_i;
 ptp_locked <= ptp_locked_ALTERA_SYNTHESIZED;
-second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 media_clock <= std_logic_vector(media_clock_u);
 ptp_mean_path_delay <= std_logic_vector(ptp_mean_path_delay_ALTERA_SYNTHESIZED);
 ptp_offset_from_master <= std_logic_vector(ptp_offset_from_master_ALTERA_SYNTHESIZED);
 ptp_ram_addr <= std_logic_vector(ptp_ram_addr_u);
 end generate;
 
+media_clock <= std_logic_vector(media_clock_u);
+second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 
 b2v_wallclock :  entity work.wallclock
 GENERIC MAP(audio_fs => 48000,

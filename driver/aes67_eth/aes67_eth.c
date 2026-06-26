@@ -93,7 +93,6 @@ static void aes67_tx_one(struct aes67_priv *p, struct sk_buff *skb)
 		       (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP);
 	u32 tx_base = AES67_MEM_ETH_BUF + AES67_TX_REGION_OFFSET;
 	u32 ts_sec = 0, ts_nsec = 0;
-	unsigned int i;
 	int ret = 0;
 
 	if (skb->len > AES67_MAX_FRAME || skb->len < MIN_ETH_FRAME) {
@@ -104,8 +103,8 @@ static void aes67_tx_one(struct aes67_priv *p, struct sk_buff *skb)
 
 	mutex_lock(&p->bus_lock);
 	aes67_wait_tx_done_locked(p);
-	for (i = 0; i < skb->len && !ret; i++)
-		ret = aes67_wb_write_locked(p, tx_base + 4 * i, skb->data[i]);
+	/* Stream the whole frame in one burst instead of a write per byte. */
+	ret = aes67_wb_write_burst_locked(p, tx_base, skb->data, skb->len);
 	if (!ret)
 		ret = aes67_wb_write_locked(p, AES67_REG_ETH_BUF_TX_LEN, skb->len);
 	if (!ret)
@@ -178,8 +177,8 @@ static bool aes67_rx_one(struct aes67_priv *p)
 	u32 rx_base = AES67_MEM_ETH_BUF;
 	unsigned int trailer = rx_ts ? AES67_RX_TS_TRAILER_LEN : 0;
 	struct sk_buff *skb;
-	u32 raw_len, word;
-	unsigned int total, payload, i;
+	u32 raw_len;
+	unsigned int total, payload;
 	u8 cap_sec = 0;
 	u32 cap_nsec = 0;
 	int ret;
@@ -199,13 +198,11 @@ static bool aes67_rx_one(struct aes67_priv *p)
 		goto release;   /* drop, but still release the buffer */
 	}
 
-	for (i = 0; i < total; i++) {
-		ret = aes67_wb_read_locked(p, rx_base + 4 * i, &word);
-		if (ret) {
-			ndev->stats.rx_errors++;
-			goto release;
-		}
-		p->rx_buf[i] = word & 0xff;
+	/* Pull the whole frame in one burst instead of a read per byte. */
+	ret = aes67_wb_read_burst_locked(p, rx_base, p->rx_buf, total);
+	if (ret) {
+		ndev->stats.rx_errors++;
+		goto release;
 	}
 
 	if (trailer) {
@@ -470,6 +467,14 @@ static int aes67_probe(struct spi_device *spi)
 	if (!p->wq) {
 		ret = -ENOMEM;
 		goto err_free;
+	}
+
+	/* DMA-safe scratch for SPI burst transfers (auto-freed on driver detach). */
+	p->spi_tx = devm_kmalloc(&spi->dev, AES67_BURST_BUF, GFP_KERNEL);
+	p->spi_rx = devm_kmalloc(&spi->dev, AES67_BURST_BUF, GFP_KERNEL);
+	if (!p->spi_tx || !p->spi_rx) {
+		ret = -ENOMEM;
+		goto err_wq;
 	}
 
 	ndev->netdev_ops  = &aes67_netdev_ops;

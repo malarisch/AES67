@@ -10,7 +10,7 @@ use work.miim_types.all;
 
 ENTITY top_cyc1000 IS
 	generic (
-		SOC_TYPE : string := "LITEX_SDRAM"; 
+		SOC_TYPE : string := "LITEX_SPIBONE"; 
 		platform : string := "ALTERA";
         MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
@@ -52,7 +52,7 @@ ENTITY top_cyc1000 IS
         TDM_BCLK_MULT : INTEGER := 64;
             TDM_I2S_MODE : BOOLEAN := false;
     TDM_FSCLK_50DUTY : BOOLEAN := true;
-    PTP_IN_SOFTWARE : BOOLEAN := false
+    PTP_IN_SOFTWARE : BOOLEAN := true
 
 
 	);
@@ -93,7 +93,7 @@ ENTITY top_cyc1000 IS
         PIO_01 : IN STD_LOGIC; -- spictrl clk
         PIO_02 : IN STD_LOGIC; -- spictrl cs
         PIO_03 : IN STD_LOGIC; -- spictrl mosi
-        PIO_04 : INOUT STD_LOGIC; -- spictrl miso
+        PIO_04 : OUT STD_LOGIC; -- spictrl miso
         PIO_05 : OUT STD_LOGIC; -- spictrl irq
 
 		sdram_a                             : OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
@@ -125,6 +125,7 @@ signal uart0_tx_reg : std_logic;
 signal uart0_rx_reg : std_logic;
 signal uart_ctrl_rx_reg : std_logic;
 signal uart_ctrl_tx_reg : std_logic;
+signal miso : std_logic;
 
 begin
 	tdm_in(0) <= D1;
@@ -140,6 +141,7 @@ begin
     uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
         uart0_rx_reg <= uart0_rx;
         uart0_tx <= uart0_tx_reg;
+		  PIO_04 <= miso;
     end generate;
 	soc_top_inst : entity work.soc_top
   generic map (
@@ -223,7 +225,7 @@ begin
     sdram_we_n => sdram_we_n,
     spibone_clk => PIO_01,
     spibone_cs_n => PIO_02,
-    spibone_miso => PIO_04,
+    spibone_miso => miso,
     spibone_mosi => PIO_03,
     spibone_irq_o => PIO_05,
     uartbone_rx => uart_ctrl_rx_reg,
