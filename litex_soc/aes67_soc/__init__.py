@@ -15,6 +15,9 @@ from .platform import (
     SpiboneStubPlatform,
     UartboneStubPlatform,
     BridgeStubPlatform,
+    SpiboneLatticeStubPlatform,
+    UartboneLatticeStubPlatform,
+    BridgeLatticeStubPlatform,
 )
 
 __all__ = [
@@ -25,4 +28,7 @@ __all__ = [
     "SpiboneStubPlatform",
     "UartboneStubPlatform",
     "BridgeStubPlatform",
+    "SpiboneLatticeStubPlatform",
+    "UartboneLatticeStubPlatform",
+    "BridgeLatticeStubPlatform",
 ]

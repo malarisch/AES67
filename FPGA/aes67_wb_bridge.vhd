@@ -574,7 +574,6 @@ begin
         mac_tx_reset_i => mac_tx_rst,
         mac_tx_enable_o => mcu_tx_en,
         mac_tx_byte_sent_i => mac_tx_byte_sent,
-        mac_tx_busy_i => mac_tx_busy,
         mac_tx_dat_o => mcu_tx_data,
         mac_start_prefetch_i => mcu_tx_start_prefetch,
         mac_speed_in => mac_speed,
@@ -586,8 +585,6 @@ begin
         pkt_len_i => std_logic_vector(mcu_received_packet_length),
         eth_ram_data_i => mcu_ethbuf_ram_data,
         eth_ram_addr_o => mcu_ethbuf_ram_addr_slv,
-        mcu_clk_i => clk_mcu_i,
-        sys_clk_i => sys_clk_125MHz_i,
-        packet_length_valid_i => '1'
+        mcu_clk_i => clk_mcu_i
     );
 end architecture;

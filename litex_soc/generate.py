@@ -40,6 +40,9 @@ from aes67_soc import (
     SpiboneStubPlatform,
     UartboneStubPlatform,
     BridgeStubPlatform,
+    SpiboneLatticeStubPlatform,
+    UartboneLatticeStubPlatform,
+    BridgeLatticeStubPlatform,
 )
 
 
@@ -51,6 +54,20 @@ ALL_TARGETS = ["cyclone10", "cyc1000", "gowin", "spibone", "uartbone", "aes67_br
 # crystal inputs to 80 MHz; 75 MHz gives clean ratios for all targets.
 DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6,
                         "spibone": 75e6, "uartbone": 75e6, "aes67_bridge": 75e6}
+
+# The device-agnostic CPU-less targets (spibone / uartbone / aes67_bridge) can
+# be generated for different FPGA vendor families.  The SoC logic is byte-for-byte
+# identical across families — only the AsyncResetSynchronizer primitive differs
+# (Altera `DFF` vs ECP5/Diamond `FD1S3BX`), because that is the one vendor cell
+# LiteX bakes into the SoC; the PLL lives in the top-level FPGA design (see crg.py).
+# Vendor-specific targets (cyclone10 / cyc1000 / gowin) carry vendor RAM/PLL glue
+# and ignore --family.
+FAMILIES = ["altera", "lattice"]
+FAMILY_PLATFORMS = {
+    "spibone":      {"altera": SpiboneStubPlatform,  "lattice": SpiboneLatticeStubPlatform},
+    "uartbone":     {"altera": UartboneStubPlatform, "lattice": UartboneLatticeStubPlatform},
+    "aes67_bridge": {"altera": BridgeStubPlatform,   "lattice": BridgeLatticeStubPlatform},
+}
 
 
 def _generate_docs_svd(soc, target, output_dir):
@@ -97,21 +114,32 @@ def _generate_docs_svd(soc, target, output_dir):
 
 def _build_target(target, args):
     sys_clk_freq = args.sys_clk_freq if args.sys_clk_freq is not None else DEFAULT_SYS_CLK_FREQ[target]
-    output_dir   = args.output_dir or os.path.join(os.path.dirname(__file__), "build", target)
+
+    # --family only applies to the device-agnostic CPU-less targets; it swaps the
+    # vendor stub platform so LiteX emits the matching reset-FF primitive.  For a
+    # non-default family we suffix the default output dir (build/<target>_<family>)
+    # so the Lattice gateware lives alongside the Altera one instead of clobbering
+    # it.  An explicit --output-dir is always honoured verbatim.
+    family = getattr(args, "family", "altera")
+    family_aware = target in FAMILY_PLATFORMS
+    if not family_aware and family != "altera":
+        print(f"NOTE: --family={family} ignored for vendor-specific target '{target}'.")
+    subdir = f"{target}_{family}" if (family_aware and family != "altera") else target
+    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "build", subdir)
 
     # CPU-less targets (spibone / uartbone / aes67_bridge) have no BIOS to
     # compile, so software/bios-console options do not apply.
     is_cpu_less = target in ("spibone", "uartbone", "aes67_bridge")
 
     if target == "spibone":
-        platform = SpiboneStubPlatform()
+        platform = FAMILY_PLATFORMS[target][family]()
         soc = AES67SoC(
             platform,
             sys_clk_freq = int(sys_clk_freq),
             target       = "spibone",
         )
     elif target == "uartbone":
-        platform = UartboneStubPlatform()
+        platform = FAMILY_PLATFORMS[target][family]()
         soc = AES67SoC(
             platform,
             sys_clk_freq = int(sys_clk_freq),
@@ -120,7 +148,7 @@ def _build_target(target, args):
     elif target == "aes67_bridge":
         # Standalone AES67 Wishbone-slave bridge (no CPU); the only target that
         # builds the AES67 peripherals.  Every other target is a master to it.
-        platform = BridgeStubPlatform()
+        platform = FAMILY_PLATFORMS[target][family]()
         soc = AES67SoC(
             platform,
             sys_clk_freq  = int(sys_clk_freq),
@@ -181,6 +209,7 @@ def _build_target(target, args):
 def main():
     parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
     parser.add_argument("--target",             default=None, choices=ALL_TARGETS, help="Target FPGA platform (default: build all)")
+    parser.add_argument("--family",             default="altera", choices=FAMILIES, help="FPGA vendor family for the device-agnostic CPU-less targets (spibone/uartbone/aes67_bridge). 'lattice' emits the ECP5/Diamond reset-FF primitive (FD1S3BX) instead of the Altera DFF; output goes to build/<target>_<family>/. Ignored for vendor-specific targets.")
     parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 75 MHz for all targets (must match top-level PLL output).")
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")

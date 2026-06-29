@@ -67,8 +67,8 @@ generic (
 		enet_mdio :  INOUT  STD_LOGIC;
 		
 		-- hyperram for litex hram target
-		hbus_rwds :  INOUT  STD_LOGIC := '0';
-		hbus_dq :  INOUT  STD_LOGIC_VECTOR(7 DOWNTO 0) := (others => '0') ;
+		hbus_rwds :  INOUT  STD_LOGIC;
+		hbus_dq :  INOUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		hbus_rstn :  OUT  STD_LOGIC  := '0';
 		hbus_cs2n :  OUT  STD_LOGIC := '0';
 		hbus_clk0_p :  OUT  STD_LOGIC := '0';
@@ -84,10 +84,10 @@ generic (
 		uart1_tx :  OUT  STD_LOGIC := '0';
 
 		-- litex i2c master
-		i2c0_scl :  INOUT  STD_LOGIC := '0';
-		i2c0_sda :  INOUT  STD_LOGIC := '0';
-		i2c1_scl :  INOUT  STD_LOGIC := '0';
-		i2c1_sda :  INOUT  STD_LOGIC := '0';
+		i2c0_scl :  INOUT  STD_LOGIC;
+		i2c0_sda :  INOUT  STD_LOGIC;
+		i2c1_scl :  INOUT  STD_LOGIC;
+		i2c1_sda :  INOUT  STD_LOGIC;
 
 
 		-- litex spi flash
@@ -122,7 +122,7 @@ generic (
     sdram_clock : out std_logic := '0';
     sdram_cs_n : out std_logic := '0';
     sdram_dm : out std_logic_vector     (1 downto 0) := (others => '0');
-    sdram_dq : inout std_logic_vector    (15 downto 0) := (others => '0');
+    sdram_dq : inout std_logic_vector    (15 downto 0);
     sdram_ras_n : out std_logic := '0';
     sdram_we_n : out std_logic := '0';
 

@@ -4,7 +4,7 @@ USE ieee.numeric_std.all;
 
 ENTITY topevalkit IS 
 	generic (
-		SOC_TYPE : string := "LITEX_HRAM"; -- LITEX_HRAM, LITEX_SDRAM, SPIBONE; WISHBONE_ONLY
+		SOC_TYPE : string := "LITEX_SPIBONE"; -- LITEX_HRAM, LITEX_SDRAM, SPIBONE; WISHBONE_ONLY
 		platform : string := "ALTERA"; -- ALTERA, GOWIN, LATTICE
 
 		-- clocking
@@ -37,8 +37,11 @@ ENTITY topevalkit IS
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
 		AUDIO_TX_TDM_INPUTS : natural := 2;
-		AUDIO_TX_TDM_CHANNELS : natural  := 8
-
+		AUDIO_TX_TDM_CHANNELS : natural  := 8;
+        TDM_BCLK_MULT : INTEGER := 64;
+            TDM_I2S_MODE : BOOLEAN := false;
+    TDM_FSCLK_50DUTY : BOOLEAN := true;
+    PTP_IN_SOFTWARE : BOOLEAN := true
 		
 	);
 	PORT
@@ -163,7 +166,12 @@ begin
         AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
         USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
         ENABLE_METERING => ENABLE_METERING,
-		PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH
+		PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
+
+    TDM_BCLK_MULT => TDM_BCLK_MULT,
+    TDM_FSCLK_50DUTY => TDM_FSCLK_50DUTY,
+    TDM_I2S_MODE => TDM_I2S_MODE,
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
     )
      port map(
         rst_n_i => rst_n_i,
@@ -197,9 +205,8 @@ begin
         spiflash_mosi => spiflash_mosi,
         spiflash_miso => spiflash_miso,
         pll_512fs_i => pll_512fs_i,
-        audioclk_512fs_o => pll_512fs_o,
-        audioclk_256fs_rising_o => pll_256fs_rising,
-        audioclk_256fs_falling_o => pll_256fs_falling,
+        audioclk_mclk_o => pll_512fs_o,
+        audioclk_bclk_o => pll_256fs_rising,
         --audioclk_64fs_o => ,
         audioclk_lrclk_o => lrclk_tdm_o,
         tdm_in => tdm_in,

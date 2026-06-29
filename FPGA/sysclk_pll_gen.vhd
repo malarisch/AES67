@@ -31,11 +31,47 @@ architecture rtl of sysclk_pll_gen is
         mdclk: in std_logic
     );
 end component;
+component lattice_pll_16m
+  port (
+    CLKI : in std_logic;
+    CLKOP : out std_logic;
+    CLKOS : out std_logic;
+    LOCK : out std_logic
+  );
+end component;
+component sysclks_altpll_50m_in
+  port (
+    areset : in STD_LOGIC;
+    inclk0 : in STD_LOGIC;
+    c0 : out STD_LOGIC;
+    c1 : out STD_LOGIC;
+    c2 : out STD_LOGIC;
+    locked : out STD_LOGIC
+  );
+end component;
+component sysclks_altpll_12m_in
+  port (
+    areset : in STD_LOGIC;
+    inclk0 : in STD_LOGIC;
+    c0 : out STD_LOGIC;
+    c1 : out STD_LOGIC;
+    c2 : out STD_LOGIC;
+    locked : out STD_LOGIC
+  );
+end component;
+component gowin_pll_27i_125o
+  port (
+    clkout : out std_logic;
+    reset : in std_logic;
+    clkin : in std_logic;
+    lock_o : out std_logic
+  );
+end component;
 signal sys_clk_locked : std_logic;
 begin
 -- system clocks
 sysclkgen50: if (platform = "ALTERA" and clk_in_speed = 50) generate
-sysclks_altpll_50m_in_inst : entity work.sysclks_altpll_50m_in PORT MAP (
+sysclks_altpll_50m_in_inst : sysclks_altpll_50m_in PORT MAP (
 		areset	 => not rst_n_i,
 		inclk0	 => clock_i,
 		c0	 => sys_clk_125MHz_o,
@@ -46,7 +82,7 @@ sysclks_altpll_50m_in_inst : entity work.sysclks_altpll_50m_in PORT MAP (
 
 end generate;
 sysclkgen12: if (platform = "ALTERA" and clk_in_speed = 12) generate
-sysclks_altpll_12m_in_inst : entity work.sysclks_altpll_12m_in PORT MAP (
+sysclks_altpll_12m_in_inst : sysclks_altpll_12m_in PORT MAP (
 		areset	 => not rst_n_i,
 		inclk0	 => clock_i,
 		c0	 => sys_clk_125MHz_o,
@@ -57,7 +93,7 @@ sysclks_altpll_12m_in_inst : entity work.sysclks_altpll_12m_in PORT MAP (
 
 end generate;
 sysclkgen27: if (platform = "GOWIN" and clk_in_speed = 27) generate
-gowin_pll_27i_125o_inst: entity work.gowin_pll_27i_125o
+gowin_pll_27i_125o_inst: gowin_pll_27i_125o
  port map(
 	clkout => sys_clk_125MHz_o,
 	reset => not rst_n_i,
@@ -75,6 +111,16 @@ sysclkgen50_gw: if (platform = "GOWIN" and clk_in_speed = 50) generate
 		lock => sys_clk_locked,
 		mdclk => clock_i
 	);
+end generate;
+sysclkgen16_lat : if (platform = "LATTICE" and clk_in_speed = 16) generate
+	lattice_pll_16m_inst: lattice_pll_16m
+	 port map(
+		CLKI => clock_i,
+		CLKOP => sys_clk_125MHz_o,
+		CLKOS => mcu_clk_o,
+		LOCK => sys_clk_locked
+	);
+
 end generate;
     
 locked_o <= sys_clk_locked;

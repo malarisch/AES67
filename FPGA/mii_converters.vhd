@@ -32,7 +32,14 @@ entity mii_converters is
 end entity;
 
 architecture rtl of mii_converters is
-
+component ethernet_clks
+  port (
+    areset : in STD_LOGIC;
+    inclk0 : in STD_LOGIC;
+    c0 : out STD_LOGIC;
+    c1 : out STD_LOGIC
+  );
+end component;
   component rmii_phy_if
     port (
       rstn_async       : in std_logic;
@@ -143,15 +150,16 @@ begin
       mac_gmii_rxd    => gmii_rxd
 
     );
-    rgmiiclks_inst : entity work.ethernet_clks
+    rgmiiclks_inst : ethernet_clks
       port map
       (
+        areset => '0',
         inclk0 => phy_refclk_i,
         c0     => enet_clk,
         c1     => enet_clk_90
       );
   end generate;
-  rmiigen : if (ethernet_type = "RMII" and platform = "ALTERA") generate
+  rmiigen : if (ethernet_type = "RMII" and (platform = "ALTERA" or platform = "LATTICE")) generate
 
     -- MAC-side MII interface mapping (identical to the RGMII path, lines above).
     -- These were missing: mii_rx_clock_o/mii_tx_clock_o were never driven, so the

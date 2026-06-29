@@ -40,7 +40,7 @@ architecture Behavioral of ethernet_timestamp_mii is
 
     signal s_reg : UNSIGNED(3 downto 0);
     signal stamp_valid : std_logic := '0';
-    signal adjusted : integer range -(PIPELINE_LATENCY - MII_LATENCY) to 1e9 + PIPELINE_LATENCY - MII_LATENCY;
+    signal adjusted : integer;
     signal mii_en_prev : std_logic;
     signal mii_data_prev : STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
     signal gmii_data_reg : STD_LOGIC_VECTOR(7 downto 0);

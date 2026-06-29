@@ -1,0 +1,18 @@
+d6 mdc
+d7 mdio
+d8 refc
+d9 crsdv
+d10 rx0
+d11 rx1
+d12 txen
+d13 txd0
+d14 txd1
+
+a0 flash mosi
+a1 flash sck
+a2 flash miso
+a3 flash cs
+a4 lrclk
+a5 i2s
+a6 bclk
+a7 sclk

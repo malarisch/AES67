@@ -10,6 +10,7 @@ import shutil
 from litex.build.generic_platform import Pins, Subsignal, IOStandard
 from litex.build.altera import AlteraPlatform
 from litex.build.gowin.platform import GowinPlatform
+from litex.build.lattice import LatticePlatform
 
 
 # -- Shared I/O: everything except clock and main RAM (identical across targets) --
@@ -382,6 +383,66 @@ class BridgeStubPlatform(AlteraPlatform):
 
     def __init__(self):
         AlteraPlatform.__init__(self, "10CL025YU256I7G", _io_bridge, toolchain="quartus")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+# -- Lattice (ECP5 / Diamond) stub platforms ----------------------------------
+#
+# These mirror the device-agnostic CPU-less Altera stubs above, but use a
+# Lattice/Diamond platform so LiteX lowers migen's AsyncResetSynchronizer to the
+# ECP5-native FD1S3BX flip-flop instead of the Altera `DFF` primitive (which
+# Diamond does not recognise → "Reference to undefined module DFF").
+#
+# The generated SoC is otherwise identical to the Altera variant: the CRGs for
+# these targets only use external clocks + AsyncResetSynchronizer (no vendor PLL
+# is baked into the SoC, see crg.py).  The ECP5 device string below is
+# irrelevant for HDL-only generation (no synthesis / no pin constraints emitted);
+# pick the real part in the Diamond project itself.
+_LATTICE_STUB_DEVICE = "LFE5U-25F-6BG256C"
+
+
+class SpiboneLatticeStubPlatform(LatticePlatform):
+    """Lattice/Diamond counterpart of :class:`SpiboneStubPlatform`."""
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        LatticePlatform.__init__(self, _LATTICE_STUB_DEVICE, _io_spibone, toolchain="diamond")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class UartboneLatticeStubPlatform(LatticePlatform):
+    """Lattice/Diamond counterpart of :class:`UartboneStubPlatform`."""
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        LatticePlatform.__init__(self, _LATTICE_STUB_DEVICE, _io_uartbone, toolchain="diamond")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class BridgeLatticeStubPlatform(LatticePlatform):
+    """Lattice/Diamond counterpart of :class:`BridgeStubPlatform`."""
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+
+    def __init__(self):
+        LatticePlatform.__init__(self, _LATTICE_STUB_DEVICE, _io_bridge, toolchain="diamond")
 
     def create_programmer(self):
         raise NotImplementedError
