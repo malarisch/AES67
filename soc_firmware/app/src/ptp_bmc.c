@@ -44,7 +44,11 @@ static struct ptp_announce_dataset my_dataset;
 static ptp_bmc_change_cb_t change_cb;
 static enum ptp_bmc_role last_role = PTP_ROLE_LISTENING;
 
-static struct k_sem ip_ready_sem;
+/* Statically initialised: the DHCP-bound handler in main.c notifies us
+ * unconditionally, and can fire before ptp_bmc_start() (or without it ever
+ * running, in CONFIG_AES67_PTP_SOFTWARE builds) — a k_sem_give on an
+ * uninitialised k_sem walks a NULL wait queue and faults. */
+static K_SEM_DEFINE(ip_ready_sem, 0, 1);
 static bool started;
 static struct net_if *ptp_iface;
 
@@ -186,8 +190,6 @@ int ptp_bmc_start(struct net_if *iface)
 		my_clock_id[0], my_clock_id[1], my_clock_id[2], my_clock_id[3],
 		my_clock_id[4], my_clock_id[5], my_clock_id[6], my_clock_id[7]);
 
-	k_sem_init(&ip_ready_sem, 0, 1);
-
 	push_config_to_fpga();
 
 	k_thread_create(&ptp_poll_thread_data, ptp_poll_stack,
@@ -212,7 +214,10 @@ void ptp_bmc_notify_ip_ready(void)
 
 void ptp_bmc_notify_fpga_ready(void)
 {
-	push_config_to_fpga();
+	/* No-op unless the FPGA BMC is in use (skipped in software-PTP mode). */
+	if (started) {
+		push_config_to_fpga();
+	}
 }
 
 void ptp_bmc_notify_link_up(void)

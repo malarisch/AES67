@@ -2,9 +2,10 @@
  * Copyright (c) 2026
  * SPDX-License-Identifier: Apache-2.0
  *
- * Zephyr Ethernet driver that carries frames over the on-FPGA spictrl
- * block via the `fpga_spi` bus driver. See drivers/fpga_spi/fpga_spi.h
- * and FPGA/spictrl.vhd.
+ * Zephyr Ethernet driver that carries frames over the FPGA's
+ * litex_eth_buffer_bridge packet buffers via the `spibone` Wishbone
+ * bridge driver. See drivers/spibone/spibone.h and
+ * FPGA/litex_eth_buffer_bridge.vhd.
  *
  * The public surface is intentionally small — the driver registers as
  * a normal Zephyr Ethernet device (ETH_NET_DEVICE_INIT) and everything

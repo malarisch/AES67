@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Binding for the LiteX spibone SPI-to-Wishbone bridge on the AES67 FPGA
+# as seen by an external MCU. Uses the standard spi-device properties
+# (freq/duplex/frame-format). Same wire protocol as the Linux kernel
+# driver's "aes67,spibone" node (driver/aes67_eth/dts).
+
+description: AES67 FPGA spibone Wishbone-over-SPI bridge
+
+compatible: "aes67,spibone"
+
+include:
+  - name: spi-device.yaml
+
+properties:
+  int-gpios:
+    type: phandle-array
+    required: false
+    description: |
+      GPIO line driven by the FPGA `mcu_irq_o` output (the eth_buf
+      RX-ready event). Asserted while an RX Ethernet frame is waiting
+      in the FPGA RX buffer. Used by the eth_spi driver; when absent
+      the driver falls back to polling the rx_ready register.

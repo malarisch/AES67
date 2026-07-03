@@ -25,6 +25,7 @@
 #include "aes67_config.h"
 #include "ieee1588_utils.h"
 #include "ptp_bmc.h"
+#include "ptp_ctrl.h"
 #include "sap_sdp.h"
 #include "ui_display.h"
 #ifdef CONFIG_SD_CONFIG
@@ -197,6 +198,19 @@ static int read_fpga_status(struct ui_fpga_metrics *m)
 	m->path_delay_ns = fpga_hal_read_path_delay();
 	m->leader_offset_ns = fpga_hal_read_ptp_offset();
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+	/* --ptp-in-software gateware drops the servo/lock/offset CSRs; source
+	 * these from the Zephyr PTP stack instead so the dashboard (summary,
+	 * FPGA tab, offset chart) shows the same picture in both PTP modes. */
+	struct ptp_ctrl_status pst;
+
+	ptp_ctrl_get_status(&pst);
+	m->wc_locked        = pst.locked;
+	m->path_delay_ns    = pst.path_delay_ns;
+	m->leader_offset_ns = pst.offset_ns;
+	m->ptp_leader_lost  = false;
+#endif
+
 	/* Read raw counters and calculate PPB */
 	uint32_t count_wc = 0, count_pll = 0;
 
@@ -270,74 +284,66 @@ static int build_status_network(char *buf, size_t sz)
 
 static int build_status_ptp(char *buf, size_t sz)
 {
+	struct ptp_ctrl_status st;
+	struct ptp_ctrl_foreign fms[8];
 	int p = json_start_object(buf, sz);
 	char id_str[32];
 
-	/* Role */
-	enum ptp_bmc_role role = ptp_bmc_get_role();
+	ptp_ctrl_get_status(&st);
+
+	p = json_add_str(buf, sz, p, "mode", st.mode);
+
 	const char *role_str =
-		(role == PTP_ROLE_LEADER)   ? "leader" :
-		(role == PTP_ROLE_FOLLOWER) ? "follower" : "listening";
+		(st.role == PTP_CTRL_ROLE_LEADER)   ? "leader" :
+		(st.role == PTP_CTRL_ROLE_FOLLOWER) ? "follower" : "listening";
 	p = json_add_str(buf, sz, p, "role", role_str);
 
-	/* Our identity */
-	uint8_t my_id[8];
-
-	ptp_bmc_get_clock_identity(my_id);
-	format_clock_id(id_str, sizeof(id_str), my_id);
+	format_clock_id(id_str, sizeof(id_str), st.clock_id);
 	p = json_add_str(buf, sz, p, "clock_identity", id_str);
 
-	/* Best master */
-	uint8_t best_id[8];
-
-	if (ptp_bmc_get_best_master_id(best_id) == 0) {
-		format_clock_id(id_str, sizeof(id_str), best_id);
+	if (st.gm_valid) {
+		format_clock_id(id_str, sizeof(id_str), st.gm_id);
 		p = json_add_str(buf, sz, p, "best_master", id_str);
 	} else {
 		p = json_add_str(buf, sz, p, "best_master", "none");
 	}
 
-	/* Own dataset */
-	const struct ptp_announce_dataset *own = ptp_bmc_get_own_dataset();
-	if (own) {
-		p = json_add_uint(buf, sz, p, "own_priority1",
-				   own->gm_priority1);
-		p = json_add_uint(buf, sz, p, "own_priority2",
-				   own->gm_priority2);
-		p = json_add_uint(buf, sz, p, "own_clock_class",
-				   own->gm_clock_class);
-		p = json_add_uint(buf, sz, p, "own_clock_accuracy",
-				   own->gm_clock_accuracy);
-	}
+	p = json_add_int(buf, sz, p, "offset_ns", st.offset_ns);
+	p = json_add_int(buf, sz, p, "path_delay_ns", st.path_delay_ns);
+	p = json_add_bool(buf, sz, p, "locked", st.locked);
+	p = json_add_uint(buf, sz, p, "steps_removed", st.steps_removed);
 
-	/* Foreign masters */
-	int fm_count = 0;
-	const struct ptp_announce_dataset *fms =
-		ptp_bmc_get_foreign_masters(&fm_count);
+	/* Own announce quality — identical to the stored config in both modes. */
+	aes67_config_lock();
+	const struct aes67_device_config *cfg = aes67_config_get();
+
+	p = json_add_uint(buf, sz, p, "own_priority1", cfg->ptp_priority1);
+	p = json_add_uint(buf, sz, p, "own_priority2", cfg->ptp_priority2);
+	p = json_add_uint(buf, sz, p, "own_clock_class", cfg->ptp_clock_class);
+	p = json_add_uint(buf, sz, p, "own_clock_accuracy",
+			   cfg->ptp_clock_accuracy);
+	aes67_config_unlock();
+
+	/* Foreign masters (software mode; the FPGA BMA keeps no list). */
+	int fm_count = ptp_ctrl_get_foreign_masters(fms, ARRAY_SIZE(fms));
 
 	p = json_add_key(buf, sz, p, "foreign_masters");
 	p = json_start_array(buf, sz, p);
 
 	for (int i = 0; i < fm_count; i++) {
 		p += snprintf(buf + p, sz - p, "{");
-		format_clock_id(id_str, sizeof(id_str),
-				fms[i].sender_clock_id);
+		format_clock_id(id_str, sizeof(id_str), fms[i].sender_id);
 		p = json_add_str(buf, sz, p, "sender_id", id_str);
-		format_clock_id(id_str, sizeof(id_str),
-				fms[i].gm_identity);
+		format_clock_id(id_str, sizeof(id_str), fms[i].gm_id);
 		p = json_add_str(buf, sz, p, "gm_identity", id_str);
-		p = json_add_uint(buf, sz, p, "priority1",
-				   fms[i].gm_priority1);
+		p = json_add_uint(buf, sz, p, "priority1", fms[i].priority1);
 		p = json_add_uint(buf, sz, p, "clock_class",
-				   fms[i].gm_clock_class);
+				   fms[i].clock_class);
 		p = json_add_uint(buf, sz, p, "clock_accuracy",
-				   fms[i].gm_clock_accuracy);
-		p = json_add_uint(buf, sz, p, "priority2",
-				   fms[i].gm_priority2);
+				   fms[i].clock_accuracy);
+		p = json_add_uint(buf, sz, p, "priority2", fms[i].priority2);
 		p = json_add_uint(buf, sz, p, "steps_removed",
 				   fms[i].steps_removed);
-		p = json_add_uint(buf, sz, p, "time_source",
-				   fms[i].time_source);
 		p = json_add_uint(buf, sz, p, "announce_count",
 				   fms[i].announce_count);
 		/* Remove trailing comma and close */
@@ -901,8 +907,9 @@ static int apply_config_json(const char *json, size_t len)
 
 	aes67_config_unlock();
 
-	/* Propagate PTP config changes to BMC's own dataset */
-	ptp_bmc_update_own_dataset();
+	/* Propagate PTP config changes into the active PTP stack
+	 * (FPGA hardware BMC or Zephyr software PTP). */
+	ptp_ctrl_apply_config();
 
 	LOG_INF("WEB: Configuration updated via REST API");
 	return 0;

@@ -1,11 +1,12 @@
 menuconfig ETH_SPI
-	bool "Ethernet over FPGA SPI"
-	depends on FPGA_SPI && NET_L2_ETHERNET
+	bool "Ethernet over FPGA SPI (spibone)"
+	depends on SPIBONE && NET_L2_ETHERNET
 	help
-	  Zephyr Ethernet driver that uses the fpga_spi bus driver to
-	  exchange frames with the on-FPGA spictrl block (registers
-	  0x20 TX, 0x21 RX length, 0x22 RX data). An IRQ GPIO connected
-	  to the FPGA's `mcu_irq` line wakes the RX thread.
+	  Zephyr Ethernet driver that uses the spibone bus driver to
+	  exchange frames with the FPGA's litex_eth_buffer_bridge packet
+	  buffers (eth_buf memory + rx_len/rx_ack/tx_len CSRs). An IRQ
+	  GPIO connected to the FPGA's `mcu_irq_o` line (eth_buf RX-ready
+	  event) wakes the RX thread.
 
 if ETH_SPI
 
@@ -39,7 +40,7 @@ config ETH_SPI_INIT_PRIORITY
 	int "Driver init priority"
 	default 81
 	help
-	  Must run after CONFIG_FPGA_SPI_INIT_PRIORITY (default 60) and
+	  Must run after CONFIG_SPIBONE_INIT_PRIORITY (default 60) and
 	  after the SPI controller (typically 50).
 
 endif # ETH_SPI

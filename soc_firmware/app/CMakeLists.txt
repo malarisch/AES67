@@ -103,6 +103,15 @@ if(CONFIG_APP_SPI_BRINGUP)
 elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
     # HTTP server: register per-service resource linker sections.
     zephyr_linker_sources(SECTIONS sections-rom.ld)
+    # ESP32-S3 PSRAM: keep net-stack thread stacks in internal DRAM while the
+    # packet pools live in PSRAM (content is #ifdef'd on the SPIRAM symbol).
+    zephyr_linker_sources(SECTIONS sections-psram-stacks.ld)
+
+    if(CONFIG_AES67_PTP_SOFTWARE)
+      # ptp_ctrl's software backend reads the Zephyr PTP stack's internal
+      # datasets — the public zephyr/net/ptp.h exposes no status/config API.
+      target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/lib/ptp)
+    endif()
     zephyr_linker_section(NAME http_resource_desc_aes67_http
                           KVMA RAM_REGION GROUP RODATA_REGION)
 
@@ -137,6 +146,7 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
       src/fpga_poll.c
       src/ui_display.c
       src/ptp_bmc.c
+      src/ptp_ctrl.c
       src/sap_sdp.c
       src/aes67_config.c
       src/config_json.c

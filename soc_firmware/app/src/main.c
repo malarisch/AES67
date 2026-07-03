@@ -31,6 +31,7 @@
 #include "pll_ctrl.h"
 #include "ui_display.h"
 #include "ptp_bmc.h"
+#include "ptp_ctrl.h"
 #include "sap_sdp.h"
 #include "webserver.h"
 #include "aes67_config.h"
@@ -430,8 +431,11 @@ int main(void)
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 	/* Software PTP: Zephyr's IEEE 1588 stack (CONFIG_PTP) auto-starts via
 	 * SYS_INIT and disciplines the FPGA wallclock through the aes67 PHC; the
-	 * FPGA hardware BMC is not used. */
+	 * FPGA hardware BMC is not used. Push the stored PTP config (priorities,
+	 * clock quality, log intervals) into the stack — it booted with its
+	 * Kconfig defaults. */
 	LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining FPGA wallclock");
+	ptp_ctrl_apply_config();
 #else
 	ptp_bmc_register_change_cb(on_bmc_change);
 	int bmc_ret = ptp_bmc_start(iface);

@@ -10,7 +10,7 @@ choice FPGA_HAL_BACKEND
 	prompt "FPGA HAL backend"
 	default FPGA_HAL_FMC if ETH_FMC_BASIC
 	default FPGA_HAL_LITEX if ETH_LITEX
-	default FPGA_HAL_SPI if FPGA_SPI
+	default FPGA_HAL_SPI if SPIBONE
 
 config FPGA_HAL_FMC
 	bool "FMC backend (STM32H7)"
@@ -25,12 +25,13 @@ config FPGA_HAL_LITEX
 	  Use LiteX CSR registers for FPGA register access.
 
 config FPGA_HAL_SPI
-	bool "SPI backend (external MCU)"
-	depends on FPGA_SPI
+	bool "SPI backend (external MCU, spibone)"
+	depends on SPIBONE
 	help
-	  Use the on-FPGA spictrl SPI slave for register access. Intended
-	  for boards where Zephyr runs on an external MCU and communicates
-	  with the FPGA over SPI.
+	  Reach the aes67_bridge CSR map over the LiteX spibone
+	  SPI-to-Wishbone bridge. Intended for boards where Zephyr runs
+	  on an external MCU (e.g. ESP32-S3) and drives CPU-less FPGA
+	  gateware over SPI.
 
 endchoice
 

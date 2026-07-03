@@ -14,17 +14,46 @@
  *                 wallclock_ppb (freq_correction_ppb_i).
  *
  * The same module also reconstructs full RX/TX hardware timestamps from the
- * 4-bit captured-seconds fields (aes67_ptp_reconstruct), used by the aes67_eth
- * driver. Only built when CONFIG_AES67_PTP_SOFTWARE is set (the CSRs above exist
- * only in a `--ptp-in-software` aes67_bridge gateware build).
+ * 4-bit captured-seconds fields (aes67_ptp_reconstruct), used by the eth_litex
+ * and eth_spi drivers. Only built when CONFIG_AES67_PTP_SOFTWARE is set (the
+ * CSRs above exist only in a `--ptp-in-software` aes67_bridge gateware build).
+ *
+ * Register access is backend-dispatched: memory-mapped CSRs on the integrated
+ * softcore (FPGA_HAL_LITEX), spibone transactions on an external MCU
+ * (FPGA_HAL_SPI).
  */
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/ptp_clock.h>
 #include <zephyr/net/ptp_time.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/logging/log.h>
 
 #include "eth_litex.h"
+
+LOG_MODULE_REGISTER(ptp_aes67, LOG_LEVEL_INF);
+
+#ifdef CONFIG_FPGA_HAL_SPI
+/* A failed spibone transaction degrades to reading 0 / dropping the write;
+ * the PTP servo treats that like a missed sample and recovers on the next. */
+#include "../spibone/spibone.h"
+
+static uint32_t wc_csr_read(uintptr_t addr)
+{
+	uint32_t v = 0;
+
+	(void)spibone_read((uint32_t)addr, &v);
+	return v;
+}
+
+static void wc_csr_write(uintptr_t addr, uint32_t val)
+{
+	(void)spibone_write((uint32_t)addr, val);
+}
+#else
+#define wc_csr_read(addr)       litex_csr_read(addr)
+#define wc_csr_write(addr, val) litex_csr_write(addr, val)
+#endif
 
 #define NS_PER_SEC   1000000000LL
 /* Wallclock freq correction is a signed 20-bit ppb value (±524287). */
@@ -33,8 +62,8 @@
 /* Read the live 48-bit wallclock seconds. */
 static uint64_t aes67_wc_read_seconds(void)
 {
-	uint32_t lo = litex_csr_read(CSR_AES67_CSR_WALLCLOCK_SECONDS_IN_LO_ADDR);
-	uint32_t hi = litex_csr_read(CSR_AES67_CSR_WALLCLOCK_SECONDS_IN_HI_ADDR) & 0xFFFF;
+	uint32_t lo = wc_csr_read(CSR_AES67_CSR_WALLCLOCK_SECONDS_IN_LO_ADDR);
+	uint32_t hi = wc_csr_read(CSR_AES67_CSR_WALLCLOCK_SECONDS_IN_HI_ADDR) & 0xFFFF;
 
 	return ((uint64_t)hi << 32) | lo;
 }
@@ -50,7 +79,7 @@ static int ptp_aes67_get(const struct device *dev, struct net_ptp_time *tm)
 	 * if it advanced (guards a torn read across a one-second boundary). */
 	do {
 		sec  = aes67_wc_read_seconds();
-		nsec = litex_csr_read(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_IN_ADDR) & 0x3FFFFFFF;
+		nsec = wc_csr_read(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_IN_ADDR) & 0x3FFFFFFF;
 		sec2 = aes67_wc_read_seconds();
 	} while (sec != sec2);
 
@@ -63,15 +92,15 @@ static int ptp_aes67_set(const struct device *dev, struct net_ptp_time *tm)
 {
 	ARG_UNUSED(dev);
 
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO_ADDR, (uint32_t)tm->second);
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI_ADDR,
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO_ADDR, (uint32_t)tm->second);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI_ADDR,
 			(uint32_t)(tm->second >> 32) & 0xFFFF);
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_OUT_ADDR, tm->nanosecond & 0x3FFFFFFF);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_OUT_ADDR, tm->nanosecond & 0x3FFFFFFF);
 	/* Pulse set (1 then 0); the bus latency between writes exceeds the CDC
 	 * capture window in the gateware. */
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR,
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR,
 			BIT(CSR_AES67_CSR_WALLCLOCK_CTRL_SET_OFFSET));
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR, 0);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR, 0);
 	return 0;
 }
 
@@ -87,13 +116,13 @@ static int ptp_aes67_adjust(const struct device *dev, int increment)
 	sec  = (delta + (delta >= 0 ? NS_PER_SEC / 2 : -(NS_PER_SEC / 2))) / NS_PER_SEC;
 	nsec = delta - sec * NS_PER_SEC;
 
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO_ADDR, (uint32_t)sec);
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI_ADDR,
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO_ADDR, (uint32_t)sec);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI_ADDR,
 			(uint32_t)((uint64_t)sec >> 32) & 0xFFFF);
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_OUT_ADDR, (uint32_t)nsec & 0x3FFFFFFF);
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR,
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_NANOSECONDS_OUT_ADDR, (uint32_t)nsec & 0x3FFFFFFF);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR,
 			BIT(CSR_AES67_CSR_WALLCLOCK_CTRL_PHASEJUMP_OFFSET));
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR, 0);
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_CTRL_ADDR, 0);
 	return 0;
 }
 
@@ -108,7 +137,19 @@ static int ptp_aes67_rate_adjust(const struct device *dev, double ratio)
 	ppb = (int64_t)((ratio - 1.0) * 1e9);
 	ppb = CLAMP(ppb, -AES67_MAX_PPB, AES67_MAX_PPB);
 
-	litex_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+	/* Temporary SW-PTP bring-up diagnostics: one line per second at the
+	 * AES67 8 Hz sync rate. A healthy locked servo settles near the
+	 * crystal offset (typically a few 1000 ppb, constant); a value pinned
+	 * at ±524287 means clamp/windup, wild swings mean loop instability. */
+	{
+		static uint32_t cnt;
+
+		if ((++cnt % 8U) == 0) {
+			LOG_WRN("PPB applied %lld", (long long)ppb);
+		}
+	}
+
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
 	return 0;
 }
 

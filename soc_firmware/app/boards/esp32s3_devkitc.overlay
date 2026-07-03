@@ -1,8 +1,8 @@
 /*
  * ESP32-S3 DevKitC-1 (N16R8) overlay for AES67.
  *
- * Wires SPI2 to the on-FPGA `spictrl` block and selects it as
- * `zephyr,fpga-spi` so the fpga_spi driver picks it up.
+ * Wires SPI2 to the FPGA's spibone Wishbone bridge and selects it as
+ * `zephyr,fpga-spi` so the spibone driver picks it up.
  *
  * Pins (placeholders — update to match the hardware):
  *   SCK  = GPIO12
@@ -22,10 +22,14 @@
 
 &pinctrl {
 	spim2_fpga: spim2_fpga {
+		/* CS deliberately NOT muxed to the peripheral (SPIM2_CSEL):
+		 * hardware CS toggles at every 64-byte FIFO chunk of a large
+		 * transfer, which aborts spibone burst transactions mid-frame.
+		 * GPIO10 stays a plain GPIO driven by the SPI core's cs-gpios
+		 * handling, held low across the whole transfer. */
 		group1 {
 			pinmux = <SPIM2_MISO_GPIO13>,
-				 <SPIM2_SCLK_GPIO12>,
-				 <SPIM2_CSEL_GPIO10>;
+				 <SPIM2_SCLK_GPIO12>;
 		};
 		group2 {
 			pinmux = <SPIM2_MOSI_GPIO11>;
@@ -38,16 +42,19 @@
 	status = "okay";
 	pinctrl-0 = <&spim2_fpga>;
 	pinctrl-names = "default";
-	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>; 
 	cs-setup-time = <10>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 
 	fpga_spi: fpga@0 {
-		compatible = "aes67,fpga-spi";
+		compatible = "aes67,spibone";
 		reg = <0>;
-		spi-max-frequency = <1000000>;
-		int-gpios = <&gpio0 9 GPIO_ACTIVE_LOW>;
+		spi-max-frequency = <5000000>;
+		/* mcu_irq_o is driven active-HIGH by the FPGA (eth_buf
+		 * RX-ready event). Getting this wrong makes the RX thread
+		 * spin on an idle line. */
+		int-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
 	};
 };
 

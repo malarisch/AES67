@@ -2,11 +2,14 @@
  * Copyright (c) 2026
  * SPDX-License-Identifier: Apache-2.0
  *
- * FPGA HAL backend — SPI implementation.
+ * FPGA HAL backend — SPI (spibone) implementation.
  *
- * Uses the standalone fpga_spi driver (drivers/fpga_spi/) to talk to the
- * on-FPGA spictrl block. Intended for boards that host only the control
- * plane (Zephyr) on an external MCU while the FPGA owns the data plane.
+ * External-MCU path (e.g. ESP32-S3): the same aes67_bridge CSR map the other
+ * hosts use, reached over the LiteX spibone SPI-to-Wishbone bridge instead of
+ * a memory-mapped bus. Register names/addresses come from the LiteX-generated
+ * aes67_bridge headers (litex_soc/build/aes67_bridge/software/include); the
+ * register sequences mirror fpga_hal_litex.c / eth_litex.c and the Linux
+ * kernel driver.
  */
 
 #include <zephyr/kernel.h>
@@ -15,65 +18,47 @@
 #include <string.h>
 
 #include "fpga_hal.h"
-#include "../fpga_spi/fpga_spi.h"
+#include "../spibone/spibone.h"
+/* Macro layer only (AES67_STATUS_ / AES67_CTRL_ bit fields, stream-cfg and
+ * eth_buf base addresses derived from the generated headers). The eth_litex
+ * functions declared there are not built in this backend. */
+#include "../eth_litex/eth_litex.h"
 
 LOG_MODULE_REGISTER(fpga_hal, LOG_LEVEL_INF);
-
-/* Shadow of the flag register (0x50). The FPGA commits the full byte on
- * every write, so we track bits locally to support set/clear semantics.
- * PPB_START is auto-cleared by the FPGA once the measurement completes;
- * we clear it from the shadow lazily when the host next writes the byte.
- */
-static struct {
-	struct k_spinlock lock;
-	uint8_t bits;
-} g_flags;
-
-static int flags_write_locked(uint8_t new_bits)
-{
-	const struct device *dev = fpga_spi_get_dev();
-
-	if (!dev) {
-		return -ENODEV;
-	}
-	return fpga_spi_write(dev, FPGA_SPI_REG_FLAGS, &new_bits, 1);
-}
-
-static int flags_update(uint8_t set_mask, uint8_t clear_mask)
-{
-	k_spinlock_key_t key = k_spin_lock(&g_flags.lock);
-	uint8_t bits = g_flags.bits;
-
-	bits &= ~clear_mask;
-	bits |= set_mask;
-	g_flags.bits = bits;
-	k_spin_unlock(&g_flags.lock, key);
-
-	return flags_write_locked(bits);
-}
 
 /* ---- Device accessor ---- */
 
 const struct device *fpga_hal_get_dev(void)
 {
-	return fpga_spi_get_dev();
+	return spibone_get_dev();
 }
 
 /* ---- FPGA ready / recovery ---- */
 
 bool fpga_hal_is_ready(void)
 {
-	const struct device *dev = fpga_spi_get_dev();
+	const struct device *dev = spibone_get_dev();
+	uint32_t status;
 
-	return dev != NULL && device_is_ready(dev);
+	if (dev == NULL || !device_is_ready(dev)) {
+		return false;
+	}
+	/* Probe an actual bus transaction: the bridge answers reads only once
+	 * the FPGA is configured and the SPI wiring is sound. */
+	return spibone_read(CSR_AES67_CSR_STATUS_ADDR, &status) == 0;
 }
 
 int fpga_hal_wait_ready(uint32_t timeout_ms)
 {
-	/* The FPGA runs independently. If the SPI bus is up we assume the
-	 * FPGA is reachable; there is no ready line on this transport. */
-	ARG_UNUSED(timeout_ms);
-	return fpga_hal_is_ready() ? 0 : -ETIMEDOUT;
+	int64_t deadline = k_uptime_get() + timeout_ms;
+
+	while (!fpga_hal_is_ready()) {
+		if (timeout_ms != 0 && k_uptime_get() >= deadline) {
+			return -ETIMEDOUT;
+		}
+		k_msleep(10);
+	}
+	return 0;
 }
 
 void fpga_hal_register_recover_cb(fpga_hal_recover_cb_t cb, void *user_data)
@@ -87,114 +72,112 @@ void fpga_hal_register_recover_cb(fpga_hal_recover_cb_t cb, void *user_data)
 
 int fpga_hal_write_mac(const uint8_t mac[6])
 {
-	const struct device *dev = fpga_spi_get_dev();
+	/* mac[0..1] → mac_addr_hi (bits 47..32), mac[2..5] → mac_addr_lo. */
+	uint32_t hi = ((uint32_t)mac[0] << 8) |
+		      (uint32_t)mac[1];
+	uint32_t lo = ((uint32_t)mac[2] << 24) |
+		      ((uint32_t)mac[3] << 16) |
+		      ((uint32_t)mac[4] << 8) |
+		      (uint32_t)mac[5];
+	int ret;
 
-	if (!dev) {
-		return -ENODEV;
+	spibone_bus_lock();
+	ret = spibone_write_locked(CSR_AES67_CSR_MAC_ADDR_LO_ADDR, lo);
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_MAC_ADDR_HI_ADDR, hi);
 	}
-	/* Wire order: byte 0 = MAC[47:40] (MSB first) — matches input layout. */
-	return fpga_spi_write(dev, FPGA_SPI_REG_MAC, mac, 6);
+	spibone_bus_unlock();
+	return ret;
 }
 
 int fpga_hal_write_ip(const struct in_addr *ip)
 {
-	const struct device *dev = fpga_spi_get_dev();
-
-	if (!dev) {
-		return -ENODEV;
-	}
-	/* s_addr is stored in network byte order, same as the FPGA expects
-	 * (byte 0 = IP[31:24]). */
+	/* s_addr is network byte order; the CSR wants octet 0 in bits 31..24. */
 	const uint8_t *b = (const uint8_t *)&ip->s_addr;
-	return fpga_spi_write(dev, FPGA_SPI_REG_IP, b, 4);
-}
+	uint32_t val = ((uint32_t)b[0] << 24) |
+		       ((uint32_t)b[1] << 16) |
+		       ((uint32_t)b[2] << 8) |
+		       (uint32_t)b[3];
 
-/* Cache for PTP-config / GM-quality so we can write the full 7-byte block
- * atomically when only part of it is updated by the caller. */
-K_MUTEX_DEFINE(g_ptp_cfg_lock);
-
-static struct {
-	uint8_t time_source;
-	int8_t  log_sync;
-	int8_t  log_announce;
-	uint8_t prio1;
-	uint8_t prio2;
-	uint8_t clock_class;
-	uint8_t clock_accuracy;
-} g_ptp_cfg = {
-	/* Sensible IEEE 1588 defaults until the first explicit write. */
-	.clock_class    = 248,
-	.clock_accuracy = 0xFE,
-};
-
-static int ptp_cfg_flush(void)
-{
-	const struct device *dev = fpga_spi_get_dev();
-
-	if (!dev) {
-		return -ENODEV;
-	}
-	uint8_t buf[7] = {
-		g_ptp_cfg.time_source,
-		(uint8_t)g_ptp_cfg.log_sync,
-		(uint8_t)g_ptp_cfg.log_announce,
-		g_ptp_cfg.prio1,
-		g_ptp_cfg.prio2,
-		g_ptp_cfg.clock_class,
-		g_ptp_cfg.clock_accuracy,
-	};
-	return fpga_spi_write(dev, FPGA_SPI_REG_PTP_CONFIG, buf, sizeof(buf));
+	return spibone_write(CSR_AES67_CSR_IP_ADDR_ADDR, val);
 }
 
 int fpga_hal_write_ptp_config(uint8_t time_source,
 			      int8_t log_msg_interval,
 			      int8_t log_announce_interval)
 {
-	k_mutex_lock(&g_ptp_cfg_lock, K_FOREVER);
-	g_ptp_cfg.time_source  = time_source;
-	g_ptp_cfg.log_sync     = log_msg_interval;
-	g_ptp_cfg.log_announce = log_announce_interval;
-	int ret = ptp_cfg_flush();
-	k_mutex_unlock(&g_ptp_cfg_lock);
-	return ret;
-}
+	int ret;
 
-int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
-				  uint8_t clock_class, uint8_t clock_accuracy)
-{
-	k_mutex_lock(&g_ptp_cfg_lock, K_FOREVER);
-	g_ptp_cfg.prio1          = priority1;
-	g_ptp_cfg.prio2          = priority2;
-	g_ptp_cfg.clock_class    = clock_class;
-	g_ptp_cfg.clock_accuracy = clock_accuracy;
-	int ret = ptp_cfg_flush();
-	k_mutex_unlock(&g_ptp_cfg_lock);
+	spibone_bus_lock();
+	ret = spibone_write_locked(CSR_AES67_CSR_PTP_TIME_SOURCE_ADDR, time_source);
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_PTP_LOG_MSG_INTERVAL_ADDR,
+					   (uint8_t)log_msg_interval);
+	}
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_PTP_ANNOUNCE_MSG_INTERVAL_ADDR,
+					   (uint8_t)log_announce_interval);
+	}
+	spibone_bus_unlock();
 	return ret;
 }
 
 bool fpga_hal_read_ptp_leader_id(uint8_t leader_clock_id[8])
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint8_t le[8];
+	uint32_t id_lo, id_hi;
+	int ret;
 
-	if (!dev || fpga_spi_read(dev, FPGA_SPI_REG_GM_ID, le, 8) < 0) {
+	spibone_bus_lock();
+	ret = spibone_read_locked(CSR_AES67_CSR_PTP_LEADER_ID_LO_ADDR, &id_lo);
+	if (ret == 0) {
+		ret = spibone_read_locked(CSR_AES67_CSR_PTP_LEADER_ID_HI_ADDR, &id_hi);
+	}
+	spibone_bus_unlock();
+
+	if (ret < 0) {
 		memset(leader_clock_id, 0, 8);
 		return false;
 	}
-	/* Wire order is little-endian (byte 0 = bits 7..0 of gmid). The public
-	 * API returns the clock identity in big-endian / network order, so
-	 * reverse here. */
-	for (int i = 0; i < 8; i++) {
-		leader_clock_id[i] = le[7 - i];
-	}
 
-	for (int i = 0; i < 8; i++) {
-		if (leader_clock_id[i] != 0) {
-			return true;
-		}
-	}
-	return false;
+	leader_clock_id[0] = (uint8_t)(id_hi >> 24);
+	leader_clock_id[1] = (uint8_t)(id_hi >> 16);
+	leader_clock_id[2] = (uint8_t)(id_hi >> 8);
+	leader_clock_id[3] = (uint8_t)(id_hi);
+	leader_clock_id[4] = (uint8_t)(id_lo >> 24);
+	leader_clock_id[5] = (uint8_t)(id_lo >> 16);
+	leader_clock_id[6] = (uint8_t)(id_lo >> 8);
+	leader_clock_id[7] = (uint8_t)(id_lo);
+
+	return (id_lo | id_hi) != 0;
 }
+
+int fpga_hal_write_ptp_gm_quality(uint8_t priority1, uint8_t priority2,
+				  uint8_t clock_class, uint8_t clock_accuracy)
+{
+	int ret;
+
+	spibone_bus_lock();
+	ret = spibone_write_locked(CSR_AES67_CSR_PTP_GM_PRIORITY1_ADDR, priority1);
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_PTP_GM_PRIORITY2_ADDR, priority2);
+	}
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_PTP_GM_CLOCK_CLASS_ADDR, clock_class);
+	}
+	if (ret == 0) {
+		ret = spibone_write_locked(CSR_AES67_CSR_PTP_GM_CLOCK_ACCURACY_ADDR,
+					   clock_accuracy);
+	}
+	spibone_bus_unlock();
+	return ret;
+}
+
+/* ---- Stream config RAMs ----
+ *
+ * One config byte per 32-bit Wishbone word (byte i of stream s at word index
+ * s*32 + i), so a stream's record is one auto-incrementing burst write.
+ * Byte layouts identical to eth_litex.c / the Rust aes67-config crate.
+ */
 
 int fpga_hal_write_tx_stream_config(uint8_t stream_id,
 				    const struct in_addr *dst_ip,
@@ -204,33 +187,32 @@ int fpga_hal_write_tx_stream_config(uint8_t stream_id,
 				    uint8_t num_ch_ids,
 				    uint32_t ssrc)
 {
-	const struct device *dev = fpga_spi_get_dev();
 	uint8_t buf[20];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
 
-	if (!dev) {
-		return -ENODEV;
-	}
-	if (num_ch_ids > 8) {
+	if (stream_id > 7 || num_ch_ids > 8) {
 		return -EINVAL;
 	}
 
 	memset(buf, 0, sizeof(buf));
 	buf[0] = stream_id & 0x07;
-	/* Bytes 1..4: destination IP in network byte order (big-endian). */
-	memcpy(&buf[1], &dst_ip->s_addr, 4);
+	buf[1] = ip[0];
+	buf[2] = ip[1];
+	buf[3] = ip[2];
+	buf[4] = ip[3];
 	buf[5] = channel_count;
 	buf[6] = samples_per_pkt;
-	if (ch_ids && num_ch_ids) {
-		memcpy(&buf[7], ch_ids, num_ch_ids);
+	for (uint8_t i = 0; i < num_ch_ids; i++) {
+		buf[7 + i] = ch_ids[i];
 	}
-	/* buf[15] reserved */
-	/* Bytes 16..19: SSRC big-endian */
+	/* Byte 15 reserved, bytes 16-19: SSRC (big-endian) */
 	buf[16] = (uint8_t)(ssrc >> 24);
 	buf[17] = (uint8_t)(ssrc >> 16);
 	buf[18] = (uint8_t)(ssrc >> 8);
 	buf[19] = (uint8_t)(ssrc);
 
-	return fpga_spi_write(dev, FPGA_SPI_REG_TX_STREAM, buf, sizeof(buf));
+	return spibone_write_burst(TX_STREAM_CFG_BASE + (((uint32_t)stream_id * 32) << 2),
+				   buf, sizeof(buf));
 }
 
 int fpga_hal_write_rx_stream_config(uint8_t stream_id,
@@ -241,117 +223,109 @@ int fpga_hal_write_rx_stream_config(uint8_t stream_id,
 				    uint8_t output_delay,
 				    uint8_t samples_per_channel)
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint8_t buf[18];
-
-	if (!dev) {
-		return -ENODEV;
-	}
+	uint8_t buf[17];
+	const uint8_t *ip = (const uint8_t *)&dst_ip->s_addr;
 
 	memset(buf, 0, sizeof(buf));
-	buf[0] = stream_id & 0x07;
-	/* Bytes 1..4: destination IP big-endian (network order). */
-	memcpy(&buf[1], &dst_ip->s_addr, 4);
-	/* Bytes 5..6: destination UDP port big-endian. */
-	buf[5] = (uint8_t)(dst_port >> 8);
-	buf[6] = (uint8_t)(dst_port);
-	if (ch_map && channel_count) {
-		uint8_t n = channel_count > 8 ? 8 : channel_count;
-		memcpy(&buf[7], ch_map, n);
+	buf[0] = ip[0];
+	buf[1] = ip[1];
+	buf[2] = ip[2];
+	buf[3] = ip[3];
+	buf[4] = (uint8_t)(dst_port >> 8);
+	buf[5] = (uint8_t)(dst_port);
+	for (uint8_t i = 0; i < 8 && i < channel_count; i++) {
+		buf[6 + i] = ch_map[i];
 	}
-	buf[15] = channel_count;
-	buf[16] = output_delay;
-	buf[17] = samples_per_channel;
+	buf[14] = channel_count;
+	buf[15] = output_delay;
+	buf[16] = samples_per_channel;
 
-	return fpga_spi_write(dev, FPGA_SPI_REG_RX_STREAM, buf, sizeof(buf));
+	return spibone_write_burst(RX_STREAM_CFG_BASE + (((uint32_t)stream_id * 32) << 2),
+				   buf, sizeof(buf));
 }
 
 /* ---- Control register ---- */
 
-static uint8_t hal_to_flag_bits(uint32_t bits)
+static uint32_t hal_to_ctrl_bits(uint32_t bits)
 {
-	uint8_t out = 0;
+	uint32_t out = 0;
 
 	if (bits & FPGA_HAL_CTRL_PPB_START) {
-		out |= FPGA_SPI_FLAG_PPB_START;
+		out |= AES67_CTRL_PPB_START;
 	}
-	if (bits & FPGA_HAL_CTRL_RESET_WALLCLOCK) {
-		out |= FPGA_SPI_FLAG_RESET_WALLCLOCK;
-	}
-	if (bits & FPGA_HAL_CTRL_RESET_PTP) {
-		out |= FPGA_SPI_FLAG_RESET_PTP;
-	}
-	if (bits & FPGA_HAL_CTRL_RESET_ETHERNET) {
-		out |= FPGA_SPI_FLAG_RESET_ETHERNET;
-	}
+	/* The FPGA_HAL_CTRL_RESET_* flags map to the dedicated reset CSR
+	 * (fpga_hal_set_resets), not the control register — same as the
+	 * LiteX backend. */
 	return out;
+}
+
+static int ctrl_update(uint32_t set_mask, uint32_t clear_mask)
+{
+	uint32_t val;
+	int ret;
+
+	spibone_bus_lock();
+	ret = spibone_read_locked(CSR_AES67_CSR_CTRL_ADDR, &val);
+	if (ret == 0) {
+		val &= ~clear_mask;
+		val |= set_mask;
+		ret = spibone_write_locked(CSR_AES67_CSR_CTRL_ADDR, val);
+	}
+	spibone_bus_unlock();
+	return ret;
 }
 
 int fpga_hal_ctrl_set_bits(uint32_t bits)
 {
-	return flags_update(hal_to_flag_bits(bits), 0);
+	return ctrl_update(hal_to_ctrl_bits(bits), 0);
 }
 
 int fpga_hal_ctrl_clear_bits(uint32_t bits)
 {
-	return flags_update(0, hal_to_flag_bits(bits));
+	return ctrl_update(0, hal_to_ctrl_bits(bits));
 }
 
 int fpga_hal_set_adda_nrst(bool released)
 {
 	if (released) {
-		return flags_update(FPGA_SPI_FLAG_ADDA_NRST, 0);
+		return ctrl_update(AES67_CTRL_ADDA_NRST, 0);
 	}
-	return flags_update(0, FPGA_SPI_FLAG_ADDA_NRST);
+	return ctrl_update(0, AES67_CTRL_ADDA_NRST);
 }
 
 /* ---- Status reads ---- */
 
-static int32_t le_to_s32(const uint8_t b[4])
-{
-	return (int32_t)((uint32_t)b[0] |
-			 ((uint32_t)b[1] << 8) |
-			 ((uint32_t)b[2] << 16) |
-			 ((uint32_t)b[3] << 24));
-}
-
 uint32_t fpga_hal_read_status(void)
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint32_t hal = 0;
-	uint8_t v;
+	uint32_t raw, hal = 0;
+	uint32_t ppb_wc, ppb_pll;
 
-	if (!dev) {
+	if (spibone_read(CSR_AES67_CSR_STATUS_ADDR, &raw) < 0) {
 		return 0;
 	}
 
-	/* Clocking status (0x50 read). */
-	if (fpga_spi_read(dev, FPGA_SPI_REG_STATUS_CLK, &v, 1) == 0) {
-		if (v & FPGA_SPI_CLK_PPB_VALID) {
-			hal |= FPGA_HAL_CLK_PPB_VALID;
-		}
-		if (v & FPGA_SPI_CLK_WC_LOCKED) {
-			hal |= FPGA_HAL_CLK_WC_LOCKED;
-		}
-		if (v & FPGA_SPI_CLK_WC_CONFIGURED) {
-			hal |= FPGA_HAL_CLK_WC_CONFIGURED;
-		}
-		if (v & FPGA_SPI_CLK_PTP_LEADER) {
-			hal |= FPGA_HAL_PTP_IS_LEADER;
-		}
-		if (v & FPGA_SPI_CLK_PTP_FOLLOWER) {
-			hal |= FPGA_HAL_PTP_IS_FOLLOWER;
-		}
-		/* SPI register map has no PHASEJUMP / LEADER_LOST bits. */
+	if (raw & AES67_STATUS_WC_LOCKED) {
+		hal |= FPGA_HAL_CLK_WC_LOCKED;
+	}
+	if (raw & AES67_STATUS_WC_CONFIGURED) {
+		hal |= FPGA_HAL_CLK_WC_CONFIGURED;
+	}
+	if (raw & AES67_STATUS_ETH_LINK_UP) {
+		hal |= FPGA_HAL_ETH_LINK_UP;
+	}
+	if (raw & AES67_STATUS_PTP_IS_LEADER) {
+		hal |= FPGA_HAL_PTP_IS_LEADER;
+	}
+	if (raw & AES67_STATUS_PTP_IS_FOLLOWER) {
+		hal |= FPGA_HAL_PTP_IS_FOLLOWER;
 	}
 
-	/* Ethernet status (0x51 read). */
-	if (fpga_spi_read(dev, FPGA_SPI_REG_STATUS_ETH, &v, 1) == 0) {
-		if (v & FPGA_SPI_ETH_LINK_UP) {
-			hal |= FPGA_HAL_ETH_LINK_UP;
-		}
-		uint32_t speed = (v & FPGA_SPI_ETH_SPEED_MASK) >> FPGA_SPI_ETH_SPEED_SHIFT;
-		hal |= (speed << FPGA_HAL_ETH_SPEED_SHIFT);
+	uint32_t speed = (raw & AES67_STATUS_ETH_SPEED_MASK) >> AES67_STATUS_ETH_SPEED_SHIFT;
+
+	hal |= (speed << FPGA_HAL_ETH_SPEED_SHIFT);
+
+	if (fpga_hal_read_ppb_counts(&ppb_wc, &ppb_pll)) {
+		hal |= FPGA_HAL_CLK_PPB_VALID;
 	}
 
 	return hal;
@@ -359,186 +333,236 @@ uint32_t fpga_hal_read_status(void)
 
 int32_t fpga_hal_read_path_delay(void)
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint8_t buf[4];
+	/* Dropped from a --ptp-in-software bridge (software PTP owns these). */
+#ifdef CSR_AES67_CSR_PTP_PATH_DELAY_ADDR
+	uint32_t val;
 
-	if (!dev || fpga_spi_read(dev, FPGA_SPI_REG_PATH_DELAY, buf, 4) < 0) {
+	if (spibone_read(CSR_AES67_CSR_PTP_PATH_DELAY_ADDR, &val) < 0) {
 		return 0;
 	}
-	return le_to_s32(buf);
+	return (int32_t)val;
+#else
+	return 0;
+#endif
 }
 
 int32_t fpga_hal_read_ptp_offset(void)
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint8_t buf[4];
+#ifdef CSR_AES67_CSR_PTP_OFFSET_ADDR
+	uint32_t val;
 
-	if (!dev || fpga_spi_read(dev, FPGA_SPI_REG_PTP_OFFSET, buf, 4) < 0) {
+	if (spibone_read(CSR_AES67_CSR_PTP_OFFSET_ADDR, &val) < 0) {
 		return 0;
 	}
-	return le_to_s32(buf);
+	return (int32_t)val;
+#else
+	return 0;
+#endif
 }
 
 bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)
 {
-	const struct device *dev = fpga_spi_get_dev();
-	uint8_t buf[8];
-	uint8_t status;
+	uint32_t status, wc, pll;
+	int ret;
 
-	if (!dev || fpga_spi_read(dev, FPGA_SPI_REG_PPB_COUNTERS, buf, 8) < 0) {
-		*wc_count = 0;
-		*pll_count = 0;
-		return false;
+	*wc_count = 0;
+	*pll_count = 0;
+
+	spibone_bus_lock();
+	ret = spibone_read_locked(CSR_AES67_CSR_PLL_PPB_STATUS_ADDR, &status);
+	if (ret == 0) {
+		ret = spibone_read_locked(CSR_AES67_CSR_PLL_PPB_WC_COUNT_ADDR, &wc);
 	}
-	/* Bytes 0..3 PLL, bytes 4..7 wallclock, each little-endian.
-	 * Counters are 22-bit on the FPGA, mask to be safe. */
-	*pll_count = ((uint32_t)buf[0] |
-		      ((uint32_t)buf[1] << 8) |
-		      ((uint32_t)buf[2] << 16) |
-		      ((uint32_t)buf[3] << 24)) & 0x3FFFFFu;
-	*wc_count  = ((uint32_t)buf[4] |
-		      ((uint32_t)buf[5] << 8) |
-		      ((uint32_t)buf[6] << 16) |
-		      ((uint32_t)buf[7] << 24)) & 0x3FFFFFu;
-
-	if (fpga_spi_read(dev, FPGA_SPI_REG_STATUS_CLK, &status, 1) < 0) {
-		return false;
+	if (ret == 0) {
+		ret = spibone_read_locked(CSR_AES67_CSR_PLL_PPB_PLL_COUNT_ADDR, &pll);
 	}
-	return (status & FPGA_SPI_CLK_PPB_VALID) != 0;
-}
-
-/* ---- Audio metering ----
- *
- * Register 0x30 returns `metering_bytes` bytes. With N_RX/N_TX channels
- * each contributing a 1-bit signal and a 1-bit clip flag, the FPGA shadow
- * is concatenated as `rx_sig & rx_clip & tx_sig & tx_clip` (MSB-first in
- * the shadow, i.e. rx_sig is at the top). Bytes are shifted out starting
- * from the LSB, so the wire order is tx_clip, tx_sig, rx_clip, rx_sig.
- *
- * Byte count is derived from the FPGA info register (0x00): byte 4 =
- * TXCHANNELS, byte 5 = RXCHANNELS. We cache that on the first call so
- * subsequent reads stay hot.
- *
- * The FPGA asserts its internal `meter_clear` pulse as soon as the last
- * byte of the 0x30 read transaction has been clocked out — no flag write
- * needed from the host. */
-
-static struct {
-	uint8_t tx_channels;
-	uint8_t rx_channels;
-	bool    known;
-} g_meter_cfg;
-
-static int meter_info_fetch(const struct device *dev)
-{
-	uint8_t info[8];
-	int ret = fpga_spi_read(dev, FPGA_SPI_REG_INFO, info, sizeof(info));
+	spibone_bus_unlock();
 
 	if (ret < 0) {
-		return ret;
+		return false;
 	}
-	g_meter_cfg.tx_channels = info[4];
-	g_meter_cfg.rx_channels = info[5];
-	g_meter_cfg.known = true;
-	return 0;
+	*wc_count = wc & 0x3FFFFF;
+	*pll_count = pll & 0x3FFFFF;
+	return (status & AES67_PPB_STATUS_VALID) != 0;
 }
 
-static int meter_ch_to_bytes(uint8_t ch)
-{
-	/* Ceil(ch / 8), capped at 2 bytes since the HAL API returns uint16_t. */
-	int b = (ch + 7) / 8;
-
-	if (b > 2) {
-		b = 2;
-	}
-	return b;
-}
-
-static uint16_t pack_bytes_le(const uint8_t *buf, int nbytes)
-{
-	uint16_t v = 0;
-
-	for (int i = 0; i < nbytes; i++) {
-		v |= (uint16_t)buf[i] << (8 * i);
-	}
-	return v;
-}
-
-void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
-			    uint16_t *tx_signal, uint16_t *tx_clip)
-{
-	if (rx_signal) *rx_signal = 0;
-	if (rx_clip)   *rx_clip   = 0;
-	if (tx_signal) *tx_signal = 0;
-	if (tx_clip)   *tx_clip   = 0;
-
-	const struct device *dev = fpga_spi_get_dev();
-
-	if (!dev) {
-		return;
-	}
-	if (!g_meter_cfg.known && meter_info_fetch(dev) < 0) {
-		return;
-	}
-
-	int tx_bytes = meter_ch_to_bytes(g_meter_cfg.tx_channels);
-	int rx_bytes = meter_ch_to_bytes(g_meter_cfg.rx_channels);
-	int total    = 2 * tx_bytes + 2 * rx_bytes;
-
-	if (total == 0 || total > 8) {
-		return;
-	}
-
-	uint8_t buf[8];
-
-	if (fpga_spi_read(dev, FPGA_SPI_REG_METERING, buf, total) < 0) {
-		return;
-	}
-
-	/* Wire order (low-to-high byte index): tx_clip, tx_sig, rx_clip, rx_sig. */
-	int off = 0;
-	uint16_t vtc = pack_bytes_le(&buf[off], tx_bytes); off += tx_bytes;
-	uint16_t vts = pack_bytes_le(&buf[off], tx_bytes); off += tx_bytes;
-	uint16_t vrc = pack_bytes_le(&buf[off], rx_bytes); off += rx_bytes;
-	uint16_t vrs = pack_bytes_le(&buf[off], rx_bytes);
-
-	if (tx_clip)   *tx_clip   = vtc;
-	if (tx_signal) *tx_signal = vts;
-	if (rx_clip)   *rx_clip   = vrc;
-	if (rx_signal) *rx_signal = vrs;
-}
-
-/* ---- PTP servo tuning + monitoring (not implemented on SPI backend) ---- */
+/* ---- PTP servo / parser tuning + monitoring ---- */
 
 int fpga_hal_write_ptp_tuning(const struct fpga_hal_ptp_tuning *t)
 {
-	ARG_UNUSED(t);
-	return -ENOTSUP;
+	int ret = 0;
+
+	if (!t) {
+		return -EINVAL;
+	}
+
+	spibone_bus_lock();
+	/* Servo tuning CSRs exist only when the aes67_bridge is built with the
+	 * servo (dropped via --no-servo-csr); the parser CSRs are always there. */
+#ifdef CSR_AES67_CSR_SERVO_KP_GAIN_ADDR
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR, (uint8_t)t->kp_gain);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR, (uint8_t)t->ki_gain);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR, t->gain_shift & 0x1F);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_GAIN_SHIFT_LOCKED_ADDR,
+				    t->gain_shift_locked & 0x1F);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_KI_EXTRA_SHIFT_ADDR,
+				    t->ki_extra_shift & 0x1F);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_FILTER_SHIFT_ADDR,
+				    t->filter_shift & 0x1F);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_WARMUP_SAMPLES_ADDR, t->warmup_samples);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR,
+				    t->lock_threshold_ns);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR,
+				    t->unlock_threshold_ns);
+	ret |= spibone_write_locked(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR,
+				    t->lock_count_threshold);
+#endif
+
+	uint32_t mf = (t->min_filter_enable ? 1u : 0u) |
+		      ((uint32_t)t->min_filter_active_depth << 8);
+
+	ret |= spibone_write_locked(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR, mf);
+	ret |= spibone_write_locked(CSR_AES67_CSR_PARSER_DELAY_ASYMMETRY_NS_ADDR,
+				    (uint32_t)t->delay_asymmetry_ns);
+	spibone_bus_unlock();
+
+	return ret < 0 ? -EIO : 0;
+}
+
+/* Locked read helper for the bulk getters: on error, report 0. */
+static uint32_t rd0(uint32_t addr)
+{
+	uint32_t val;
+
+	if (spibone_read_locked(addr, &val) < 0) {
+		return 0;
+	}
+	return val;
 }
 
 void fpga_hal_read_ptp_tuning(struct fpga_hal_ptp_tuning *t)
 {
-	if (t) {
-		memset(t, 0, sizeof(*t));
+	if (!t) {
+		return;
 	}
+	memset(t, 0, sizeof(*t));
+
+	spibone_bus_lock();
+#ifdef CSR_AES67_CSR_SERVO_KP_GAIN_ADDR
+	t->kp_gain              = (int8_t)rd0(CSR_AES67_CSR_SERVO_KP_GAIN_ADDR);
+	t->ki_gain              = (int8_t)rd0(CSR_AES67_CSR_SERVO_KI_GAIN_ADDR);
+	t->gain_shift           = (uint8_t)(rd0(CSR_AES67_CSR_SERVO_GAIN_SHIFT_ADDR) & 0x1F);
+	t->gain_shift_locked    = (uint8_t)(rd0(CSR_AES67_CSR_SERVO_GAIN_SHIFT_LOCKED_ADDR) & 0x1F);
+	t->ki_extra_shift       = (uint8_t)(rd0(CSR_AES67_CSR_SERVO_KI_EXTRA_SHIFT_ADDR) & 0x1F);
+	t->filter_shift         = (uint8_t)(rd0(CSR_AES67_CSR_SERVO_FILTER_SHIFT_ADDR) & 0x1F);
+	t->warmup_samples       = (uint8_t)rd0(CSR_AES67_CSR_SERVO_WARMUP_SAMPLES_ADDR);
+	t->lock_threshold_ns    = rd0(CSR_AES67_CSR_SERVO_LOCK_THRESHOLD_NS_ADDR);
+	t->unlock_threshold_ns  = rd0(CSR_AES67_CSR_SERVO_UNLOCK_THRESHOLD_NS_ADDR);
+	t->lock_count_threshold = (uint8_t)rd0(CSR_AES67_CSR_SERVO_LOCK_COUNT_THRESHOLD_ADDR);
+#endif
+
+	uint32_t mf = rd0(CSR_AES67_CSR_PARSER_MIN_FILTER_ADDR);
+
+	t->min_filter_enable       = (mf & 0x1) != 0;
+	t->min_filter_active_depth = (uint8_t)((mf >> 8) & 0xFF);
+	t->delay_asymmetry_ns      = (int32_t)rd0(CSR_AES67_CSR_PARSER_DELAY_ASYMMETRY_NS_ADDR);
+	spibone_bus_unlock();
 }
 
 void fpga_hal_read_ptp_monitor(struct fpga_hal_ptp_monitor *m)
 {
-	if (m) {
-		memset(m, 0, sizeof(*m));
+	if (!m) {
+		return;
 	}
+	memset(m, 0, sizeof(*m));
+
+#ifdef CSR_AES67_CSR_SERVO_MON_STATUS_ADDR
+	spibone_bus_lock();
+	m->filtered_offset = (int32_t)rd0(CSR_AES67_CSR_SERVO_MON_FILTERED_OFFSET_ADDR);
+	m->integral_sum    = (int32_t)rd0(CSR_AES67_CSR_SERVO_MON_INTEGRAL_SUM_ADDR);
+	m->pi_proportional = (int32_t)rd0(CSR_AES67_CSR_SERVO_MON_PI_PROPORTIONAL_ADDR);
+	m->pi_sum_raw      = (int32_t)rd0(CSR_AES67_CSR_SERVO_MON_PI_SUM_RAW_ADDR);
+
+	uint32_t status = rd0(CSR_AES67_CSR_SERVO_MON_STATUS_ADDR);
+
+	m->effective_gain_shift = (uint8_t)(status & 0xFF);
+	m->lock_counter         = (uint16_t)((status >> 8) & 0xFFFF);
+	m->first_lock_achieved  = ((status >> 24) & 0x1) != 0;
+
+	m->sample_count = (uint16_t)rd0(CSR_AES67_CSR_SERVO_MON_SAMPLE_COUNT_ADDR);
+	spibone_bus_unlock();
+#endif
+}
+
+/* ---- Reset domains ---- */
+
+static int reset_update(uint32_t csr_bits, bool held)
+{
+	uint32_t reg;
+	int ret;
+
+	spibone_bus_lock();
+	ret = spibone_read_locked(CSR_AES67_CSR_RESET_ADDR, &reg);
+	if (ret == 0) {
+		if (held) {
+			reg |= csr_bits;
+		} else {
+			reg &= ~csr_bits;
+		}
+		ret = spibone_write_locked(CSR_AES67_CSR_RESET_ADDR, reg);
+	}
+	spibone_bus_unlock();
+	return ret;
 }
 
 int fpga_hal_set_ptp_reset(bool held_in_reset)
 {
-	ARG_UNUSED(held_in_reset);
-	return -ENOTSUP;
+	return reset_update(BIT(CSR_AES67_CSR_RESET_PTP_OFFSET), held_in_reset);
 }
 
 int fpga_hal_set_resets(uint32_t domains, bool held)
 {
-	ARG_UNUSED(domains);
-	ARG_UNUSED(held);
-	return -ENOTSUP;
+	uint32_t csr_bits = 0;
+
+	if (domains & FPGA_HAL_RESET_PTP) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_PTP_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_TX) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_TX_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_RX) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_RX_OFFSET);
+	}
+	if (domains & FPGA_HAL_RESET_ETH) {
+		csr_bits |= BIT(CSR_AES67_CSR_RESET_ETH_OFFSET);
+	}
+
+	return reset_update(csr_bits, held);
+}
+
+/* ---- Audio metering ---- */
+
+void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
+			    uint16_t *tx_signal, uint16_t *tx_clip)
+{
+	/* Metering CSRs exist only when the aes67_bridge is built with metering
+	 * (dropped via --no-metering-csr). Without them, report zeros. */
+#ifdef CSR_AES67_CSR_RX_METER_SIGNAL_ADDR
+	spibone_bus_lock();
+	*rx_signal = (uint16_t)rd0(CSR_AES67_CSR_RX_METER_SIGNAL_ADDR);
+	*rx_clip   = (uint16_t)rd0(CSR_AES67_CSR_RX_METER_CLIP_ADDR);
+	*tx_signal = (uint16_t)rd0(CSR_AES67_CSR_TX_METER_SIGNAL_ADDR);
+	*tx_clip   = (uint16_t)rd0(CSR_AES67_CSR_TX_METER_CLIP_ADDR);
+
+	/* Toggle the clear bit so the FPGA resets its sticky detectors. */
+	uint32_t cur = rd0(CSR_AES67_CSR_METER_CLEAR_ADDR);
+
+	(void)spibone_write_locked(CSR_AES67_CSR_METER_CLEAR_ADDR, cur ^ 1);
+	spibone_bus_unlock();
+#else
+	*rx_signal = 0;
+	*rx_clip   = 0;
+	*tx_signal = 0;
+	*tx_clip   = 0;
+#endif
 }

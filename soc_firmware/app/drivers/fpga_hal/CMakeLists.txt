@@ -4,6 +4,19 @@ endif()
 
 if(CONFIG_FPGA_HAL_SPI)
   target_sources(app PRIVATE fpga_hal_spi.c)
+
+  # External MCU: no CPU SoC, the register map comes straight from the
+  # aes67_bridge LiteX build (the same absolute addresses every host uses).
+  set(LITEX_BRIDGE_INC
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../../../litex_soc/build/aes67_bridge/software/include")
+  if(NOT EXISTS "${LITEX_BRIDGE_INC}/generated/csr.h")
+    message(FATAL_ERROR
+      "aes67_bridge generated headers not found at ${LITEX_BRIDGE_INC}.\n"
+      "Run: cd litex_soc && python generate.py --target aes67_bridge")
+  endif()
+  # LiteX stubs must come before the generated directory.
+  target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../eth_litex/litex_stubs)
+  target_include_directories(app PRIVATE ${LITEX_BRIDGE_INC})
 endif()
 
 if(CONFIG_FPGA_HAL_SHELL)

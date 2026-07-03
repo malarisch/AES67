@@ -1,0 +1,34 @@
+config SPIBONE
+	bool "spibone Wishbone-over-SPI bridge driver"
+	depends on SPI
+	help
+	  Transport driver for the LiteX spibone SPI-to-Wishbone bridge
+	  (litex_soc/spi_bone.py) that fronts the aes67_bridge register
+	  set on CPU-less gateware. Requires a chosen node
+	  `zephyr,fpga-spi` pointing at the SPI slave representing the
+	  FPGA on the bus. Same wire protocol as the Linux kernel driver
+	  (driver/aes67_eth/aes67_bus.c) and the Rust config_tool.
+
+if SPIBONE
+
+module = SPIBONE
+module-str = spibone
+source "subsys/logging/Kconfig.template.log_config"
+
+config SPIBONE_INIT_PRIORITY
+	int "spibone driver init priority"
+	default 60
+	help
+	  Must run after the SPI controller (typically 50) and before
+	  the FPGA HAL backend and eth_spi driver that use it.
+
+config SPIBONE_BURST
+	bool "Use spibone burst transfers (commands 0x02/0x03)"
+	default y
+	help
+	  Stream whole frames with the repo-local spibone fork's
+	  auto-incrementing burst commands instead of one SPI round-trip
+	  per 32-bit word. Disable only when the loaded FPGA gateware
+	  predates burst support (every burst would otherwise time out).
+
+endif # SPIBONE
