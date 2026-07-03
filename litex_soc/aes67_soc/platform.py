@@ -26,14 +26,8 @@ _io_common = [
         Subsignal("rx", Pins(1)),
     ),
 
-    # I2C 0: Display + PLL (SSD1306 + Si5351A)
+    # I2C: single shared bus (SSD1306 + Si5351A + AD/DA card controller)
     ("i2c", 0,
-        Subsignal("scl", Pins(1)),
-        Subsignal("sda", Pins(1)),
-    ),
-
-    # I2C 1: AD/DA Card Controller
-    ("i2c", 1,
         Subsignal("scl", Pins(1)),
         Subsignal("sda", Pins(1)),
     ),

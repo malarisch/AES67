@@ -1,6 +1,26 @@
 
 rsource "drivers/Kconfig"
 
+config AES67_PTP_SOFTWARE
+	bool "Run PTP in software (Zephyr IEEE 1588 stack) instead of FPGA hardware PTP"
+	default n
+	depends on FPGA_HAL_LITEX
+	depends on PTP
+	help
+	  Use Zephyr's IEEE 1588 PTP stack (CONFIG_PTP) on the softcore to
+	  discipline the FPGA wallclock, instead of the FPGA's hardware PTP
+	  state machine + servo. Requires the aes67_bridge gateware built with
+	  `--ptp-in-software` (exposes wallclock in/out, set/phasejump/ppb, the
+	  TX-timestamp CSR and the RX-timestamp trailer). The aes67_eth driver
+	  then advertises ETHERNET_PTP, returns the aes67 PHC via get_ptp_clock,
+	  stamps RX frames from the FPGA trailer and reports TX timestamps. The
+	  firmware's FPGA-BMC path (ptp_bmc.c) is not started in this mode.
+
+	  Do not `select` PTP here: it would form a Kconfig dependency loop with
+	  the FPGA_HAL backend choice (PTP -> NET_SOCKETS -> ... -> SPI). Enable
+	  this mode via the ptpsw.conf overlay, which turns on CONFIG_PTP and this
+	  option together.
+
 config APP_SPI_BRINGUP
 	bool "Build the SPI bring-up stub instead of the full control plane"
 	default n

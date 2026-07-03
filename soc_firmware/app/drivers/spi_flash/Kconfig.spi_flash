@@ -4,4 +4,6 @@ config SPI_FLASH_LITESPI
 	help
 	  Enable in-system read/write access to the SPI NOR flash
 	  via the LiteSPI master CSR interface. Requires the LiteX
-	  SoC to instantiate the SpiFlash `master` CSR block.
+	  SoC to instantiate the SpiFlash master CSR block — either
+	  the stock `spiflash_master` (RAM-copy boot targets) or the
+	  BIOS-invisible `spiflash_ctrl` (XIP-boot targets, cyc1000).

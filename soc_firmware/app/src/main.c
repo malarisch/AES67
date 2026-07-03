@@ -155,7 +155,8 @@ static void fpga_reconfigure(void *user_data)
 
 /* ---- BMC state change callback ---- */
 
-static void on_bmc_change(enum ptp_bmc_role new_role)
+/* Unused when PTP runs in software (Zephyr stack), where the FPGA BMC is off. */
+static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 {
 	LOG_INF("PLL: BMC change (role=%d) — resetting PI controller", new_role);
 	pll_ctrl_reset();
@@ -400,10 +401,14 @@ int main(void)
 #endif
 
 	/* The FPGA powers up with every module held in reset (reset CSR = all-ones).
-	 * Release Ethernet first so the MAC/PHY bring the link up; PTP and the audio
-	 * paths are released later, once their prerequisites are in place (mirrors the
-	 * staged bring-up the aes67d daemon does on the SoC path). */
-	fpga_hal_set_resets(FPGA_HAL_RESET_ETH, false);
+	 * Release ALL domains in a single write, before the link comes up — the
+	 * equivalent of the manual `devmem <reset_csr> 0` that is known to work.
+	 * Do NOT stage this: taking a domain (notably audio TX/RX) out of reset
+	 * *after* the Ethernet datapath is already live bounces the link and wedges
+	 * the buffer-bridge TX — eth_tx_done stops asserting, so DHCP TX times out.
+	 * Bring everything up at once and never touch the reset CSR again while
+	 * traffic flows. */
+	fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
 
 	fpga_wait_for_link_up(30000);
 
@@ -419,18 +424,21 @@ int main(void)
 	net_dhcpv4_start(iface);
 	g_dhcp_running = true;
 
-	/* ---- Start PTPv2 Best Master Clock algorithm ---- */
-	/* PTP out of reset now that the network identity is up; then the audio TX/RX
-	 * paths last, so they only run on a configured, time-synced node. */
-	fpga_hal_set_resets(FPGA_HAL_RESET_PTP, false);
-
+	/* ---- Start PTP ---- */
+	/* All reset domains (PTP + audio included) were already released together
+	 * before the link came up; see the note there on why staging is unsafe. */
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+	/* Software PTP: Zephyr's IEEE 1588 stack (CONFIG_PTP) auto-starts via
+	 * SYS_INIT and disciplines the FPGA wallclock through the aes67 PHC; the
+	 * FPGA hardware BMC is not used. */
+	LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining FPGA wallclock");
+#else
 	ptp_bmc_register_change_cb(on_bmc_change);
 	int bmc_ret = ptp_bmc_start(iface);
 	if (bmc_ret < 0) {
 		LOG_ERR("Failed to start PTP BMC: %d", bmc_ret);
 	}
-
-	fpga_hal_set_resets(FPGA_HAL_RESET_AUDIO, false);
+#endif
 
 	/* ---- Start AES67 SAP/SDP announcements ---- */
 	int sap_ret = sap_sdp_start(iface);

@@ -12,7 +12,6 @@ from litex.gen import *
 
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.soc import SoCRegion
-from litex.soc.cores.bitbang import I2CMaster
 from litex.soc.cores.spi import SPIMaster
 from litex.soc.cores.uart import RS232PHY, UART
 from litex.soc.interconnect.csr import CSRStorage
@@ -227,13 +226,16 @@ class AES67SoC(SoCCore):
         # there is no CPU to drive them, and a pure register bridge keeps only
         # the AES67 CSRs + memory-mapped peripherals below.
         if not cpu_less:
-            # -- I2C 0: Display (SSD1306) + PLL (Si5351A) ---------------------
-            self.i2c0 = I2CMaster(platform.request("i2c", 0))
-
-            # -- I2C 1: AD/DA Card Controller (hardware I2C via LiteI2C) ------
+            # -- I2C: single shared bus (Display SSD1306 + PLL Si5351A +
+            #    AD/DA card controller) via hardware LiteI2C ----------------
+            # There is only ONE physical I2C bus; everything hangs off the
+            # "i2c" 0 pads.  The hardware LiteI2C master is kept (rather than
+            # the old bitbang I2CMaster) because its Zephyr driver serializes
+            # concurrent bus users with a mutex — the bitbang litex,i2c
+            # driver does not.
             self.add_i2c_master(
-                name  = "i2c1",
-                pads  = platform.request("i2c", 1),
+                name  = "i2c0",
+                pads  = platform.request("i2c", 0),
             )
 
             # -- SPI: SD Card --------------------------------------------------
@@ -245,21 +247,25 @@ class AES67SoC(SoCCore):
             )
 
             # -- SPI Flash: W25Q64 (8 MB, memory-mapped, BIOS executes here) --
-            # with_master=True: enables the SPI master port alongside memory-
-            # mapped reads.  The master port allows the firmware to issue raw
-            # SPI commands (write-enable, page-program, sector-erase) for
-            # in-system firmware updates.  The BIOS still skips frequency
-            # calibration (see SPIFLASH_SKIP_FREQ_INIT below) so it never
-            # activates the master during boot — avoiding the XIP deadlock.  By
-            # the time Zephyr runs, all code executes from HyperRAM, so master
-            # access is safe.
-            # XIP targets (cyc1000) run the BIOS directly from the memory-mapped
-            # SPI flash, so any master-port access during BIOS init would
-            # deadlock the CPU (the BIOS is fetching instructions from MMAP
-            # while the master tries to take over the same port).  Disable the
-            # master port entirely on XIP builds.  Targets that copy the BIOS
-            # into RAM first (cyclone10, gowin) can keep the master enabled for
-            # firmware updates.
+            # A raw SPI master port alongside the memory-mapped reads lets the
+            # firmware issue raw SPI commands (write-enable, page-program,
+            # sector-erase) for in-system firmware updates.
+            #
+            # RAM-copy targets (cyclone10, gowin) copy the BIOS out of flash
+            # before it runs, so they use LiteSPI's stock master
+            # (with_master=True, CSR regs "spiflash_master_*").
+            #
+            # XIP targets (cyc1000) execute the BIOS directly from the
+            # memory-mapped SPI flash.  The LiteX BIOS unconditionally probes
+            # the flash ID through the master port whenever it sees
+            # CSR_SPIFLASH_MASTER_CS_ADDR (liblitespi spiflash_init(); NOT
+            # covered by SPIFLASH_SKIP_FREQ_INIT) — the master then holds the
+            # crossbar while the CPU tries to fetch the next instruction via
+            # MMAP from the same flash: deadlock.  So on XIP builds the stock
+            # master stays off and an identical master is instantiated manually
+            # under a CSR bank the BIOS does not know ("spiflash_ctrl_*"): same
+            # hardware, invisible to the BIOS, usable by Zephyr once it runs
+            # from SDRAM.
             xip_boot = (target == "cyc1000")
 
             from litespi.modules import W25Q64
@@ -269,18 +275,33 @@ class AES67SoC(SoCCore):
                 clk_freq=20e6,
                 with_master=not xip_boot)
 
-            if not xip_boot:
-                # Gate the MMAP port's crossbar request with a CSR so firmware
-                # can disable memory-mapped reads while using the SPI master
-                # port.  Without this, the MMAP port's round-robin arbitration
-                # interferes with master transactions, corrupting SPI flash
-                # writes/reads.
-                self.spiflash_mmap_en = CSRStorage(1, reset=1,
-                    description="Set to 0 to disable MMAP flash access (allows clean master access).")
-                original_mmap_req = self.spiflash.crossbar.user_request[0]
-                gated_req = Signal()
-                self.comb += gated_req.eq(original_mmap_req & self.spiflash_mmap_en.storage)
-                self.spiflash.crossbar.user_request[0] = gated_req
+            if xip_boot:
+                # BIOS-invisible master port (see comment above).  Mirrors what
+                # LiteSPI does internally for with_master=True (litespi
+                # __init__.py), just under a different CSR bank name.
+                from litespi.core.master import LiteSPIMaster
+                self.spiflash_ctrl = LiteSPIMaster(
+                    tx_fifo_depth = 1,
+                    rx_fifo_depth = 1,
+                    cs_width      = 1)
+                port_master = self.spiflash.crossbar.get_port(self.spiflash_ctrl.cs)
+                self.comb += [
+                    port_master.source.connect(self.spiflash_ctrl.sink),
+                    self.spiflash_ctrl.source.connect(port_master.sink),
+                ]
+
+            # Gate the MMAP port's crossbar request with a CSR so firmware
+            # can disable memory-mapped reads while using the SPI master
+            # port.  Without this, the MMAP port's round-robin arbitration
+            # interferes with master transactions, corrupting SPI flash
+            # writes/reads.  Resets to 1, so the XIP BIOS keeps fetching
+            # from flash during boot; Zephyr (running from RAM) flips it.
+            self.spiflash_mmap_en = CSRStorage(1, reset=1,
+                description="Set to 0 to disable MMAP flash access (allows clean master access).")
+            original_mmap_req = self.spiflash.crossbar.user_request[0]
+            gated_req = Signal()
+            self.comb += gated_req.eq(original_mmap_req & self.spiflash_mmap_en.storage)
+            self.spiflash.crossbar.user_request[0] = gated_req
 
             # Skip SPI Flash frequency auto-calibration — on RAM-copy targets
             # the master port would interfere with the MMAP arbitration; on XIP

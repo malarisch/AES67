@@ -44,7 +44,7 @@ struct eth_litex_data {
 	struct k_sem rx_sem;           /* Signaled by ISR on RX packet */
 	bool link_up;                  /* Cached link state for edge detection */
 
-	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE];
+	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + ETH_LITEX_RX_TRAILER_LEN];
 	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
@@ -189,13 +189,22 @@ bool eth_litex_read_ppb_counts(const struct device *dev,
 uint32_t eth_litex_read_path_delay(const struct device *dev)
 {
 	ARG_UNUSED(dev);
+	/* Dropped from a --ptp-in-software bridge (software PTP owns these). */
+#ifdef CSR_AES67_CSR_PTP_PATH_DELAY_ADDR
 	return litex_csr_read(CSR_AES67_CSR_PTP_PATH_DELAY_ADDR);
+#else
+	return 0;
+#endif
 }
 
 uint32_t eth_litex_read_ptp_offset(const struct device *dev)
 {
 	ARG_UNUSED(dev);
+#ifdef CSR_AES67_CSR_PTP_OFFSET_ADDR
 	return litex_csr_read(CSR_AES67_CSR_PTP_OFFSET_ADDR);
+#else
+	return 0;
+#endif
 }
 
 uint32_t eth_litex_read_status(const struct device *dev)
@@ -625,6 +634,31 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		k_busy_wait(2);
 		eth_litex_ctrl_clear_bits(dev, AES67_CTRL_ETH_TX_REQUEST);
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+		/* PTP event frames need their egress timestamp reported back to the
+		 * stack. Wait for the frame to actually leave (eth_tx_done) so the
+		 * TX-timestamp CSR holds this frame's capture, then post it. */
+		if (net_pkt_is_tx_timestamping(pkt)) {
+			int ts_wait = 0;
+
+			while (!(litex_csr_read(CSR_AES67_CSR_STATUS_ADDR) & AES67_STATUS_ETH_TX_DONE)) {
+				k_busy_wait(10);
+				if (++ts_wait > 20000) { /* ~200ms */
+					LOG_WRN("TX timestamp wait timeout");
+					break;
+				}
+			}
+
+			uint8_t  sec  = litex_csr_read(CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR) & 0xF;
+			uint32_t nsec = litex_csr_read(CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR) & 0x3FFFFFFF;
+			struct net_ptp_time tx_ts;
+
+			aes67_ptp_reconstruct(sec, nsec, &tx_ts);
+			net_pkt_set_timestamp(pkt, &tx_ts);
+			net_if_add_tx_timestamp(pkt);
+		}
+#endif
+
 		LOG_DBG("TX: done, unref pkt");
 		net_pkt_unref(pkt);
 	}
@@ -653,25 +687,51 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		uint16_t pkt_len = litex_csr_read(CSR_ETH_BUF_RX_LEN_ADDR) & 0xFFFF;
+		uint16_t raw_len = litex_csr_read(CSR_ETH_BUF_RX_LEN_ADDR) & 0xFFFF;
+		uint16_t pkt_len;
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+		struct net_ptp_time rx_ts;
+		bool rx_have_ts = false;
+
+		/* Read the whole raw buffer (frame + FCS + 5-byte timestamp trailer),
+		 * peel the trailer off the end and reconstruct the RX timestamp, then
+		 * strip the FCS from what remains. */
+		raw_len = MIN(raw_len, (uint16_t)sizeof(data->rx_buf));
+		eth_buf_read_packet(data->rx_buf, raw_len);
+
+		if (raw_len >= ETH_LITEX_RX_TRAILER_LEN + 4) {
+			uint16_t t = raw_len - ETH_LITEX_RX_TRAILER_LEN;
+			uint32_t ts_nsec = (uint32_t)data->rx_buf[t + 1] |
+					   ((uint32_t)data->rx_buf[t + 2] << 8) |
+					   ((uint32_t)data->rx_buf[t + 3] << 16) |
+					   ((uint32_t)data->rx_buf[t + 4] << 24);
+
+			aes67_ptp_reconstruct(data->rx_buf[t], ts_nsec, &rx_ts);
+			rx_have_ts = true;
+			pkt_len = t - 4; /* drop trailer, then the 4-byte FCS */
+		} else {
+			pkt_len = 0;
+		}
+#else
 		/* The MAC includes the 4-byte FCS in the frame.  Strip it
 		 * before handing to the network stack which expects frames
 		 * without FCS. */
-		if (pkt_len >= 4) {
-			pkt_len -= 4;
-		}
+		pkt_len = (raw_len >= 4) ? raw_len - 4 : 0;
+#endif
 
 		if (pkt_len < 14 || pkt_len > ETH_LITEX_MAX_PKT_SIZE) {
-			LOG_WRN("RX invalid len %u", pkt_len);
+			LOG_WRN("RX invalid len %u (raw %u)", pkt_len, raw_len);
 			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
 			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
 			litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
 			continue;
 		}
 
-		/* Read packet data from RX buffer */
+#ifndef CONFIG_AES67_PTP_SOFTWARE
+		/* Read packet data from RX buffer (already read above in PTP mode) */
 		eth_buf_read_packet(data->rx_buf, pkt_len);
+#endif
 		LOG_HEXDUMP_DBG(data->rx_buf, pkt_len, "RX frame");
 		/* Debug: log ethertype and dst port for TCP packets */
 		{
@@ -731,6 +791,12 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			net_pkt_unref(pkt);
 			continue;
 		}
+
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+		if (rx_have_ts) {
+			net_pkt_set_timestamp(pkt, &rx_ts);
+		}
+#endif
 
 		int ret = net_recv_data(data->iface, pkt);
 		if (ret < 0) {
@@ -801,8 +867,20 @@ static void eth_litex_iface_init(struct net_if *iface)
 static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev)
 {
 	ARG_UNUSED(dev);
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+	return ETHERNET_LINK_100BASE | ETHERNET_PTP;
+#else
 	return ETHERNET_LINK_100BASE;
+#endif
 }
+
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+static const struct device *eth_litex_get_ptp_clock(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+	return aes67_ptp_clock_device();
+}
+#endif
 
 static void eth_litex_link_work(struct k_work *work)
 {
@@ -834,6 +912,9 @@ static void eth_litex_link_work(struct k_work *work)
 static const struct ethernet_api eth_litex_api = {
 	.iface_api.init = eth_litex_iface_init,
 	.get_capabilities = eth_litex_get_capabilities,
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+	.get_ptp_clock = eth_litex_get_ptp_clock,
+#endif
 	.send = eth_litex_send,
 };
 

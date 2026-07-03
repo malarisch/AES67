@@ -58,32 +58,10 @@
 	status = "okay";
 };
 
-/* ---- I2C 0: Display (SSD1306) + PLL (Si5351A) ---- */
+/* ---- I2C: the SoC has a single bus (hardware LiteI2C, see i2c_card
+ * below).  Disable the upstream bitbang litex,i2c instance. ---- */
 &i2c0 {
-	reg-names = "write", "read";
-	clock-frequency = <I2C_BITRATE_STANDARD>;
-	status = "okay";
-
-	si5351a: si5351a@60 {
-		compatible = "silabs,si5351a";
-		reg = <0x60>;
-		clock-frequency = <25000000>;
-		silabs,xtal-load-pf = <10>;
-	};
-
-	ssd1306: ssd1306@3c {
-		compatible = "solomon,ssd1306fb";
-		reg = <0x3c>;
-		width = <128>;
-		height = <64>;
-		segment-offset = <0>;
-		page-offset = <0>;
-		display-offset = <0>;
-		multiplex-ratio = <63>;
-		segment-remap;
-		com-invdir;
-		prechargep = <0x22>;
-	};
+	status = "disabled";
 };
 
 /* ---- I2C 1 (litex,litei2c): disable the default DTSI instance ---- */
@@ -91,8 +69,9 @@
 	status = "disabled";
 };
 
-/* Hardware I2C for the AD/DA card controller. Reg addresses come from
- * <target>_csr.dtsi via a &i2c_card override there. */
+/* Single shared I2C bus (hardware LiteI2C): Display (SSD1306) + PLL
+ * (Si5351A) + AD/DA card controller (probed at runtime by card_manager).
+ * Reg addresses come from <target>_csr.dtsi via a &i2c_card override. */
 / {
 	soc {
 		i2c_card: i2c2: i2c@f0002800 {
@@ -107,6 +86,27 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
+
+			si5351a: si5351a@60 {
+				compatible = "silabs,si5351a";
+				reg = <0x60>;
+				clock-frequency = <25000000>;
+				silabs,xtal-load-pf = <10>;
+			};
+
+			ssd1306: ssd1306@3c {
+				compatible = "solomon,ssd1306fb";
+				reg = <0x3c>;
+				width = <128>;
+				height = <64>;
+				segment-offset = <0>;
+				page-offset = <0>;
+				display-offset = <0>;
+				multiplex-ratio = <63>;
+				segment-remap;
+				com-invdir;
+				prechargep = <0x22>;
+			};
 		};
 	};
 };

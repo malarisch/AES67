@@ -4,7 +4,7 @@ USE ieee.numeric_std.all;
 
 ENTITY topevalkit IS 
 	generic (
-		SOC_TYPE : string := "LITEX_SPIBONE"; -- LITEX_HRAM, LITEX_SDRAM, SPIBONE; WISHBONE_ONLY
+		SOC_TYPE : string := "LITEX_HRAM"; -- LITEX_HRAM, LITEX_SDRAM, SPIBONE; WISHBONE_ONLY
 		platform : string := "ALTERA"; -- ALTERA, GOWIN, LATTICE
 
 		-- clocking
@@ -119,6 +119,10 @@ ENTITY topevalkit IS
 		spictrl_miso_o : INOUT STD_LOGIC;
 		spictrl_irq_n_o : OUT STD_LOGIC;
 		
+		ALTERA_DCLK : out STD_LOGIC;
+		ALTERA_ASDO_DATA1 : out std_logic;
+		ALTERA_FLASH_nCE_nCSO : out STD_LOGIC;
+		ALTERA_DATA0 : in STD_LOGIC;
 		
 		
 		
@@ -200,10 +204,10 @@ begin
         i2c0_sda => i2c0_sda,
         i2c1_scl => i2c1_scl,
         i2c1_sda => i2c1_sda,
-        spiflash_clk => spiflash_clk,
-        spiflash_cs => spiflash_cs,
-        spiflash_mosi => spiflash_mosi,
-        spiflash_miso => spiflash_miso,
+        spiflash_clk => ALTERA_DCLK,
+        spiflash_cs => ALTERA_ASDO_DATA1,
+        spiflash_mosi => ALTERA_FLASH_nCE_nCSO,
+        spiflash_miso => ALTERA_DATA0,
         pll_512fs_i => pll_512fs_i,
         audioclk_mclk_o => pll_512fs_o,
         audioclk_bclk_o => pll_256fs_rising,

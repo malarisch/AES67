@@ -38,7 +38,13 @@ extern "C" {
 #define ETH_BUF_TX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x2000UL) /* TX: byte 0..1517 */
 
 /* ---- Status register bit fields (CSR_AES67_CSR_STATUS) ---- */
+/* wallclock_locked is dropped from a --ptp-in-software bridge (the software PTP
+ * servo, not the FPGA, tracks lock); define it to 0 so consumers still build. */
+#ifdef CSR_AES67_CSR_STATUS_WALLCLOCK_LOCKED_OFFSET
 #define AES67_STATUS_WC_LOCKED      BIT(CSR_AES67_CSR_STATUS_WALLCLOCK_LOCKED_OFFSET)
+#else
+#define AES67_STATUS_WC_LOCKED      0U
+#endif
 #define AES67_STATUS_WC_CONFIGURED  BIT(CSR_AES67_CSR_STATUS_WALLCLOCK_CONFIGURED_OFFSET)
 /* wallclock_phasejump (bit 1) and ptp_sync_lost (bit 3) were removed from the
  * bridge; those status bits no longer exist. */
@@ -64,6 +70,15 @@ extern "C" {
 
 /* Maximum Ethernet frame size (without FCS): 6 dst + 6 src + 4 VLAN + 2 EtherType + 1500 payload */
 #define ETH_LITEX_MAX_PKT_SIZE 1518
+
+/* In --ptp-in-software gateware the buffer bridge appends a 5-byte RX
+ * hardware-timestamp trailer ([seconds(1)][nanoseconds(4, little-endian)])
+ * after the frame (which still carries its FCS). */
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+#define ETH_LITEX_RX_TRAILER_LEN 5
+#else
+#define ETH_LITEX_RX_TRAILER_LEN 0
+#endif
 
 /* ========================================================================
  * CSR access primitives
@@ -136,6 +151,17 @@ int eth_litex_write_ptp_gm_quality(const struct device *dev,
  */
 bool eth_litex_read_ppb_counts(const struct device *dev,
 			       uint32_t *wc_count, uint32_t *pll_count);
+
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+#include <zephyr/net/ptp_time.h>
+
+/** The aes67 PTP hardware clock (FPGA wallclock) device, for get_ptp_clock. */
+const struct device *aes67_ptp_clock_device(void);
+
+/** Reconstruct a full RX/TX hardware timestamp from a captured (4-bit seconds,
+ *  30-bit nanoseconds) pair using the live wallclock seconds. */
+void aes67_ptp_reconstruct(uint8_t cap_sec, uint32_t cap_nsec, struct net_ptp_time *out);
+#endif /* CONFIG_AES67_PTP_SOFTWARE */
 
 /**
  * @brief Read PTP path delay from FPGA.

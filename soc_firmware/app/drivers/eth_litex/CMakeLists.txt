@@ -1,5 +1,8 @@
 target_sources(app PRIVATE eth_litex.c)
 
+# Software-PTP: the FPGA wallclock exposed as a Zephyr ptp_clock device.
+target_sources_ifdef(CONFIG_AES67_PTP_SOFTWARE app PRIVATE ptp_clock_aes67.c)
+
 # Stubs for LiteX BIOS headers (system.h) that don't exist in Zephyr.
 # Must come BEFORE the LiteX generated directory so our stubs take priority.
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/litex_stubs)

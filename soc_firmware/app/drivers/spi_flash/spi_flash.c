@@ -15,6 +15,31 @@
 #include "spi_flash.h"
 #include "../eth_litex/litex_csr_compat.h"
 
+/*
+ * XIP targets (cyc1000): the BIOS executes in place from the memory-mapped
+ * flash, and the LiteX BIOS would deadlock itself probing the flash ID if it
+ * saw CSR_SPIFLASH_MASTER_CS_ADDR.  The SoC therefore instantiates the master
+ * port under the BIOS-invisible "spiflash_ctrl" CSR bank instead (see
+ * litex_soc/aes67_soc/soc.py).  Map it onto the canonical names used below.
+ */
+#ifndef CSR_SPIFLASH_MASTER_CS_ADDR
+#define CSR_SPIFLASH_MASTER_CS_ADDR	CSR_SPIFLASH_CTRL_CS_ADDR
+#define CSR_SPIFLASH_MASTER_RXTX_ADDR	CSR_SPIFLASH_CTRL_RXTX_ADDR
+#define CSR_SPIFLASH_MASTER_STATUS_ADDR	CSR_SPIFLASH_CTRL_STATUS_ADDR
+#define CSR_SPIFLASH_MASTER_STATUS_TX_READY_OFFSET \
+	CSR_SPIFLASH_CTRL_STATUS_TX_READY_OFFSET
+#define CSR_SPIFLASH_MASTER_STATUS_RX_READY_OFFSET \
+	CSR_SPIFLASH_CTRL_STATUS_RX_READY_OFFSET
+#define CSR_SPIFLASH_MASTER_PHYCONFIG_ADDR \
+	CSR_SPIFLASH_CTRL_PHYCONFIG_ADDR
+#define CSR_SPIFLASH_MASTER_PHYCONFIG_LEN_OFFSET \
+	CSR_SPIFLASH_CTRL_PHYCONFIG_LEN_OFFSET
+#define CSR_SPIFLASH_MASTER_PHYCONFIG_WIDTH_OFFSET \
+	CSR_SPIFLASH_CTRL_PHYCONFIG_WIDTH_OFFSET
+#define CSR_SPIFLASH_MASTER_PHYCONFIG_MASK_OFFSET \
+	CSR_SPIFLASH_CTRL_PHYCONFIG_MASK_OFFSET
+#endif
+
 LOG_MODULE_REGISTER(spi_flash, LOG_LEVEL_DBG);
 
 /* Mutex protecting all SPI master port access. */
@@ -193,7 +218,8 @@ static void spi_set_clk_divisor(uint8_t div)
 void spi_flash_init(void)
 {
 	/* Disable MMAP port — prevents crossbar arbitration interference.
-	 * After boot everything runs from HyperRAM, MMAP reads not needed. */
+	 * After boot everything runs from RAM (HyperRAM/SDRAM), so MMAP
+	 * reads are not needed anymore — even on the XIP-boot cyc1000. */
 	spi_mmap_disable();
 
 	/* Deassert CS first, then wait for any in-flight PHY transaction
