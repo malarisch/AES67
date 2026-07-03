@@ -68,6 +68,8 @@ architecture Behavioral of wallclock is
     -- fits in 28-bit signed (max ±134M). Narrowing from 32 to 28 bits
     -- shortens the Stage-2 adder/compare/subtractor carry chain by
     -- ~4 bits worth of LUT delay -- the dominant critical path here.
+    signal frac_ns_accum_minus : signed(27 downto 0) := (others => '0');
+    signal frac_ns_accum_plus : signed(27 downto 0) := (others => '0');
     signal frac_ns_accum : signed(27 downto 0) := (others => '0');
     signal new_frac : signed (28 downto 0) := (others => '0');
 
@@ -614,6 +616,19 @@ end generate;
         end if;
     end process;
 
+
+    process (clk, reset_n)
+
+    begin 
+        if (reset_n = '0') then
+            frac_ns_accum_minus <= (others => '0');
+            frac_ns_accum_plus <= (others => '0');
+        elsif rising_edge(clk) then
+            frac_ns_accum_minus <= resize(new_frac - FRAC_UNDERFLOW, 28);
+            frac_ns_accum_plus <= resize(new_frac - FRAC_OVERFLOW, 28);
+        end if;
+    end process;
+
     process (clk, reset_n)
     begin
         if reset_n = '0' then
@@ -624,10 +639,10 @@ end generate;
                 ns_adjust_pipe <= 0;  -- default
 
                 if new_frac >= resize(FRAC_OVERFLOW, 29) then
-                    frac_ns_accum  <= resize(new_frac - FRAC_OVERFLOW, 28);
+                    frac_ns_accum  <= frac_ns_accum_plus;
                     ns_adjust_pipe <= 1;
                 elsif new_frac <= resize(FRAC_UNDERFLOW, 29) then
-                    frac_ns_accum  <= resize(new_frac - FRAC_UNDERFLOW, 28);
+                    frac_ns_accum  <= frac_ns_accum_minus;
                     ns_adjust_pipe <= -1;
                 else
                     frac_ns_accum <= resize(new_frac, 28);
