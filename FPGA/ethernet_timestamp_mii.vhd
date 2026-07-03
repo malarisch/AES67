@@ -83,7 +83,7 @@ rmii_sof_gen: if MII_WIDTH = 2 generate -- rmii
         end if;
     end process;
 end generate;
-gmii_sof_gen: if MII_WIDTH = 4 or MII_WIDTH = 8 generate -- rgmii
+gmii_sof_gen: if (MII_WIDTH = 4 or MII_WIDTH = 8) and (MII_CLK_NS_PER_TICK = 8) generate -- rgmii
     
     gmii_sof_qualifier: process (mii_clk_i)
     begin
@@ -105,6 +105,39 @@ gmii_sof_gen: if MII_WIDTH = 4 or MII_WIDTH = 8 generate -- rgmii
                     end if;
                 when s_Wait2 =>
                     if (gmii_data_reg = x"D5" and gmii_data_prev = x"55") then
+                        sof_tog <= not sof_tog;
+                        rmii_sm <= s_Idle;
+                    end if;
+                when s_Wait3 =>
+                    rmii_sm <= s_Idle;
+                when others => 
+                    rmii_sm <= s_Idle;
+            end case;
+
+        end if;
+    end process;
+end generate;
+    mii_sof_gen: if MII_WIDTH = 4 and MII_CLK_NS_PER_TICK = 40 generate -- mii
+    
+    mii_sof_qualifier: process (mii_clk_i)
+    begin
+        if rising_edge(mii_clk_i) then
+            mii_en_prev <= mii_en_in;
+            mii_data_prev <= mii_in;
+            if (mii_en_in = '0') then
+                rmii_sm <= s_Idle;
+            end if;
+            case rmii_sm is
+                when s_Idle =>
+                    if (mii_en_prev = '0' and mii_en_in = '1') then
+                        rmii_sm <= s_Wait1;
+                    end if;
+                when s_Wait1 =>
+                    if mii_in = x"5" then
+                        rmii_sm <= s_Wait2;
+                    end if;
+                when s_Wait2 =>
+                    if (mii_in = x"D" and mii_data_prev = x"5") then
                         sof_tog <= not sof_tog;
                         rmii_sm <= s_Idle;
                     end if;

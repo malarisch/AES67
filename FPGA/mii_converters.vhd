@@ -17,6 +17,7 @@ entity mii_converters is
     phy_mii_enet_resetn     : out std_logic                    := '0';
     phy_mii_enet_rx_d       : in std_logic_vector(MII_WIDTH - 1 downto 0)  := (others => '0');
     phy_mii_enet_tx_clk     : out std_logic                    := '0';
+    phy_mii_enet_tx_clk_i     : in std_logic                    := '0';
     phy_mii_enet_tx_en      : out std_logic                    := '0';
     phy_mii_enet_tx_d       : out std_logic_vector(MII_WIDTH - 1 downto 0) := (others => '0');
     mac_speed_i             : in std_logic_vector(1 downto 0);
@@ -136,6 +137,7 @@ begin
       phy_rgmii_rx_ctl => phy_mii_enet_rx_dv,
       phy_rgmii_rxd    => phy_mii_enet_rx_d,
       phy_rgmii_tx_clk => phy_mii_enet_tx_clk,
+      
       phy_rgmii_tx_ctl => phy_mii_enet_tx_en,
       phy_rgmii_txd    => phy_mii_enet_tx_d,
 
@@ -158,6 +160,16 @@ begin
         c0     => enet_clk,
         c1     => enet_clk_90
       );
+  end generate;
+  miigen : if (ethernet_type = "MII" and MII_WIDTH = 4) generate
+    mii_tx_clock_o <= phy_mii_enet_tx_clk_i;
+    mii_rx_clock_o <= phy_mii_enet_rx_clk;
+    mii_rx_dv_o <= phy_mii_enet_rx_dv;
+    mii_rx_err_o <= phy_mii_enet_rx_err;
+    mii_rxd_o <= x"0" & phy_mii_enet_rx_d;
+    phy_mii_enet_tx_d <= mii_txd(3 downto 0);
+    phy_mii_enet_tx_en <= mii_tx_en_i;
+    phy_mii_enet_tx_clk <= phy_mii_enet_tx_clk_i;
   end generate;
   rmiigen : if (ethernet_type = "RMII" and (platform = "ALTERA" or platform = "LATTICE")) generate
 

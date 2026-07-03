@@ -56,6 +56,7 @@ generic (
 		phy_mii_enet_resetn :  OUT  STD_LOGIC := '0';
 		phy_mii_enet_rx_d :  IN  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0)  := (others => '0');
 		phy_mii_enet_tx_clk :  OUT  STD_LOGIC  := '0';
+        phy_mii_enet_tx_clk_i :  IN  STD_LOGIC  := '0';
 		phy_mii_enet_tx_en :  OUT  STD_LOGIC := '0';
 		phy_mii_enet_tx_d :  OUT  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0) := (others => '0');
 
@@ -226,6 +227,7 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
       phy_mii_enet_resetn => phy_mii_enet_resetn,
       phy_mii_enet_rx_d => phy_mii_enet_rx_d,
       phy_mii_enet_tx_clk => phy_mii_enet_tx_clk,
+      phy_mii_enet_tx_clk_i => phy_mii_enet_tx_clk_i,
       phy_mii_enet_tx_en => phy_mii_enet_tx_en_sig,
       phy_mii_enet_tx_d => phy_mii_enet_tx_d_sig,
       mac_speed_i => mac_speed_i,

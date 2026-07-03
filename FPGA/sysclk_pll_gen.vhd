@@ -66,6 +66,15 @@ component gowin_pll_27i_125o
     clkin : in std_logic;
     lock_o : out std_logic
   );
+  
+end component;
+component altpll_25m
+  port (
+    inclk0 : in STD_LOGIC;
+    c0 : out STD_LOGIC;
+    c1 : out STD_LOGIC;
+    locked : out STD_LOGIC
+  );
 end component;
 signal sys_clk_locked : std_logic;
 begin
@@ -79,6 +88,17 @@ sysclks_altpll_50m_in_inst : sysclks_altpll_50m_in PORT MAP (
 		c2 	 => mcu_clk2_o,
 		locked	 => sys_clk_locked
 	);
+
+end generate;
+sysclkgen25: if (platform = "ALTERA" and clk_in_speed = 25) generate
+sysclks_altpll_25m_in_inst : altpll_25m
+  port map (
+    inclk0 => clock_i,
+    c0 => sys_clk_125MHz_o,
+    c1 => mcu_clk_o,
+    locked => sys_clk_locked
+  );
+
 
 end generate;
 sysclkgen12: if (platform = "ALTERA" and clk_in_speed = 12) generate

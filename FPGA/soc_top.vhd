@@ -60,6 +60,7 @@ generic (
 		phy_mii_enet_resetn :  OUT  STD_LOGIC := '0';
 		phy_mii_enet_rx_d :  IN  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0)  := (others => '0');
 		phy_mii_enet_tx_clk :  OUT  STD_LOGIC  := '0';
+    phy_mii_enet_tx_clk_i :  IN  STD_LOGIC  := '0';
 		phy_mii_enet_tx_en :  OUT  STD_LOGIC := '0';
 		phy_mii_enet_tx_d :  OUT  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0) := (others => '0');
 
@@ -83,11 +84,9 @@ generic (
 		uart1_rx :  IN  STD_LOGIC  := '0';
 		uart1_tx :  OUT  STD_LOGIC := '0';
 
-		-- litex i2c master
+		-- litex i2c master (single shared bus)
 		i2c0_scl :  INOUT  STD_LOGIC;
 		i2c0_sda :  INOUT  STD_LOGIC;
-		i2c1_scl :  INOUT  STD_LOGIC;
-		i2c1_sda :  INOUT  STD_LOGIC;
 
 
 		-- litex spi flash
@@ -171,8 +170,6 @@ COMPONENT litex_soc_cyclone10
 		hyperram_rwds		:	 INOUT STD_LOGIC;
 		i2c0_scl		:	 INOUT STD_LOGIC;
 		i2c0_sda		:	 INOUT STD_LOGIC;
-		i2c1_scl		:	 INOUT STD_LOGIC;
-		i2c1_sda		:	 INOUT STD_LOGIC;
 		serial1_rx		:	 IN STD_LOGIC;
 		serial1_tx		:	 OUT STD_LOGIC;
 		serial_rx		:	 IN STD_LOGIC;
@@ -205,8 +202,6 @@ component litex_soc_cyc1000
     eth_buf_irq : in std_logic;
     i2c0_scl : inout std_logic;
     i2c0_sda : inout std_logic;
-    i2c1_scl : inout std_logic;
-    i2c1_sda : inout std_logic;
     sdram_a : out std_logic_vector    (13 downto 0);
     sdram_ba : out std_logic_vector     (1 downto 0);
     sdram_cas_n : out std_logic;
@@ -322,6 +317,7 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     phy_mii_enet_resetn => phy_mii_enet_resetn,
     phy_mii_enet_rx_d => phy_mii_enet_rx_d,
     phy_mii_enet_tx_clk => phy_mii_enet_tx_clk,
+    phy_mii_enet_tx_clk_i => phy_mii_enet_tx_clk_i,
     phy_mii_enet_tx_en => phy_mii_enet_tx_en,
     phy_mii_enet_tx_d => phy_mii_enet_tx_d,
     enet_mdc => enet_mdc,
@@ -375,8 +371,6 @@ litex_soc_gen: if (SOC_TYPE = "LITEX_HRAM") generate
       hyperram_rwds => hbus_rwds,
       i2c0_scl => i2c0_scl,
       i2c0_sda => i2c0_sda,
-      i2c1_scl => i2c1_scl,
-      i2c1_sda => i2c1_sda,
       serial1_rx => uart1_rx,
       serial1_tx => uart1_tx,
       serial_rx => uart0_rx,
@@ -389,7 +383,7 @@ litex_soc_gen: if (SOC_TYPE = "LITEX_HRAM") generate
       spiflash_cs_n => spiflash_cs,
       spiflash_miso => spiflash_miso,
       spiflash_mosi => spiflash_mosi
-  );  
+  );
    end generate;
 litex_soc_gen_sdram: if (SOC_TYPE = "LITEX_SDRAM") generate
 litex_soc_cyc1000_inst : litex_soc_cyc1000
@@ -420,8 +414,6 @@ litex_soc_cyc1000_inst : litex_soc_cyc1000
     sdram_we_n => sdram_we_n,
       i2c0_scl => i2c0_scl,
       i2c0_sda => i2c0_sda,
-      i2c1_scl => i2c1_scl,
-      i2c1_sda => i2c1_sda,
       serial1_rx => uart1_rx,
       serial1_tx => uart1_tx,
       serial_rx => uart0_rx,
