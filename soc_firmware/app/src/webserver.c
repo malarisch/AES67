@@ -590,27 +590,61 @@ static int build_status_streams(char *buf, size_t sz)
 		if (!foreign[i].valid) {
 			continue;
 		}
+
+		/* Merge sightings of the same RTP flow (same group + port,
+		 * e.g. announced via SAP *and* mDNS) into one row, like the
+		 * Linux daemon's Registry::snapshot(): the freshest sighting
+		 * is the representative, the "via" transports are OR-ed, and
+		 * duplicates already emitted with an earlier row are skipped. */
+		const struct sap_foreign_stream *rep = &foreign[i];
+		uint8_t via = foreign[i].via;
+		bool already_emitted = false;
+
+		for (int j = 0; j < SAP_MAX_FOREIGN_STREAMS; j++) {
+			if (j == i || !foreign[j].valid ||
+			    foreign[j].mcast_addr.s_addr !=
+				    foreign[i].mcast_addr.s_addr ||
+			    foreign[j].port != foreign[i].port) {
+				continue;
+			}
+			if (j < i) {
+				already_emitted = true;
+				break;
+			}
+			via |= foreign[j].via;
+			if (foreign[j].last_seen_ms > rep->last_seen_ms) {
+				rep = &foreign[j];
+			}
+		}
+		if (already_emitted) {
+			continue;
+		}
+
 		p += snprintf(buf + p, sz - p, "{");
-		p = json_add_str(buf, sz, p, "name", foreign[i].name);
-		format_ip(tmp, sizeof(tmp), &foreign[i].mcast_addr);
+		p = json_add_str(buf, sz, p, "name", rep->name);
+		format_ip(tmp, sizeof(tmp), &rep->mcast_addr);
 		p = json_add_str(buf, sz, p, "mcast_addr", tmp);
-		p = json_add_uint(buf, sz, p, "port", foreign[i].port);
+		p = json_add_uint(buf, sz, p, "port", rep->port);
 		p = json_add_uint(buf, sz, p, "channels",
-				   foreign[i].channels);
+				   rep->channels);
 		p = json_add_uint(buf, sz, p, "bit_depth",
-				   foreign[i].bit_depth);
+				   rep->bit_depth);
 		p = json_add_uint(buf, sz, p, "sample_rate",
-				   foreign[i].sample_rate);
+				   rep->sample_rate);
 		p = json_add_uint(buf, sz, p, "samples_per_packet",
-				   foreign[i].samples_per_packet);
-		if (foreign[i].ssrc != 0) {
+				   rep->samples_per_packet);
+		if (rep->ssrc != 0) {
 			p += snprintf(buf + p, sz - p, "\"ssrc\":\"%08X\",",
-				      foreign[i].ssrc);
+				      rep->ssrc);
 		} else {
 			p += snprintf(buf + p, sz - p, "\"ssrc\":\"\",");
 		}
-		format_ip(tmp, sizeof(tmp), &foreign[i].origin_addr);
+		format_ip(tmp, sizeof(tmp), &rep->origin_addr);
 		p = json_add_str(buf, sz, p, "origin_addr", tmp);
+		p = json_add_str(buf, sz, p, "via",
+				 (via & SAP_FOREIGN_VIA_SAP) &&
+				 (via & SAP_FOREIGN_VIA_MDNS) ? "SAP + mDNS" :
+				 (via & SAP_FOREIGN_VIA_MDNS) ? "mDNS" : "SAP");
 		if (p > 1 && buf[p - 1] == ',') {
 			p--;
 		}

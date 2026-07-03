@@ -80,13 +80,15 @@ endmenu
 menu "RAVENNA mDNS/DNS-SD Discovery"
 
 config MDNS_SD
-	bool "Enable mDNS/DNS-SD service advertisement"
+	bool "Enable mDNS/DNS-SD service advertisement + discovery"
 	default y
-	depends on NETWORKING && MDNS_RESPONDER && DNS_SD
+	depends on NETWORKING
 	help
-	  Advertise HTTP and RTSP services via mDNS/DNS-SD per
-	  RAVENNA Operating Principles §3.5.1.  Registers both
-	  vendor node ID and user-defined device name services.
+	  Advertise HTTP and RTSP services (plus per-session
+	  _ravenna_session._sub._rtsp._tcp records) and browse for
+	  remote RAVENNA sessions per Operating Principles §3.5.
+	  Self-contained responder+browser on UDP 5353 — do NOT enable
+	  Zephyr's CONFIG_MDNS_RESPONDER alongside (both bind :5353).
 
 config MDNS_SD_VENDOR_ID
 	string "Vendor identifier"

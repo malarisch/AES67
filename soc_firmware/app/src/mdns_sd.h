@@ -61,6 +61,18 @@ void mdns_sd_update_device_name(void);
 int mdns_sd_advertise_session(const char *session_name, uint16_t rtsp_port);
 
 /**
+ * @brief Advertise/withdraw a session keyed by TX stream slot.
+ *
+ * Slot-based variant used by the TX stream configuration path: a rename
+ * withdraws the old instance (goodbye) and announces the new one.
+ *
+ * @param slot          TX stream id (0..AES67_MAX_TX_STREAMS-1)
+ * @param session_name  Session name, or NULL/"" to withdraw
+ * @return 0 on success, negative errno on error
+ */
+int mdns_sd_set_session(uint8_t slot, const char *session_name);
+
+/**
  * @brief Remove a streaming session advertisement.
  *
  * @param session_name  Session name to remove

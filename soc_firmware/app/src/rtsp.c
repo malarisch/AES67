@@ -21,6 +21,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/random/random.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -28,6 +29,7 @@
 #include "rtsp.h"
 #include "sap_sdp.h"
 #include "aes67_config.h"
+#include "ptp_bmc.h"
 #include "aes67_sdp_utils.h"
 
 LOG_MODULE_REGISTER(rtsp, LOG_LEVEL_INF);
@@ -290,9 +292,36 @@ static int extract_stream_id_from_url(const char *url, uint8_t *stream_id_out)
 
 	/* Check for /by-name/<name> - lookup in TX streams table */
 	if (strncmp(path, "by-name/", 8) == 0) {
-		/* For now, just use numeric parsing; name-based lookup TBD */
-		LOG_WRN("RTSP: by-name lookup not yet implemented");
-		return -ENOTSUP;
+		char name[AES67_STREAM_NAME_MAX];
+		size_t n = 0;
+		const char *p = path + 8;
+
+		/* Percent-decode the path segment */
+		while (*p && *p != ' ' && *p != '?' && *p != '\r' &&
+		       n < sizeof(name) - 1) {
+			if (p[0] == '%' && isxdigit((int)p[1]) &&
+			    isxdigit((int)p[2])) {
+				char hex[3] = { p[1], p[2], '\0' };
+
+				name[n++] = (char)strtoul(hex, NULL, 16);
+				p += 3;
+			} else {
+				name[n++] = *p++;
+			}
+		}
+		name[n] = '\0';
+
+		const struct aes67_tx_stream *tx = sap_sdp_get_tx_streams();
+
+		for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
+			if (tx[i].active &&
+			    strcasecmp(tx[i].name, name) == 0) {
+				*stream_id_out = tx[i].stream_id;
+				return 0;
+			}
+		}
+		LOG_WRN("RTSP: by-name: no TX stream named \"%s\"", name);
+		return -ENOENT;
 	}
 
 	/* Try direct numeric ID */
@@ -376,6 +405,13 @@ static int build_sdp_for_stream(char *buf, size_t buf_size, uint8_t stream_id)
 		return -ENOENT;
 	}
 
+	/* ts-refclk: the elected PTP grandmaster (like the SAP announcer and
+	 * the Linux daemon).  NULL while no grandmaster is known — the SDP
+	 * then omits the a=ts-refclk line. */
+	uint8_t gmid[8];
+	const uint8_t *clock_id =
+		(ptp_bmc_get_best_master_id(gmid) == 0) ? gmid : NULL;
+
 	struct aes67_device_config *cfg = aes67_config_get();
 	struct aes67_sdp_params params = {
 		.origin_addr = local_ip_addr,
@@ -388,7 +424,7 @@ static int build_sdp_for_stream(char *buf, size_t buf_size, uint8_t stream_id)
 		.port = AES67_DEFAULT_PORT,
 		.payload_type = AES67_DEFAULT_PAYLOAD_TYPE,
 		.ssrc = stream->ssrc,
-		.clock_id = NULL,  /* Use default placeholder */
+		.clock_id = clock_id,
 		.stream_name = stream->name,
 		.ptp_domain = cfg->ptp_domain,
 		.sync_time = 0,  /* epoch-aligned RTP timestamp */
@@ -716,9 +752,22 @@ static void handle_client(int client_sock, const struct sockaddr_in *client_addr
 	};
 	zsock_setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
+	/* Requests can arrive fragmented across several TCP segments (e.g.
+	 * the Rust rtsp_types client writes the request line and headers
+	 * piecewise) or pipelined back-to-back.  Collect until a complete
+	 * request (headers + optional Content-Length body) is buffered,
+	 * handle it, then shift any remainder down. */
+	size_t used = 0;
+
 	while (rtsp_server_running) {
-		int len = zsock_recv(client_sock, rtsp_recv_buf,
-				     sizeof(rtsp_recv_buf) - 1, 0);
+		if (used >= sizeof(rtsp_recv_buf) - 1) {
+			LOG_WRN("RTSP: request from %s too large, closing",
+				client_ip);
+			break;
+		}
+
+		int len = zsock_recv(client_sock, rtsp_recv_buf + used,
+				     sizeof(rtsp_recv_buf) - 1 - used, 0);
 		if (len <= 0) {
 			if (len == 0) {
 				LOG_INF("RTSP: Client %s disconnected", client_ip);
@@ -728,13 +777,58 @@ static void handle_client(int client_sock, const struct sockaddr_in *client_addr
 			break;
 		}
 
-		rtsp_recv_buf[len] = '\0';
+		used += len;
+		rtsp_recv_buf[used] = '\0';
 
-		/* Handle request */
-		int ret = handle_request(client_sock, client_addr,
-					 rtsp_recv_buf, len);
-		if (ret < 0) {
-			LOG_ERR("RTSP: send error: %d", ret);
+		bool conn_error = false;
+
+		while (!conn_error) {
+			char *hdr_end = strstr(rtsp_recv_buf, "\r\n\r\n");
+
+			if (!hdr_end) {
+				break;  /* headers incomplete, keep reading */
+			}
+
+			size_t req_len = (hdr_end + 4) - rtsp_recv_buf;
+
+			/* Body present? (ANNOUNCE carries SDP) */
+			const char *cl = strstr(rtsp_recv_buf, "Content-Length:");
+
+			if (cl && cl < hdr_end) {
+				req_len += strtoul(cl + 15, NULL, 10);
+				if (req_len > sizeof(rtsp_recv_buf) - 1) {
+					LOG_WRN("RTSP: oversized body from %s",
+						client_ip);
+					conn_error = true;
+					break;
+				}
+				if (used < req_len) {
+					break;  /* body incomplete */
+				}
+			}
+
+			/* NUL-terminate this request for the string-based
+			 * parser, keeping any pipelined follow-up intact. */
+			char saved = rtsp_recv_buf[req_len];
+
+			rtsp_recv_buf[req_len] = '\0';
+			int ret = handle_request(client_sock, client_addr,
+						 rtsp_recv_buf, req_len);
+			rtsp_recv_buf[req_len] = saved;
+
+			if (ret < 0) {
+				LOG_ERR("RTSP: send error: %d", ret);
+				conn_error = true;
+				break;
+			}
+
+			memmove(rtsp_recv_buf, rtsp_recv_buf + req_len,
+				used - req_len);
+			used -= req_len;
+			rtsp_recv_buf[used] = '\0';
+		}
+
+		if (conn_error) {
 			break;
 		}
 	}
@@ -1054,6 +1148,147 @@ static int parse_describe_response(const char *response, size_t len,
 	*ssrc = parsed.ssrc;
 
 	return 0;
+}
+
+/* ---- One-shot DESCRIBE (mDNS discovery) ---- */
+
+static K_MUTEX_DEFINE(describe_lock);
+static char describe_buf[2048];
+
+/* Percent-encode a URL path segment (session names may contain spaces). */
+static size_t url_encode_segment(const char *in, char *out, size_t out_size)
+{
+	static const char hex[] = "0123456789ABCDEF";
+	size_t n = 0;
+
+	for (const uint8_t *p = (const uint8_t *)in; *p; p++) {
+		bool plain = (*p >= 'A' && *p <= 'Z') ||
+			     (*p >= 'a' && *p <= 'z') ||
+			     (*p >= '0' && *p <= '9') ||
+			     *p == '-' || *p == '_' || *p == '.' || *p == '~';
+
+		if (plain) {
+			if (n + 1 >= out_size) {
+				break;
+			}
+			out[n++] = *p;
+		} else {
+			if (n + 3 >= out_size) {
+				break;
+			}
+			out[n++] = '%';
+			out[n++] = hex[*p >> 4];
+			out[n++] = hex[*p & 0xF];
+		}
+	}
+	out[n] = '\0';
+	return n;
+}
+
+int rtsp_client_describe(const struct in_addr *server_addr,
+			 uint16_t server_port,
+			 const char *session_name,
+			 struct aes67_sdp_parsed *out)
+{
+	char enc_name[2 * AES67_STREAM_NAME_MAX];
+	char ip_str[INET_ADDRSTRLEN];
+	int sock;
+	int ret;
+
+	if (!server_addr || !session_name || !out) {
+		return -EINVAL;
+	}
+
+	sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock < 0) {
+		return -errno;
+	}
+
+	struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+
+	zsock_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	zsock_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+	struct sockaddr_in srv = {
+		.sin_family = AF_INET,
+		.sin_port = htons(server_port),
+		.sin_addr = *server_addr,
+	};
+
+	ret = zsock_connect(sock, (struct sockaddr *)&srv, sizeof(srv));
+	if (ret < 0) {
+		ret = -errno;
+		goto out_close;
+	}
+
+	zsock_inet_ntop(AF_INET, server_addr, ip_str, sizeof(ip_str));
+	url_encode_segment(session_name, enc_name, sizeof(enc_name));
+
+	k_mutex_lock(&describe_lock, K_FOREVER);
+
+	int req_len = snprintf(describe_buf, sizeof(describe_buf),
+		"DESCRIBE rtsp://%s:%u/by-name/%s %s\r\n"
+		"CSeq: 1\r\n"
+		"Accept: application/sdp\r\n"
+		"\r\n",
+		ip_str, server_port, enc_name, RTSP_VERSION);
+
+	ret = zsock_send(sock, describe_buf, req_len, 0);
+	if (ret < 0) {
+		ret = -errno;
+		goto out_unlock;
+	}
+
+	/* Collect the response until headers + body are complete (the SDP
+	 * may arrive in a separate TCP segment from the headers). */
+	size_t total = 0;
+	const char *body = NULL;
+
+	while (total < sizeof(describe_buf) - 1) {
+		ret = zsock_recv(sock, describe_buf + total,
+				 sizeof(describe_buf) - 1 - total, 0);
+		if (ret <= 0) {
+			break;
+		}
+		total += ret;
+		describe_buf[total] = '\0';
+
+		body = strstr(describe_buf, "\r\n\r\n");
+		if (!body) {
+			continue;
+		}
+		body += 4;
+
+		const char *cl = strstr(describe_buf, "Content-Length:");
+
+		if (!cl || cl > body) {
+			break;  /* no length header: take what we have */
+		}
+		size_t content_len = strtoul(cl + 15, NULL, 10);
+
+		if (total - (body - describe_buf) >= content_len) {
+			break;  /* body complete */
+		}
+	}
+
+	if (total == 0 || !body) {
+		ret = -EIO;
+		goto out_unlock;
+	}
+
+	if (strstr(describe_buf, "200 ") == NULL) {
+		LOG_DBG("RTSP describe: non-200 for \"%s\"", session_name);
+		ret = -ENOENT;
+		goto out_unlock;
+	}
+
+	ret = aes67_sdp_parse(body, total - (body - describe_buf), out);
+
+out_unlock:
+	k_mutex_unlock(&describe_lock);
+out_close:
+	zsock_close(sock);
+	return ret;
 }
 
 int rtsp_client_subscribe(const struct in_addr *server_addr,

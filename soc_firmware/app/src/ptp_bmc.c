@@ -10,7 +10,9 @@
  *     time source) and keeping it in sync with the runtime config;
  *   - exposing the FPGA BMA result (role + leader ID) to the rest of
  *     the firmware by polling the status CSR;
- *   - firing a change callback when the observed role transitions.
+ *   - firing a change callback when the observed role transitions;
+ *   - proxy-joining the PTP multicast group via IGMP so snooping
+ *     switches forward 224.0.1.129 to the FPGA.
  *
  * No Announce parsing, no foreign-master table, no multicast socket.
  */
@@ -18,6 +20,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/igmp.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 
@@ -43,6 +46,42 @@ static enum ptp_bmc_role last_role = PTP_ROLE_LISTENING;
 
 static struct k_sem ip_ready_sem;
 static bool started;
+static struct net_if *ptp_iface;
+
+/* PTP primary multicast group 224.0.1.129 (Announce/Sync/Delay). */
+static const struct in_addr ptp_mcast_grp = { { { 224, 0, 1, 129 } } };
+
+/*
+ * Proxy IGMP join for the FPGA.
+ *
+ * The PTP event/general traffic terminates in the FPGA data plane — the
+ * Zephyr stack never opens a socket for it.  IGMP-snooping switches only
+ * forward 224.0.1.129 to ports from which they saw a membership report,
+ * so the SoC must join the group on the FPGA's behalf.
+ *
+ * With `rejoin`, leave first so a fresh unsolicited report goes out even
+ * if the group is still in the local table (net_ipv4_igmp_join() returns
+ * -EALREADY without emitting anything otherwise) — used after link-up.
+ */
+static void ptp_proxy_igmp_join(bool rejoin)
+{
+	int ret;
+
+	if (!ptp_iface) {
+		return;
+	}
+
+	if (rejoin) {
+		(void)net_ipv4_igmp_leave(ptp_iface, &ptp_mcast_grp);
+	}
+
+	ret = net_ipv4_igmp_join(ptp_iface, &ptp_mcast_grp, NULL);
+	if (ret < 0 && ret != -EALREADY) {
+		LOG_WRN("PTP: IGMP join 224.0.1.129 failed: %d", ret);
+	} else if (ret == 0) {
+		LOG_INF("PTP: IGMP joined 224.0.1.129 (proxy for FPGA)");
+	}
+}
 
 /* ---- Derive EUI-64 clock identity from MAC ---- */
 static void derive_clock_id(const uint8_t mac[6], uint8_t out[8])
@@ -107,6 +146,8 @@ static void ptp_poll_thread(void *a, void *b, void *c)
 	/* Block until IP is ready (matches old API contract). */
 	k_sem_take(&ip_ready_sem, K_FOREVER);
 
+	ptp_proxy_igmp_join(false);
+
 	while (1) {
 		enum ptp_bmc_role role = ptp_bmc_get_role();
 
@@ -139,6 +180,7 @@ int ptp_bmc_start(struct net_if *iface)
 		return -EINVAL;
 	}
 
+	ptp_iface = iface;
 	derive_clock_id(ll->addr, my_clock_id);
 	LOG_INF("PTP: clock identity %02x%02x%02x%02x%02x%02x%02x%02x",
 		my_clock_id[0], my_clock_id[1], my_clock_id[2], my_clock_id[3],
@@ -175,7 +217,11 @@ void ptp_bmc_notify_fpga_ready(void)
 
 void ptp_bmc_notify_link_up(void)
 {
-	/* Nothing to do — FPGA owns the PTP multicast socket. */
+	/* Re-announce the proxy IGMP membership (see ptp_proxy_igmp_join):
+	 * the switch's snooping table is stale after a link bounce. */
+	if (started) {
+		ptp_proxy_igmp_join(true);
+	}
 }
 
 enum ptp_bmc_role ptp_bmc_get_role(void)

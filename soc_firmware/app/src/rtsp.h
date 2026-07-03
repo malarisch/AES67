@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+struct aes67_sdp_parsed;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -180,6 +182,24 @@ int rtsp_client_subscribe(const struct in_addr *server_addr,
 			  uint16_t server_port,
 			  const char *stream_name,
 			  uint8_t rx_stream_id);
+
+/**
+ * @brief One-shot DESCRIBE: fetch and parse a remote session's SDP.
+ *
+ * Connects, requests rtsp://<addr>:<port>/by-name/<session_name>
+ * (percent-encoded) and parses the returned SDP.  No SETUP/PLAY, the
+ * connection is closed afterwards.  Used by mDNS session discovery.
+ *
+ * @param server_addr   IP address of the RTSP server
+ * @param server_port   RTSP port
+ * @param session_name  RAVENNA session name (raw, will be URL-encoded)
+ * @param out           Parsed SDP output
+ * @return 0 on success, negative errno on error
+ */
+int rtsp_client_describe(const struct in_addr *server_addr,
+			 uint16_t server_port,
+			 const char *session_name,
+			 struct aes67_sdp_parsed *out);
 
 /**
  * @brief Disconnect from a remote RTSP server (TEARDOWN).

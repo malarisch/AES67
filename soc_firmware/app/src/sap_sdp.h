@@ -88,8 +88,14 @@ struct aes67_rx_stream {
 #define SAP_MAX_FOREIGN_STREAMS  8
 #define SAP_SDP_NAME_MAX         32
 
+/* Discovery transport a foreign-stream sighting came from (bitmask —
+ * the web UI merges sightings of the same RTP flow and ORs these). */
+#define SAP_FOREIGN_VIA_SAP   0x01
+#define SAP_FOREIGN_VIA_MDNS  0x02
+
 struct sap_foreign_stream {
 	bool     valid;
+	uint8_t  via;                /* SAP_FOREIGN_VIA_* transport bit */
 	uint16_t msg_id_hash;
 	struct in_addr origin_addr;
 	struct in_addr mcast_addr;
@@ -222,6 +228,21 @@ const struct aes67_rx_stream *sap_sdp_get_rx_streams(void);
  * @return Pointer to the foreign stream table (SAP_MAX_FOREIGN_STREAMS entries)
  */
 const struct sap_foreign_stream *sap_sdp_get_foreign_streams(int *count);
+
+/**
+ * @brief Report a discovered stream into the foreign-stream table.
+ *
+ * Used by non-SAP discovery (mDNS + RTSP DESCRIBE): the caller fills the
+ * entry (including a unique msg_id_hash) and it is upserted like a SAP
+ * announcement.  fs->valid == false deletes the entry by hash.
+ */
+void sap_sdp_report_foreign_stream(const struct sap_foreign_stream *fs);
+
+/**
+ * @brief Refresh the last-seen timestamp of a foreign stream by hash,
+ *        preventing expiry without re-submitting the full entry.
+ */
+void sap_sdp_touch_foreign_stream(uint16_t msg_id_hash);
 
 #ifdef __cplusplus
 }

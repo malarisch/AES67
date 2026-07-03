@@ -31,6 +31,10 @@
 #include "aes67_config.h"
 #include "sd_config.h"
 #include "ieee1588_utils.h"
+#include "ptp_bmc.h"
+#ifdef CONFIG_MDNS_SD
+#include "mdns_sd.h"
+#endif
 #include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_IO_CARD
 #include "../drivers/io_card/io_card.h"
@@ -76,6 +80,20 @@ static struct sap_foreign_stream foreign_streams[SAP_MAX_FOREIGN_STREAMS];
 static uint16_t sap_msg_id_hash;
 
 /* ================================================================
+ * ts-refclk clock identity: the *elected* PTP grandmaster (FPGA BMA),
+ * like the Linux daemon — not our own MAC-derived identity.  Returns
+ * NULL while no grandmaster is known; the SDP builder then omits the
+ * a=ts-refclk line entirely.
+ * ================================================================ */
+static const uint8_t *refclk_clock_id(uint8_t out[8])
+{
+	if (ptp_bmc_get_best_master_id(out) == 0) {
+		return out;
+	}
+	return NULL;
+}
+
+/* ================================================================
  * Build SDP body for our AES67 stream (legacy single-stream config)
  *
  * Returns the number of bytes written to buf (not including NUL),
@@ -83,6 +101,7 @@ static uint16_t sap_msg_id_hash;
  * ================================================================ */
 static int build_sdp(char *buf, size_t buf_size)
 {
+	uint8_t gmid[8];
 	struct aes67_device_config *cfg = aes67_config_get();
 	struct aes67_sdp_params params = {
 		.origin_addr = my_ip_addr,
@@ -95,7 +114,7 @@ static int build_sdp(char *buf, size_t buf_size)
 		.port = local_config.port,
 		.payload_type = local_config.payload_type,
 		.ssrc = 0,
-		.clock_id = my_clock_id,
+		.clock_id = refclk_clock_id(gmid),
 		.stream_name = "Der geile Hecht",
 		.ptp_domain = cfg->ptp_domain,
 		.sync_time = 0,  /* epoch-aligned RTP timestamp */
@@ -109,6 +128,7 @@ static int build_sdp(char *buf, size_t buf_size)
 static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
 				   const struct aes67_tx_stream *stream)
 {
+	uint8_t gmid[8];
 	struct aes67_device_config *cfg = aes67_config_get();
 	struct aes67_sdp_params params = {
 		.origin_addr = my_ip_addr,
@@ -121,7 +141,7 @@ static int build_sdp_for_tx_stream(char *buf, size_t buf_size,
 		.port = AES67_DEFAULT_PORT,
 		.payload_type = AES67_DEFAULT_PAYLOAD_TYPE,
 		.ssrc = stream->ssrc,
-		.clock_id = my_clock_id,
+		.clock_id = refclk_clock_id(gmid),
 		.stream_name = stream->name,
 		.ptp_domain = cfg->ptp_domain,
 		.sync_time = 0,  /* epoch-aligned RTP timestamp */
@@ -335,6 +355,25 @@ static void foreign_stream_expire(void)
 	}
 }
 
+static void foreign_stream_update(const struct sap_foreign_stream *parsed);
+
+void sap_sdp_report_foreign_stream(const struct sap_foreign_stream *fs)
+{
+	foreign_stream_update(fs);
+}
+
+void sap_sdp_touch_foreign_stream(uint16_t msg_id_hash)
+{
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	for (int i = 0; i < SAP_MAX_FOREIGN_STREAMS; i++) {
+		if (foreign_streams[i].valid &&
+		    foreign_streams[i].msg_id_hash == msg_id_hash) {
+			foreign_streams[i].last_seen_ms = k_uptime_get();
+		}
+	}
+	k_mutex_unlock(&sap_mutex);
+}
+
 static void foreign_stream_update(const struct sap_foreign_stream *parsed)
 {
 	k_mutex_lock(&sap_mutex, K_FOREVER);
@@ -397,6 +436,66 @@ static void foreign_stream_update(const struct sap_foreign_stream *parsed)
 /* ================================================================
  * SAP thread: TX announcements + RX foreign announcements
  * ================================================================ */
+/*
+ * Join the multicast group of every active RX stream — proxy join for the
+ * FPGA, which receives the RTP data directly (see
+ * sap_sdp_configure_rx_stream).  Needed at SAP-thread start because RX
+ * streams restored from flash/SD config are configured BEFORE the SAP
+ * socket exists, so their per-stream join was skipped.
+ *
+ * With drop_first, leave each group before joining so a fresh IGMP report
+ * is emitted even if the membership already exists (after a link bounce a
+ * plain re-add returns EADDRINUSE without a report, but the switch's
+ * snooping table is stale).
+ */
+static void sap_join_rx_stream_groups(bool drop_first)
+{
+	if (sap_sock < 0 || !sap_iface) {
+		return;
+	}
+
+	k_mutex_lock(&sap_mutex, K_FOREVER);
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		if (!rx_streams[i].active) {
+			continue;
+		}
+
+		uint8_t first_octet = ntohl(rx_streams[i].dst_ip.s_addr) >> 24;
+
+		if (first_octet < 224 || first_octet > 239) {
+			continue;
+		}
+
+		struct ip_mreqn mreq;
+
+		memset(&mreq, 0, sizeof(mreq));
+		mreq.imr_multiaddr = rx_streams[i].dst_ip;
+		mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
+
+		if (drop_first) {
+			(void)zsock_setsockopt(sap_sock, IPPROTO_IP,
+					       IP_DROP_MEMBERSHIP,
+					       &mreq, sizeof(mreq));
+		}
+
+		int ret = zsock_setsockopt(sap_sock, IPPROTO_IP,
+					   IP_ADD_MEMBERSHIP,
+					   &mreq, sizeof(mreq));
+		char addr_str[INET_ADDRSTRLEN];
+
+		zsock_inet_ntop(AF_INET, &rx_streams[i].dst_ip,
+				addr_str, sizeof(addr_str));
+		if (ret < 0 && errno != EADDRINUSE) {
+			LOG_WRN("SAP: IGMP join RX stream %d mcast %s failed: %d",
+				i, addr_str, errno);
+		} else {
+			LOG_INF("SAP: IGMP joined RX stream %d mcast %s",
+				i, addr_str);
+		}
+	}
+	k_mutex_unlock(&sap_mutex);
+}
+
 static void sap_thread_fn(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
@@ -459,6 +558,10 @@ static void sap_thread_fn(void *p1, void *p2, void *p3)
 	} else {
 		LOG_INF("SAP: Joined multicast group %s", SAP_MULTICAST_ADDR);
 	}
+
+	/* RX streams restored from flash/SD config were configured before
+	 * this socket existed — catch up on their proxy IGMP joins. */
+	sap_join_rx_stream_groups(false);
 
 	/* SAP TX destination */
 	struct sockaddr_in sap_dst;
@@ -531,6 +634,8 @@ static void sap_thread_fn(void *p1, void *p2, void *p3)
 					ret = parse_sap_sdp(rx_buf, n,
 							     &parsed);
 					if (ret >= 0) {
+						parsed.via =
+							SAP_FOREIGN_VIA_SAP;
 						foreign_stream_update(&parsed);
 					}
 				}
@@ -1106,6 +1211,15 @@ int sap_sdp_configure_tx_stream(uint8_t stream_id,
 	/* Force immediate SAP announcement */
 	force_announce = true;
 
+#ifdef CONFIG_MDNS_SD
+	/* Advertise/withdraw the session via mDNS (RAVENNA §3.5.2) */
+	if (dst_ip->s_addr != 0 && channel_count > 0) {
+		mdns_sd_set_session(stream_id, tx_streams[stream_id].name);
+	} else {
+		mdns_sd_set_session(stream_id, NULL);
+	}
+#endif
+
 	char addr_str[INET_ADDRSTRLEN];
 
 	zsock_inet_ntop(AF_INET, dst_ip, addr_str, sizeof(addr_str));
@@ -1215,9 +1329,16 @@ void sap_sdp_notify_link_up(void)
 	zsock_inet_pton(AF_INET, SAP_MULTICAST_ADDR, &mreq.imr_multiaddr);
 	mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
 
+	/* Drop first: a plain re-add hits the socket's membership list
+	 * (EADDRINUSE) and never emits a fresh IGMP report — but that
+	 * report is the whole point after a link bounce, because the
+	 * switch's snooping table is stale. */
+	(void)zsock_setsockopt(sap_sock, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+			       &mreq, sizeof(mreq));
+
 	int ret = zsock_setsockopt(sap_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
 				   &mreq, sizeof(mreq));
-	if (ret < 0 && errno != EADDRINUSE) {
+	if (ret < 0) {
 		LOG_WRN("SAP: Failed to rejoin multicast %s: %d",
 			SAP_MULTICAST_ADDR, errno);
 	} else {
@@ -1226,28 +1347,5 @@ void sap_sdp_notify_link_up(void)
 
 	/* Rejoin multicast groups for all active RX streams so that
 	 * IGMP-snooping switches resume forwarding audio after link-up. */
-	k_mutex_lock(&sap_mutex, K_FOREVER);
-	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
-		if (!rx_streams[i].active) {
-			continue;
-		}
-		struct ip_mreqn rx_mreq;
-
-		memset(&rx_mreq, 0, sizeof(rx_mreq));
-		rx_mreq.imr_multiaddr = rx_streams[i].dst_ip;
-		rx_mreq.imr_ifindex = net_if_get_by_iface(sap_iface);
-
-		ret = zsock_setsockopt(sap_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-				       &rx_mreq, sizeof(rx_mreq));
-		if (ret < 0 && errno != EADDRINUSE) {
-			LOG_WRN("SAP: Failed to rejoin RX stream %d mcast: %d",
-				i, errno);
-		} else {
-			char addr_str[INET_ADDRSTRLEN];
-			zsock_inet_ntop(AF_INET, &rx_streams[i].dst_ip,
-					addr_str, sizeof(addr_str));
-			LOG_INF("SAP: Rejoined RX stream %d mcast %s", i, addr_str);
-		}
-	}
-	k_mutex_unlock(&sap_mutex);
+	sap_join_rx_stream_groups(true);
 }

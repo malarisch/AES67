@@ -70,7 +70,7 @@ int aes67_sdp_build(char *buf, size_t buf_size,
 {
 	char origin_str[INET_ADDRSTRLEN];
 	char conn_str[INET_ADDRSTRLEN];
-	char clock_id_str[32] = "00-00-00-FF-FE-00-00-00";
+	char clock_id_str[32];
 
 	zsock_inet_ntop(AF_INET, &params->origin_addr, origin_str, sizeof(origin_str));
 	zsock_inet_ntop(AF_INET, &params->connection_addr, conn_str, sizeof(conn_str));
@@ -171,11 +171,17 @@ int aes67_sdp_build(char *buf, size_t buf_size,
 	if (n < 0) return -ENOMEM;
 	pos += n;
 
-	/* a=ts-refclk (AES67 reference clock) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "a=ts-refclk:ptp=IEEE1588-2008:%s\r\n", clock_id_str);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	/* a=ts-refclk (AES67 reference clock): the elected PTP grandmaster
+	 * incl. domain.  Omitted while no grandmaster is known (clock_id ==
+	 * NULL) — a zero placeholder would claim traceability to a clock
+	 * that does not exist.  Matches the Linux daemon's behaviour. */
+	if (params->clock_id) {
+		n = snprintf(buf + pos, buf_size - pos,
+			     "a=ts-refclk:ptp=IEEE1588-2008:%s:%u\r\n",
+			     clock_id_str, params->ptp_domain);
+		if (n < 0) return -ENOMEM;
+		pos += n;
+	}
 
 	/* a=mediaclk */
 	n = snprintf(buf + pos, buf_size - pos, "a=mediaclk:direct=0\r\n");

@@ -31,8 +31,8 @@ PERIPHS = {
                          "ev_enable", "txempty", "rxfull"]),
     "uart1":  ("uart1", ["rxtx", "txfull", "rxempty", "ev_status", "ev_pending",
                          "ev_enable", "txempty", "rxfull"]),
-    "i2c0":   ("i2c0", ["write", "read"]),
-    "i2c1":   ("i2c_card", ["phy_speed_mode", "master_active", "master_settings",
+    # Single shared I2C bus (LiteI2C): display + PLL + AD/DA card controller.
+    "i2c0":   ("i2c_card", ["phy_speed_mode", "master_active", "master_settings",
                             "master_addr", "master_rxtx", "master_status"]),
     "spi0":   ("spi0", ["control", "status", "mosi", "miso", "cs", "loopback"]),
 }

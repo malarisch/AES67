@@ -2,11 +2,10 @@
  * Card Manager - I2C board detection and unified initialisation
  *
  * Detection protocol:
- *   The LiteX I²C controller is a bitbang core.  Its ACK-detection reads
- *   SDA via an FPGA register; on a floating or weakly-pulled bus this
- *   register can return 0 (= ACK) for many addresses even with nothing
- *   connected.  Therefore we NEVER rely on a simple ACK-based scan for
- *   detection decisions.
+ *   On a floating or weakly-pulled bus the I²C core can sample SDA low
+ *   during the ACK slot and report ACK for many addresses even with
+ *   nothing connected.  Therefore we NEVER rely on a simple ACK-based
+ *   scan for detection decisions.
  *
  *   Instead, detection works by content verification:
  *     1. Attempt i2c_write_read() to the primary LPC address (0x40).
@@ -89,11 +88,10 @@ static int lpc_read_ident(uint8_t addr, struct card_ident *out)
  *
  * IMPORTANT: results are NEVER used for detection decisions.
  *
- * On the LiteX bitbang I²C core the ACK signal is read back from an FPGA
- * register.  When SDA floats (no device, weak pull-up, or bus not driven)
- * the register can read 0, which the bitbang layer interprets as ACK.
- * This causes large runs of false-positive addresses (typically 0x08–0x1F
- * or similar) even with nothing connected.
+ * When SDA floats (no device, weak pull-up, or bus not driven) the I²C
+ * core can sample 0 during the ACK slot and report a false ACK.  This
+ * causes large runs of false-positive addresses (typically 0x08–0x1F or
+ * similar) even with nothing connected.
  *
  * We therefore perform the scan only to populate the informational list
  * shown in the web UI.  We additionally verify each hit with a 1-byte
@@ -122,7 +120,7 @@ static void do_scan(void)
 		0x18, 0x19,
 		/* MUX variants: PCA9540B/TCA9543A (0x70-0x73), PCA9542 (0x70) */
 		0x70, 0x71, 0x72, 0x73,
-		/* Si5351A, SSD1306 (on i2c0, but may appear on i2c2 too) */
+		/* Si5351A, SSD1306 (same shared bus as the cards) */
 		0x60, 0x3C,
 		/* DSP (AD1941) */
 		0x14,
