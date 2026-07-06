@@ -82,7 +82,7 @@ LOG_MODULE_REGISTER(webserver, LOG_LEVEL_INF);
 
 static uint16_t http_port = 80;
 
-HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port, 4, 10, NULL, NULL);
+HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port, 4, 10, NULL, NULL, NULL);
 
 /* ================================================================
  * JSON response buffer (shared, one request at a time since
@@ -199,9 +199,10 @@ static int read_fpga_status(struct ui_fpga_metrics *m)
 	m->leader_offset_ns = fpga_hal_read_ptp_offset();
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	/* --ptp-in-software gateware drops the servo/lock/offset CSRs; source
-	 * these from the Zephyr PTP stack instead so the dashboard (summary,
-	 * FPGA tab, offset chart) shows the same picture in both PTP modes. */
+	/* With PTP in software the FPGA servo readouts (lock/offset/path delay
+	 * CSRs) read constant 0; source these from the Zephyr PTP stack instead
+	 * so the dashboard (summary, FPGA tab, offset chart) shows the same
+	 * picture in both PTP modes. */
 	struct ptp_ctrl_status pst;
 
 	ptp_ctrl_get_status(&pst);
@@ -1729,7 +1730,7 @@ static int apply_display_chnled_json(const char *json, size_t len)
  * ================================================================ */
 
 static int api_handler(struct http_client_ctx *client,
-		       enum http_data_status status,
+		       enum http_transaction_status status,
 		       const struct http_request_ctx *request_ctx,
 		       struct http_response_ctx *response_ctx,
 		       void *user_data)
@@ -1746,14 +1747,17 @@ static int api_handler(struct http_client_ctx *client,
 	}
 #endif
 
-	if (status == HTTP_SERVER_DATA_ABORTED) {
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
+	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
+		/* Terminal notifications — no response may be produced, and
+		 * falling through would re-run the endpoint dispatch. */
 		post_body_len = 0;
 		return 0;
 	}
 
 	/* ----- Accumulate POST body ----- */
 	if ((method == HTTP_POST || method == HTTP_DELETE) &&
-	    status != HTTP_SERVER_DATA_FINAL &&
+	    status != HTTP_SERVER_REQUEST_DATA_FINAL &&
 	    request_ctx->data_len > 0) {
 		size_t space = POST_BODY_MAX - post_body_len;
 		size_t copy = (request_ctx->data_len < space) ?
@@ -1898,7 +1902,7 @@ static int api_handler(struct http_client_ctx *client,
 	}
 
 	/* ----- POST endpoints ----- */
-	if (method == HTTP_POST && status == HTTP_SERVER_DATA_FINAL) {
+	if (method == HTTP_POST && status == HTTP_SERVER_REQUEST_DATA_FINAL) {
 		int ret = 0;
 
 		if (strcmp(url, "/api/config") == 0) {
@@ -2168,7 +2172,7 @@ static int api_handler(struct http_client_ctx *client,
 	}
 
 	/* ----- DELETE endpoints ----- */
-	if (method == HTTP_DELETE && status == HTTP_SERVER_DATA_FINAL) {
+	if (method == HTTP_DELETE && status == HTTP_SERVER_REQUEST_DATA_FINAL) {
 		/* URL like /api/streams/tx/3 */
 		int ret = -EINVAL;
 

@@ -384,7 +384,7 @@ SHELL_CMD_REGISTER(fw_update, &fw_update_cmds,
 /* ── HTTP handler (called from webserver api_handler) ────────────── */
 
 int fw_update_http_handler(struct http_client_ctx *client,
-			   enum http_data_status status,
+			   enum http_transaction_status status,
 			   const struct http_request_ctx *request_ctx,
 			   struct http_response_ctx *response_ctx)
 {
@@ -404,6 +404,11 @@ int fw_update_http_handler(struct http_client_ctx *client,
 
 	LOG_DBG("cb enter: method=%d status=%d data_len=%zu phase=%d",
 		method, status, request_ctx->data_len, fw_state.phase);
+
+	if (status == HTTP_SERVER_TRANSACTION_COMPLETE) {
+		/* Response fully sent — must not restart the writer. */
+		return 0;
+	}
 
 	/* ── OPTIONS (CORS preflight) ── */
 	if (method == HTTP_OPTIONS) {
@@ -482,7 +487,7 @@ int fw_update_http_handler(struct http_client_ctx *client,
 		fw_state.phase, fw_state.total_received);
 
 	/* Aborted? */
-	if (status == HTTP_SERVER_DATA_ABORTED) {
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED) {
 		LOG_WRN("FW: ABORTED status=%d phase=%d total_rx=%u",
 			status, fw_state.phase, fw_state.total_received);
 		if (fw_state.phase == FW_RECEIVING ||
@@ -543,7 +548,7 @@ int fw_update_http_handler(struct http_client_ctx *client,
 	}
 
 	/* Not final yet — keep receiving */
-	if (status != HTTP_SERVER_DATA_FINAL) {
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		LOG_DBG("not final, returning final_chunk=false");
 		response_ctx->final_chunk = false;
 		return 0;

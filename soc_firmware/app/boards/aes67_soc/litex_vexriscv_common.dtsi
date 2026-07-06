@@ -11,6 +11,11 @@
 
 #include <zephyr/dt-bindings/i2c/i2c.h>
 
+/* Peripheral node skeletons that upstream removed from
+ * riscv32-litex-vexriscv.dtsi (post v4.2.0). Must come before the label
+ * references below. */
+#include "litex_soc_peripherals.dtsi"
+
 / {
 	chosen {
 		zephyr,console = &uart0;
@@ -156,6 +161,9 @@
 /* ---- Peripherals absent from our SoC ---- */
 &eth0     { status = "disabled"; };
 &mdio0    { status = "disabled"; };
+/* phy0 needs its own disable: DT_HAS_* ignores the parent's status, and the
+ * upstream generic-MII PHY driver would bind it against the disabled mdio0. */
+&phy0     { status = "disabled"; };
 &dna0     { status = "disabled"; };
 &prbs0    { status = "disabled"; };
 &wdt0     { status = "disabled"; };

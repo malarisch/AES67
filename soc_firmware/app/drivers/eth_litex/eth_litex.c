@@ -189,22 +189,15 @@ bool eth_litex_read_ppb_counts(const struct device *dev,
 uint32_t eth_litex_read_path_delay(const struct device *dev)
 {
 	ARG_UNUSED(dev);
-	/* Dropped from a --ptp-in-software bridge (software PTP owns these). */
-#ifdef CSR_AES67_CSR_PTP_PATH_DELAY_ADDR
+	/* Always in the bridge CSR map; a software-PTP FPGA reads 0 and the
+	 * caller sources the value from the Zephyr PTP stack instead. */
 	return litex_csr_read(CSR_AES67_CSR_PTP_PATH_DELAY_ADDR);
-#else
-	return 0;
-#endif
 }
 
 uint32_t eth_litex_read_ptp_offset(const struct device *dev)
 {
 	ARG_UNUSED(dev);
-#ifdef CSR_AES67_CSR_PTP_OFFSET_ADDR
 	return litex_csr_read(CSR_AES67_CSR_PTP_OFFSET_ADDR);
-#else
-	return 0;
-#endif
 }
 
 uint32_t eth_litex_read_status(const struct device *dev)
@@ -547,6 +540,21 @@ static void eth_buf_write_packet(const uint8_t *src, uint16_t len)
 	__asm__ volatile("fence" ::: "memory");
 }
 
+/* Temporary RX-path diagnostics (remove after the cyc1000 regression hunt):
+ * one WRN line every 2 s distinguishes ack-loss (redeliver>0), dead IRQ
+ * (irq==0 while poll>0 drains frames) and FIFO pressure (ready_after_ack). */
+static struct {
+	uint32_t irq;        /* ISR invocations */
+	uint32_t wake_sem;   /* rx thread woken by semaphore */
+	uint32_t wake_poll;  /* rx thread woken by poll timeout */
+	uint32_t frames;     /* frames delivered to the stack */
+	uint32_t redeliver;  /* identical frame seen twice in a row */
+	uint32_t ready_after_ack; /* rx_ready still/again set right after ack */
+	uint16_t last_len;
+	uint8_t  last_sig[16];
+	int64_t  last_report;
+} rx_dbg;
+
 /* ---- ISR ---- */
 
 static void eth_litex_isr(const struct device *dev)
@@ -559,6 +567,7 @@ static void eth_litex_isr(const struct device *dev)
 	 * RX thread will re-enable after processing. */
 	litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, 0);
 	litex_csr_write(CSR_ETH_BUF_EV_PENDING_ADDR, ETH_BUF_EV_RX_READY);
+	rx_dbg.irq++;
 	k_sem_give(&data->rx_sem);
 }
 
@@ -616,6 +625,25 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		}
 		first_tx = false;
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+		bool want_ts = net_pkt_is_tx_timestamping(pkt);
+		uint32_t pre_sec = 0, pre_nsec = 0;
+
+		/* Snapshot the egress-timestamp CSR while the previous frame is
+		 * complete (wait above): the CSR follows the live TSU capture
+		 * register, so whatever it shows now belongs to an earlier frame
+		 * (non-timestamped transmits update it too). Our frame's capture
+		 * is the next CHANGE of this value — eth_tx_done alone cannot
+		 * attribute the capture to our frame, since for short frames the
+		 * done latch can precede the on-wire SOF. */
+		if (want_ts) {
+			pre_sec = litex_csr_read(
+				CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR) & 0xF;
+			pre_nsec = litex_csr_read(
+				CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR) & 0x3FFFFFFF;
+		}
+#endif
+
 		LOG_DBG("TX: writing %zu bytes to buffer", len);
 
 		/* Write packet data to TX buffer */
@@ -635,25 +663,44 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		eth_litex_ctrl_clear_bits(dev, AES67_CTRL_ETH_TX_REQUEST);
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-		/* PTP event frames need their egress timestamp reported back to the
-		 * stack. Wait for the frame to actually leave (eth_tx_done) so the
-		 * TX-timestamp CSR holds this frame's capture, then post it. */
-		if (net_pkt_is_tx_timestamping(pkt)) {
+		/* PTP event frames need their egress timestamp reported back to
+		 * the stack. Order: pulse the request, wait for eth_tx_done, read
+		 * the timestamp CSR — but accept it only once it differs from the
+		 * pre-transmit snapshot (that change IS our frame's SOF capture
+		 * arriving; see snapshot comment above). */
+		if (want_ts) {
+			struct net_ptp_time tx_ts;
 			int ts_wait = 0;
+			bool fresh = false;
+			uint32_t sec = 0, nsec = 0;
 
-			while (!(litex_csr_read(CSR_AES67_CSR_STATUS_ADDR) & AES67_STATUS_ETH_TX_DONE)) {
-				k_busy_wait(10);
-				if (++ts_wait > 20000) { /* ~200ms */
-					LOG_WRN("TX timestamp wait timeout");
-					break;
+			k_busy_wait(5); /* let the request edge propagate/clear tx_done */
+			while (ts_wait++ < ETH_LITEX_TX_TS_POLL_LIMIT) {
+				if (litex_csr_read(CSR_AES67_CSR_STATUS_ADDR) &
+				    AES67_STATUS_ETH_TX_DONE) {
+					sec = litex_csr_read(
+						CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR) & 0xF;
+					nsec = litex_csr_read(
+						CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR) & 0x3FFFFFFF;
+					if (sec != pre_sec || nsec != pre_nsec) {
+						fresh = true;
+						break;
+					}
 				}
+				k_busy_wait(50);
 			}
 
-			uint8_t  sec  = litex_csr_read(CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR) & 0xF;
-			uint32_t nsec = litex_csr_read(CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR) & 0x3FFFFFFF;
-			struct net_ptp_time tx_ts;
-
-			aes67_ptp_reconstruct(sec, nsec, &tx_ts);
+			if (!fresh) {
+				/* Report a null timestamp: the PTP stack
+				 * discards the exchange and keeps the last
+				 * good path delay. */
+				LOG_WRN("TX timestamp stale after %d polls — invalidating exchange",
+					ts_wait);
+				tx_ts.second = 0;
+				tx_ts.nanosecond = 0;
+			} else {
+				aes67_ptp_reconstruct((uint8_t)sec, nsec, &tx_ts);
+			}
 			net_pkt_set_timestamp(pkt, &tx_ts);
 			net_if_add_tx_timestamp(pkt);
 		}
@@ -666,6 +713,18 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 
 /* ---- RX path ---- */
 
+/* Acknowledge the presented RX frame. The ack level crosses into the MAC RX
+ * clock domain through a 2-FF synchronizer + edge detector (same CDC as
+ * eth_tx_request): back-to-back CSR writes make a ~50ns pulse the 50MHz
+ * (RMII) — or 2.5MHz (10M MII) — sampling misses, which re-delivers the same
+ * frame on the next poll and stalls the RX FIFO drain. Hold it wide. */
+static void eth_litex_rx_ack(void)
+{
+	litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
+	k_busy_wait(2);
+	litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
+}
+
 static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
@@ -675,8 +734,21 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	while (1) {
-		k_sem_take(&data->rx_sem,
-			   K_MSEC(CONFIG_ETH_LITEX_POLL_INTERVAL_MS));
+		if (k_sem_take(&data->rx_sem,
+			       K_MSEC(CONFIG_ETH_LITEX_POLL_INTERVAL_MS)) == 0) {
+			rx_dbg.wake_sem++;
+		} else {
+			rx_dbg.wake_poll++;
+		}
+
+		int64_t now = k_uptime_get();
+
+		if (now - rx_dbg.last_report >= 2000) {
+			rx_dbg.last_report = now;
+			LOG_WRN("RXDBG irq=%u sem=%u poll=%u frames=%u redeliv=%u rdy_after_ack=%u",
+				rx_dbg.irq, rx_dbg.wake_sem, rx_dbg.wake_poll,
+				rx_dbg.frames, rx_dbg.redeliver, rx_dbg.ready_after_ack);
+		}
 
 		/* Check if a packet is ready */
 		uint32_t ready = litex_csr_read(CSR_ETH_BUF_RX_READY_ADDR);
@@ -722,8 +794,7 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 
 		if (pkt_len < 14 || pkt_len > ETH_LITEX_MAX_PKT_SIZE) {
 			LOG_WRN("RX invalid len %u (raw %u)", pkt_len, raw_len);
-			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
-			litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
+			eth_litex_rx_ack();
 			litex_csr_write(CSR_ETH_BUF_EV_ENABLE_ADDR, ETH_BUF_EV_RX_READY);
 			continue;
 		}
@@ -770,9 +841,25 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			}
 		}
 
+		/* Redelivery detector: an identical frame (len + first 16 bytes,
+		 * which include the IP ID/checksum) means the previous ack did
+		 * not advance the FPGA-side FIFO. */
+		if (pkt_len == rx_dbg.last_len &&
+		    memcmp(data->rx_buf, rx_dbg.last_sig,
+			   MIN(pkt_len, sizeof(rx_dbg.last_sig))) == 0) {
+			rx_dbg.redeliver++;
+		}
+		rx_dbg.last_len = pkt_len;
+		memcpy(rx_dbg.last_sig, data->rx_buf,
+		       MIN(pkt_len, sizeof(rx_dbg.last_sig)));
+		rx_dbg.frames++;
+
 		/* ACK: release the RX buffer for the next packet */
-		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 1);
-		litex_csr_write(CSR_ETH_BUF_RX_ACK_ADDR, 0);
+		eth_litex_rx_ack();
+
+		if (litex_csr_read(CSR_ETH_BUF_RX_READY_ADDR) & 0x01) {
+			rx_dbg.ready_after_ack++;
+		}
 
 		/* Re-enable EventManager IRQ (ISR disables it to prevent
 		 * re-entry while the pending clear propagates). */
@@ -864,9 +951,11 @@ static void eth_litex_iface_init(struct net_if *iface)
 
 }
 
-static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev)
+static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev,
+					struct net_if *iface)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(iface);
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 	return ETHERNET_LINK_100BASE | ETHERNET_PTP;
 #else
@@ -875,9 +964,11 @@ static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-static const struct device *eth_litex_get_ptp_clock(const struct device *dev)
+static const struct device *eth_litex_get_ptp_clock(const struct device *dev,
+						   struct net_if *iface)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(iface);
 	return aes67_ptp_clock_device();
 }
 #endif

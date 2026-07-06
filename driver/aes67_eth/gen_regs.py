@@ -2,7 +2,8 @@
 """Generate aes67_regs.h from a LiteX csr.csv.
 
 The kernel module must never hard-code Wishbone addresses: they shift whenever
-litex_soc/generate.py changes (e.g. enabling --ptp-in-software reorders CSRs).
+litex_soc/generate.py changes (e.g. adding a CSR or toggling --no-servo-csr
+reorders the map).
 This script turns the generated csr.csv into a C header of byte-address #defines
 so the driver stays in lock-step with the gateware.
 

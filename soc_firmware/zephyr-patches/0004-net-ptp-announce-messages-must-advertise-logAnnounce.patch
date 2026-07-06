@@ -1,0 +1,39 @@
+From 3bfc048e986f4edcd1733cdd030d22975b3060a0 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Fri, 3 Jul 2026 18:29:29 +0200
+Subject: [PATCH 4/5] net: ptp: announce messages must advertise
+ logAnnounceInterval
+
+port_announce_msg_transmit() filled the announce header's
+logMessageInterval with logSyncInterval. Receivers size their
+foreign-time-transmitter qualification window from the advertised
+announce interval (IEEE 1588-2019 9.3.2.4.4: 4 * announceInterval),
+so any clock whose sync interval is shorter than its announce
+interval (e.g. AES67: sync -3, announce 1) could never qualify:
+linuxptp saw the announcements but never selected the clock, and
+Zephyr peers kept an all-zero foreign record while parked in
+LISTENING.
+
+Candidate for upstream submission.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/port.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/subsys/net/lib/ptp/port.c b/subsys/net/lib/ptp/port.c
+index c0396451ce..9114bb8486 100644
+--- a/subsys/net/lib/ptp/port.c
++++ b/subsys/net/lib/ptp/port.c
+@@ -590,7 +590,7 @@ static int port_announce_msg_transmit(struct ptp_port *port)
+ 	msg->header.flags[1]	      = tpds->flags;
+ 	msg->header.src_port_id	      = port->port_ds.id;
+ 	msg->header.sequence_id	      = port->seq_id.announce++;
+-	msg->header.log_msg_interval  = port->port_ds.log_sync_interval;
++	msg->header.log_msg_interval  = port->port_ds.log_announce_interval;
+ 
+ 	msg->announce.current_utc_offset = tpds->current_utc_offset;
+ 	msg->announce.gm_priority1	 = pds->gm_priority1;
+-- 
+2.53.0
+

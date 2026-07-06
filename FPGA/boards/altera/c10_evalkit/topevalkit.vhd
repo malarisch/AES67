@@ -41,7 +41,7 @@ ENTITY topevalkit IS
         TDM_BCLK_MULT : INTEGER := 64;
             TDM_I2S_MODE : BOOLEAN := false;
     TDM_FSCLK_50DUTY : BOOLEAN := true;
-    PTP_IN_SOFTWARE : BOOLEAN := true
+    PTP_IN_SOFTWARE : BOOLEAN := false
 		
 	);
 	PORT
@@ -82,7 +82,7 @@ ENTITY topevalkit IS
 		uart1_rx :  IN  STD_LOGIC;
 		uart1_tx :  OUT  STD_LOGIC;
 
-		-- litex i2c master
+		-- litex i2c master (single shared bus; i2c1 pins now unused/tri-stated)
 		i2c0_scl :  INOUT  STD_LOGIC;
 		i2c0_sda :  INOUT  STD_LOGIC;
 		i2c1_scl :  INOUT  STD_LOGIC;
@@ -119,10 +119,7 @@ ENTITY topevalkit IS
 		spictrl_miso_o : INOUT STD_LOGIC;
 		spictrl_irq_n_o : OUT STD_LOGIC;
 		
-		ALTERA_DCLK : out STD_LOGIC;
-		ALTERA_ASDO_DATA1 : out std_logic;
-		ALTERA_FLASH_nCE_nCSO : out STD_LOGIC;
-		ALTERA_DATA0 : in STD_LOGIC;
+
 		
 		
 		
@@ -202,12 +199,10 @@ begin
         uart1_tx => uart1_tx,
         i2c0_scl => i2c0_scl,
         i2c0_sda => i2c0_sda,
-        i2c1_scl => i2c1_scl,
-        i2c1_sda => i2c1_sda,
-        spiflash_clk => ALTERA_DCLK,
-        spiflash_cs => ALTERA_ASDO_DATA1,
-        spiflash_mosi => ALTERA_FLASH_nCE_nCSO,
-        spiflash_miso => ALTERA_DATA0,
+        spiflash_clk => spiflash_clk,
+        spiflash_cs => spiflash_cs,
+        spiflash_mosi => spiflash_mosi,
+        spiflash_miso => spiflash_miso,
         pll_512fs_i => pll_512fs_i,
         audioclk_mclk_o => pll_512fs_o,
         audioclk_bclk_o => pll_256fs_rising,

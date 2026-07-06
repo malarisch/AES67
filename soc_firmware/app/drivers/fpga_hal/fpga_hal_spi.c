@@ -333,31 +333,24 @@ uint32_t fpga_hal_read_status(void)
 
 int32_t fpga_hal_read_path_delay(void)
 {
-	/* Dropped from a --ptp-in-software bridge (software PTP owns these). */
-#ifdef CSR_AES67_CSR_PTP_PATH_DELAY_ADDR
+	/* Always in the bridge CSR map; a software-PTP FPGA reads 0 and the
+	 * caller sources the value from the Zephyr PTP stack instead. */
 	uint32_t val;
 
 	if (spibone_read(CSR_AES67_CSR_PTP_PATH_DELAY_ADDR, &val) < 0) {
 		return 0;
 	}
 	return (int32_t)val;
-#else
-	return 0;
-#endif
 }
 
 int32_t fpga_hal_read_ptp_offset(void)
 {
-#ifdef CSR_AES67_CSR_PTP_OFFSET_ADDR
 	uint32_t val;
 
 	if (spibone_read(CSR_AES67_CSR_PTP_OFFSET_ADDR, &val) < 0) {
 		return 0;
 	}
 	return (int32_t)val;
-#else
-	return 0;
-#endif
 }
 
 bool fpga_hal_read_ppb_counts(uint32_t *wc_count, uint32_t *pll_count)

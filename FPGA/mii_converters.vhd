@@ -20,6 +20,8 @@ entity mii_converters is
     phy_mii_enet_tx_clk_i     : in std_logic                    := '0';
     phy_mii_enet_tx_en      : out std_logic                    := '0';
     phy_mii_enet_tx_d       : out std_logic_vector(MII_WIDTH - 1 downto 0) := (others => '0');
+    phy_clk_rx_o : out std_logic;
+    phy_clk_tx_o : out std_logic;
     mac_speed_i             : in std_logic_vector(1 downto 0);
     mii_rx_clock_o          : out std_logic;
     mii_tx_clock_o          : out std_logic;
@@ -114,7 +116,8 @@ begin
     gmii_tx_en  <= mii_tx_en_i;
     gmii_txd    <= mii_txd_i;
     gmii_tx_err <= mii_tx_err_i;
-
+    phy_clk_rx_o <= gmii_rx_clk;
+    phy_clk_tx_o <= gmii_tx_clk;
     mii_rx_clock_o <= gmii_rx_clk;
     mii_rx_err_o   <= gmii_rx_err;
     mii_rx_dv_o    <= gmii_rx_dv;
@@ -170,6 +173,8 @@ begin
     phy_mii_enet_tx_d <= mii_txd(3 downto 0);
     phy_mii_enet_tx_en <= mii_tx_en_i;
     phy_mii_enet_tx_clk <= phy_mii_enet_tx_clk_i;
+    phy_clk_rx_o <= phy_mii_enet_tx_clk_i;
+    phy_clk_tx_o <= phy_mii_enet_rx_clk;
   end generate;
   rmiigen : if (ethernet_type = "RMII" and (platform = "ALTERA" or platform = "LATTICE")) generate
 
@@ -195,6 +200,8 @@ begin
     -- the 50 MHz RMII reference clock so the MAC's MIIM and TX logic have a clock.
     enet_clk    <= gmii_tx_clk;
     enet_clk_90 <= gmii_tx_clk;
+    phy_clk_rx_o <= phy_refclk_i;
+    phy_clk_tx_o <= phy_refclk_i;
     rmii_phy_if_inst : rmii_phy_if
     port map
     (

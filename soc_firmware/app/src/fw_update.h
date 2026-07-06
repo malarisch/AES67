@@ -29,7 +29,7 @@ void fw_update_init(void);
  * is not suitable for firmware images).
  */
 int fw_update_http_handler(struct http_client_ctx *client,
-			   enum http_data_status status,
+			   enum http_transaction_status status,
 			   const struct http_request_ctx *request_ctx,
 			   struct http_response_ctx *response_ctx);
 

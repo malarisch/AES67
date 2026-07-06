@@ -288,7 +288,7 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 	int ret;
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 	bool want_ts = (pkt != NULL) && net_pkt_is_tx_timestamping(pkt);
-	uint32_t sec_pre = 0, nsec_pre = 0;
+	uint32_t pre_sec = 0, pre_nsec = 0;
 #endif
 
 	spibone_bus_lock();
@@ -296,13 +296,18 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 	eth_spi_wait_tx_done_locked(data);
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	/* Remember the current TX-timestamp latch so we can tell OUR frame's
-	 * capture apart from the previous frame's (see below). */
+	/* Snapshot the egress-timestamp latch before requesting our transmit.
+	 * The previous frame is complete (wait above), so this value belongs to
+	 * an EARLIER frame — any non-timestamped transmit (mDNS, IGMP, ARP, …)
+	 * also updates the latch and leaves eth_tx_done set. At SPI latencies
+	 * the first status read after the pulse always lands with eth_tx_done
+	 * already re-asserted, so "done" alone cannot attribute the latch to
+	 * OUR frame; the latch is ours only once it differs from this snapshot. */
 	if (want_ts) {
 		(void)spibone_read_locked(CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR,
-					  &sec_pre);
+					  &pre_sec);
 		(void)spibone_read_locked(CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR,
-					  &nsec_pre);
+					  &pre_nsec);
 	}
 #endif
 
@@ -339,44 +344,58 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 	 * immediately, so the PTP stack sees t3 first. (The wallclock reads in
 	 * aes67_ptp_reconstruct re-enter the bus mutex — it is recursive.)
 	 *
-	 * The tx_timestamp CSR latches at the end of every MCU-buffer frame,
-	 * and eth_tx_done is a level that is still high from the previous
-	 * frame until the MAC actually starts ours — which can lag behind
-	 * RTP traffic. Waiting on tx_done alone therefore hands out the
-	 * PREVIOUS frame's capture (seen as a wild ~hundreds-of-ms path
-	 * delay). Poll until the latch content changes from its pre-send
-	 * value instead. */
+	 * Order mirrors the proven kernel driver (aes67_eth.c, aes67_tx_one):
+	 * pulse the request, wait for eth_tx_done to assert for THIS frame,
+	 * then read the latch immediately. eth_tx_done clears when the FPGA
+	 * accepts the request edge and re-asserts at the end of the frame —
+	 * at SPI latencies the first status read lands well after the accept,
+	 * so a set eth_tx_done means OUR frame's capture is in the latch. */
 	if (ret == 0 && want_ts) {
-		uint32_t sec = sec_pre, nsec = nsec_pre;
 		struct net_ptp_time tx_ts;
+		uint32_t status = 0;
+		uint32_t sec = 0, nsec = 0;
+		bool fresh = false;
 		int i;
 
+		/* Order per the proven kernel driver (aes67_eth.c, aes67_tx_one):
+		 * pulse the request, wait for eth_tx_done, read the latch
+		 * immediately. Additionally require the latch to differ from the
+		 * pre-pulse snapshot — that is the only reliable freshness proof
+		 * at SPI latencies (see snapshot comment above). */
 		for (i = 0; i < TX_TS_POLL_LIMIT; i++) {
+			(void)spibone_read_locked(CSR_AES67_CSR_STATUS_ADDR,
+						  &status);
+			if (!(status & AES67_STATUS_ETH_TX_DONE)) {
+				continue;
+			}
 			(void)spibone_read_locked(
 				CSR_AES67_CSR_TX_TIMESTAMP_SEC_IN_ADDR, &sec);
 			(void)spibone_read_locked(
 				CSR_AES67_CSR_TX_TIMESTAMP_NSEC_IN_ADDR, &nsec);
-			if (sec != sec_pre || nsec != nsec_pre) {
+			if (sec != pre_sec || nsec != pre_nsec) {
+				fresh = true;
 				break;
 			}
 		}
-		if (i == TX_TS_POLL_LIMIT) {
-			/* Frame not (yet) on the wire — the latch still holds
-			 * the previous frame's capture. Report a null
-			 * timestamp: the PTP stack's Delay_Req callback treats
-			 * it as "no timestamp available" and discards the
-			 * whole exchange, keeping the last good path delay
-			 * instead of computing one from a stale t3. */
-			LOG_WRN("TX timestamp latch unchanged — invalidating exchange");
+
+		if (!fresh) {
+			/* Frame not on the wire in time (or its capture never
+			 * reached the latch) — report a null timestamp: the PTP
+			 * stack treats it as "no timestamp available" and
+			 * discards the exchange, keeping the last good path
+			 * delay. */
+			LOG_WRN("TX timestamp stale after %d polls (latch %u/%u) — invalidating exchange",
+				i, pre_sec & 0xF, pre_nsec & 0x3FFFFFFF);
 			tx_ts.second = 0;
 			tx_ts.nanosecond = 0;
 		} else {
 			aes67_ptp_reconstruct((uint8_t)(sec & 0xF),
 					      nsec & 0x3FFFFFFF, &tx_ts);
 			/* Temporary SW-PTP bring-up diagnostics. */
-			LOG_WRN("TXTS report %llu.%09u (raw sec=%u nsec=%u, polls=%d)",
+			LOG_WRN("TXTS report %llu.%09u (raw sec=%u nsec=%u, pre=%u/%u, polls=%d)",
 				tx_ts.second, tx_ts.nanosecond, sec & 0xF,
-				nsec & 0x3FFFFFFF, i);
+				nsec & 0x3FFFFFFF, pre_sec & 0xF,
+				pre_nsec & 0x3FFFFFFF, i);
 		}
 		net_pkt_set_timestamp(pkt, &tx_ts);
 		net_if_add_tx_timestamp(pkt);
@@ -525,9 +544,11 @@ static void eth_spi_iface_init(struct net_if *iface)
 		data->mac_addr[3], data->mac_addr[4], data->mac_addr[5]);
 }
 
-static enum ethernet_hw_caps eth_spi_get_capabilities(const struct device *dev)
+static enum ethernet_hw_caps eth_spi_get_capabilities(const struct device *dev,
+					struct net_if *iface)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(iface);
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 	return ETHERNET_LINK_100BASE | ETHERNET_PTP;
 #else
@@ -536,9 +557,11 @@ static enum ethernet_hw_caps eth_spi_get_capabilities(const struct device *dev)
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-static const struct device *eth_spi_get_ptp_clock(const struct device *dev)
+static const struct device *eth_spi_get_ptp_clock(const struct device *dev,
+						   struct net_if *iface)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(iface);
 	return aes67_ptp_clock_device();
 }
 #endif

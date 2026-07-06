@@ -1,7 +1,7 @@
 # aes67_eth — FPGA Ethernet + PHC kernel driver
 
 Out-of-tree Linux driver that turns the AES67 FPGA (CPU-less `aes67_bridge`
-target, built with `--ptp-in-software`) into a first-class network device with
+target; FPGA top built with `PTP_IN_SOFTWARE = true`) into a first-class network device with
 **hardware PTP timestamping**, so stock **`ptp4l`** can discipline the FPGA
 wallclock. This is Phase 5 ("PTP offload to the SoC") of
 `config_tool/docs/control-plane-plan.md`.

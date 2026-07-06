@@ -200,7 +200,7 @@ set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -
 
 
 
-set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS PROGRAMMING PIN"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
 set_global_assignment -name VHDL_FILE top_c10_006.vhd
@@ -396,9 +396,9 @@ set_location_assignment PIN_2 -to crsdv
 set_location_assignment PIN_144 -to rx1
 set_location_assignment PIN_141 -to tx0
 set_location_assignment PIN_142 -to tx1
-set_location_assignment PIN_87 -to mclk
+set_location_assignment PIN_129 -to mclk
 set_location_assignment PIN_86 -to bclk
-set_location_assignment PIN_85 -to lrclk
+set_location_assignment PIN_128 -to lrclk
 set_location_assignment PIN_32 -to tdm_in0
 set_location_assignment PIN_33 -to tdm_out0
 set_location_assignment PIN_67 -to spictrl_clk
@@ -407,5 +407,8 @@ set_location_assignment PIN_68 -to spictrl_miso
 set_location_assignment PIN_69 -to spictrl_irq
 set_location_assignment PIN_66 -to spictrl_cs
 set_location_assignment PIN_137 -to txen
-set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name RESERVE_FLASH_NCE_AFTER_CONFIGURATION "AS INPUT TRI-STATED"
+set_location_assignment PIN_100 -to led_o
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to spictrl_irq
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
+set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

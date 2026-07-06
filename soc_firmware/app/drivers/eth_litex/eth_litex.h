@@ -38,13 +38,9 @@ extern "C" {
 #define ETH_BUF_TX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x2000UL) /* TX: byte 0..1517 */
 
 /* ---- Status register bit fields (CSR_AES67_CSR_STATUS) ---- */
-/* wallclock_locked is dropped from a --ptp-in-software bridge (the software PTP
- * servo, not the FPGA, tracks lock); define it to 0 so consumers still build. */
-#ifdef CSR_AES67_CSR_STATUS_WALLCLOCK_LOCKED_OFFSET
+/* wallclock_locked reflects the FPGA hardware PTP servo; a software-PTP FPGA
+ * ties it to 0 (the Zephyr PTP stack tracks lock instead). */
 #define AES67_STATUS_WC_LOCKED      BIT(CSR_AES67_CSR_STATUS_WALLCLOCK_LOCKED_OFFSET)
-#else
-#define AES67_STATUS_WC_LOCKED      0U
-#endif
 #define AES67_STATUS_WC_CONFIGURED  BIT(CSR_AES67_CSR_STATUS_WALLCLOCK_CONFIGURED_OFFSET)
 /* wallclock_phasejump (bit 1) and ptp_sync_lost (bit 3) were removed from the
  * bridge; those status bits no longer exist. */
@@ -79,6 +75,11 @@ extern "C" {
 #else
 #define ETH_LITEX_RX_TRAILER_LEN 0
 #endif
+
+/* TX-timestamp latch poll budget: latch-change detection after tx_request
+ * (50 µs per iteration → ~6 ms, covers the MAC delaying the MCU frame
+ * behind RTP traffic; beyond that the exchange gets invalidated). */
+#define ETH_LITEX_TX_TS_POLL_LIMIT 120
 
 /* ========================================================================
  * CSR access primitives

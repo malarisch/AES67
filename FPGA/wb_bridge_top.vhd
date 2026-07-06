@@ -122,6 +122,8 @@ signal phy_mii_enet_tx_d_sig : std_logic_vector(MII_WIDTH - 1 downto 0);
 signal phy_mii_enet_rx_d_sig : std_logic_vector(MII_WIDTH - 1 downto 0);
 
 signal phy_mii_enet_tx_en_sig : std_logic;
+signal phy_rxclk : std_logic;
+signal phy_txclk: std_logic;
 begin
     rst_n <= rst_n_i and sysclk_pll_locked;
     phy_mii_enet_tx_d <= phy_mii_enet_tx_d_sig;
@@ -161,8 +163,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     enet_clk_i => phy_refclk_i,
     clk_mcu_i => mcu_clk,
     rst_n => rst_n,
-    phy_mii_rx_clk_in => mii_rx_clock,
-    phy_mii_tx_clk_in => mii_tx_clock,
+    phy_mii_rx_clk_in => phy_rxclk,
+    phy_mii_tx_clk_in => phy_txclk,
     phy_mii_tx_data_in => phy_mii_enet_tx_d_sig(MII_WIDTH -1 downto 0),
     phy_mii_rx_data_in => phy_mii_enet_rx_d_sig(MII_WIDTH -1 downto 0),
     phy_mii_tx_en_i => phy_mii_enet_tx_en_sig,
@@ -230,6 +232,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
       phy_mii_enet_tx_clk_i => phy_mii_enet_tx_clk_i,
       phy_mii_enet_tx_en => phy_mii_enet_tx_en_sig,
       phy_mii_enet_tx_d => phy_mii_enet_tx_d_sig,
+      phy_clk_rx_o => phy_rxclk,
+      phy_clk_tx_o => phy_txclk,
       mac_speed_i => mac_speed_i,
       mii_rx_clock_o => mii_rx_clock,
       mii_tx_clock_o => mii_tx_clock,

@@ -41,7 +41,6 @@ entity litex_eth_buffer_bridge is
     buf_rx_valid_o  : out std_logic;
     buf_rx_ack_i    : in  std_logic;
     timestamps_i : in t_eth_timestamps;
-    tx_timestamp_o : out t_eth_timestamp;
     -- TX buffer: this module reads packet data
 
     buf_tx_addr_o   : out std_logic_vector(10 downto 0);
@@ -276,10 +275,9 @@ begin
           
           if mac_tx_byte_sent_i = '1' then
             mac_tx_dat_o <= buf_tx_dat_i;
-            
             if buf_tx_addr = unsigned(buf_tx_len_i) then
               sm_tx <= TX_END;
-              tx_timestamp_o <= timestamps_i.tx;
+              
 
             else
               buf_tx_addr <= buf_tx_addr + 1;

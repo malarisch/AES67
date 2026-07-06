@@ -221,9 +221,7 @@ static void uart_rx_callback(const struct device *dev, void *user_data)
 {
 	ARG_UNUSED(user_data);
 
-	if (!uart_irq_update(dev)) {
-		return;
-	}
+	uart_irq_update(dev);
 
 	while (uart_irq_rx_ready(dev)) {
 		uint8_t c;

@@ -6,7 +6,11 @@ manifest:
     - name: zephyr
       repo-path: zephyr
       remote: zephyrproject
-      revision: v4.2.0
+      # Pinned main snapshot (2026-07-03): post-v4.4.1, includes the PTP
+      # overhaul (configurable PI servo gains, uptime-based msg aging,
+      # ingress-ts validity guards). Local patches live on branch
+      # aes67/main-20260703 in external/zephyr — re-checkout after west update.
+      revision: 8edca5b8df024f290d30daad028fd5e4488877bd
       clone-depth: 1
       import:
         path-prefix: external

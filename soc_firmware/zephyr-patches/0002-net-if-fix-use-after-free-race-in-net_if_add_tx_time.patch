@@ -1,0 +1,38 @@
+From b5394e4ad2c2bb01f5208b0fbbb3442b8b0beb05 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Fri, 3 Jul 2026 15:30:53 +0200
+Subject: [PATCH 2/5] net: if: fix use-after-free race in
+ net_if_add_tx_timestamp
+
+Ref the packet before putting it on tx_ts_queue: the timestamp thread
+is cooperative and can consume + unref the packet immediately after
+k_fifo_put, before the producer takes its reference.
+
+Candidate for upstream submission.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/ip/net_if.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/subsys/net/ip/net_if.c b/subsys/net/ip/net_if.c
+index 55314826c7..e92fb7f620 100644
+--- a/subsys/net/ip/net_if.c
++++ b/subsys/net/ip/net_if.c
+@@ -6545,8 +6545,12 @@ void net_if_call_timestamp_cb(struct net_pkt *pkt)
+ 
+ void net_if_add_tx_timestamp(struct net_pkt *pkt)
+ {
+-	k_fifo_put(&tx_ts_queue, pkt);
++	/* Take the reference BEFORE queueing: the tx_tstamp thread runs at
++	 * cooperative priority and can consume + unref the packet the moment
++	 * it is put on the FIFO — reffing afterwards operates on a freed
++	 * packet (use-after-free, pool corruption). */
+ 	net_pkt_ref(pkt);
++	k_fifo_put(&tx_ts_queue, pkt);
+ }
+ #endif /* CONFIG_NET_PKT_TIMESTAMP_THREAD */
+ 
+-- 
+2.53.0
+

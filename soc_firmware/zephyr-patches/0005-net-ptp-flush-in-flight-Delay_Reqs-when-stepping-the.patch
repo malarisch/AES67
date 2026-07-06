@@ -1,0 +1,58 @@
+From cc0132a32b455ab5122ab1d82b65bec404a0cae6 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Fri, 3 Jul 2026 19:21:03 +0200
+Subject: [PATCH 5/5] net: ptp: flush in-flight Delay_Reqs when stepping the
+ clock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The post-step epoch reset zeroes t1..t4 and mean_delay, but a
+Delay_Req already sent before the step still delivers an egress
+timestamp from the old timescale. The first mean_delay of the new
+epoch then absorbs the step size, the next Sync sees exactly that as
+offset and steps back — a self-sustaining step limit cycle (observed
+oscillating +/-110 ms at 1 Hz). Drop the pending requests so the
+first delay exchange of the new epoch is entirely post-step.
+
+Candidate for upstream submission (together with the step rework).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/clock.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index c961ed765e..de573a3d0c 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -740,6 +740,26 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 		ptp_clk.current_ds.mean_delay = 0;
+ 		clock_servo_reset();
+ 
++		/* Also discard in-flight Delay_Req exchanges: their egress
++		 * timestamps were taken in the pre-step timescale, so the first
++		 * mean_delay of the new epoch would absorb the step size — and
++		 * the next Sync would then "correct" that with a step of
++		 * exactly the same magnitude, sustaining a step limit cycle.
++		 * (last_sync_fup is deliberately left alone — its unref is
++		 * owned by the caller.) */
++		struct ptp_port *flush_port;
++
++		SYS_SLIST_FOR_EACH_CONTAINER(&ptp_clk.ports_list, flush_port, node) {
++			sys_snode_t *req_node;
++
++			while ((req_node = sys_slist_get(&flush_port->delay_req_list)) != NULL) {
++				struct ptp_msg *req =
++					CONTAINER_OF(req_node, struct ptp_msg, node);
++
++				ptp_msg_unref(req);
++			}
++		}
++
+ 		return;
+ 	}
+ 
+-- 
+2.53.0
+

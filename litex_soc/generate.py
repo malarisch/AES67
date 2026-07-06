@@ -155,7 +155,6 @@ def _build_target(target, args):
             target        = "aes67_bridge",
             with_servo    = not args.no_servo_csr,
             with_metering = not args.no_metering_csr,
-            with_ptp_sw   = args.ptp_in_software,
         )
     elif target == "gowin":
         platform = GowinStubPlatform()
@@ -216,7 +215,7 @@ def main():
     parser.add_argument("--bios-console",       default="full", choices=["full", "lite", "disable"], help="BIOS console mode (disable saves most ROM)")
     parser.add_argument("--no-servo-csr",       action="store_true", help="aes67_bridge: drop the PTP servo tuning + monitoring CSRs (FPGA configures the servo statically via a generic). Ports stay; logic is optimized away.")
     parser.add_argument("--no-metering-csr",    action="store_true", help="aes67_bridge: drop the audio metering CSRs (FPGA has metering disabled). Ports stay; logic is optimized away.")
-    parser.add_argument("--ptp-in-software",     action="store_true", help="aes67_bridge: add the PTP-in-software wallclock CSRs (wallclock in/out, TX timestamp, set/phasejump/ppb). Ports stay; logic is optimized away when omitted.")
+    parser.add_argument("--ptp-in-software",     action="store_true", help="Deprecated no-op: the PTP-in-software wallclock CSRs are now always part of the aes67_bridge map, so the CSR layout no longer depends on the PTP mode (hardware-PTP gateware ignores the wallclock control CSRs).")
     parser.add_argument("--output-dir",         default=None,              help="Output directory")
     args = parser.parse_args()
 

@@ -132,7 +132,7 @@ The data-plane logic is identical regardless of who drives it; only the **Wishbo
 |---------|----------------------------|------|-----------|-------|
 | **Integrated softcore** | `cyclone10` / `cyc1000` / `gowin` (`LITEX_HRAM` / `LITEX_SDRAM`) | On-FPGA VexRiscv + Zephyr | LiteX CSR over Wishbone | Self-contained single-chip system; SoC boots from SPI flash. |
 | **External MCU (Zephyr)** | `spibone` (`LITEX_SPIBONE`) | ESP32-S3 (same Zephyr firmware) | SPI → Wishbone | Active target; the SPI driver still needs porting from the old `spictrl` byte protocol to `spibone`. |
-| **External Linux host** | `aes67_bridge` + `--ptp-in-software`, driven over `spibone` | Linux (e.g. Raspberry Pi) | SPI→Wishbone via `aes67_eth.ko` | The `aes67_eth` kernel driver provides `net_device` + PHC (stock `ptp4l` disciplines the wallclock) and owns the bus; the Rust `config_tool` stack runs on top of it (daemon, CLI, web, discovery, TAP bridge). |
+| **External Linux host** | `aes67_bridge`, driven over `spibone` (FPGA top built with `PTP_IN_SOFTWARE = true`) | Linux (e.g. Raspberry Pi) | SPI→Wishbone via `aes67_eth.ko` | The `aes67_eth` kernel driver provides `net_device` + PHC (stock `ptp4l` disciplines the wallclock) and owns the bus; the Rust `config_tool` stack runs on top of it (daemon, CLI, web, discovery, TAP bridge). |
 
 > For bring-up/debug, `config_tool` can also open a `spibone`/`uartbone` bridge **directly** (`aes67cfg --spi`/`--uart`) without the kernel driver — but the full Linux control plane (with `ptp4l` hardware PTP) runs through `aes67_eth.ko`, the single Wishbone master.
 >
@@ -170,7 +170,7 @@ All time-critical audio and timing logic lives in [FPGA/](FPGA/). New logic is V
 | Moving average | [FPGA/ptp/average.vhd](FPGA/ptp/average.vhd) | Configurable moving-average filter (`PTP_MOVING_AVERAGE_DEPTH`) |
 | Wallclock | [FPGA/ptp/wallclock.vhd](FPGA/ptp/wallclock.vhd) | PTP-disciplined 48-bit seconds + 32-bit nanoseconds + media clock |
 
-In **hardware PTP** mode the FPGA runs the full PTPv2 engine on-chip and the control plane only runs the **BMC** (best-master-clock) decision, feeding the resulting grandmaster priorities/identity back over the bus. In **software PTP** mode (`PTP_IN_SOFTWARE = true`, gateware built with `--ptp-in-software`) the FPGA provides only hardware timestamping and CSR access to the wallclock, and a host PTP stack (`ptp4l` via the kernel driver, or Zephyr's `CONFIG_PTP`) disciplines it.
+In **hardware PTP** mode the FPGA runs the full PTPv2 engine on-chip and the control plane only runs the **BMC** (best-master-clock) decision, feeding the resulting grandmaster priorities/identity back over the bus. In **software PTP** mode (FPGA top built with `PTP_IN_SOFTWARE = true`) the FPGA provides only hardware timestamping and CSR access to the wallclock (the bridge CSR map is identical in both modes), and a host PTP stack (`ptp4l` via the kernel driver, or Zephyr's `CONFIG_PTP`) disciplines it.
 
 ### Clock & Timing
 | Module | File | Description |
@@ -310,7 +310,7 @@ Crate layout: `transport` (HAL: UART/SPI bridges) → `config` (CSR map + by-nam
 
 ## Linux Kernel Driver & Software PTP
 
-[driver/aes67_eth/](driver/aes67_eth/) is an out-of-tree Linux driver that turns the FPGA (`aes67_bridge` gateware built with `--ptp-in-software`) into a first-class network device with **hardware PTP timestamping**, so stock **`ptp4l`** disciplines the FPGA wallclock. This is "Phase 5 — PTP offload" of the control-plane plan.
+[driver/aes67_eth/](driver/aes67_eth/) is an out-of-tree Linux driver that turns the FPGA (gateware built with `PTP_IN_SOFTWARE = true`) into a first-class network device with **hardware PTP timestamping**, so stock **`ptp4l`** disciplines the FPGA wallclock. This is "Phase 5 — PTP offload" of the control-plane plan.
 
 - **`net_device`** carrying the FPGA `eth_buf` datapath in-kernel (the RX-drain / TX-inject protocol the daemon used).
 - **PHC** (`/dev/ptpN`, clock `aes67_wallclock`) mapping the wallclock CSRs: `gettime`/`settime`/`adjtime`/`adjfine`.

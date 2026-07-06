@@ -10,7 +10,7 @@ use work.miim_types.all;
 
 ENTITY top_cyc1000 IS
 	generic (
-		SOC_TYPE : string := "LITEX_SPIBONE"; 
+		SOC_TYPE : string := "LITEX_SDRAM"; 
 		platform : string := "ALTERA";
         MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii
 		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
@@ -52,7 +52,7 @@ ENTITY top_cyc1000 IS
         TDM_BCLK_MULT : INTEGER := 64;
             TDM_I2S_MODE : BOOLEAN := false;
     TDM_FSCLK_50DUTY : BOOLEAN := true;
-    PTP_IN_SOFTWARE : BOOLEAN := true
+    PTP_IN_SOFTWARE : BOOLEAN := false
 
 
 	);
@@ -76,10 +76,10 @@ ENTITY top_cyc1000 IS
         AIN7: OUT STD_LOGIC; -- sclk
         D0 : OUT STD_LOGIC;
         D1 : IN STD_LOGIC; -- n/c tdm in
-        D2: INOUT STD_LOGIC; -- i2c clk 0
-        D3: INOUT STD_LOGIC; -- i2c clk 1
-        D4: INOUT STD_LOGIC; -- i2c data 0
-        D5: INOUT STD_LOGIC; -- i2c data 1
+        D2: INOUT STD_LOGIC; -- i2c clk (single shared bus)
+        D3: INOUT STD_LOGIC; -- unused (was i2c clk 1)
+        D4: INOUT STD_LOGIC; -- i2c data (single shared bus)
+        D5: INOUT STD_LOGIC; -- unused (was i2c data 1)
         D6 : OUT STD_LOGIC; -- mdc
         D7 : INOUT STD_LOGIC; --mdio
         D8 : IN STD_LOGIC; -- refclk
@@ -200,8 +200,6 @@ begin
     uart1_tx => open,
     i2c0_scl => D2,
     i2c0_sda => D4,
-    i2c1_scl => D3,
-    i2c1_sda => D5,
     spiflash_clk => AIN1,
     spiflash_cs => AIN3,
     spiflash_mosi => AIN0,

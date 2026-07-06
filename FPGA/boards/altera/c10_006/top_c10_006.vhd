@@ -26,7 +26,7 @@ ENTITY top_c10_006 IS
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         
 		TX_MAX_STREAMS : natural := 1;
-		RX_MAX_STREAMS : natural := 2;
+		RX_MAX_STREAMS : natural := 8;
 		
 		
 		
@@ -36,7 +36,7 @@ ENTITY top_c10_006 IS
     	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
 		
 
-		RX_CHANNELS		: natural := 2;
+		RX_CHANNELS		: natural := 8;
         
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
@@ -81,7 +81,9 @@ ENTITY top_c10_006 IS
         spictrl_cs : IN STD_LOGIC; -- spictrl cs
         spictrl_mosi : IN STD_LOGIC; -- spictrl mosi
         spictrl_miso : OUT STD_LOGIC; -- spictrl miso
-        spictrl_irq : OUT STD_LOGIC -- spictrl irq
+        spictrl_irq : OUT STD_LOGIC; -- spictrl irq
+
+        led_o : OUT std_logic
 	);
 END top_c10_006;
 
@@ -104,6 +106,7 @@ signal uart_ctrl_tx_reg : std_logic;
 signal miso : std_logic;
 
 begin
+    led_o <= '1';
 	tdm_in(0) <= tdm_in0;
     tdm_out0 <= tdm_out(0);
     mii_rxd(0) <= rx0;

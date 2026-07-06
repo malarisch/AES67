@@ -19,10 +19,9 @@ class AES67CSRs(LiteXModule, AutoCSR):
     not complain; the now-unused outputs are simply left undriven (constant 0)
     and the unused inputs dangling, both optimized away during synthesis.
     """
-    def __init__(self, with_servo=True, with_metering=True, with_ptp_sw=False):
+    def __init__(self, with_servo=True, with_metering=True):
         self.with_servo    = with_servo
         self.with_metering = with_metering
-        self.with_ptp_sw   = with_ptp_sw
 
         # =====================================================================
         # Input signals (directly active from external FPGA logic)
@@ -120,10 +119,11 @@ class AES67CSRs(LiteXModule, AutoCSR):
         # keep their original offsets so firmware reading the other status bits
         # is unaffected.
         #
-        # When PTP runs in software the wallclock lock state is determined by the
-        # software servo, not the FPGA, so the "wallclock_locked" bit is dropped
-        # (offset 0 becomes a reserved gap; the other fields keep their offsets).
-        status_fields = [
+        # wallclock_locked is only meaningful with the FPGA (hardware) PTP servo;
+        # a --ptp-in-software gateware ties it to 0 and the host uses its own
+        # servo state instead.
+        self.status = CSRStatus(32, fields=[
+            CSRField("wallclock_locked",    size=1, offset=0, description="Wallclock locked (hardware PTP servo only; 0 in software-PTP gateware)"),
             CSRField("wallclock_configured", size=1, offset=2, description="Wallclock configured"),
             CSRField("eth_link_up",         size=1, offset=4, description="Ethernet link up"),
             CSRField("eth_speed",           size=2, offset=5, description="Ethernet speed (00=10M,01=100M,10=1G)"),
@@ -131,18 +131,16 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("eth_rx_overflow",     size=1, offset=8, description="Ethernet RX overflow"),
             CSRField("ptp_is_leader",       size=1, offset=9, description="PTP BMA result: node is leader"),
             CSRField("ptp_is_follower",     size=1, offset=10, description="PTP BMA result: node is follower"),
-        ]
-        if not with_ptp_sw:
-            status_fields.insert(0,
-                CSRField("wallclock_locked", size=1, offset=0, description="Wallclock locked"))
-        self.status = CSRStatus(32, fields=status_fields)
+        ])
 
-        # PTP path delay / offset from master are computed by the FPGA PTP servo;
-        # when PTP runs in software those readouts come from the software stack,
-        # so the FPGA-sourced CSRs are dropped (i_ ports stay, optimized away).
-        if not with_ptp_sw:
-            self.ptp_path_delay = CSRStatus(32, description="PTP path delay (ns)")
-            self.ptp_offset     = CSRStatus(32, description="PTP offset from master (ns)")
+        # PTP path delay / offset from master as computed by the FPGA PTP servo.
+        # Always present so the CSR layout is identical for hardware- and
+        # software-PTP gateware (a --ptp-in-software FPGA feeds constant 0 and
+        # the host sources these from its own PTP stack).  The map used to
+        # change with the PTP mode, which silently broke hosts built against
+        # the other variant's headers.
+        self.ptp_path_delay = CSRStatus(32, description="PTP path delay (ns, hardware PTP servo; 0 in software-PTP gateware)")
+        self.ptp_offset     = CSRStatus(32, description="PTP offset from master (ns, hardware PTP servo; 0 in software-PTP gateware)")
 
         # =====================================================================
         # CSR: Control registers (RW) — directly drive output signals
@@ -238,29 +236,28 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.servo_mon_sample_count = CSRStatus(16, description="Servo: warmup sample count")
 
         # =====================================================================
-        # PTP-in-software CSRs — dropped unless the FPGA runs the PTP servo /
-        # wallclock discipline in software (``--ptp-in-software``).  Same pattern
-        # as the servo CSRs above: the i_/o_ ports (hence the aes67_ctrl pads)
-        # stay declared so the board top-level wires unchanged; the unused
-        # outputs are constant 0 and unused inputs dangle, both optimized away.
+        # PTP-in-software CSRs — used when a host PTP stack disciplines the
+        # wallclock (gateware ``PTP_IN_SOFTWARE = true``).  Always present so the
+        # CSR layout does not depend on the PTP mode: hardware-PTP gateware
+        # simply ignores the wallclock control outputs (the FPGA servo owns the
+        # wallclock) and the snapshot inputs still read the live wallclock.
         # =====================================================================
-        if with_ptp_sw:
-            # Wallclock snapshot from FPGA (RO)
-            self.wallclock_seconds_in_lo  = CSRStatus(32, description="Wallclock seconds [31:0] (FPGA -> SoC)")
-            self.wallclock_seconds_in_hi  = CSRStatus(32, description="Wallclock seconds [47:32] (bits [15:0] used)")
-            self.wallclock_nanoseconds_in = CSRStatus(32, description="Wallclock nanoseconds [29:0] (FPGA -> SoC)")
-            self.tx_timestamp_sec_in      = CSRStatus(4,  description="TX timestamp seconds [3:0] (FPGA -> SoC)")
-            self.tx_timestamp_nsec_in     = CSRStatus(32, description="TX timestamp nanoseconds [29:0] (FPGA -> SoC)")
+        # Wallclock snapshot from FPGA (RO)
+        self.wallclock_seconds_in_lo  = CSRStatus(32, description="Wallclock seconds [31:0] (FPGA -> SoC)")
+        self.wallclock_seconds_in_hi  = CSRStatus(32, description="Wallclock seconds [47:32] (bits [15:0] used)")
+        self.wallclock_nanoseconds_in = CSRStatus(32, description="Wallclock nanoseconds [29:0] (FPGA -> SoC)")
+        self.tx_timestamp_sec_in      = CSRStatus(4,  description="TX timestamp seconds [3:0] (FPGA -> SoC)")
+        self.tx_timestamp_nsec_in     = CSRStatus(32, description="TX timestamp nanoseconds [29:0] (FPGA -> SoC)")
 
-            # Wallclock control to FPGA (RW)
-            self.wallclock_seconds_out_lo  = CSRStorage(32, description="Wallclock set value seconds [31:0] (SoC -> FPGA)")
-            self.wallclock_seconds_out_hi  = CSRStorage(32, description="Wallclock set value seconds [47:32] (bits [15:0] used)")
-            self.wallclock_nanoseconds_out = CSRStorage(32, description="Wallclock set value nanoseconds [29:0] (SoC -> FPGA)")
-            self.wallclock_ppb             = CSRStorage(20, description="Wallclock frequency correction (signed ppb, SoC -> FPGA)")
-            self.wallclock_ctrl = CSRStorage(32, fields=[
-                CSRField("set",       size=1, offset=0, description="Load wallclock_seconds_out/nanoseconds_out into the FPGA wallclock"),
-                CSRField("phasejump", size=1, offset=1, description="Apply a one-shot phase jump to the FPGA wallclock"),
-            ])
+        # Wallclock control to FPGA (RW)
+        self.wallclock_seconds_out_lo  = CSRStorage(32, description="Wallclock set value seconds [31:0] (SoC -> FPGA)")
+        self.wallclock_seconds_out_hi  = CSRStorage(32, description="Wallclock set value seconds [47:32] (bits [15:0] used)")
+        self.wallclock_nanoseconds_out = CSRStorage(32, description="Wallclock set value nanoseconds [29:0] (SoC -> FPGA)")
+        self.wallclock_ppb             = CSRStorage(20, description="Wallclock frequency correction (signed ppb, SoC -> FPGA)")
+        self.wallclock_ctrl = CSRStorage(32, fields=[
+            CSRField("set",       size=1, offset=0, description="Load wallclock_seconds_out/nanoseconds_out into the FPGA wallclock"),
+            CSRField("phasejump", size=1, offset=1, description="Apply a one-shot phase jump to the FPGA wallclock"),
+        ])
 
         # =====================================================================
         # Wiring: input signals -> CSR status fields
@@ -280,15 +277,13 @@ class AES67CSRs(LiteXModule, AutoCSR):
 
             self.ptp_leader_id_lo.status.eq(self.i_ptp_leader_id[:32]),
             self.ptp_leader_id_hi.status.eq(self.i_ptp_leader_id[32:]),
-        ]
 
-        # PTP lock / path delay / offset readouts — only when PTP is in the FPGA.
-        if not with_ptp_sw:
-            self.comb += [
-                self.status.fields.wallclock_locked.eq(self.i_wallclock_locked),
-                self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
-                self.ptp_offset.status.eq(self.i_ptp_offset),
-            ]
+            # PTP lock / path delay / offset readouts (constant 0 from a
+            # software-PTP FPGA — the ports dangle there).
+            self.status.fields.wallclock_locked.eq(self.i_wallclock_locked),
+            self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
+            self.ptp_offset.status.eq(self.i_ptp_offset),
+        ]
 
         # =====================================================================
         # Wiring: CSR storage fields -> output signals (always present)
@@ -356,24 +351,23 @@ class AES67CSRs(LiteXModule, AutoCSR):
                 self.servo_mon_sample_count.status.eq(self.i_servo_mon_sample_count),
             ]
 
-        # -- PTP-in-software wiring (only when those CSRs exist) ---------------
-        if with_ptp_sw:
-            self.comb += [
-                # FPGA -> SoC status
-                self.wallclock_seconds_in_lo.status.eq(self.i_wallclock_seconds_in[:32]),
-                self.wallclock_seconds_in_hi.status.eq(self.i_wallclock_seconds_in[32:]),
-                self.wallclock_nanoseconds_in.status.eq(self.i_wallclock_nanoseconds_in),
-                self.tx_timestamp_sec_in.status.eq(self.i_tx_timestamp_sec_in),
-                self.tx_timestamp_nsec_in.status.eq(self.i_tx_timestamp_nsec_in),
+        # -- PTP-in-software wiring (hardware-PTP gateware ignores the o_* side)
+        self.comb += [
+            # FPGA -> SoC status
+            self.wallclock_seconds_in_lo.status.eq(self.i_wallclock_seconds_in[:32]),
+            self.wallclock_seconds_in_hi.status.eq(self.i_wallclock_seconds_in[32:]),
+            self.wallclock_nanoseconds_in.status.eq(self.i_wallclock_nanoseconds_in),
+            self.tx_timestamp_sec_in.status.eq(self.i_tx_timestamp_sec_in),
+            self.tx_timestamp_nsec_in.status.eq(self.i_tx_timestamp_nsec_in),
 
-                # SoC -> FPGA control
-                self.o_wallclock_seconds_out.eq(
-                    Cat(self.wallclock_seconds_out_lo.storage, self.wallclock_seconds_out_hi.storage[:16])),
-                self.o_wallclock_nanoseconds_out.eq(self.wallclock_nanoseconds_out.storage[:30]),
-                self.o_wallclock_ppb.eq(self.wallclock_ppb.storage),
-                self.o_wallclock_set.eq(self.wallclock_ctrl.fields.set),
-                self.o_wallclock_phasejump.eq(self.wallclock_ctrl.fields.phasejump),
-            ]
+            # SoC -> FPGA control
+            self.o_wallclock_seconds_out.eq(
+                Cat(self.wallclock_seconds_out_lo.storage, self.wallclock_seconds_out_hi.storage[:16])),
+            self.o_wallclock_nanoseconds_out.eq(self.wallclock_nanoseconds_out.storage[:30]),
+            self.o_wallclock_ppb.eq(self.wallclock_ppb.storage),
+            self.o_wallclock_set.eq(self.wallclock_ctrl.fields.set),
+            self.o_wallclock_phasejump.eq(self.wallclock_ctrl.fields.phasejump),
+        ]
 
 
 def add_aes67_csr(soc, platform):

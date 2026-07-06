@@ -1,0 +1,139 @@
+From 9a0187396b46cd894b5ae7f16bc75e12fd3ff88a Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Fri, 3 Jul 2026 16:42:58 +0200
+Subject: [PATCH 3/5] net: ptp: step small offsets via atomic phase jump; PI
+ anti-windup
+
+- Lower the step threshold from 1 s to 5 ms and use ptp_clock_adjust()
+  (atomic in-hardware phase jump) when the offset fits: PHC rate
+  corrections saturate (AES67 wallclock: +/-524287 ppb), so offsets in
+  the ms range slew for tens of seconds, and a get/compute/set step
+  ages by the bus round-trip over a slow PHC bus (SPI).
+- Clamp the PI integral term to the same saturation bound: without
+  anti-windup a saturated actuator winds pi_drift up by millions of
+  ppb, pinning the rate correction at the clamp for minutes
+  (observed: 'PPB applied -524287' continuously after boot).
+
+Candidate for upstream submission.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/clock.c | 66 +++++++++++++++++++++++++++-----------
+ 1 file changed, 47 insertions(+), 19 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index 8faa64570f..c961ed765e 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -45,12 +45,18 @@ LOG_MODULE_REGISTER(ptp_clock, CONFIG_PTP_LOG_LEVEL);
+  * the configured Sync interval. These thresholds protect the PI controller from
+  * bad timestamps; they are not clock-accuracy guarantees.
+  */
+-#define SYNC_SERVO_STEP_THRESHOLD_NS (1LL * NSEC_PER_SEC)
++/* Step instead of slewing above 5 ms: PHC rate corrections saturate (the
++ * AES67 wallclock at +/-524287 ppb ~ 524 us/s), so larger offsets would
++ * take minutes to slew out while winding up the PI integral. */
++#define SYNC_SERVO_STEP_THRESHOLD_NS (5LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_LOCK_OFFSET_NS (10LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_OUTLIER_NS (100LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_LOCK_SAMPLES 3U
+ #define SYNC_SERVO_OUTLIER_SAMPLES 2U
+ #define PTP_SERVO_GAIN_SCALE 1000.0
++/* Anti-windup bound for the PI integral term: integrating past the
++ * actuator's saturation point only delays recovery once the sign flips. */
++#define PTP_SERVO_INTEGRAL_LIMIT_PPB 524287.0
+ 
+ /**
+  * @brief PTP Clock structure.
+@@ -548,6 +554,11 @@ static double ptp_servo_pi(int64_t nanosecond_diff)
+ 	double ppb;
+ 
+ 	ptp_clk.pi_drift += ki * nanosecond_diff;
++	if (ptp_clk.pi_drift > PTP_SERVO_INTEGRAL_LIMIT_PPB) {
++		ptp_clk.pi_drift = PTP_SERVO_INTEGRAL_LIMIT_PPB;
++	} else if (ptp_clk.pi_drift < -PTP_SERVO_INTEGRAL_LIMIT_PPB) {
++		ptp_clk.pi_drift = -PTP_SERVO_INTEGRAL_LIMIT_PPB;
++	}
+ 	ppb = kp * nanosecond_diff + ptp_clk.pi_drift;
+ 
+ 	return ppb;
+@@ -671,7 +682,7 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 	    offset < -SYNC_SERVO_STEP_THRESHOLD_NS) {
+ 		int32_t dest_nsec;
+ 
+-		LOG_WRN("Clock offset exceeds 1 second (t1=%" PRIu64 ".%09u t2=%" PRIu64
++		LOG_WRN("Clock offset exceeds step threshold (t1=%" PRIu64 ".%09u t2=%" PRIu64
+ 			".%09u delay=%lldns offset=%lldns phc_now=%" PRIu64 ".%09u |t2-phc|=%"
+ 			PRIu64 "ns)",
+ 			ptp_clk.timestamp.t1 / NSEC_PER_SEC,
+@@ -684,25 +695,43 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 			current.nanosecond,
+ 			clock_abs_delta_u64(ptp_clk.timestamp.t2, phc_now_ns));
+ 
+-		ret = ptp_clock_get(ptp_clk.phc, &current);
+-		if (ret < 0) {
+-			LOG_WRN("Failed to read PHC time for clock step (err %d)", ret);
+-			return;
+-		}
++		if (offset >= INT32_MIN && offset <= INT32_MAX) {
++			/* Step via an atomic in-hardware phase jump. A
++			 * get/compute/set sequence ages by the PHC bus
++			 * round-trip (milliseconds over SPI), leaving a
++			 * residual the saturating rate correction would then
++			 * slew out for tens of seconds. */
++			ret = ptp_clock_adjust(ptp_clk.phc, (int)-offset);
++			if (ret < 0) {
++				LOG_WRN("Failed to step PHC (err %d)", ret);
++				return;
++			}
++
++			LOG_WRN("Stepped clock by %lldns (phase jump)", -offset);
++		} else {
++			ret = ptp_clock_get(ptp_clk.phc, &current);
++			if (ret < 0) {
++				LOG_WRN("Failed to read PHC time for clock step (err %d)", ret);
++				return;
++			}
+ 
+-		current.second = (uint64_t)(current.second - (offset / NSEC_PER_SEC));
+-		dest_nsec = (int32_t)(current.nanosecond - (offset % NSEC_PER_SEC));
++			current.second = (uint64_t)(current.second - (offset / NSEC_PER_SEC));
++			dest_nsec = (int32_t)(current.nanosecond - (offset % NSEC_PER_SEC));
+ 
+-		if (dest_nsec < 0) {
+-			current.second--;
+-			dest_nsec += NSEC_PER_SEC;
+-		} else if (dest_nsec >= NSEC_PER_SEC) {
+-			current.second++;
+-			dest_nsec -= NSEC_PER_SEC;
+-		}
++			if (dest_nsec < 0) {
++				current.second--;
++				dest_nsec += NSEC_PER_SEC;
++			} else if (dest_nsec >= NSEC_PER_SEC) {
++				current.second++;
++				dest_nsec -= NSEC_PER_SEC;
++			}
+ 
+-		current.nanosecond = (uint32_t)dest_nsec;
+-		ptp_clock_set(ptp_clk.phc, &current);
++			current.nanosecond = (uint32_t)dest_nsec;
++			ptp_clock_set(ptp_clk.phc, &current);
++
++			LOG_WRN("Set clock time: %"PRIu64".%09u", current.second,
++				current.nanosecond);
++		}
+ 
+ 		/* A hard step invalidates the timestamps used by the E2E delay path and
+ 		 * any accumulated frequency correction from the previous time base.
+@@ -711,7 +740,6 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 		ptp_clk.current_ds.mean_delay = 0;
+ 		clock_servo_reset();
+ 
+-		LOG_WRN("Set clock time: %"PRIu64".%09u", current.second, current.nanosecond);
+ 		return;
+ 	}
+ 
+-- 
+2.53.0
+

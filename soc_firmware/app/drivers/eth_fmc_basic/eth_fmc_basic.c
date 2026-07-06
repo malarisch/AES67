@@ -717,9 +717,11 @@ static void eth_fmc_basic_iface_init(struct net_if *iface)
 		data->mac_addr[3], data->mac_addr[4], data->mac_addr[5]);
 }
 
-static enum ethernet_hw_caps eth_fmc_basic_get_capabilities(const struct device *dev)
+static enum ethernet_hw_caps eth_fmc_basic_get_capabilities(const struct device *dev,
+					struct net_if *iface)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(iface);
 	return ETHERNET_LINK_10BASE | ETHERNET_LINK_100BASE;
 }
 

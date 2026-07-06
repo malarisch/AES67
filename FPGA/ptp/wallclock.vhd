@@ -355,7 +355,6 @@ begin
         end if;
     end process;
 
-    nco_pi_proc_gen: if (0 = 1) generate
     nco_p_proc: process (clk, reset_n) begin
         if (reset_n = '0') then
             nco_phase_bias <= (others => '0');
@@ -402,7 +401,6 @@ begin
 
         end if;
     end process;
-end generate;
 
     nco_increment_proc: process(clk, reset_n) begin
 

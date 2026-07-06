@@ -316,7 +316,6 @@ signal mac_reset : STD_LOGIC;
 
 signal wallclock_signals : t_wallclock_signals;
 signal timestamps : t_eth_timestamps;
-signal tx_timestamp : t_eth_timestamp;
 signal aes67_ctrl_wallclock_ppb_reg : STD_LOGIC_VECTOR(19 downto 0);
 begin
 
@@ -409,8 +408,16 @@ begin
         aes67_ctrl_tx_reset => audiotx_reset,
         aes67_ctrl_rx_reset => audiorx_reset,
         aes67_ctrl_eth_reset => mac_reset,
-        aes67_ctrl_tx_timestamp_nsec_in => STD_LOGIC_VECTOR(tx_timestamp.nanoseconds),
-        aes67_ctrl_tx_timestamp_sec_in => STD_LOGIC_VECTOR(tx_timestamp.seconds),
+        -- Feed the CSR from the live TSU capture register (sys domain, same as
+        -- this CSR logic) instead of the buffer bridge's tx_timestamp_o copy:
+        -- that copy is latched in the mac_tx domain when the LAST BYTE has been
+        -- fed to the MAC, which for short frames can precede the on-wire SOF —
+        -- the latch then keeps the PREVIOUS frame's capture until the next
+        -- transmit (host reads a one-frame-stale egress timestamp). The host
+        -- attributes the live value to its frame by polling for a change
+        -- against a pre-transmit snapshot.
+        aes67_ctrl_tx_timestamp_nsec_in => STD_LOGIC_VECTOR(timestamps.tx.nanoseconds),
+        aes67_ctrl_tx_timestamp_sec_in => STD_LOGIC_VECTOR(timestamps.tx.seconds),
         aes67_ctrl_wallclock_seconds_in => STD_LOGIC_VECTOR(wallclock_signals.wallclock_seconds_o),
         aes67_ctrl_wallclock_nanoseconds_in => STD_LOGIC_VECTOR(wallclock_signals.wallclock_nanoseconds_o),
         aes67_ctrl_wallclock_nanoseconds_out => wallclock_signals.wallclock_nanoseconds_i,
@@ -557,7 +564,6 @@ begin
      )
      port map(
         timestamps_i => timestamps,
-        tx_timestamp_o => tx_timestamp,
         buf_rx_data_o => mcu_buf_rx_data,
         buf_rx_addr_o => mcu_buf_rx_addr,
         buf_rx_we_o => mcu_buf_rx_we,

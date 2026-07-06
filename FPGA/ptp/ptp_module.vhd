@@ -31,7 +31,7 @@ ENTITY ptp_module IS
 		mac_tx_clock :  IN  STD_LOGIC;
 		mac_tx_busy :  IN  STD_LOGIC;
 		mac_tx_byte_sent :  IN  STD_LOGIC;
-
+		mcu_tx_en_i : IN STD_LOGIC;
 		rx_clk_i            : in std_logic;
         rx_data_i           : in STD_LOGIC_VECTOR(7 downto 0);
         rx_byte_received_i  : in std_logic;
@@ -234,7 +234,6 @@ rx_tsu: entity work.ethernet_timestamp_mii
 	mii_en_in => phy_mii_rx_en_i
 );
 
-tx_en_switch <= phy_mii_tx_en_i when ETHERNET_TYPE = "RMII" else mac_tx_busy;
 tx_tsu: entity work.ethernet_timestamp_mii
  generic map(
 	PATH => "TX",
@@ -253,6 +252,7 @@ tx_tsu: entity work.ethernet_timestamp_mii
 	mii_en_in => tx_en_switch
 );
 ptp_sw_gen: if (PTP_IN_SOFTWARE = true) generate
+	tx_en_switch <= mcu_tx_en_i;
 	-- wallclock_signals is a mixed-direction record. The wallclock OUTPUTS (_o)
 	-- flow out to the bridge (gettime / RX-TX timestamping); the control INPUTS
 	-- (_i) come back from the bridge CSRs (settime / phasejump / ppb). Each
@@ -275,6 +275,7 @@ ptp_sw_gen: if (PTP_IN_SOFTWARE = true) generate
 end generate;
 
 ptp_hw_gen: if (PTP_IN_SOFTWARE = false) generate
+tx_en_switch <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
 -- EUI-64 clock identity from MAC (same mapping as ptpv2_parser)
 my_clock_identity <= (mac_address(47 downto 40) XOR x"02")
                    & mac_address(39 downto 24)

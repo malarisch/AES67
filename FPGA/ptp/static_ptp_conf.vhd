@@ -14,7 +14,7 @@ entity static_ptp_conf is
         -- IEEE 1588-2008 §7.4.2.
         -- 100M default (Cyc1000 / LAN8720A): measured +6200 ns on the
         -- LAN8720A — RX path is much longer than TX.
-        DELAY_ASYMMETRY_NS_100M : integer := 6200;
+        DELAY_ASYMMETRY_NS_100M : integer := 0;
         DELAY_ASYMMETRY_NS_1G   : integer := 0
     );
     port(

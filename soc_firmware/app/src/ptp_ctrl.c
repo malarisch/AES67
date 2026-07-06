@@ -173,6 +173,22 @@ void ptp_ctrl_apply_config(void)
 	dds->clk_quality.accuracy = acc;
 	dds->domain = domain;
 
+	/* Announce content is built from the parent dataset, which the stack
+	 * copies from the default dataset only in clock_update_grandmaster()
+	 * (static, runs on grandmaster state decisions). Refresh the GM fields
+	 * here too so in-flight announces carry the new values immediately —
+	 * observed stale announces otherwise while the BMC already compared
+	 * with the new defaults. Only touch it while WE are the grandmaster:
+	 * as a follower the parent dataset describes the foreign master. */
+	struct ptp_parent_ds *pds = (struct ptp_parent_ds *)ptp_clock_parent_ds();
+
+	if (memcmp(pds->gm_id.id, dds->clk_id.id, sizeof(dds->clk_id.id)) == 0) {
+		pds->gm_priority1 = p1;
+		pds->gm_priority2 = p2;
+		pds->gm_clk_quality.cls = cc;
+		pds->gm_clk_quality.accuracy = acc;
+	}
+
 	SYS_SLIST_FOR_EACH_CONTAINER(ptp_clock_ports_list(), port, node) {
 		port->port_ds.log_announce_interval = log_ann;
 		port->port_ds.log_sync_interval = log_sync;

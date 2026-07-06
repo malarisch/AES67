@@ -373,6 +373,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 mac_tx_busy => mac_tx_busy,
 		 mac_tx_byte_sent => mac_tx_byte_sent,
 		 mac_tx_allow_i => eth_tx_allow_ptp,
+		 mcu_tx_en_i => eth_tx_en_mcu_i,
 
 
 		rx_clk_i => mac_rx_clock,
