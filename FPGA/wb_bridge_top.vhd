@@ -39,8 +39,8 @@ generic (
 		ENABLE_METERING: BOOLEAN := false;
         PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
         TDM_BCLK_MULT : INTEGER := 256;
-        PTP_IN_SOFTWARE : BOOLEAN := false
-
+        PTP_IN_SOFTWARE : BOOLEAN := false;
+        PHY_TYPE : STRING
 
 	);
 	
@@ -98,7 +98,8 @@ generic (
       aes67_wb_err                              : out std_logic;
       aes67_wb_sel                              : in std_logic_vector(3 downto 0);
       aes67_wb_stb                              : in std_logic;
-      aes67_wb_we                               : in std_logic
+      aes67_wb_we                               : in std_logic;
+      dbg_mac_tx_clk_o : out std_logic
 	);
 END wb_bridge_top;
 
@@ -156,11 +157,12 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
     TDM_BCLK_MULT => TDM_BCLK_MULT,
-    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+    PHY_TYPE => PHY_TYPE
 )
  port map(
     sys_clk_125MHz_i => sys_clk_125MHz,
-    enet_clk_i => phy_refclk_i,
+    enet_clk_i => mii_rx_clock,
     clk_mcu_i => mcu_clk,
     rst_n => rst_n,
     phy_mii_rx_clk_in => phy_rxclk,
@@ -197,7 +199,8 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     rx_sample_register => rx_sample_register,
     tdm8in_i => tdm_in,
     tx_sample_register => tx_sample_register,
-    eth_irq_o => mcu_irq_o
+    eth_irq_o => mcu_irq_o,
+    dbg_mac_tx_clk_o => dbg_mac_tx_clk_o
 );
 
   sysclk_pll_gen_inst: entity work.sysclk_pll_gen

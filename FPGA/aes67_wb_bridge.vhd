@@ -38,7 +38,8 @@ entity aes67_wb_bridge is
 		ENABLE_METERING: BOOLEAN := true;
     PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
     TDM_BCLK_MULT : INTEGER := 256;
-    PTP_IN_SOFTWARE : BOOLEAN := false
+    PTP_IN_SOFTWARE : BOOLEAN := false;
+    PHY_TYPE : STRING := "UNKNOWN"
 
 	);
 	PORT
@@ -102,7 +103,9 @@ entity aes67_wb_bridge is
 
 		-- audio inputs
 		tdm8in_i : IN STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
-		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0)
+		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0);
+
+    dbg_mac_tx_clk_o : out std_logic
 
 	);
 end entity;
@@ -321,6 +324,7 @@ begin
 
     -- eth-ram read address: litex bridge drives std_logic_vector, ethernet_top
     -- consumes unsigned.
+    dbg_mac_tx_clk_o <= mac_rx_clk;
     mcu_ethbuf_ram_addr <= unsigned(mcu_ethbuf_ram_addr_slv);
     mac_resetn <= not mac_reset;
     litex_soc_aes67_bridge_inst: litex_soc_aes67_bridge
@@ -454,7 +458,8 @@ begin
         ENABLE_METERING => ENABLE_METERING,
         PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
         TDM_BCLK_MULT => TDM_BCLK_MULT,
-        PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+        PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+        PHY_TYPE => PHY_TYPE
     )
      port map(
         sys_clk_125MHz_i => sys_clk_125MHz_i,

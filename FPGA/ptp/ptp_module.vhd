@@ -12,7 +12,7 @@ ENTITY ptp_module IS
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		STATIC_PTP_CONF : BOOLEAN := true;
-		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8; 
+		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 4; 
 		PTP_IN_SOFTWARE : BOOLEAN := false
 	);
 	PORT

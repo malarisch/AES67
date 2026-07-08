@@ -27,6 +27,7 @@ ENTITY aes67_top IS
     	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
 
     	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
+		PHY_TYPE : STRING := "UNKNOWN";
 		
 
 		
@@ -301,8 +302,13 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
 end generate;
 
 
+no_audio_tx_gen : if (TX_CHANNELS = 0) generate
+eth_tx_en_rtp <= '0';
+eth_tx_req_rtp <= '0';
+eth_tx_data_rtp <= (others => '0');
 
-
+end generate;
+audiotx_gen: if (TX_CHANNELS /= 0) generate
 audiotx_inst: entity work.audio_tx_module
 GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			global_channel_count => TX_CHANNELS,
@@ -350,7 +356,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 tx_data_o => eth_tx_data_rtp,
 		 mac_speed_i => mac_speed);
 
-
+end generate;
 
 mac_linkup_o <= mac_linkup;
 
@@ -525,7 +531,8 @@ ethernet_top_inst: entity work.ethernet_top
  GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
  MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
  ETHERNET_TYPE => ETHERNET_TYPE,
- PTP_IN_SOFTWARE => PTP_IN_SOFTWARE)
+ PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+ PHY_TYPE => PHY_TYPE)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,

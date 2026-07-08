@@ -25,7 +25,7 @@ entity litex_eth_buffer_bridge is
     -- RX ring buffer size in bytes. MUST be a power of two and >= 2048 so the
     -- byte pointers wrap naturally and any single entry (max frame + header +
     -- trailer) always fits in the contiguous address space of one wrap window.
-    RX_RING_SIZE : integer := 8192
+    RX_RING_SIZE : integer := 2048
   );
   port (
     -- ================================================================

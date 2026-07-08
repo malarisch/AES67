@@ -42,7 +42,8 @@ generic (
     TDM_BCLK_MULT : INTEGER := 256;
     TDM_I2S_MODE : BOOLEAN := false;
     TDM_FSCLK_50DUTY : BOOLEAN := false;
-    PTP_IN_SOFTWARE : BOOLEAN := false
+    PTP_IN_SOFTWARE : BOOLEAN := false;
+    PHY_TYPE : STRING := "UNKNOWN"
 
 
 
@@ -131,7 +132,8 @@ generic (
     spibone_mosi : in std_logic := '0';
 	spibone_irq_o : out std_logic := '1';
   uartbone_rx : IN STD_LOGIC :='0';
-  uartbone_tx : OUT STD_LOGIC :='0'
+  uartbone_tx : OUT STD_LOGIC :='0';
+  dbg_mac_tx_clk_o : OUT STD_LOGIC
 	);
 END soc_top;
 
@@ -306,7 +308,8 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
     TDM_BCLK_MULT => TDM_BCLK_MULT,
-    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+    PHY_TYPE => PHY_TYPE
   )
   port map (
     rst_n_i => rst_n_i,
@@ -342,7 +345,8 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     aes67_wb_err => aes67_wb_err,
     aes67_wb_sel => aes67_wb_sel,
     aes67_wb_stb => aes67_wb_stb,
-    aes67_wb_we => aes67_wb_we
+    aes67_wb_we => aes67_wb_we,
+    dbg_mac_tx_clk_o => dbg_mac_tx_clk_o
   );
 
 

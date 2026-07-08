@@ -9,7 +9,8 @@ entity ethernet_top is
     MIIM_CLOCK_DIVIDER : POSITIVE := 50;
     MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
     ETHERNET_TYPE : STRING := "RGMII";
-    PTP_IN_SOFTWARE: BOOLEAN := false
+    PTP_IN_SOFTWARE: BOOLEAN := false;
+    PHY_TYPE : STRING := "UNKNOWN"
   );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
@@ -116,7 +117,7 @@ architecture rtl of ethernet_top is
     SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
     
 begin
-  mac_speed_override <= SPEED_100MBPS WHEN ETHERNET_TYPE = "RMII" else SPEED_UNSPECIFIED;
+  mac_speed_override <= SPEED_100MBPS WHEN ETHERNET_TYPE = "RMII" OR ETHERNET_TYPE = "MII" else SPEED_UNSPECIFIED;
   is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
   is_mcu_pkt_tog_o <= is_mcu_pkt_tog_done when mac_speed = b"01" else is_mcu_pkt_tog_receive;
 
@@ -202,8 +203,9 @@ b2v_yol_mac : entity work.ethernet
 GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
 			MIIM_DISABLE => false,
 			MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
-			MIIM_POLL_WAIT_TICKS => 1000000,
-			MIIM_RESET_WAIT_TICKS => 1250000
+			MIIM_POLL_WAIT_TICKS => 10000,
+			MIIM_RESET_WAIT_TICKS => 125000,
+      PHY_TYPE => PHY_TYPE
 			)
 PORT MAP(clock_125_i => enet_clk_i,
 		 reset_i => mac_reset_i,

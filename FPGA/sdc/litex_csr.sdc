@@ -49,8 +49,6 @@ set_false_path -from * -to [get_ports {uart0_tx}]
 set_false_path -from [get_ports {uart0_rx}] -to *
 set_false_path -from * -to [get_ports {i2c0_scl i2c0_sda}]
 set_false_path -from [get_ports {i2c0_scl i2c0_sda}] -to *
-set_false_path -from * -to [get_ports {i2c1_scl i2c1_sda}]
-set_false_path -from [get_ports {i2c1_scl i2c1_sda}] -to *
 
 # Note: the adda_nRST output port is currently commented out in topevalkit.vhd
 # (driven internally as aes67_ctrl_adda_nrst but not routed to a pin). Re-add a
