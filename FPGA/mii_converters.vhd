@@ -173,8 +173,8 @@ begin
     phy_mii_enet_tx_d <= mii_txd_i(3 downto 0);
     phy_mii_enet_tx_en <= mii_tx_en_i;
     phy_mii_enet_tx_clk <= phy_mii_enet_tx_clk_i;
-    phy_clk_rx_o <= phy_mii_enet_tx_clk_i;
-    phy_clk_tx_o <= phy_mii_enet_rx_clk;
+    phy_clk_tx_o <= phy_mii_enet_tx_clk_i;
+    phy_clk_rx_o <= phy_mii_enet_rx_clk;
   end generate;
   rmiigen : if (ethernet_type = "RMII" and (platform = "ALTERA" or platform = "LATTICE")) generate
 

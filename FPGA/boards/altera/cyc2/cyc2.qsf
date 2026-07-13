@@ -132,7 +132,6 @@ set_location_assignment PIN_45 -to bclk_adc
 set_location_assignment PIN_46 -to fs_ext
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
-set_global_assignment -name SIGNALTAP_FILE output_files/stp1.stp
 set_global_assignment -name ENABLE_INIT_DONE_OUTPUT ON
 set_global_assignment -name USE_CONFIGURATION_DEVICE ON
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
@@ -188,4 +187,5 @@ set_location_assignment PIN_191 -to dbg_o[3]
 set_location_assignment PIN_192 -to dbg_o[2]
 set_location_assignment PIN_193 -to dbg_o[1]
 set_location_assignment PIN_195 -to dbg_o[0]
+set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-STATED"
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

@@ -129,17 +129,13 @@ begin
 	 bclk_adc <= bclk;
 	 bclk_dac <= bclk;
 	 txen(0) <= phy_txen;
-	 txen(1) <= phy_txen;
-	 txen(2) <= phy_txen;
-	 
-     txen(3) <= phy_txen;
 	 phy0tx <= phy_tx;
 	 phy1tx <= phy_tx;
 	 phy2tx <= phy_tx;
 	 phy3tx <= phy_tx;
 	 phy_rxdv <= crsdv(0); -- or crsdv(1) or crsdv(2) or crsdv(3);
 	 phy_rx <= phy0rx(0) & phy0rx(1) & phy0rx(2) &phy0rx(3); -- or phy1rx or phy2rx or phy3rx;
-     dbg_o <= txclk_i & dbg_mac_tx_clk_o & phy_txen & phy_rx & phy_rxdv;
+     dbg_o <= phy_rx & phy_tx;
     uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
 		  spictrl_miso <= miso;
     end generate;

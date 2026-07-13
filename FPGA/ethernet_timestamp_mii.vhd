@@ -133,14 +133,12 @@ end generate;
                         rmii_sm <= s_Wait1;
                     end if;
                 when s_Wait1 =>
-                    if mii_in = x"5" then
-                        rmii_sm <= s_Wait2;
-                    end if;
-                when s_Wait2 =>
-                    if (mii_in = x"D" and mii_data_prev = x"5") then
+                    if (mii_in = "1101") then
                         sof_tog <= not sof_tog;
                         rmii_sm <= s_Idle;
                     end if;
+                when s_Wait2 =>
+                    rmii_sm <= s_Idle;
                 when s_Wait3 =>
                     rmii_sm <= s_Idle;
                 when others => 
