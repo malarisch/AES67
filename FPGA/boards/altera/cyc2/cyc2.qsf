@@ -48,7 +48,7 @@ set_global_assignment -name MAX_CORE_JUNCTION_TEMP 85
 set_global_assignment -name ERROR_CHECK_FREQUENCY_DIVISOR 1
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
 set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
-set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVCMOS"
+set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVTTL"
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
@@ -56,8 +56,6 @@ set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 set_global_assignment -name VHDL_SHOW_LMF_MAPPING_MESSAGES OFF
 set_location_assignment PIN_131 -to rxclk_i
 set_location_assignment PIN_129 -to txclk_i
-set_location_assignment PIN_12 -to tdm_in0
-set_location_assignment PIN_208 -to tdm_out0
 set_location_assignment PIN_41 -to spictrl_clk
 set_location_assignment PIN_39 -to spictrl_cs
 set_location_assignment PIN_37 -to spictrl_irq
@@ -130,10 +128,13 @@ set_location_assignment PIN_31 -to fs_adc
 set_location_assignment PIN_44 -to bclk_dac
 set_location_assignment PIN_45 -to bclk_adc
 set_location_assignment PIN_46 -to fs_ext
-set_global_assignment -name ENABLE_SIGNALTAP ON
+set_global_assignment -name ENABLE_SIGNALTAP OFF
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
 set_global_assignment -name ENABLE_INIT_DONE_OUTPUT ON
-set_global_assignment -name USE_CONFIGURATION_DEVICE ON
+set_global_assignment -name USE_CONFIGURATION_DEVICE OFF
+# RBF for MCU-hosted Passive-Serial configuration (ESP32 fpga_ps driver,
+# CONFIG_AES67_FPGA_PS_BITSTREAM points at output_files/cyc2.rbf)
+set_global_assignment -name GENERATE_RBF_FILE ON
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
 set_global_assignment -name RESERVE_ASDO_AFTER_CONFIGURATION "AS INPUT TRI-STATED"
 set_location_assignment PIN_94 -to phy0tx[3]
@@ -187,5 +188,19 @@ set_location_assignment PIN_191 -to dbg_o[3]
 set_location_assignment PIN_192 -to dbg_o[2]
 set_location_assignment PIN_193 -to dbg_o[1]
 set_location_assignment PIN_195 -to dbg_o[0]
+set_location_assignment PIN_63 -to mclk
+set_location_assignment PIN_12 -to tdm_out[0]
+set_location_assignment PIN_13 -to tdm_out[1]
+set_location_assignment PIN_15 -to tdm_out[2]
+set_location_assignment PIN_14 -to tdm_out[3]
+set_global_assignment -name ON_CHIP_BITSTREAM_DECOMPRESSION OFF
+set_global_assignment -name GENERATE_JAM_FILE ON
+set_global_assignment -name GENERATE_JBC_FILE ON
+set_global_assignment -name GENERATE_TTF_FILE ON
+set_global_assignment -name GENERATE_SVF_FILE ON
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS_NO_OUTPUT_GND "AS INPUT TRI-STATED"
+set_location_assignment PIN_208 -to tdm_in[0]
+set_location_assignment PIN_5 -to tdm_in[1]
+set_location_assignment PIN_6 -to tdm_in[2]
+set_location_assignment PIN_8 -to tdm_in[3]
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

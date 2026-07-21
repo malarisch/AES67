@@ -36,7 +36,7 @@ architecture Behavioral of ethernet_timestamp_mii is
     signal sof_tog_i_prev : std_logic := '0';
 
     signal PIPELINE_LATENCY : integer := 3*SYS_CLK_NS_PER_TICK;
-    signal MII_LATENCY : integer := (MII_CLK_NS_PER_TICK/2); -- 3 Sys Clocks for CDC, Half of a Mii clock to account for Asynchronus clock latency
+    signal MII_LATENCY : integer := (MII_CLK_NS_PER_TICK/2) + MII_CLK_NS_PER_TICK; -- 3 Sys Clocks for CDC, Half of a Mii clock to account for Asynchronus clock latency
 
     signal s_reg : UNSIGNED(3 downto 0);
     signal stamp_valid : std_logic := '0';

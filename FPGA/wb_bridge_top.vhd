@@ -24,7 +24,6 @@ generic (
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
 		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		AUDIO_RX_TDM_CHANNELS : natural  := 8;
 
 
         TX_MAX_STREAMS : natural := 8;
@@ -33,15 +32,14 @@ generic (
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
 		AUDIO_TX_TDM_INPUTS : natural := 2;
-		AUDIO_TX_TDM_CHANNELS : natural  := 8;
 
 		USE_EXTERNAL_PLL : BOOLEAN := false;
 		ENABLE_METERING: BOOLEAN := false;
         PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-        TDM_BCLK_MULT : INTEGER := 256;
         PTP_IN_SOFTWARE : BOOLEAN := false;
-        PHY_TYPE : STRING
+        PHY_TYPE : STRING;
 
+        AUDIO_TDM_CONFIG : t_audio_clock_cfg
 	);
 	
 	PORT
@@ -149,16 +147,14 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
     AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
     AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    AUDIO_RX_TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS,
     AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
     AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-    TDM_BCLK_MULT => TDM_BCLK_MULT,
     PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
-    PHY_TYPE => PHY_TYPE
+    PHY_TYPE => PHY_TYPE,
+    AUDIO_TDM_CONFIG => AUDIO_TDM_CONFIG
 )
  port map(
     sys_clk_125MHz_i => sys_clk_125MHz,

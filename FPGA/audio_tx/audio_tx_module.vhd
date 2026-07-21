@@ -13,7 +13,7 @@ ENTITY audio_tx_module IS
 			-- TDM serial input frontend (forwarded to tx_sample_buffer)
 			TDM_INPUT : BOOLEAN := true;
 			TDM_INPUTS : INTEGER := 2;
-			TDM_CHANNELS : INTEGER := 8
+			TDM_CONFIG : t_audio_clock_io_cfg
 	);
 	PORT
 	(
@@ -104,7 +104,7 @@ GENERIC MAP(bytes_per_sample => bytes_per_sample,
 			ENABLE_METERING => ENABLE_METERING,
 			TDM_INPUT => TDM_INPUT,
 			TDM_INPUTS => TDM_INPUTS,
-			TDM_CHANNELS => TDM_CHANNELS
+			TDM_CONFIG => TDM_CONFIG
 			)
 PORT MAP(sys_clk => sys_clk,
 		 reset_n => rst_n,

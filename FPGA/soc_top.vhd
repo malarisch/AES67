@@ -25,7 +25,7 @@ generic (
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
 		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		AUDIO_RX_TDM_CHANNELS : natural  := 8;
+		
 
 
         TX_MAX_STREAMS : natural := 8;
@@ -34,14 +34,13 @@ generic (
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
 		AUDIO_TX_TDM_INPUTS : natural := 2;
-		AUDIO_TX_TDM_CHANNELS : natural  := 8;
-
-		USE_EXTERNAL_PLL : BOOLEAN := false;
+		
+    AUDIO_TDM_CONFIG : t_audio_clock_cfg;
+		
+    USE_EXTERNAL_PLL : BOOLEAN := false;
 		ENABLE_METERING: BOOLEAN := false;
     PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-    TDM_BCLK_MULT : INTEGER := 256;
-    TDM_I2S_MODE : BOOLEAN := false;
-    TDM_FSCLK_50DUTY : BOOLEAN := false;
+    
     PTP_IN_SOFTWARE : BOOLEAN := false;
     PHY_TYPE : STRING := "UNKNOWN"
 
@@ -103,7 +102,9 @@ generic (
 		-- audio clocks outputs
 		audioclk_mclk_o :  OUT  STD_LOGIC;
 		audioclk_bclk_o : OUT STD_LOGIC;
-		audioclk_lrclk_o :  OUT  STD_LOGIC;
+		audioclk_lrclk_dac_o :  OUT  STD_LOGIC;
+    audioclk_lrclk_adc_o : OUT STD_LOGIC;
+    audioclk_lrclk_ext_o : OUT STD_LOGIC;
     
 		
 
@@ -274,12 +275,26 @@ signal audioclocks : t_audio_clocks;
 signal selected_audio_clock : t_audio_clocks_selected;
 begin
 
-  audioclk_mclk_o <= audioclocks.mclk WHEN TDM_BCLK_MULT /= 64 ELSE audioclocks.clk_256fs.bclk;
-  audioclk_bclk_o <= selected_audio_clock.bclk;
-  audioclk_lrclk_o <= audioclocks.fsclk_50 when TDM_I2S_MODE = false and TDM_FSCLK_50DUTY = true
-else selected_audio_clock.fsclk_i2s_50 when TDM_I2S_MODE = true and TDM_FSCLK_50DUTY = true
-  else selected_audio_clock.fsclk_tdm when TDM_I2S_MODE = false and TDM_FSCLK_50DUTY = false
-    else selected_audio_clock.fsclk_i2s_tdm when TDM_I2S_MODE = true and TDM_FSCLK_50DUTY = false;
+  audioclk_mclk_o <= audioclocks.mclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_24_57
+                ELSE audioclocks.clk_256fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_12_28
+                ELSE audioclocks.clk_128fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_06_14
+                ELSE audioclocks.clk_64fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_03_07;
+                
+  audioclk_bclk_o <= audioclocks.mclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_24_57
+                ELSE audioclocks.clk_256fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_12_28
+                ELSE audioclocks.clk_128fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_06_14
+                ELSE audioclocks.clk_64fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_03_07;
+  
+  audioclk_lrclk_dac_o <= audioclocks.fsclk_50 when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = false
+else selected_audio_clock.fsclk_i2s_50_dac when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = false
+  else selected_audio_clock.fsclk_tdm when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = true
+    else selected_audio_clock.fsclk_i2s_tdm when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = true;
+  audioclk_lrclk_adc_o <= audioclocks.fsclk_50 when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = false
+else selected_audio_clock.fsclk_i2s_50 when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = false
+  else selected_audio_clock.fsclk_tdm when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = true
+    else selected_audio_clock.fsclk_i2s_tdm when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = true;
+
+      audioclk_lrclk_ext_o <= audioclocks.fsclk_50;
 wb_bridge_top_inst : entity work.wb_bridge_top
   generic map (
     clk_in_speed => clk_in_speed,
@@ -296,20 +311,18 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
     RX_BYTE_DEPTH => RX_BYTE_DEPTH,
     AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    AUDIO_RX_TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS,
     TX_MAX_STREAMS => TX_MAX_STREAMS,
     TX_CHANNELS => TX_CHANNELS,
     TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
     AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
     TX_BYTE_DEPTH => TX_BYTE_DEPTH,
     AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
     PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-    TDM_BCLK_MULT => TDM_BCLK_MULT,
     PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
-    PHY_TYPE => PHY_TYPE
+    PHY_TYPE => PHY_TYPE,
+    AUDIO_TDM_CONFIG => AUDIO_TDM_CONFIG
   )
   port map (
     rst_n_i => rst_n_i,

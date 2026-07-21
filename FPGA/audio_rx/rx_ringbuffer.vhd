@@ -13,13 +13,9 @@ entity rx_ringbuffer is
         ENABLE_METERING: BOOLEAN := true;
         PARALLEL_OUT: BOOLEAN := true;
         TDM_OUTPUTS:  integer := 2; -- amount of output pins
-        TDM_CHANNELS : integer := 8; -- tdm format, eg. 2, 8, 16
+        TDM_CONFIG : t_audio_clock_io_cfg;
 
-        -- Simulation-only backdoor into sample_ram. When false (the default,
-        -- and the only synthesizable value) the dbg_* ports are unused and
-        -- the extra logic optimizes away. When true a testbench can write
-        -- known data into sample_ram and read it back to test the packet
-        -- parser and the playout paths independently. See rx_ringbuffer_tb.
+
         SIM_SAMPLE_RAM_BACKDOOR : boolean := false
 
         
@@ -164,6 +160,7 @@ architecture Behavioral of rx_ringbuffer is
     signal metering_clear_i_sync1 : std_logic := '0';
     signal metering_clear_i_sync2 : std_logic := '0';
     signal metering_clear_last : std_logic := '0';
+    signal zfs50_tdm : std_logic := '0'; -- fsclk_i2s_50 edge detect (TDM read-pointer latch)
     
 
     -- tdm output signals
@@ -171,7 +168,7 @@ architecture Behavioral of rx_ringbuffer is
     signal tdm_byte_latch  : t_tdm_latch := (others => (others => '0')); -- driving the serial output
     signal tdm_byte_shadow : t_tdm_latch := (others => (others => '0')); -- pre-fetched next byte
     signal tdm_channel_bit_counter : unsigned(4 downto 0) := (others => '0');
-    signal tdm_channel_counter : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
+    signal tdm_channel_counter : unsigned(clog2(TDM_CONFIG.tdm_channels)-1 downto 0) := (others => '0');
 
     type t_tdm_fetch_state is (tfs_idle, tfs_addr_wait, tfs_capture,
                                tfs_prime_wait, tfs_prime_cap);
@@ -180,7 +177,7 @@ architecture Behavioral of rx_ringbuffer is
 
     signal tdm_byte_in_slot   : unsigned(1 downto 0) := (others => '0');
     -- Channel that the prefetch is currently building.
-    signal tdm_fetch_ch       : unsigned(clog2(TDM_CHANNELS)-1 downto 0) := (others => '0');
+    signal tdm_fetch_ch       : unsigned(clog2(TDM_CONFIG.tdm_channels)-1 downto 0) := (others => '0');
     signal tdm_byte_tick    : std_logic := '0';  -- pulse: start prefetching next byte
     signal tdm_commit_tick  : std_logic := '0';  -- pulse: copy shadow -> latch
     signal tdm_byte_off     : unsigned(1 downto 0) := (others => '0'); -- captured offset for in-flight burst
@@ -630,18 +627,27 @@ parellel_out_proc_gen: if (PARALLEL_OUT = true) generate
 end generate;
 
 tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
-    
-    sample_rd_ptr <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
 
-    ---process (sys_clk) begin
-    --    if rising_edge(sys_clk) then
-    --         if fs_clk_50duty_i = '0' and fs_clk_50duty_sync = '1' then -- latch stable media clock at falling edge of 50 percent duty cycle
-    --            sample_rd_ptr_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
-    --         elsif fs_clk_50duty_i = '1' and fs_clk_50duty_sync = '0' then
-    --            sample_rd_ptr <= sample_rd_ptr_latch;
-    --         end if;
-    --    end if;
-    --end process;
+    -- Read-pointer latching. media_clock_i must NOT be used combinationally
+    -- here: it is derived from the wallclock and steps once per sample right
+    -- around the frame boundary (the NCO generating fs/bclk is servo-pulled
+    -- onto it). That step lands between the channel-0 MSB prime (at the fs
+    -- edge) and the channel-0 byte fetches, tearing channel 0's sample apart
+    -- (MSB from sample N, mid/LSB from N+1) -> distortion on the first TDM
+    -- channel whenever signal is present. So: latch the pointer mid-frame
+    -- (falling edge of the 50%-duty frame clock, half a frame away from the
+    -- step) and commit it at the frame-sync edge, so one whole frame reads
+    -- one consistent sample.
+    process (sys_clk) begin
+        if rising_edge(sys_clk) then
+            zfs50_tdm <= audioclocks_i.fsclk_i2s_50;
+            if audioclocks_i.fsclk_i2s_50 = '0' and zfs50_tdm = '1' then
+                sample_rd_ptr_latch <= unsigned(media_clock_i(SAMPLE_IDX_BITS - 1 downto 0)) & to_unsigned(0, SAMPLE_SHIFT);
+            elsif audioclocks_i.fsclk_i2s_tdm = '1' and zaudio_sync = '0' then
+                sample_rd_ptr <= sample_rd_ptr_latch;
+            end if;
+        end if;
+    end process;
 
 
     -- Counters and ticks.
@@ -686,13 +692,15 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
     -- Commit at bit_counter=7 swaps the latch right before that edge.
     --
     -- byte_in_slot is initialised to 3 so that the *first* byte_tick after
-    -- frame sync wraps to 0. With the linear RAM slot layout (offset 0=MSB,
-    -- 1=mid, 2=LSB, 3=pad) the RAM offset == byte_in_slot, so the wire carries
-    -- MSB, mid, LSB, pad in that time order, which matches the datasheet.
+    -- frame sync wraps to 0. byte_in_slot tracks the byte currently on the
+    -- wire, so the prefetch must read one byte ahead: with the linear RAM
+    -- slot layout (offset 0=MSB, 1=mid, 2=LSB, 3=pad) the RAM offset is
+    -- byte_in_slot + 1 (the +1 in the address computations below). The wire
+    -- then carries MSB, mid, LSB, pad in time order, matching the datasheet.
     tdm_fetch_proc: process(sys_clk)
         variable v_ch_global : integer range 0 to global_channel_count - 1;
         variable v_next_byte_in_slot : unsigned(1 downto 0);
-        variable v_next_ch           : unsigned(clog2(TDM_CHANNELS)-1 downto 0);
+        variable v_next_ch           : unsigned(clog2(TDM_CONFIG.tdm_channels)-1 downto 0);
         variable v_off               : unsigned(1 downto 0);
     begin
         if rising_edge(sys_clk) then
@@ -708,12 +716,13 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                         end if;
                         tdm_byte_in_slot <= v_next_byte_in_slot;
                         tdm_fetch_ch     <= v_next_ch;
-                        -- RAM byte offset == position in slot: linear 0..3.
+                        -- RAM byte offset = position in slot + 1 (prefetch
+                        -- runs one byte ahead of the wire, see header comment).
                         v_off := v_next_byte_in_slot;
                         tdm_byte_off <= v_off;
 
                         tdm_fetch_pin_idx <= 0;
-                        v_ch_global := 0 * TDM_CHANNELS + to_integer(v_next_ch);
+                        v_ch_global := 0 * TDM_CONFIG.tdm_channels + to_integer(v_next_ch);
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
                             + resize(v_off, ADDR_BITS) + 1;
@@ -730,12 +739,13 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                         tdm_fetch_state <= tfs_idle;
                     else
                         tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
-                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CHANNELS + to_integer(tdm_fetch_ch);
-                        -- Linear slot layout: RAM offset == position in slot.
-                        -- offset 0,1,2,3 = MSB, mid, LSB, pad. Same offset for every pin.
+                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CONFIG.tdm_channels + to_integer(tdm_fetch_ch);
+                        -- Same +1 as the pin-0 fetch in tfs_idle: the prefetch
+                        -- bookkeeping lags one byte behind the wire, so the RAM
+                        -- offset is byte_in_slot + 1. Same offset for every pin.
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
-                            + resize(tdm_byte_off, ADDR_BITS);
+                            + resize(tdm_byte_off, ADDR_BITS) + 1;
                         tdm_fetch_state <= tfs_addr_wait;
                     end if;
 
@@ -749,8 +759,8 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                         tdm_fetch_state <= tfs_idle;
                     else
                         tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
-                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CHANNELS + 0;
-                        sample_rd_addr <= sample_rd_ptr
+                        v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CONFIG.tdm_channels + 0;
+                        sample_rd_addr <= sample_rd_ptr_latch
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS);
                         tdm_fetch_state <= tfs_prime_wait;
                     end if;
@@ -765,7 +775,10 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                 tdm_byte_in_slot  <= to_unsigned(3, 2);
                 tdm_fetch_ch      <= (others => '1');
                 tdm_fetch_pin_idx <= 0;
-                sample_rd_addr    <= sample_rd_ptr;      -- ch0, offset 0 (MSB)
+                -- ch0, offset 0 (MSB). Read the latch directly: sample_rd_ptr
+                -- is committed from it in this same cycle and would still
+                -- hold the previous frame's pointer here.
+                sample_rd_addr    <= sample_rd_ptr_latch;
                 tdm_fetch_state   <= tfs_prime_wait;
             end if;
         end if;
@@ -775,7 +788,7 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
     tdmoutgen : for i in 0 to TDM_OUTPUTS - 1 generate
             process (audioclocks_i.bclk)
             begin
-                if (rising_edge(audioclocks_i.bclk)) then
+                if (rising_edge(audioclocks_i.bclk) and TDM_CONFIG.data_is_valid_on_rising_bclk_edge = true) or (falling_edge(audioclocks_i.bclk) and TDM_CONFIG.data_is_valid_on_rising_bclk_edge = false) then
                 tdm_out(i) <= tdm_byte_latch(i)(7 - to_integer(tdm_channel_bit_counter(2 downto 0)));
                 end if;
             end process;
@@ -784,9 +797,6 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 end generate;
 
 
-    -- Dedicated sample_ram process (simple dual-port: sync write + sync read)
-    -- no_rw_check attribute tells Quartus read-during-write result is don't-care,
-    -- allowing M9K inference without undefined output on address collision
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then
@@ -802,9 +812,6 @@ end generate;
         end if;
     end process;
 
-    -- Simulation backdoor read port (testbench only). Separate 1-cycle-latency
-    -- read so a testbench can inspect sample_ram contents without disturbing
-    -- the playout read pointer. Disabled / optimized away in synthesis.
     sim_backdoor_rd_gen : if SIM_SAMPLE_RAM_BACKDOOR generate
         process(sys_clk)
         begin
@@ -835,8 +842,6 @@ end generate;
         end if;
     end process;
 
-    -- Pipeline register (separate process to not interfere with Block RAM inference)
-    -- Breaks timing path from RAM output to comparison logic
     process(sys_clk)
     begin
         if rising_edge(sys_clk) then

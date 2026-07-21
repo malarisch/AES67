@@ -2,6 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.ALL;
 
+use work.audioclks_pkg.all;
 entity tx_sample_buffer is
     generic
     (
@@ -15,7 +16,7 @@ entity tx_sample_buffer is
         -- TDM_INPUT=true : serial TDM demux integrated here; audio_in unused.
         TDM_INPUT  : boolean := false;
         TDM_INPUTS : integer := 2;  -- number of serial TDM data pins
-        TDM_CHANNELS : integer := 8; -- channels per TDM frame (32 bclk slots each)
+        TDM_CONFIG : t_audio_clock_io_cfg;
 
         -- Simulation-only backdoor into sample_ram (see rx_ringbuffer). Disabled
         -- / optimized away in synthesis.
@@ -136,7 +137,7 @@ architecture Behavioral of tx_sample_buffer is
 
     -- ===== TDM demux frontend signals (TDM_INPUT=true) =====
     -- bit/slot counters, clocked on bclk edges, reset on fs edge.
-    signal tdm_bit_counter     : unsigned(clog2(TDM_CHANNELS * SLOT_BYTES * 8) - 1 downto 0) := (others => '0'); -- 0..31 within a slot
+    signal tdm_bit_counter     : unsigned(clog2(TDM_CONFIG.tdm_channels * SLOT_BYTES * 8) - 1 downto 0) := (others => '0'); -- 0..31 within a slot
 
     type t_tdm_shift is array (0 to TDM_INPUTS - 1) of std_logic_vector(7 downto 0);
     signal tdm_shift : t_tdm_shift := (others => (others => '0'));
@@ -310,7 +311,7 @@ begin
             if reset_n = '0' then
                 tdm_bit_counter <= (others => '0');
                 tdm_shift <= (others => (others => '0'));
-            elsif rising_edge(bclk_sync_i) then
+            elsif (rising_edge(bclk_sync_i) and TDM_CONFIG.data_is_valid_on_rising_bclk_edge = true) or (falling_edge(bclk_sync_i) and TDM_CONFIG.data_is_valid_on_rising_bclk_edge = false) then
 
                 -- bclk falling edge: sample one bit per pin
                 --if (bclk_sync_i = '0' and zbclk = '1') then
@@ -332,7 +333,7 @@ begin
         ram_wr_addr <= to_integer(
                     media_clock_latch2 -- time index
                     & (tdm_bit_counter(tdm_bit_counter'length -1 downto 5) -- channel index per tdm
-                     + (demux_pin * TDM_CHANNELS)) -- add the corresponding demux offset
+                     + (demux_pin * TDM_CONFIG.tdm_channels)) -- add the corresponding demux offset
                     & tdm_bit_counter(4 downto 3)); -- byte index
                     
         tdm_write_proc: process(sys_clk, reset_n)

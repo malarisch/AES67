@@ -33,18 +33,16 @@ ENTITY aes67_top IS
 		
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
 		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		AUDIO_RX_TDM_CHANNELS : natural  := 8;
 
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
 		AUDIO_TX_TDM_INPUTS : natural := 1;
-		AUDIO_TX_TDM_CHANNELS : natural  := 8;
 
 		USE_EXTERNAL_PLL : BOOLEAN := true;
 		ENABLE_METERING: BOOLEAN := true;
 		STATIC_PTP_CONF: BOOLEAN := true;
 		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-		TDM_BCLK_MULT : INTEGER := 256;
-		PTP_IN_SOFTWARE : BOOLEAN := false
+		PTP_IN_SOFTWARE : BOOLEAN := false;
+		AUDIO_TDM_CONFIG : t_audio_clock_cfg
 
 	);
 	PORT
@@ -271,7 +269,9 @@ mac_rx_clock_o <= mac_rx_clock;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
-selected_audio_clock <= audioclks.clk_256fs when TDM_BCLK_MULT = 256 else audioclks.clk_128fs when TDM_BCLK_MULT = 128 else audioclks.clk_64fs WHEN TDM_BCLK_MULT = 64;
+selected_audio_clock <= audioclks.clk_256fs when AUDIO_TDM_CONFIG.bclk_speed = audio_clock_12_28 
+					else audioclks.clk_128fs when AUDIO_TDM_CONFIG.bclk_speed = audio_clock_06_14 else audioclks.clk_64fs
+						WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_03_07;
 mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 --	clk_512fs <= pll_512fs_i;
 --	audioclocks_inst: entity work.audioclock_generator
@@ -318,7 +318,7 @@ GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
 			-- TDM demux integrated unless the legacy parallel interface is forced.
 			TDM_INPUT => not AUDIO_TX_USE_PARALLEL_INTERFACE,
 			TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-			TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS
+			TDM_CONFIG => AUDIO_TDM_CONFIG.adc_cfg
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ctrl_plane_clk => clk_mcu_i,
@@ -476,7 +476,7 @@ end generate;
 
 
 
-
+rx_gen: if (RX_CHANNELS /= 0) generate
 rx_ringbuffer_inst: entity work.rx_ringbuffer
 GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			bytes_per_sample => RX_BYTE_DEPTH,
@@ -485,7 +485,7 @@ GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
 			ENABLE_METERING => ENABLE_METERING,
 			PARALLEL_OUT => AUDIO_RX_USE_PARALLEL_INTERFACE,
 			TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-			TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS
+			TDM_CONFIG => AUDIO_TDM_CONFIG.dac_cfg
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => audiorx_reset_n,
@@ -515,7 +515,14 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 metering_clear_i => audio_meter_clear_i,
 		 metering_clip_o => audio_meter_rx_clip_o,
 		 metering_signal_o => audio_meter_rx_signal_o);
-
+end generate;
+no_rx_gen: if rx_channels = 0 generate
+	audio_meter_rx_clip_o <= (others => '0');
+	audio_meter_rx_signal_o <= (others => '0');
+	rx_sample_register <= (others => '0');
+	tdm8out_o <= (others => '0');
+	rtp_ram_addr <= (others => '0');
+end generate;
 
 
 

@@ -482,11 +482,15 @@ begin
         if rising_edge(clk) then
             cntsub := mclk_cnt + 2;
             audioclks_reg.clk_256fs.fsclk_i2s_50 <= not cntsub(8);
+            
+
             if (cntsub = 0) then
                 audioclks_reg.clk_256fs.fsclk_i2s_tdm <= '1';
             elsif (cntsub = 2) then
                 audioclks_reg.clk_256fs.fsclk_i2s_tdm <= '0';
             end if;
+            cntsub := mclk_cnt + 3;
+            audioclks_reg.clk_256fs.fsclk_i2s_50_dac <= not cntsub(8);
         end if;
     end process;
     process (clk)
@@ -500,6 +504,8 @@ begin
             elsif (cntsub = 4) then
                 audioclks_reg.clk_128fs.fsclk_i2s_tdm <= '0';
             end if;
+            cntsub := mclk_cnt + 6;
+            audioclks_reg.clk_128fs.fsclk_i2s_50_dac <= not cntsub(8);
         end if;
     end process;
     process (clk)
@@ -513,6 +519,8 @@ begin
             elsif (cntsub = 8) then
                 audioclks_reg.clk_64fs.fsclk_i2s_tdm <= '0';
             end if;
+             cntsub := mclk_cnt + 12;
+            audioclks_reg.clk_64fs.fsclk_i2s_50_dac <= not cntsub(8);
         end if;
     end process;
     -- ============================================================

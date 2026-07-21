@@ -1,12 +1,10 @@
--- Cyclone 10 LP board top level
--- Instantiates aes67_top, litex_soc, litex_eth_buffer_bridge,
--- RMII Interface; SDRAM
 
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
 
 use work.miim_types.all;
+use work.audioclks_pkg.all;
 
 ENTITY cyc2top IS
 	generic (
@@ -18,40 +16,36 @@ ENTITY cyc2top IS
 		ethernet_type	 : string := "MII"; -- RMII; RGMII
 		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 2; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
+		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false;
 
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         
-		TX_MAX_STREAMS : natural := 1;
-		RX_MAX_STREAMS : natural := 2;
+		TX_MAX_STREAMS : natural := 8;
+		RX_MAX_STREAMS : natural := 1;
 		
 		
 		
 		  
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 10;
+    	MIIM_CLOCK_DIVIDER : POSITIVE := 25;
 
     	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
 		
 
-		RX_CHANNELS		: natural := 2;
+		RX_CHANNELS		: natural := 0;
         
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
-		AUDIO_RX_TDM_OUTPUTS : natural := 1;
+		AUDIO_RX_TDM_OUTPUTS : natural := 4;
 		AUDIO_RX_TDM_CHANNELS : natural  := 2;
 
         TX_CHANNELS		: natural := 2; -- must be multiple of two for i2s, multiple of 8 for tdm8
         
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
-		AUDIO_TX_TDM_INPUTS : natural := 1;
-		AUDIO_TX_TDM_CHANNELS : natural  := 2;
-        TDM_BCLK_MULT : INTEGER := 64;
-            TDM_I2S_MODE : BOOLEAN := false;
-    TDM_FSCLK_50DUTY : BOOLEAN := true;
+		AUDIO_TX_TDM_INPUTS : natural := 4;
     PTP_IN_SOFTWARE : BOOLEAN := true
 
 
@@ -64,12 +58,12 @@ ENTITY cyc2top IS
         fs_adc: OUT STD_LOGIC; -- lrclk
 		  fs_dac: OUT STD_LOGIC; -- lrclk
 		  fs_ext : OUT STD_LOGIC;
-        tdm_out0: OUT STD_LOGIC; -- tdm out
+        tdm_out: OUT STD_LOGIC_VECTOR(3 downto 0); -- tdm out
         bclk_adc: OUT STD_LOGIC; -- bclk
 		  bclk_dac : out std_logic;
         mclk: OUT STD_LOGIC; -- sclk
         
-        tdm_in0 : IN STD_LOGIC; -- n/c tdm in
+        tdm_in : IN STD_LOGIC_VECTOR(3 downto 0);
         mdc : OUT STD_LOGIC; -- mdc
         mdio : INOUT STD_LOGIC; --mdio
         rxclk_i : IN STD_LOGIC; -- refclk
@@ -91,7 +85,8 @@ ENTITY cyc2top IS
         spictrl_mosi : IN STD_LOGIC; -- spictrl mosi
         spictrl_miso : OUT STD_LOGIC; -- spictrl miso
         spictrl_irq : OUT STD_LOGIC; -- spictrl irq
-        dbg_o : out STD_LOGIC_VECTOR(7 downto 0)
+        dbg_o : out STD_LOGIC_VECTOR(7 downto 0);
+		  INIT_DONE : out STD_LOGIC
 	);
 END cyc2top;
 
@@ -103,8 +98,14 @@ END cyc2top;
 
 
 ARCHITECTURE bdf_type OF cyc2top IS
-signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);
-signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
+constant tdm_conf : t_audio_clock_cfg := (
+    mclk_speed => audio_clock_24_57,
+    bclk_speed => audio_clock_03_07,
+    dac_cfg => i2s_dac_config,
+    adc_cfg => i2s_adc_config
+    
+);
+signal tdm_out_reg : STD_LOGIC_VECTOR(3 downto 0);
 signal uart0_tx_reg : std_logic;
 signal uart0_rx_reg : std_logic;
 signal uart_ctrl_rx_reg : std_logic;
@@ -116,18 +117,17 @@ signal phy_rx : std_logic_vector(3 downto 0);
 signal phy_tx : std_logic_vector(3 downto 0);
 signal phy_rxdv : std_logic;
 signal phy_txen : std_logic;
+signal mclk_reg : std_logic;
 signal dbg_mac_tx_clk_o : std_logic;
 
 begin
+	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	tdm_in(0) <= tdm_in0;
-    tdm_out0 <= tdm_out(0);
+	tdm_out <= tdm_out_reg;
+	mclk <= mclk_reg;
 	 phy_rstn_o <= '1';
-	 fs_adc <= fs;
-	 fs_dac <= fs;
-	 fs_ext <= fs;
-	 bclk_adc <= bclk;
-	 bclk_dac <= bclk;
+	 bclk_adc <= not bclk;
+	 bclk_dac <= not bclk;
 	 txen(0) <= phy_txen;
 	 phy0tx <= phy_tx;
 	 phy1tx <= phy_tx;
@@ -135,7 +135,7 @@ begin
 	 phy3tx <= phy_tx;
 	 phy_rxdv <= crsdv(0); -- or crsdv(1) or crsdv(2) or crsdv(3);
 	 phy_rx <= phy0rx(0) & phy0rx(1) & phy0rx(2) &phy0rx(3); -- or phy1rx or phy2rx or phy3rx;
-     dbg_o <= phy_rx & phy_tx;
+     dbg_o <= mclk_reg & not bclk & fs & tdm_out_reg & '0';
     uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
 		  spictrl_miso <= miso;
     end generate;
@@ -156,22 +156,18 @@ begin
     AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
     RX_BYTE_DEPTH => RX_BYTE_DEPTH,
     AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    AUDIO_RX_TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS,
     TX_MAX_STREAMS => TX_MAX_STREAMS,
     TX_CHANNELS => TX_CHANNELS,
     TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
     AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
     TX_BYTE_DEPTH => TX_BYTE_DEPTH,
     AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
-    TDM_BCLK_MULT => TDM_BCLK_MULT,
-    TDM_FSCLK_50DUTY => TDM_FSCLK_50DUTY,
-    TDM_I2S_MODE => TDM_I2S_MODE,
     PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
 	 PTP_MOVING_AVERAGE_DEPTH => 1,
-    PHY_TYPE => "LXT973"
+    PHY_TYPE => "LXT973",
+    AUDIO_TDM_CONFIG => tdm_conf
   )
   port map (
     rst_n_i => '1',
@@ -194,9 +190,10 @@ begin
     hbus_clk0_n => open,
     pll_512fs_i => '0',
     --audioclk_512fs_o => AIN7,
-    audioclk_mclk_o => mclk,
+    audioclk_mclk_o => mclk_reg,
     audioclk_bclk_o => bclk,
-    audioclk_lrclk_o => fs,
+    audioclk_lrclk_adc_o => fs_adc,
+    audioclk_lrclk_dac_o => fs_dac,
     spibone_clk => spictrl_clk,
     spibone_cs_n => spictrl_cs,
     spibone_miso => miso,
@@ -205,7 +202,7 @@ begin
     uartbone_rx => uart_ctrl_rx_reg,
     uartbone_tx => uart_ctrl_tx_reg,
     tdm_in => tdm_in,
-    tdm_out => tdm_out,
+    tdm_out => tdm_out_reg,
     dbg_mac_tx_clk_o => dbg_mac_tx_clk_o
   );
 
