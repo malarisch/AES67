@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2026
- * SPDX-License-Identifier: Apache-2.0
- *
+
  * PTP control/monitoring HAL — one API for both PTP modes.
  *
  * The endpoint runs PTP either in the FPGA (hardware BMC + servo, monitored
@@ -67,6 +65,14 @@ struct ptp_ctrl_foreign {
 
 /** Snapshot the current PTP state from the active stack. */
 void ptp_ctrl_get_status(struct ptp_ctrl_status *st);
+
+/** Mode-invariant "wallclock is usable" flag, mirroring the gateware's
+ *  wallclock_locked (= is_leader OR servo_locked). In hardware mode this
+ *  is the FPGA status bit; in software mode the SW-PTP gateware never
+ *  builds the HW servo (the bit is stuck at 0), so it is derived from
+ *  the Zephyr stack: leader role, or follower with the offset inside the
+ *  lock window. Drives the display state and the audio output enable. */
+bool ptp_ctrl_wallclock_locked(void);
 
 /** Fill up to @p max foreign-master records; returns the count.
  *  Hardware mode returns 0 (the FPGA BMA keeps no exposed list). */

@@ -267,8 +267,6 @@ int lo_card_init(const struct device *i2c_dev)
 	 * 3. Release reset (GlbReg = NRST)
 	 * 4. Wait 500ms for boot
 	 *
-	 * The old LO firmware had this commented out, but MI card does it
-	 * and the DSP won't respond without a proper reset cycle.
 	 */
 
 	/* Step 1: Assert reset (hold DSP and DACs in reset) */

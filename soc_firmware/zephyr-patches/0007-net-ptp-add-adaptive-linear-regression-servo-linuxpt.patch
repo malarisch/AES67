@@ -1,0 +1,493 @@
+From 49193ee8ae5ec90bb7b4ae5aa5a1f7398a06503e Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Mon, 13 Jul 2026 23:06:46 +0200
+Subject: [PATCH] net: ptp: add adaptive linear-regression servo (linuxptp
+ linreg)
+
+Add a second clock servo next to the PI controller, selectable via a
+new Kconfig choice (PTP_SERVO_PI, the default, or PTP_SERVO_LINREG).
+
+The servo is a port of the linreg servo of the linuxptp project
+(linreg.c, Miroslav Lichvar): pairs of (uncorrected local time, remote
+time) are collected in a circular buffer, and for window sizes of 4 to
+64 samples a least-squares line is fitted. Its slope yields the
+frequency error, its intercept the phase error, and the window in use
+is the largest one with the smallest long-term prediction error.
+Compared to the PI servo it needs no gain tuning and adapts the
+averaging interval to the measurement noise automatically.
+
+The phase-correction term needs the Sync interval, so the port now
+reports the timeTransmitter's logMessageInterval to the clock via the
+new ptp_clock_sync_interval() before each synchronization.
+
+Deviations from the linuxptp original:
+- stepping stays in the existing step-threshold logic outside the
+  servo; a step fully resets the servo state, consistent with
+  clock_servo_reset() returning the PHC rate to nominal
+- samples are unweighted (Zephyr has no sample-weight source)
+
+The servo is fed the raw offset, not the moving-median-filtered one
+used by the step check and the PI controller: the median's ~half-window
+group delay inside the control loop turns linreg's one-interval phase
+correction into a full-scale limit cycle at the rate clamp (observed on
+hardware as the applied correction alternating between +/-524287 ppb at
+the 8 Hz AES67 sync rate; reproduced in closed-loop simulation, which
+locks to sub-microsecond offsets with the raw offset under identical
+noise and latency). The median keeps guarding the step and outlier
+logic.
+
+The PI gain options PTP_SERVO_KP/KI now depend on PTP_SERVO_PI.
+
+---
+ subsys/net/lib/ptp/Kconfig |  31 ++++
+ subsys/net/lib/ptp/clock.c | 304 ++++++++++++++++++++++++++++++++++++-
+ subsys/net/lib/ptp/clock.h |   9 ++
+ subsys/net/lib/ptp/port.c  |   2 +
+ 4 files changed, 340 insertions(+), 6 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/Kconfig b/subsys/net/lib/ptp/Kconfig
+index 1112b05505..75a1ca5fe2 100644
+--- a/subsys/net/lib/ptp/Kconfig
++++ b/subsys/net/lib/ptp/Kconfig
+@@ -281,8 +281,38 @@ config PTP_SYNC_LOG_INTERVAL
+ 	  when transmitted as multicast messages. The value is the converted
+ 	  to nanoseconds as follow: nanoseconds = (10^9) * 2^(value)
+ 
++choice PTP_SERVO
++	prompt "PTP clock servo"
++	default PTP_SERVO_PI
++	help
++	  Algorithm used to discipline the PTP Hardware Clock from the
++	  offset measured against the timeTransmitter.
++
++config PTP_SERVO_PI
++	bool "Proportional-integral controller"
++	help
++	  Classic PI servo: the frequency correction is the sum of a term
++	  proportional to the measured offset and an integral term that
++	  accumulates the residual drift. Gains are configured with
++	  PTP_SERVO_KP and PTP_SERVO_KI.
++
++config PTP_SERVO_LINREG
++	bool "Adaptive linear regression"
++	help
++	  Adaptive servo based on linear regression, modelled after the
++	  linreg servo of the linuxptp project. Offset samples are collected
++	  in windows of 4 to 64 points; frequency and phase error are taken
++	  from a least-squares fit over the window with the smallest
++	  long-term prediction error. Compared to the PI controller it needs
++	  no gain tuning and automatically adapts the averaging window to
++	  the measurement noise. Uses about 1 KiB of additional RAM for the
++	  sample history.
++
++endchoice
++
+ config PTP_SERVO_KP
+ 	int "PI servo proportional gain in thousandths"
++	depends on PTP_SERVO_PI
+ 	default 700
+ 	range 0 10000
+ 	help
+@@ -295,6 +325,7 @@ config PTP_SERVO_KP
+ 
+ config PTP_SERVO_KI
+ 	int "PI servo integral gain in thousandths"
++	depends on PTP_SERVO_PI
+ 	default 300
+ 	range 0 10000
+ 	help
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index 2a0a961ffe..7b71b13cf4 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -57,6 +57,9 @@ LOG_MODULE_REGISTER(ptp_clock, CONFIG_PTP_LOG_LEVEL);
+ /* Anti-windup bound for the PI integral term: integrating past the
+  * actuator's saturation point only delays recovery once the sign flips. */
+ #define PTP_SERVO_INTEGRAL_LIMIT_PPB 524287.0
++/* Largest |frequency correction| the PHC rate actuator can realize (the
++ * AES67 wallclock rate correction saturates at +/-524287 ppb). */
++#define PTP_SERVO_MAX_FREQ_PPB 524287.0
+ 
+ /**
+  * @brief PTP Clock structure.
+@@ -615,6 +618,7 @@ int ptp_clock_management_msg_process(struct ptp_port *port, struct ptp_msg *msg)
+ 	return state_decision_required;
+ }
+ 
++#if defined(CONFIG_PTP_SERVO_PI)
+ static double ptp_servo_pi(int64_t nanosecond_diff)
+ {
+ 	const double kp = (double)CONFIG_PTP_SERVO_KP / PTP_SERVO_GAIN_SCALE;
+@@ -631,12 +635,288 @@ static double ptp_servo_pi(int64_t nanosecond_diff)
+ 
+ 	return ppb;
+ }
++#endif /* CONFIG_PTP_SERVO_PI */
++
++#if defined(CONFIG_PTP_SERVO_LINREG)
++/**
++ * Adaptive servo based on linear regression, modelled after the linreg
++ * servo of the linuxptp project (linreg.c, Miroslav Lichvar).
++ *
++ * Pairs of (uncorrected local time, remote time) are collected in a circular
++ * buffer. For window sizes of 4 to 64 points a least-squares line is fitted;
++ * its slope is the frequency ratio between the remote clock and the free
++ * running local clock and its intercept the phase error at the reference
++ * point. The window actually used is the largest one whose long-term
++ * prediction error is smallest, so the averaging interval adapts to the
++ * measurement noise without any gain tuning.
++ *
++ * Unlike linuxptp, stepping the clock is handled outside the servo (by the
++ * step-threshold logic in clock_synchronize_with_delay()), samples are not
++ * weighted, and a step resets the servo state entirely - consistent with
++ * clock_servo_reset() returning the PHC rate to nominal.
++ */
++
++/* Window sizes used in the regression, as powers of 2 */
++#define LINREG_MAX_SIZE 6
++#define LINREG_MIN_SIZE 2
++#define LINREG_MAX_POINTS BIT(LINREG_MAX_SIZE)
++#define LINREG_NUM_RESULTS (LINREG_MAX_SIZE - LINREG_MIN_SIZE + 1)
++/* Smoothing factor used for the long-term prediction error */
++#define LINREG_ERR_SMOOTH 0.02
++/* Number of updates used for initialization of the prediction error */
++#define LINREG_ERR_INITIAL_UPDATES 10
++/* Maximum ratio of two prediction errors to be considered equal */
++#define LINREG_ERR_EQUALS 1.05
++
++/* Uncorrected local time (x) vs remote time (y) */
++struct linreg_point {
++	uint64_t x;
++	uint64_t y;
++};
++
++struct linreg_result {
++	/* Slope and intercept from the latest regression */
++	double slope;
++	double intercept;
++	/* Exponential moving average of the prediction error */
++	double err;
++	/* Number of initial err updates */
++	uint8_t err_updates;
++};
++
++static struct linreg_servo {
++	/* Circular buffer of points */
++	struct linreg_point points[LINREG_MAX_POINTS];
++	/* Current time in x, y */
++	struct linreg_point reference;
++	/* Number of stored points */
++	unsigned int num_points;
++	/* Index of the newest point */
++	unsigned int last_point;
++	/* Remainder from the last update of reference.x */
++	double x_remainder;
++	/* Local timestamp of the last update */
++	uint64_t last_update;
++	/* Regression results for all window sizes */
++	struct linreg_result results[LINREG_NUM_RESULTS];
++	/* Selected window size */
++	unsigned int size;
++	/* Frequency correction currently applied to the clock, in ppb
++	 * (positive speeds the clock up)
++	 */
++	double clock_freq;
++	/* Expected interval between updates, in seconds */
++	double update_interval;
++} linreg = {
++	.update_interval = 1.0,
++};
++
++static double linreg_fabs(double v)
++{
++	return v < 0.0 ? -v : v;
++}
++
++static void linreg_move_reference(int64_t x, int64_t y)
++{
++	struct linreg_result *res;
++	unsigned int i;
++
++	linreg.reference.x += (uint64_t)x;
++	linreg.reference.y += (uint64_t)y;
++
++	/* Update intercepts for the new reference */
++	for (i = LINREG_MIN_SIZE; i <= LINREG_MAX_SIZE; i++) {
++		res = &linreg.results[i - LINREG_MIN_SIZE];
++		res->intercept += (double)x * res->slope - (double)y;
++	}
++}
++
++static void linreg_update_reference(uint64_t local_ts)
++{
++	double x_interval;
++	int64_t y_interval;
++
++	if (linreg.last_update != 0ULL) {
++		y_interval = (int64_t)(local_ts - linreg.last_update);
++
++		/* Remove the applied frequency correction from the interval */
++		x_interval = (double)y_interval / (1.0 + linreg.clock_freq / 1e9);
++		x_interval += linreg.x_remainder;
++		linreg.x_remainder = x_interval - (double)(int64_t)x_interval;
++
++		linreg_move_reference((int64_t)x_interval, y_interval);
++	}
++
++	linreg.last_update = local_ts;
++}
++
++static void linreg_add_sample(int64_t offset)
++{
++	linreg.last_point = (linreg.last_point + 1U) % LINREG_MAX_POINTS;
++
++	linreg.points[linreg.last_point].x = linreg.reference.x;
++	linreg.points[linreg.last_point].y = linreg.reference.y - (uint64_t)offset;
++
++	if (linreg.num_points < LINREG_MAX_POINTS) {
++		linreg.num_points++;
++	}
++}
++
++static void linreg_regress(void)
++{
++	double x, y, y0, e, x_sum = 0.0, y_sum = 0.0, xy_sum = 0.0, x2_sum = 0.0;
++	unsigned int i = 0, l, n, size;
++	struct linreg_result *res;
++
++	y0 = (double)(int64_t)(linreg.points[linreg.last_point].y - linreg.reference.y);
++
++	for (size = LINREG_MIN_SIZE; size <= LINREG_MAX_SIZE; size++) {
++		n = 1U << size;
++		if (n > linreg.num_points) {
++			/* Not enough points for this window size */
++			break;
++		}
++
++		res = &linreg.results[size - LINREG_MIN_SIZE];
++
++		/* Update the moving average of the prediction error */
++		if (res->slope != 0.0) {
++			e = linreg_fabs(res->intercept - y0);
++			if (res->err_updates < LINREG_ERR_INITIAL_UPDATES) {
++				res->err *= res->err_updates;
++				res->err += e;
++				res->err_updates++;
++				res->err /= res->err_updates;
++			} else {
++				res->err += LINREG_ERR_SMOOTH * (e - res->err);
++			}
++		}
++
++		for (; i < n; i++) {
++			/* Iterate points from newest to oldest */
++			l = (LINREG_MAX_POINTS + linreg.last_point - i) % LINREG_MAX_POINTS;
++
++			x = (double)(int64_t)(linreg.points[l].x - linreg.reference.x);
++			y = (double)(int64_t)(linreg.points[l].y - linreg.reference.y);
++
++			x_sum += x;
++			y_sum += y;
++			xy_sum += x * y;
++			x2_sum += x * x;
++		}
++
++		/* Get new intercept and slope */
++		res->slope = (xy_sum - x_sum * y_sum / n) / (x2_sum - x_sum * x_sum / n);
++		res->intercept = (y_sum - res->slope * x_sum) / n;
++	}
++}
++
++static void linreg_update_size(void)
++{
++	struct linreg_result *res;
++	double best_err = 0.0;
++	unsigned int size, best_size = 0;
++
++	/* Find the largest window size with the smallest prediction error */
++	for (size = LINREG_MIN_SIZE; size <= LINREG_MAX_SIZE; size++) {
++		res = &linreg.results[size - LINREG_MIN_SIZE];
++		if ((best_size == 0U && res->slope != 0.0) ||
++		    (best_err * LINREG_ERR_EQUALS > res->err &&
++		     res->err_updates >= LINREG_ERR_INITIAL_UPDATES)) {
++			best_size = size;
++			best_err = res->err;
++		}
++	}
++
++	linreg.size = best_size;
++}
++
++static void linreg_reset(void)
++{
++	unsigned int i;
++
++	linreg.num_points = 0;
++	linreg.last_update = 0;
++	linreg.x_remainder = 0.0;
++	linreg.size = 0;
++	/* clock_servo_reset() returns the PHC rate to nominal */
++	linreg.clock_freq = 0.0;
++
++	for (i = 0; i < LINREG_NUM_RESULTS; i++) {
++		linreg.results[i].slope = 0.0;
++		linreg.results[i].err_updates = 0;
++	}
++}
++
++/* Returns the frequency correction to apply, in ppb (positive speeds the
++ * clock up). @offset is the measured offset from the timeTransmitter and
++ * @local_ts the ingress timestamp of the Sync message it was derived from.
++ */
++static double ptp_servo_linreg(int64_t offset, uint64_t local_ts)
++{
++	struct linreg_result *res;
++	unsigned int corr_interval;
++
++	linreg_update_reference(local_ts);
++	linreg_add_sample(offset);
++	linreg_regress();
++	linreg_update_size();
++
++	if (linreg.size < LINREG_MIN_SIZE) {
++		/* Not enough points yet, hold the current correction */
++		return linreg.clock_freq;
++	}
++
++	res = &linreg.results[linreg.size - LINREG_MIN_SIZE];
++
++	LOG_DBG("linreg: points %u slope %.9f intercept %.0f err %.0f",
++		BIT(linreg.size), res->slope, res->intercept, res->err);
++
++	/* Set the clock frequency to the slope */
++	linreg.clock_freq = 1e9 * (res->slope - 1.0);
++
++	/* Adjust the frequency to correct the time offset. Use a longer
++	 * correction interval with larger window sizes to reduce the
++	 * frequency error.
++	 */
++	corr_interval = linreg.size <= 4U ? 1U : linreg.size / 2U;
++	linreg.clock_freq += res->intercept / linreg.update_interval / corr_interval;
++
++	/* Clamp the frequency to the allowed maximum */
++	if (linreg.clock_freq > PTP_SERVO_MAX_FREQ_PPB) {
++		linreg.clock_freq = PTP_SERVO_MAX_FREQ_PPB;
++	} else if (linreg.clock_freq < -PTP_SERVO_MAX_FREQ_PPB) {
++		linreg.clock_freq = -PTP_SERVO_MAX_FREQ_PPB;
++	}
++
++	return linreg.clock_freq;
++}
++#endif /* CONFIG_PTP_SERVO_LINREG */
++
++void ptp_clock_sync_interval(int8_t log_interval)
++{
++#if defined(CONFIG_PTP_SERVO_LINREG)
++	/* Guard against reserved/out-of-spec values (e.g. 0x7F on unicast) */
++	if (log_interval < -15 || log_interval > 15) {
++		return;
++	}
++
++	linreg.update_interval = log_interval < 0 ? 1.0 / (double)BIT(-log_interval)
++						  : (double)BIT(log_interval);
++#else
++	ARG_UNUSED(log_interval);
++#endif
++}
+ 
+ static void clock_servo_reset(void)
+ {
+ 	int ret;
+ 
++#if defined(CONFIG_PTP_SERVO_LINREG)
++	linreg_reset();
++#else
+ 	ptp_clk.pi_drift = 0.0;
++#endif
+ 	ptp_clk.sync_servo_lock_samples = 0;
+ 	ptp_clk.sync_servo_outlier_samples = 0;
+ 	ptp_clk.sync_servo_locked = false;
+@@ -708,6 +988,7 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ {
+ 	double ppb;
+ 	int64_t offset;
++	int64_t raw_offset;
+ 	int ret;
+ 	int64_t delay = mean_delay >> 16;
+ 	struct net_ptp_time current;
+@@ -744,14 +1025,15 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 		return;
+ 	}
+ 
+-	offset = (int64_t)(ptp_clk.timestamp.t2 - ptp_clk.timestamp.t1) - delay;
++	raw_offset = (int64_t)(ptp_clk.timestamp.t2 - ptp_clk.timestamp.t1) - delay;
+ 
+-	/* Median-filter the offset before both the step check and the servo:
+-	 * a single bad timestamp then neither steps the clock nor kicks the
+-	 * PI controller, while a genuine time change still steps once it
+-	 * persists for half the filter window.
++	/* Median-filter the offset before the step check, the outlier logic
++	 * and the PI servo: a single bad timestamp then neither steps the
++	 * clock nor kicks the PI controller, while a genuine time change
++	 * still steps once it persists for half the filter window. The
++	 * linreg servo deliberately gets the raw offset instead (see below).
+ 	 */
+-	offset = clock_filter_update(&offset_filter, offset);
++	offset = clock_filter_update(&offset_filter, raw_offset);
+ 
+ 	/* If diff is too big, ptp_clk needs to be set first. */
+ 	if (offset > SYNC_SERVO_STEP_THRESHOLD_NS ||
+@@ -856,7 +1138,17 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 
+ 	ptp_clk.sync_servo_outlier_samples = 0;
+ 
++#if defined(CONFIG_PTP_SERVO_LINREG)
++	/* The linreg servo gets the unfiltered offset, as in linuxptp: the
++	 * median's ~half-window group delay inside the loop turns the servo's
++	 * one-interval phase correction into a full-scale limit cycle at the
++	 * rate clamp. The regression window provides its own noise averaging;
++	 * the median stays in front of the step/outlier checks only.
++	 */
++	ppb = ptp_servo_linreg(raw_offset, ptp_clk.timestamp.t2);
++#else
+ 	ppb = ptp_servo_pi(-offset);
++#endif
+ 	ret = ptp_clock_rate_adjust(ptp_clk.phc, 1.0 + (ppb / 1000000000.0));
+ 	if (ret < 0) {
+ 		LOG_WRN("Failed to adjust PHC rate for offset %lldns (ppb=%f err %d), "
+diff --git a/subsys/net/lib/ptp/clock.h b/subsys/net/lib/ptp/clock.h
+index d25e6683b5..5ce269a7e9 100644
+--- a/subsys/net/lib/ptp/clock.h
++++ b/subsys/net/lib/ptp/clock.h
+@@ -139,6 +139,15 @@ void ptp_clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+  */
+ void ptp_clock_delay(uint64_t egress, uint64_t ingress);
+ 
++/**
++ * @brief Function informing the clock servo about the expected interval
++ * between successive synchronization updates.
++ *
++ * @param[in] log_interval logMessageInterval of Sync messages received
++ * from the timeTransmitter.
++ */
++void ptp_clock_sync_interval(int8_t log_interval);
++
+ /**
+  * @brief Function updating PTP Port peer-to-peer link delay.
+  *
+diff --git a/subsys/net/lib/ptp/port.c b/subsys/net/lib/ptp/port.c
+index 9114bb8486..e275e5a26d 100644
+--- a/subsys/net/lib/ptp/port.c
++++ b/subsys/net/lib/ptp/port.c
+@@ -136,6 +136,8 @@ static void port_synchronize(struct ptp_port *port,
+ 	t2 = ingress_ts.second * NSEC_PER_SEC + ingress_ts.nanosecond;
+ 	t1c = t1 + (correction1 >> 16) + (correction2 >> 16);
+ 
++	ptp_clock_sync_interval(port->port_ds.log_sync_interval);
++
+ 	if (port->port_ds.delay_mechanism == PTP_DM_P2P) {
+ 		ptp_clock_synchronize_with_delay(t2, t1c, port->port_ds.mean_link_delay,
+ 						 ingress_ts_valid);
+-- 
+2.53.0
+

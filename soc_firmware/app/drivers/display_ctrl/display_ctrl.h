@@ -507,7 +507,10 @@ int display_ctrl_all_off(void);
  * Audio Metering
  ******************************************************************************/
 
-#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL) || defined(CONFIG_FPGA_HAL_LITEX)
+/* Metering and the status cycle need fpga_hal_read_metering(), which the
+ * LiteX and SPI (external MCU) HAL backends provide — not the legacy FMC
+ * one. */
+#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
 /**
  * @brief Start the metering polling thread
  *

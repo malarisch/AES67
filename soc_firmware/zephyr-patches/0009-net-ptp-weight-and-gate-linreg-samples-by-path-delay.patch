@@ -1,0 +1,219 @@
+From 5e9ee95b69ed41d4dd7e4a2344170015494a5d4d Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Thu, 16 Jul 2026 13:25:50 +0200
+Subject: [PATCH] net: ptp: weight and gate linreg samples by path-delay ratio
+
+The linreg servo locks to +/-10 ns on a quiet network but was thrown
+tens of microseconds off by the slightest cross traffic: queuing delay
+is one-sided, so a Sync held up behind another frame carries an offset
+biased by the queue time, and an unweighted sample pollutes regression
+windows of up to 64 points.
+
+Adopt linuxptp's tsproc filter_weight weighting: each offset sample is
+weighted by filtered_delay / raw_delay, where the raw delay is computed
+from the current Sync (t2, t1) and the latest Delay_Req exchange
+(t3, t4). A delay-spiked Sync thus identifies itself and is discounted.
+
+Weighting alone is not enough at AES67 rates: in closed-loop simulation
+a burst of 10-120 us queuing spikes on 40 % of Syncs still wanders the
+clock by ~17 us. Samples below weight 0.7 (raw delay ~1.4x the filtered
+delay) are therefore dropped outright, which keeps the worst-case error
+during such a burst at ~35 ns. A starvation guard admits a (still
+discounted) sample after 8 consecutive drops so sustained congestion
+degrades to slower updates instead of a blind servo.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/clock.c | 99 +++++++++++++++++++++++++++++++-------
+ 1 file changed, 82 insertions(+), 17 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index 7b71b13cf4..e1f5066c61 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -650,10 +650,13 @@ static double ptp_servo_pi(int64_t nanosecond_diff)
+  * prediction error is smallest, so the averaging interval adapts to the
+  * measurement noise without any gain tuning.
+  *
+- * Unlike linuxptp, stepping the clock is handled outside the servo (by the
+- * step-threshold logic in clock_synchronize_with_delay()), samples are not
+- * weighted, and a step resets the servo state entirely - consistent with
+- * clock_servo_reset() returning the PHC rate to nominal.
++ * Samples are weighted as in linuxptp's tsproc filter_weight mode (see
++ * clock_sample_weight()), and delay-spiked samples are dropped outright
++ * below LINREG_MIN_SAMPLE_WEIGHT. Unlike linuxptp, stepping the clock is
++ * handled outside the servo (by the step-threshold logic in
++ * clock_synchronize_with_delay()) and a step resets the servo state
++ * entirely - consistent with clock_servo_reset() returning the PHC rate
++ * to nominal.
+  */
+ 
+ /* Window sizes used in the regression, as powers of 2 */
+@@ -667,11 +670,24 @@ static double ptp_servo_pi(int64_t nanosecond_diff)
+ #define LINREG_ERR_INITIAL_UPDATES 10
+ /* Maximum ratio of two prediction errors to be considered equal */
+ #define LINREG_ERR_EQUALS 1.05
++/* Samples whose weight (filtered/raw path delay, see clock_sample_weight())
++ * falls below this are dropped instead of entering the regression: network
++ * queuing delay is one-sided, so a delay-spiked Sync carries a guaranteed-
++ * biased offset that would pollute up to LINREG_MAX_POINTS fits. 0.7 flags
++ * a raw delay more than ~1.4x the filtered delay as spiked.
++ */
++#define LINREG_MIN_SAMPLE_WEIGHT 0.7
++/* Starvation guard: under sustained congestion every Sync is delayed, so
++ * after this many consecutive drops the sample is used anyway (its weight
++ * still discounts it) rather than letting the servo go blind.
++ */
++#define LINREG_MAX_SAMPLE_SKIPS 8
+ 
+ /* Uncorrected local time (x) vs remote time (y) */
+ struct linreg_point {
+ 	uint64_t x;
+ 	uint64_t y;
++	double w;
+ };
+ 
+ struct linreg_result {
+@@ -707,6 +723,8 @@ static struct linreg_servo {
+ 	double clock_freq;
+ 	/* Expected interval between updates, in seconds */
+ 	double update_interval;
++	/* Consecutive samples dropped for insufficient weight */
++	unsigned int skips;
+ } linreg = {
+ 	.update_interval = 1.0,
+ };
+@@ -750,12 +768,13 @@ static void linreg_update_reference(uint64_t local_ts)
+ 	linreg.last_update = local_ts;
+ }
+ 
+-static void linreg_add_sample(int64_t offset)
++static void linreg_add_sample(int64_t offset, double weight)
+ {
+ 	linreg.last_point = (linreg.last_point + 1U) % LINREG_MAX_POINTS;
+ 
+ 	linreg.points[linreg.last_point].x = linreg.reference.x;
+ 	linreg.points[linreg.last_point].y = linreg.reference.y - (uint64_t)offset;
++	linreg.points[linreg.last_point].w = weight;
+ 
+ 	if (linreg.num_points < LINREG_MAX_POINTS) {
+ 		linreg.num_points++;
+@@ -764,7 +783,8 @@ static void linreg_add_sample(int64_t offset)
+ 
+ static void linreg_regress(void)
+ {
+-	double x, y, y0, e, x_sum = 0.0, y_sum = 0.0, xy_sum = 0.0, x2_sum = 0.0;
++	double x, y, w, y0, e;
++	double x_sum = 0.0, y_sum = 0.0, xy_sum = 0.0, x2_sum = 0.0, w_sum = 0.0;
+ 	unsigned int i = 0, l, n, size;
+ 	struct linreg_result *res;
+ 
+@@ -798,16 +818,19 @@ static void linreg_regress(void)
+ 
+ 			x = (double)(int64_t)(linreg.points[l].x - linreg.reference.x);
+ 			y = (double)(int64_t)(linreg.points[l].y - linreg.reference.y);
++			w = linreg.points[l].w;
+ 
+-			x_sum += x;
+-			y_sum += y;
+-			xy_sum += x * y;
+-			x2_sum += x * x;
++			x_sum += x * w;
++			y_sum += y * w;
++			xy_sum += x * y * w;
++			x2_sum += x * x * w;
++			w_sum += w;
+ 		}
+ 
+ 		/* Get new intercept and slope */
+-		res->slope = (xy_sum - x_sum * y_sum / n) / (x2_sum - x_sum * x_sum / n);
+-		res->intercept = (y_sum - res->slope * x_sum) / n;
++		res->slope = (xy_sum - x_sum * y_sum / w_sum) /
++			     (x2_sum - x_sum * x_sum / w_sum);
++		res->intercept = (y_sum - res->slope * x_sum) / w_sum;
+ 	}
+ }
+ 
+@@ -839,6 +862,7 @@ static void linreg_reset(void)
+ 	linreg.last_update = 0;
+ 	linreg.x_remainder = 0.0;
+ 	linreg.size = 0;
++	linreg.skips = 0;
+ 	/* clock_servo_reset() returns the PHC rate to nominal */
+ 	linreg.clock_freq = 0.0;
+ 
+@@ -848,17 +872,57 @@ static void linreg_reset(void)
+ 	}
+ }
+ 
++/* Weight of the current offset sample, following linuxptp's tsproc
++ * filter_weight mode: the ratio of the filtered path delay to the raw
++ * path delay computed from the current Sync (t2, t1) and the latest
++ * Delay_Req exchange (t3, t4). Queuing delay is one-sided, so a raw
++ * delay above the filtered value means this Sync (or the last Delay_Req)
++ * was held up in a queue and its offset is biased by about the excess.
++ */
++static double clock_sample_weight(int64_t filtered_delay)
++{
++	int64_t raw_delay;
++
++	if (ptp_clk.timestamp.t3 == 0ULL || ptp_clk.timestamp.t4 == 0ULL ||
++	    filtered_delay <= 0) {
++		return 1.0;
++	}
++
++	/* raw_delay = ((t2 - t3) + (t4 - t1)) / 2 */
++	raw_delay = ((int64_t)(ptp_clk.timestamp.t2 - ptp_clk.timestamp.t3) +
++		     (int64_t)(ptp_clk.timestamp.t4 - ptp_clk.timestamp.t1)) / 2;
++
++	if (raw_delay <= filtered_delay) {
++		return 1.0;
++	}
++
++	return (double)filtered_delay / (double)raw_delay;
++}
++
+ /* Returns the frequency correction to apply, in ppb (positive speeds the
+- * clock up). @offset is the measured offset from the timeTransmitter and
+- * @local_ts the ingress timestamp of the Sync message it was derived from.
++ * clock up). @offset is the measured offset from the timeTransmitter,
++ * @local_ts the ingress timestamp of the Sync message it was derived from
++ * and @weight the sample weight from clock_sample_weight().
+  */
+-static double ptp_servo_linreg(int64_t offset, uint64_t local_ts)
++static double ptp_servo_linreg(int64_t offset, uint64_t local_ts, double weight)
+ {
+ 	struct linreg_result *res;
+ 	unsigned int corr_interval;
+ 
++	/* Drop delay-spiked samples entirely (up to the starvation limit):
++	 * even strongly downweighted they wander the fit by microseconds
++	 * once cross traffic bursts, while dropping them keeps the servo
++	 * on the clean-sample trend and costs only update rate.
++	 */
++	if (weight < LINREG_MIN_SAMPLE_WEIGHT &&
++	    linreg.skips < LINREG_MAX_SAMPLE_SKIPS) {
++		linreg.skips++;
++		return linreg.clock_freq;
++	}
++	linreg.skips = 0;
++
+ 	linreg_update_reference(local_ts);
+-	linreg_add_sample(offset);
++	linreg_add_sample(offset, weight);
+ 	linreg_regress();
+ 	linreg_update_size();
+ 
+@@ -1145,7 +1209,8 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 	 * rate clamp. The regression window provides its own noise averaging;
+ 	 * the median stays in front of the step/outlier checks only.
+ 	 */
+-	ppb = ptp_servo_linreg(raw_offset, ptp_clk.timestamp.t2);
++	ppb = ptp_servo_linreg(raw_offset, ptp_clk.timestamp.t2,
++			       clock_sample_weight(delay));
+ #else
+ 	ppb = ptp_servo_pi(-offset);
+ #endif
+-- 
+2.53.0
+

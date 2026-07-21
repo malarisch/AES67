@@ -1,0 +1,32 @@
+# Altera/Intel Cyclone FPGA JTAG interface, bit-banged over four GPIOs.
+#
+# Used to scan the JTAG chain (read IDCODE) and — later — to configure the
+# FPGA's SRAM directly over JTAG, which works regardless of the MSEL
+# straps and takes precedence over AS/PS. TCK/TMS/TDI are MCU outputs, TDO
+# is an MCU input; all are plain GPIOs (IEEE 1149.1, sampled on the rising
+# TCK edge, TDO updated on the falling edge).
+
+description: Cyclone FPGA JTAG (IEEE 1149.1) bit-bang interface
+
+compatible: "aes67,cyclone-jtag"
+
+properties:
+  tck-gpios:
+    type: phandle-array
+    required: true
+    description: JTAG TCK (test clock), MCU output. Declare GPIO_ACTIVE_HIGH.
+
+  tms-gpios:
+    type: phandle-array
+    required: true
+    description: JTAG TMS (test mode select), MCU output. Declare GPIO_ACTIVE_HIGH.
+
+  tdi-gpios:
+    type: phandle-array
+    required: true
+    description: JTAG TDI (data into the device), MCU output. Declare GPIO_ACTIVE_HIGH.
+
+  tdo-gpios:
+    type: phandle-array
+    required: true
+    description: JTAG TDO (data out of the device), MCU input. Declare GPIO_ACTIVE_HIGH.

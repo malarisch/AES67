@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2026
- * SPDX-License-Identifier: Apache-2.0
- *
+
  * PTP control/monitoring HAL — see ptp_ctrl.h.
  */
 
@@ -114,6 +112,17 @@ void ptp_ctrl_get_status(struct ptp_ctrl_status *st)
 		     abs(st->offset_ns) <= PTP_CTRL_LOCK_THRESHOLD_NS;
 
 	k_sched_unlock();
+}
+
+bool ptp_ctrl_wallclock_locked(void)
+{
+	struct ptp_ctrl_status st;
+
+	ptp_ctrl_get_status(&st);
+
+	/* Same rule as the gateware's wallclock_locked signal:
+	 * eff_is_leader OR servo locked. */
+	return st.role == PTP_CTRL_ROLE_LEADER || st.locked;
 }
 
 int ptp_ctrl_get_foreign_masters(struct ptp_ctrl_foreign *out, int max)
@@ -241,6 +250,11 @@ void ptp_ctrl_get_status(struct ptp_ctrl_status *st)
 	st->offset_ns     = fpga_hal_read_ptp_offset();
 	st->path_delay_ns = fpga_hal_read_path_delay();
 	st->locked = (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) != 0;
+}
+
+bool ptp_ctrl_wallclock_locked(void)
+{
+	return (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) != 0;
 }
 
 int ptp_ctrl_get_foreign_masters(struct ptp_ctrl_foreign *out, int max)

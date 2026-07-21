@@ -1,0 +1,189 @@
+From ec607b52d7936236997ab2801846b732541e6be2 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Mon, 13 Jul 2026 13:50:40 +0200
+Subject: [PATCH] net: ptp: median-filter path delay and offset measurements
+
+The servo consumed every raw measurement directly: one delay sample
+polluted by asymmetric queuing shifted meanDelay (and thus every
+subsequent offset) until the next exchange, and a single bad timestamp
+above the step threshold hard-stepped the clock and reset the servo.
+
+Add linuxptp-style moving-median filters on both servo inputs:
+
+- E2E path delay (CONFIG_PTP_PATH_DELAY_FILTER_LENGTH, default 9),
+  applied after the plausibility check in ptp_clock_delay().
+- offsetFromTimeTransmitter (CONFIG_PTP_OFFSET_FILTER_LENGTH,
+  default 5), applied before both the step-threshold check and the
+  PI servo, so an outlier neither steps the clock nor kicks the
+  controller; a genuine time change still steps once it persists for
+  half the window.
+
+Both filters reset on a clock step (samples from the old timescale are
+meaningless); the offset filter also resets with the servo. A window
+length of 1 disables the respective filter.
+
+---
+ subsys/net/lib/ptp/Kconfig | 24 +++++++++++
+ subsys/net/lib/ptp/clock.c | 83 +++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 105 insertions(+), 2 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/Kconfig b/subsys/net/lib/ptp/Kconfig
+index d251eb49d8..1112b05505 100644
+--- a/subsys/net/lib/ptp/Kconfig
++++ b/subsys/net/lib/ptp/Kconfig
+@@ -305,6 +305,30 @@ config PTP_SERVO_KI
+ 	  Shorter Sync intervals may require a smaller gain to avoid
+ 	  oscillation.
+ 
++config PTP_PATH_DELAY_FILTER_LENGTH
++	int "Moving-median filter length for E2E path delay samples"
++	default 9
++	range 1 31
++	help
++	  Number of end-to-end delay measurements (Delay_Req/Delay_Resp
++	  exchanges) over which a moving median is computed before the result
++	  is used as meanDelay in offset computations. The median rejects
++	  outliers caused by asymmetric queuing delays in the network path,
++	  which would otherwise translate directly into offset error.
++	  Set to 1 to disable filtering.
++
++config PTP_OFFSET_FILTER_LENGTH
++	int "Moving-median filter length for offset samples"
++	default 5
++	range 1 31
++	help
++	  Number of offsetFromTimeTransmitter samples over which a moving
++	  median is computed before the offset is fed to the clock servo and
++	  the step-threshold logic. This rejects single bad timestamps that
++	  would otherwise disturb the PI servo or trigger a spurious clock
++	  step, at the cost of about half the filter length in Sync intervals
++	  of additional response latency. Set to 1 to disable filtering.
++
+ config PTP_MIN_PDELAY_REQ_LOG_INTERVAL
+ 	int "PDelay Req interval in Log2 base"
+ 	default 0
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index de573a3d0c..2a0a961ffe 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -89,6 +89,74 @@ struct ptp_clock {
+ __maybe_unused static struct ptp_clock ptp_clk = { 0 };
+ char str_clock_id[] = "FF:FF:FF:FF:FF:FF:FF:FF";
+ 
++/**
++ * @brief Moving-median sample filter (linuxptp-style).
++ *
++ * Both measurement inputs of the servo are median-filtered: the E2E path
++ * delay (asymmetric queuing produces one-sided spikes that a mean would
++ * absorb instead of reject) and the offset (a single bad timestamp must not
++ * disturb the PI servo or trigger a spurious clock step).
++ */
++struct clock_sample_filter {
++	int64_t *samples;	/* ring buffer of the last @len samples */
++	uint8_t len;
++	uint8_t count;
++	uint8_t head;
++};
++
++#define CLOCK_FILTER_MAX_LEN                                                                       \
++	MAX(CONFIG_PTP_PATH_DELAY_FILTER_LENGTH, CONFIG_PTP_OFFSET_FILTER_LENGTH)
++
++static int64_t delay_filter_samples[CONFIG_PTP_PATH_DELAY_FILTER_LENGTH];
++static struct clock_sample_filter delay_filter = {
++	.samples = delay_filter_samples,
++	.len = CONFIG_PTP_PATH_DELAY_FILTER_LENGTH,
++};
++
++static int64_t offset_filter_samples[CONFIG_PTP_OFFSET_FILTER_LENGTH];
++static struct clock_sample_filter offset_filter = {
++	.samples = offset_filter_samples,
++	.len = CONFIG_PTP_OFFSET_FILTER_LENGTH,
++};
++
++static void clock_filter_reset(struct clock_sample_filter *f)
++{
++	f->count = 0;
++	f->head = 0;
++}
++
++static int64_t clock_filter_update(struct clock_sample_filter *f, int64_t sample)
++{
++	int64_t sorted[CLOCK_FILTER_MAX_LEN];
++
++	if (f->len <= 1) {
++		return sample;
++	}
++
++	f->samples[f->head] = sample;
++	f->head = (f->head + 1U) % f->len;
++	if (f->count < f->len) {
++		f->count++;
++	}
++
++	for (uint8_t i = 0; i < f->count; i++) {
++		int64_t value = f->samples[i];
++		uint8_t pos = i;
++
++		while (pos > 0 && sorted[pos - 1] > value) {
++			sorted[pos] = sorted[pos - 1];
++			pos--;
++		}
++		sorted[pos] = value;
++	}
++
++	if (f->count % 2U) {
++		return sorted[f->count / 2U];
++	}
++
++	return (sorted[f->count / 2U - 1U] + sorted[f->count / 2U]) / 2;
++}
++
+ static int clock_generate_id(ptp_clk_id *clock_id, struct net_if *iface)
+ {
+ 	struct net_linkaddr *addr = net_if_get_link_addr(iface);
+@@ -572,6 +640,7 @@ static void clock_servo_reset(void)
+ 	ptp_clk.sync_servo_lock_samples = 0;
+ 	ptp_clk.sync_servo_outlier_samples = 0;
+ 	ptp_clk.sync_servo_locked = false;
++	clock_filter_reset(&offset_filter);
+ 
+ 	ret = ptp_clock_rate_adjust(ptp_clk.phc, 1.0);
+ 	if (ret < 0) {
+@@ -677,6 +746,13 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 
+ 	offset = (int64_t)(ptp_clk.timestamp.t2 - ptp_clk.timestamp.t1) - delay;
+ 
++	/* Median-filter the offset before both the step check and the servo:
++	 * a single bad timestamp then neither steps the clock nor kicks the
++	 * PI controller, while a genuine time change still steps once it
++	 * persists for half the filter window.
++	 */
++	offset = clock_filter_update(&offset_filter, offset);
++
+ 	/* If diff is too big, ptp_clk needs to be set first. */
+ 	if (offset > SYNC_SERVO_STEP_THRESHOLD_NS ||
+ 	    offset < -SYNC_SERVO_STEP_THRESHOLD_NS) {
+@@ -738,6 +814,7 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 		 */
+ 		memset(&ptp_clk.timestamp, 0, sizeof(ptp_clk.timestamp));
+ 		ptp_clk.current_ds.mean_delay = 0;
++		clock_filter_reset(&delay_filter);
+ 		clock_servo_reset();
+ 
+ 		/* Also discard in-flight Delay_Req exchanges: their egress
+@@ -825,8 +902,10 @@ void ptp_clock_delay(uint64_t egress, uint64_t ingress)
+ 		return;
+ 	}
+ 
+-	LOG_DBG("Delay %lldns", delay);
+-	ptp_clk.current_ds.mean_delay = clock_ns_to_timeinterval(delay);
++	int64_t filtered = clock_filter_update(&delay_filter, delay);
++
++	LOG_DBG("Delay %lldns (median %lldns)", delay, filtered);
++	ptp_clk.current_ds.mean_delay = clock_ns_to_timeinterval(filtered);
+ }
+ 
+ int ptp_clock_pdelay(struct ptp_port *port, int64_t t1, int64_t t2, int64_t t3, int64_t t4,
+-- 
+2.53.0
+

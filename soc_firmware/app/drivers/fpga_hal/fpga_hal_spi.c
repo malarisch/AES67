@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2026
- * SPDX-License-Identifier: Apache-2.0
- *
+
  * FPGA HAL backend — SPI (spibone) implementation.
  *
  * External-MCU path (e.g. ESP32-S3): the same aes67_bridge CSR map the other
@@ -14,6 +12,8 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/init.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 
@@ -285,6 +285,41 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits)
 	return ctrl_update(0, hal_to_ctrl_bits(bits));
 }
 
+/* On external-MCU boards the card's nRST pin can be wired to an MCU GPIO
+ * instead of the FPGA's adda_nrst CSR output — declared as an
+ * "aes67,adda-nrst" node (label adda_nrst) in the board overlay. When the
+ * node exists it replaces the CSR bit entirely; the GPIO also works before
+ * the SPI bridge is up, which main() relies on to assert reset early. */
+#define ADDA_NRST_NODE DT_NODELABEL(adda_nrst)
+
+#if DT_NODE_EXISTS(ADDA_NRST_NODE)
+
+static const struct gpio_dt_spec adda_nrst_gpio = GPIO_DT_SPEC_GET(ADDA_NRST_NODE, gpios);
+static bool adda_nrst_configured;
+
+int fpga_hal_set_adda_nrst(bool released)
+{
+	int ret;
+
+	if (!gpio_is_ready_dt(&adda_nrst_gpio)) {
+		return -ENODEV;
+	}
+
+	if (!adda_nrst_configured) {
+		/* Come up asserted (active = in reset); the first caller is
+		 * main() holding the card in reset anyway. */
+		ret = gpio_pin_configure_dt(&adda_nrst_gpio, GPIO_OUTPUT_ACTIVE);
+		if (ret < 0) {
+			return ret;
+		}
+		adda_nrst_configured = true;
+	}
+
+	return gpio_pin_set_dt(&adda_nrst_gpio, released ? 0 : 1);
+}
+
+#else /* !DT_NODE_EXISTS(ADDA_NRST_NODE) */
+
 int fpga_hal_set_adda_nrst(bool released)
 {
 	if (released) {
@@ -292,6 +327,8 @@ int fpga_hal_set_adda_nrst(bool released)
 	}
 	return ctrl_update(0, AES67_CTRL_ADDA_NRST);
 }
+
+#endif /* DT_NODE_EXISTS(ADDA_NRST_NODE) */
 
 /* ---- Status reads ---- */
 
@@ -559,3 +596,77 @@ void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 	*tx_clip   = 0;
 #endif
 }
+
+/* ---- spibone bus sanity probe ---- */
+
+#ifdef CONFIG_AES67_SPIBONE_PROBE
+/*
+ * Confirm the FPGA actually answers over spibone before the rest of the app
+ * relies on it. main() calls this explicitly during boot bring-up, right
+ * after the FPGA has been configured over JTAG and before it releases the
+ * reset domains — which itself reads the reset CSR over this bus, so a dead
+ * bus would otherwise fail there without a clear cause.
+ *
+ * The scratch registers are pure storage with no side effects and are
+ * reachable regardless of the AES67 reset domains (they sit in the CSR
+ * infrastructure, not the datapath).
+ *
+ * Returns 0 if the bus round-trips cleanly, -EIO otherwise.
+ */
+int fpga_hal_spibone_probe(void)
+{
+	static const uint32_t patterns[] = {
+		0x12345678u, 0xA5A5A5A5u, 0x00000000u, 0xFFFFFFFFu,
+	};
+	uint32_t v;
+	int ret;
+	bool ok = true;
+
+#ifdef CSR_CTRL_SCRATCH_ADDR
+	/* Known-constant test, no write needed: the LiteX control block's
+	 * scratch register powers up as 0x12345678. */
+	ret = spibone_read(CSR_CTRL_SCRATCH_ADDR, &v);
+	if (ret < 0) {
+		LOG_ERR("spibone probe: ctrl_scratch read failed (err %d) — "
+			"bus not responding", ret);
+		ok = false;
+	} else if (v != 0x12345678u) {
+		LOG_ERR("spibone probe: ctrl_scratch = 0x%08X, expected "
+			"0x12345678 — bus/address-decode fault", v);
+		ok = false;
+	} else {
+		LOG_INF("spibone probe: ctrl_scratch = 0x12345678 (OK)");
+	}
+#endif
+
+	/* Round-trip patterns through the AES67 scratch register: this also
+	 * exercises the data lines in both directions and catches stuck or
+	 * swapped bits that a single constant read could miss. */
+	for (size_t i = 0; i < ARRAY_SIZE(patterns) && ok; i++) {
+		ret = spibone_write(CSR_AES67_CSR_SCRATCH_ADDR, patterns[i]);
+		if (ret == 0) {
+			ret = spibone_read(CSR_AES67_CSR_SCRATCH_ADDR, &v);
+		}
+		if (ret < 0) {
+			LOG_ERR("spibone probe: scratch transfer failed "
+				"(err %d)", ret);
+			ok = false;
+		} else if (v != patterns[i]) {
+			LOG_ERR("spibone probe: scratch wrote 0x%08X read 0x%08X"
+				" — data-line fault", patterns[i], v);
+			ok = false;
+		}
+	}
+
+	if (ok) {
+		LOG_INF("spibone probe: bus OK (scratch round-trip verified)");
+	} else {
+		LOG_ERR("spibone probe: FAILED — the FPGA is configured but not "
+			"answering on the Wishbone bus. Check the SPI2 wiring "
+			"(SCK/MOSI/MISO/CS), the bus frequency, and that the "
+			"gateware's spibone clock is running.");
+	}
+
+	return ok ? 0 : -EIO;
+}
+#endif /* CONFIG_AES67_SPIBONE_PROBE */

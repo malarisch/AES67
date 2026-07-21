@@ -44,4 +44,17 @@ config FPGA_HAL_SHELL
 	  and write APIs (status, mac, ip, ptp, gm, ctrl set/clear, adda,
 	  meter, tx, rx). Works with every HAL backend.
 
+config AES67_SPIBONE_PROBE
+	bool "Probe the spibone bus at boot (scratch-register sanity check)"
+	depends on FPGA_HAL_SPI
+	default y
+	help
+	  After the drivers come up, read the LiteX ctrl scratch register
+	  (known reset value 0x12345678, when present) and round-trip a set
+	  of patterns through the AES67 scratch register, logging whether
+	  the spibone Wishbone bus actually responds. Turns a silent "FPGA
+	  doesn't respond" into a definite bus-up/bus-down verdict before
+	  the reset-staging in main() (which reads the reset CSR over the
+	  same bus) runs. Cheap; leave on for bring-up.
+
 endif # FPGA_HAL

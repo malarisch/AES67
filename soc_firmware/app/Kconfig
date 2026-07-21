@@ -143,25 +143,39 @@ config SD_CONFIG
 
 endmenu
 
-menu "SPI Flash Configuration Storage"
+menu "Flash Configuration Storage"
 
 config FLASH_CONFIG
-	bool "Enable SPI flash configuration storage"
+	bool "Enable flash configuration storage"
 	default y
-	depends on SPI_FLASH_LITESPI
+	depends on SPI_FLASH_LITESPI || FLASH_MAP
 	help
-	  Store device configuration in the upper area of the SPI NOR flash
-	  using a crash-safe A/B slot scheme with CRC-32 verification.
-	  Provides a fallback when no SD card is present.
+	  Store device configuration in flash using a crash-safe A/B slot
+	  scheme with CRC-32 verification. Provides a fallback when no SD
+	  card is present. The storage backend follows the platform: the
+	  FPGA board's SPI NOR flash via the LiteSPI spi_flash driver on
+	  the integrated softcore, or the MCU's own program flash (fixed
+	  "storage" partition via the Zephyr flash map) on external-MCU
+	  builds such as the ESP32-S3.
+
+config FLASH_CONFIG_BACKEND_LITESPI
+	def_bool SPI_FLASH_LITESPI
+	depends on FLASH_CONFIG
+
+config FLASH_CONFIG_BACKEND_FLASH_AREA
+	def_bool !SPI_FLASH_LITESPI && FLASH_MAP
+	depends on FLASH_CONFIG
 
 config FLASH_CONFIG_OFFSET
 	hex "Flash offset for config storage (0-based)"
 	default 0x7F0000
-	depends on FLASH_CONFIG
+	depends on FLASH_CONFIG_BACKEND_LITESPI
 	help
 	  Byte offset within the SPI flash where config storage begins.
 	  Two 8 KB slots are placed here (16 KB total).
 	  Default 0x7F0000 = 8 MB - 64 KB, well above firmware area.
+	  (The flash-map backend ignores this and uses the "storage"
+	  partition from the devicetree instead.)
 
 endmenu
 

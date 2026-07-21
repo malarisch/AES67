@@ -309,6 +309,19 @@ int  fpga_hal_set_resets(uint32_t domains, bool held);
 void fpga_hal_read_metering(uint16_t *rx_signal, uint16_t *rx_clip,
 			    uint16_t *tx_signal, uint16_t *tx_clip);
 
+#if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)
+/**
+ * @brief Verify the FPGA answers over the spibone Wishbone bus.
+ *
+ * Reads the constant ctrl_scratch register and round-trips test patterns
+ * through the AES67 scratch register. Call during boot bring-up after the
+ * FPGA has been configured and before relying on the bus.
+ *
+ * @return 0 if the bus round-trips cleanly, -EIO on any fault.
+ */
+int fpga_hal_spibone_probe(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

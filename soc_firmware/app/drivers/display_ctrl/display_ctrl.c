@@ -998,7 +998,8 @@ int display_ctrl_all_off(void)
  * Audio Metering Thread (polls FPGA metering CSRs → signal/clip LEDs)
  ******************************************************************************/
 
-#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL) || defined(CONFIG_FPGA_HAL_LITEX)
+/* Needs fpga_hal_read_metering(): LiteX and SPI HAL backends only. */
+#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
 #include "../fpga_hal/fpga_hal.h"
 
 #define METERING_STACK_SIZE 512
@@ -1201,7 +1202,7 @@ void display_ctrl_update_status_cycle_ip(const struct in_addr *ip)
 		 "%03u%03u", a[2], a[3]);
 }
 
-#endif /* CONFIG_DISPLAY_CTRL_NRST_HAL || CONFIG_FPGA_HAL_LITEX */
+#endif /* CONFIG_FPGA_HAL_LITEX || CONFIG_FPGA_HAL_SPI */
 
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
 

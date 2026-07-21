@@ -1,0 +1,16 @@
+# ADDA / analog card reset line driven directly by the MCU. Used by the
+# external-MCU control plane (fpga_hal_spi.c) when the card's nRST pin is
+# wired to an MCU GPIO instead of the FPGA's adda_nrst CSR output.
+
+description: AES67 ADDA / analog card nRST reset line
+
+compatible: "aes67,adda-nrst"
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      GPIO wired to the card's nRST input. Declare as GPIO_ACTIVE_LOW
+      for the usual active-low reset: asserting the GPIO (logical 1)
+      then holds the card in reset, deasserting it releases the card.

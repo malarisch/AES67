@@ -1,0 +1,67 @@
+From 69ef1c6b22b87f5ab448bcc027918c75ee7e23a2 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Tue, 14 Jul 2026 00:31:06 +0200
+Subject: [PATCH] soc: espressif: esp32s3: re-init esp_flash default chip after
+ PSRAM init
+
+On the ESP32-S3 the MSPI core clock is shared between flash and PSRAM
+(SOC_MEMSPI_CORE_CLK_SHARED_WITH_PSRAM). PSRAM timing tuning (required
+e.g. for octal PSRAM at 80 MHz) switches that core clock, but
+esp_flash_config() has already initialized the esp_flash default chip
+at that point, capturing the pre-tuning source frequency in the SPI1
+clock configuration that every esp_flash transaction re-programs into
+the controller.
+
+After tuning raises the core clock from 80 to 160 MHz, the stale
+divider of 1 clocks all SPI1 command transactions at 160 MHz. The
+flash then returns garbage on status reads, and every erase/program
+fails the WEL verification in spi_flash_chip_generic_set_write_protect
+with ESP_ERR_NOT_FOUND (261) - the flash driver (and with it flash_map,
+NVS, settings, ...) is unusable, while XIP through the tuned SPI0/cache
+path keeps working.
+
+ESP-IDF avoids this by initializing the default chip after PSRAM
+timing tuning. Mirror that by re-running esp_flash_init_default_chip()
+after esp_init_psram(): it recomputes the clock configuration from the
+live (post-tuning) core clock.
+
+---
+ soc/espressif/esp32s3/soc.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/soc/espressif/esp32s3/soc.c b/soc/espressif/esp32s3/soc.c
+index be973bee2b..1d4df15e85 100644
+--- a/soc/espressif/esp32s3/soc.c
++++ b/soc/espressif/esp32s3/soc.c
+@@ -9,6 +9,7 @@
+ #include <esp_rom_serial_output.h>
+ #include <soc_init.h>
+ #include <flash_init.h>
++#include <esp_flash_internal.h>
+ #include <esp_private/cache_utils.h>
+ #include <esp_private/system_internal.h>
+ #include <esp_timer.h>
+@@ -61,6 +62,20 @@ void IRAM_ATTR __esp_platform_app_start(void)
+ #if CONFIG_ESP_SPIRAM
+ 	esp_init_psram();
+ 
++	/* PSRAM timing tuning may have switched the MSPI core clock, which is
++	 * shared between flash and PSRAM. The esp_flash default chip captured
++	 * the pre-tuning source frequency in its SPI1 clock configuration, so
++	 * every esp_flash transaction would now overclock the bus (e.g. core
++	 * clock 80 -> 160 MHz with a stale divider of 1 drives the flash at
++	 * 160 MHz: status reads return garbage and every erase/program fails
++	 * in the WEL check with ESP_ERR_NOT_FOUND). ESP-IDF initializes the
++	 * default chip after PSRAM for this reason; re-run the init here to
++	 * recompute the clock configuration from the final core clock.
++	 */
++	if (esp_flash_init_default_chip() != ESP_OK) {
++		printk("Failed to re-init flash chip after PSRAM init\n");
++	}
++
+ 	int err = esp_psram_smh_init();
+ 
+ 	if (err) {
+-- 
+2.53.0
+

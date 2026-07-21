@@ -8,6 +8,7 @@
 #include <zephyr/net/hostname.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
+#include <stdio.h>
 
 #ifdef CONFIG_SI5351A
 #include "../drivers/si5351a/si5351a.h"
@@ -25,6 +26,9 @@
 #include "card_manager.h"
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
+#endif
+#ifdef CONFIG_AES67_FPGA_JTAG
+#include "../drivers/fpga_jtag/fpga_jtag.h"
 #endif
 #include "fpga_regs.h"
 #include "fpga_poll.h"
@@ -171,7 +175,7 @@ static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 			display_ctrl_stop_status_cycle();
 			/* If wallclock already locked, go online immediately;
 			 * otherwise let fpga_poll handle when wc_locked fires */
-			if (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) {
+			if (ptp_ctrl_wallclock_locked()) {
 				display_ctrl_loading_animation_stop();
 				display_ctrl_start_metering();
 				display_ctrl_start_status_cycle("LEADER",
@@ -185,7 +189,7 @@ static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 			display_ctrl_stop_status_cycle();
 			/* If wallclock already locked, go online;
 			 * otherwise show SYNCNG and let fpga_poll handle transition */
-			if (fpga_hal_read_status() & FPGA_HAL_CLK_WC_LOCKED) {
+			if (ptp_ctrl_wallclock_locked()) {
 				display_ctrl_loading_animation_stop();
 				display_ctrl_start_metering();
 				display_ctrl_start_status_cycle("FOLLOW",
@@ -218,6 +222,64 @@ static void nrst_card_rescan_cb(void *unused)
 #endif
 
 /* ---- Entry point ---- */
+
+#ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
+#ifdef CONFIG_DISPLAY_CTRL
+/* Show the bitstream-upload progress on the 7-segment panel as "UP  NN".
+ * Called from inside the JTAG shift (clock stalled), so keep it cheap and
+ * only refresh every 5 %. */
+static void jtag_upload_progress(uint8_t percent, void *ctx)
+{
+	ARG_UNUSED(ctx);
+
+	if (percent % 5 != 0 && percent != 100) {
+		return;
+	}
+	if (display_ctrl_ready()) {
+		char buf[7];
+
+		snprintf(buf, sizeof(buf), "UP%4u", (unsigned int)percent);
+		display_ctrl_show_status(buf);
+	}
+}
+#endif /* CONFIG_DISPLAY_CTRL */
+
+/* Configure the FPGA over JTAG at boot. Runs after the display is up so the
+ * upload can show progress; skips the upload if the FPGA already holds this
+ * bitstream (USERCODE match). */
+static void fpga_jtag_bringup(void)
+{
+	fpga_jtag_progress_cb cb = NULL;
+
+#ifdef CONFIG_DISPLAY_CTRL
+	cb = jtag_upload_progress;
+#endif
+
+	int ret = fpga_jtag_boot_load(cb, NULL);
+
+	if (ret < 0) {
+		LOG_ERR("FPGA JTAG configuration failed (err %d); the FPGA will "
+			"not respond over spibone", ret);
+#ifdef CONFIG_DISPLAY_CTRL
+		if (display_ctrl_ready()) {
+			display_ctrl_show_status("FPGAER");
+		}
+#endif
+		return;
+	}
+
+	if (ret == 1) {
+		LOG_INF("FPGA already configured — bitstream upload skipped");
+	} else {
+		LOG_INF("FPGA configured over JTAG");
+	}
+#ifdef CONFIG_DISPLAY_CTRL
+	if (display_ctrl_ready()) {
+		display_ctrl_show_status("  FPGA");
+	}
+#endif
+}
+#endif /* CONFIG_AES67_FPGA_JTAG_BOOT_LOAD */
 
 int main(void)
 {
@@ -287,24 +349,6 @@ int main(void)
 #endif
 #endif
 
-#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
-	/* ---- Analog I/O Card Autodetect ---- */
-	{
-		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
-
-		if (!device_is_ready(card_i2c)) {
-			LOG_ERR("Card I2C bus (i2c2) not ready");
-		} else {
-			int cm_ret = card_manager_init(card_i2c);
-
-			if (cm_ret < 0) {
-				LOG_WRN("Card manager init error: %d", cm_ret);
-			}
-			/* Individual result is logged by card_manager */
-		}
-	}
-#endif
-
 #ifdef CONFIG_DISPLAY_CTRL
 	/* ---- Display Controller (LEDs, Buttons, 7-Segment) Setup ---- */
 	/* Register IO card re-init callback for runtime nRST resets */
@@ -328,11 +372,50 @@ int main(void)
 	}
 #endif
 
+#ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
+	/* ---- Configure the FPGA over JTAG (display is up, shows progress) ----
+	 * Scans the chain, skips the upload if the FPGA already holds this
+	 * bitstream, otherwise loads it with a 7-segment progress bar. */
+	fpga_jtag_bringup();
+#endif
+
+#if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)
+	/* ---- Verify the Wishbone bus answers now that the FPGA is up ---- */
+	fpga_hal_spibone_probe();
+#endif
+
 	/* ---- Wait for FPGA to be ready before network operations ---- */
 	if (fpga_hal_wait_ready(30000) < 0) {
 		LOG_ERR("FPGA not ready after 30s - network services will not start");
 		return -1;
 	}
+
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
+	/* ---- Analog I/O Card Autodetect (depends on the FPGA) ----
+	 * The AD/DA cards are clocked by the FPGA, so they stay silent on I2C
+	 * until it is configured and answering — which the wait_ready above
+	 * has just confirmed. card_manager_init() releases the ADDA nRST and
+	 * scans the bus, so it must run here, not during early init. */
+#ifdef CONFIG_DISPLAY_CTRL
+	if (display_ctrl_ready()) {
+		display_ctrl_show_status(" CARDS");
+	}
+#endif
+	{
+		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+
+		if (!device_is_ready(card_i2c)) {
+			LOG_ERR("Card I2C bus (i2c2) not ready");
+		} else {
+			int cm_ret = card_manager_init(card_i2c);
+
+			if (cm_ret < 0) {
+				LOG_WRN("Card manager init error: %d", cm_ret);
+			}
+			/* Individual result is logged by card_manager */
+		}
+	}
+#endif
 
 #ifdef CONFIG_SD_CONFIG
 	/* ---- Load configuration from SD card (now that FPGA is ready) ---- */
@@ -436,6 +519,9 @@ int main(void)
 	 * Kconfig defaults. */
 	LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining FPGA wallclock");
 	ptp_ctrl_apply_config();
+	/* ptp_bmc is not running: the fpga_poll thread samples the Zephyr
+	 * stack's role and fires the same display handler on changes. */
+	fpga_poll_register_role_change_cb(on_bmc_change);
 #else
 	ptp_bmc_register_change_cb(on_bmc_change);
 	int bmc_ret = ptp_bmc_start(iface);

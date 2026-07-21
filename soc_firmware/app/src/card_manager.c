@@ -255,7 +255,9 @@ int card_manager_init(const struct device *i2c_dev)
 	s_i2c_dev = i2c_dev;
 
 	/* nRST has been held LOW since early boot (set in main()).
-	 * MCLK should be stable by now (Si5351A + 2 s settling).
+	 * The cards' MCLK is derived by the FPGA, so main() only calls this
+	 * once the FPGA is configured and answering — the CS5368 ADCs need a
+	 * stable MCLK before nRST is released or their I2C won't come up.
 	 * Release nRST and give all card ICs time to initialise. */
 	LOG_INF("Card manager: releasing ADDA nRST...");
 	fpga_hal_set_adda_nrst(true);

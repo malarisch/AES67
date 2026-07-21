@@ -1,13 +1,17 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
+
  *
- * SPI Flash configuration storage implementation.
+ * Flash configuration storage implementation.
  *
- * Uses the custom spi_flash driver (LiteSPI master) for low-level
- * flash I/O and config_json for serialization / parsing.
+ * Uses config_json for serialization / parsing on top of one of two
+ * build-time-selected flash backends:
+ *  - LITESPI (integrated softcore): the FPGA board's SPI NOR flash via
+ *    the custom spi_flash driver, slots at CONFIG_FLASH_CONFIG_OFFSET.
+ *  - FLASH_AREA (external MCU, e.g. ESP32-S3): the MCU's own program
+ *    flash via Zephyr's flash map, slots at the start of the fixed
+ *    "storage" partition.
  *
- * Two 8 KB slots (A/B) at the top of flash provide crash-safe updates:
+ * Two 8 KB slots (A/B) provide crash-safe updates:
  *  - Each slot has a 16-byte header: magic + sequence + length + CRC-32.
  *  - On load, the slot with the highest valid sequence is used.
  *  - On save, the older slot is overwritten and the sequence incremented.
@@ -20,21 +24,27 @@
 
 #include "flash_config.h"
 #include "config_json.h"
-#include "../drivers/spi_flash/spi_flash.h"
 
 LOG_MODULE_REGISTER(flash_config, LOG_LEVEL_INF);
 
 /* ---- Layout constants ---- */
 
+#define CFG_SECTOR_SIZE 4096
+#define SLOT_SIZE       (2 * CFG_SECTOR_SIZE)         /* 8 KB per slot */
+
+#if defined(CONFIG_FLASH_CONFIG_BACKEND_FLASH_AREA)
+/* Slots live at the start of the "storage" fixed partition. */
+#define SLOT_A_OFFSET   0
+#else
 /* Offset within flash (0-based).  Must not overlap firmware area.
  * Default: 0x7F0000 = 8 MB - 64 KB, leaving 64 KB at the very top. */
 #ifndef CONFIG_FLASH_CONFIG_OFFSET
 #define CONFIG_FLASH_CONFIG_OFFSET  0x7F0000
 #endif
-
-#define SLOT_SIZE       (2 * SPI_FLASH_SECTOR_SIZE)   /* 8 KB per slot */
 #define SLOT_A_OFFSET   (CONFIG_FLASH_CONFIG_OFFSET)
-#define SLOT_B_OFFSET   (CONFIG_FLASH_CONFIG_OFFSET + SLOT_SIZE)
+#endif
+
+#define SLOT_B_OFFSET   (SLOT_A_OFFSET + SLOT_SIZE)
 
 /* Maximum JSON payload per slot (slot size minus header). */
 #define MAX_PAYLOAD     (SLOT_SIZE - sizeof(struct slot_header))
@@ -64,11 +74,154 @@ static uint32_t seq_b;
 static char json_buf[JSON_BUF_SIZE];
 
 /* ================================================================
+ * Flash backend primitives
+ * ================================================================ */
+
+#if defined(CONFIG_FLASH_CONFIG_BACKEND_FLASH_AREA)
+
+#include <zephyr/storage/flash_map.h>
+
+static const struct flash_area *cfg_area;
+
+static int cfg_backend_init(void)
+{
+	int ret = flash_area_open(FIXED_PARTITION_ID(storage_partition), &cfg_area);
+
+	if (ret < 0) {
+		LOG_ERR("Flash config: storage partition unavailable (err %d)", ret);
+		return ret;
+	}
+
+	if (!device_is_ready(flash_area_get_device(cfg_area))) {
+		LOG_ERR("Flash config: flash device not ready");
+		return -ENODEV;
+	}
+
+	if (cfg_area->fa_size < SLOT_B_OFFSET + SLOT_SIZE) {
+		LOG_ERR("Flash config: storage partition too small (%u < %u)",
+			(unsigned int)cfg_area->fa_size,
+			(unsigned int)(SLOT_B_OFFSET + SLOT_SIZE));
+		return -ENOMEM;
+	}
+
+	/* The slot header (16 bytes) and the tail-padding logic in
+	 * cfg_flash_write() assume the write-block size divides 16. */
+	if (flash_area_align(cfg_area) > 16U ||
+	    16U % flash_area_align(cfg_area) != 0U) {
+		LOG_ERR("Flash config: unsupported write alignment %u",
+			(unsigned int)flash_area_align(cfg_area));
+		return -ENOTSUP;
+	}
+
+	LOG_INF("Flash config: using storage partition @ 0x%lx (%u KiB)",
+		(unsigned long)cfg_area->fa_off,
+		(unsigned int)(cfg_area->fa_size / 1024U));
+	return 0;
+}
+
+static int cfg_flash_read(uint32_t offset, void *buf, size_t len)
+{
+	return flash_area_read(cfg_area, offset, buf, len);
+}
+
+/* Write @len bytes, padding the unaligned tail with 0xFF up to the
+ * device's write-block size (padding stays within the slot: payloads are
+ * capped at MAX_PAYLOAD and the header is a multiple of the alignment). */
+static int cfg_flash_write(uint32_t offset, const void *buf, size_t len)
+{
+	uint8_t align = flash_area_align(cfg_area);
+	size_t main_len = len & ~((size_t)align - 1U);
+	int ret = 0;
+
+	if (main_len > 0) {
+		ret = flash_area_write(cfg_area, offset, buf, main_len);
+	}
+
+	if (ret == 0 && len > main_len) {
+		uint8_t tail[16];
+
+		memset(tail, 0xFF, sizeof(tail));
+		memcpy(tail, (const uint8_t *)buf + main_len, len - main_len);
+		ret = flash_area_write(cfg_area, offset + main_len, tail, align);
+	}
+
+	return ret;
+}
+
+static int cfg_flash_erase_slot(uint32_t offset)
+{
+	return flash_area_erase(cfg_area, offset, SLOT_SIZE);
+}
+
+#else /* CONFIG_FLASH_CONFIG_BACKEND_LITESPI */
+
+#include "../drivers/spi_flash/spi_flash.h"
+
+BUILD_ASSERT(CFG_SECTOR_SIZE == SPI_FLASH_SECTOR_SIZE,
+	     "slot layout assumes 4 KiB erase sectors");
+
+static int cfg_backend_init(void)
+{
+	uint32_t jedec = spi_flash_read_jedec_id();
+
+	if (jedec == 0 || jedec == 0xFFFFFF) {
+		LOG_ERR("Flash config: SPI flash not detected (JEDEC=0x%06x)",
+			jedec);
+		return -ENODEV;
+	}
+
+	if (SLOT_B_OFFSET + SLOT_SIZE > SPI_FLASH_TOTAL_SIZE) {
+		LOG_ERR("Flash config: config area exceeds flash size!");
+		return -ENOMEM;
+	}
+
+	LOG_INF("Flash config: init OK (JEDEC 0x%06x, config @ 0x%06x)",
+		jedec, CONFIG_FLASH_CONFIG_OFFSET);
+	return 0;
+}
+
+static int cfg_flash_read(uint32_t offset, void *buf, size_t len)
+{
+	spi_flash_read(offset, buf, len);
+	return 0;
+}
+
+static int cfg_flash_write(uint32_t offset, const void *buf, size_t len)
+{
+	const uint8_t *src = buf;
+
+	while (len > 0) {
+		/* Respect page boundary: bytes left in current page. */
+		size_t page_space = SPI_FLASH_PAGE_SIZE -
+				    (offset % SPI_FLASH_PAGE_SIZE);
+		size_t chunk = MIN(len, page_space);
+
+		spi_flash_page_program(offset, src, chunk);
+		offset += chunk;
+		src    += chunk;
+		len    -= chunk;
+	}
+
+	return 0;
+}
+
+static int cfg_flash_erase_slot(uint32_t offset)
+{
+	spi_flash_sector_erase(offset);
+	spi_flash_sector_erase(offset + SPI_FLASH_SECTOR_SIZE);
+	return 0;
+}
+
+#endif /* backend selection */
+
+/* ================================================================
  * Internal: read and validate a slot header
  * ================================================================ */
 static bool read_slot(uint32_t offset, struct slot_header *hdr)
 {
-	spi_flash_read(offset, (uint8_t *)hdr, sizeof(*hdr));
+	if (cfg_flash_read(offset, hdr, sizeof(*hdr)) != 0) {
+		return false;
+	}
 
 	if (hdr->magic != FLASH_CONFIG_MAGIC) {
 		return false;
@@ -87,8 +240,10 @@ static bool validate_slot_crc(uint32_t offset, const struct slot_header *hdr)
 		return false;
 	}
 
-	spi_flash_read(offset + sizeof(struct slot_header),
-		       (uint8_t *)json_buf, hdr->length);
+	if (cfg_flash_read(offset + sizeof(struct slot_header),
+			   json_buf, hdr->length) != 0) {
+		return false;
+	}
 	json_buf[hdr->length] = '\0';
 
 	uint32_t crc = crc32_ieee((const uint8_t *)json_buf, hdr->length);
@@ -108,34 +263,26 @@ static int write_slot(uint32_t offset, uint32_t new_seq,
 		.crc32  = crc32_ieee((const uint8_t *)payload, payload_len),
 	};
 
-	/* Erase the two sectors that make up this slot. */
-	spi_flash_sector_erase(offset);
-	spi_flash_sector_erase(offset + SPI_FLASH_SECTOR_SIZE);
+	/* Erase the slot. */
+	if (cfg_flash_erase_slot(offset) != 0) {
+		LOG_ERR("Flash config: slot erase failed");
+		return -EIO;
+	}
 
-	/* Write header. */
-	spi_flash_page_program(offset, (const uint8_t *)&hdr, sizeof(hdr));
-
-	/* Write payload page-by-page. */
-	uint32_t addr = offset + sizeof(hdr);
-	const uint8_t *src = (const uint8_t *)payload;
-	uint32_t remaining = payload_len;
-
-	while (remaining > 0) {
-		/* Respect page boundary: bytes left in current page. */
-		uint32_t page_space = SPI_FLASH_PAGE_SIZE -
-				      (addr % SPI_FLASH_PAGE_SIZE);
-		uint32_t chunk = (remaining < page_space) ? remaining
-							  : page_space;
-
-		spi_flash_page_program(addr, src, chunk);
-		addr      += chunk;
-		src       += chunk;
-		remaining -= chunk;
+	/* Write header, then payload. */
+	if (cfg_flash_write(offset, &hdr, sizeof(hdr)) != 0 ||
+	    cfg_flash_write(offset + sizeof(hdr), payload, payload_len) != 0) {
+		LOG_ERR("Flash config: slot write failed");
+		return -EIO;
 	}
 
 	/* Read-back verification. */
 	struct slot_header verify_hdr;
-	spi_flash_read(offset, (uint8_t *)&verify_hdr, sizeof(verify_hdr));
+
+	if (cfg_flash_read(offset, &verify_hdr, sizeof(verify_hdr)) != 0) {
+		LOG_ERR("Flash config: verify read failed");
+		return -EIO;
+	}
 
 	if (verify_hdr.magic != FLASH_CONFIG_MAGIC ||
 	    verify_hdr.seq   != new_seq ||
@@ -160,25 +307,16 @@ static int write_slot(uint32_t offset, uint32_t new_seq,
 
 int flash_config_init(void)
 {
+	int ret;
+
 	k_mutex_init(&flash_mutex);
 
-	/* Verify flash is accessible. */
-	uint32_t jedec = spi_flash_read_jedec_id();
-	if (jedec == 0 || jedec == 0xFFFFFF) {
-		LOG_ERR("Flash config: SPI flash not detected (JEDEC=0x%06x)",
-			jedec);
-		return -ENODEV;
-	}
-
-	/* Sanity: make sure our config area doesn't exceed flash. */
-	if (SLOT_B_OFFSET + SLOT_SIZE > SPI_FLASH_TOTAL_SIZE) {
-		LOG_ERR("Flash config: config area exceeds flash size!");
-		return -ENOMEM;
+	ret = cfg_backend_init();
+	if (ret < 0) {
+		return ret;
 	}
 
 	flash_ready = true;
-	LOG_INF("Flash config: init OK (JEDEC 0x%06x, config @ 0x%06x)",
-		jedec, CONFIG_FLASH_CONFIG_OFFSET);
 	return 0;
 }
 
@@ -238,8 +376,13 @@ int flash_config_load(void)
 
 	/* Read payload (validate_slot_crc already loaded it, but re-read
 	 * in case the other slot's CRC check overwrote json_buf). */
-	spi_flash_read(use_offset + sizeof(struct slot_header),
-		       (uint8_t *)json_buf, use_hdr->length);
+	if (cfg_flash_read(use_offset + sizeof(struct slot_header),
+			   json_buf, use_hdr->length) != 0) {
+		LOG_ERR("Flash config: payload read failed");
+		load_status = FLASH_CONFIG_LOAD_ERROR;
+		k_mutex_unlock(&flash_mutex);
+		return -EIO;
+	}
 	json_buf[use_hdr->length] = '\0';
 
 	/* Apply configuration. */
@@ -324,10 +467,12 @@ int flash_config_erase(void)
 
 	LOG_WRN("Flash config: erasing both config slots");
 
-	spi_flash_sector_erase(SLOT_A_OFFSET);
-	spi_flash_sector_erase(SLOT_A_OFFSET + SPI_FLASH_SECTOR_SIZE);
-	spi_flash_sector_erase(SLOT_B_OFFSET);
-	spi_flash_sector_erase(SLOT_B_OFFSET + SPI_FLASH_SECTOR_SIZE);
+	if (cfg_flash_erase_slot(SLOT_A_OFFSET) != 0 ||
+	    cfg_flash_erase_slot(SLOT_B_OFFSET) != 0) {
+		LOG_ERR("Flash config: erase failed");
+		k_mutex_unlock(&flash_mutex);
+		return -EIO;
+	}
 
 	seq_a = 0;
 	seq_b = 0;

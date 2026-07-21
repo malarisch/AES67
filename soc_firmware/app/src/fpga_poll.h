@@ -3,6 +3,8 @@
 
 #include <zephyr/net/net_if.h>
 
+#include "ptp_bmc.h"
+
 /** Callback type for requesting a DHCP restart from main. */
 typedef void (*fpga_poll_dhcp_restart_fn)(void);
 
@@ -23,5 +25,17 @@ void fpga_poll_start(fpga_poll_dhcp_restart_fn dhcp_restart_cb);
  * @param ip  The assigned IP address (stored for status display)
  */
 void fpga_poll_notify_ip_valid(const struct in_addr *ip);
+
+/**
+ * @brief Register a PTP role-change callback (software-PTP mode).
+ *
+ * With CONFIG_AES67_PTP_SOFTWARE the FPGA-BMC module (ptp_bmc.c) is not
+ * running, so nobody fires the role-change callback that drives the
+ * front-panel role LEDs and status cycle. In that mode the poll thread
+ * samples the Zephyr stack's port state once per second and invokes
+ * @p cb on every change — same contract as ptp_bmc_register_change_cb().
+ * No-op (never fired) in hardware-PTP builds.
+ */
+void fpga_poll_register_role_change_cb(ptp_bmc_change_cb_t cb);
 
 #endif /* FPGA_POLL_H */

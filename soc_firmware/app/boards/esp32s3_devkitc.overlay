@@ -12,6 +12,22 @@
  *   IRQ  = GPIO9  (FPGA mcu_irq_o — active high while an RX frame waits)
  * Bus speed starts at 10 MHz for bring-up; raise after signal integrity
  * is validated.
+ *
+ * ADDA / analog card (placeholders — update to match the hardware):
+ *   I2C SDA   = GPIO1  (board default i2c0 pinmux)
+ *   I2C SCL   = GPIO2  (board default i2c0 pinmux)
+ *   ADDA nRST = GPIO14 (active low — low holds the card in reset;
+ *                       shared with the display controller)
+ *
+ * Display controller (LEDs/buttons/7-segment, 115200 8N1):
+ *   TX = GPIO17, RX = GPIO18 (board default uart1 pinmux)
+ *
+ * FPGA JTAG configuration (broken-out header, bit-banged over GPIOs;
+ * needs a solid GND return and a ~1k pull-down on TCK for clean edges):
+ *   TCK = GPIO4
+ *   TMS = GPIO5
+ *   TDI = GPIO6
+ *   TDO = GPIO7  (MCU input, driven by the FPGA)
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -36,6 +52,7 @@
 			output-low;
 		};
 	};
+
 };
 
 &spi2 {
@@ -62,8 +79,56 @@
 	status = "okay";
 };
 
+/* Card I2C bus. main.c and the card manager look the bus up as
+ * DT_NODELABEL(i2c2) (the LiteI2C label on the LiteX targets), so the
+ * ESP32's i2c0 gets `i2c2` as an additional label. Pinmux (SDA=GPIO1,
+ * SCL=GPIO2, pull-ups, open-drain) and 100 kHz come from the board dts;
+ * the external card has its own pull-ups, the weak internal ones just
+ * keep the bus defined while it is unplugged. */
+i2c2: &i2c0 {
+	status = "okay";
+};
+
+/* Display-controller UART (front panel LEDs/buttons/7-segment).
+ * main.c looks the port up via the display-ctrl-uart alias; pinmux
+ * (TX=GPIO17, RX=GPIO18) comes from the board pinctrl. */
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
+};
+
 / {
 	chosen {
 		zephyr,fpga-spi = &fpga_spi;
+	};
+
+	aliases {
+		display-ctrl-uart = &uart1;
+		/* The nRST line is shared between the display controller and
+		 * the ADDA card: display_ctrl's GPIO reset backend and
+		 * fpga_hal_spi.c both drive the same pin. */
+		dc-nrst = &adda_nrst;
+	};
+
+	/* FPGA JTAG, bit-banged over four GPIOs. TCK/TMS/TDI are outputs,
+	 * TDO is an input driven by the FPGA. Loads the bitstream into the
+	 * FPGA's SRAM at boot (fpga_jtag driver, init priority < spibone). */
+	fpga_jtag: fpga-jtag {
+		compatible = "aes67,cyclone-jtag";
+		tck-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+		tms-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+		tdi-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+		tdo-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
+	};
+
+	/* ADDA nRST, driven directly by the ESP32 (the FPGA's adda_nrst
+	 * CSR pin is not wired to this card). fpga_hal_spi.c drives this
+	 * GPIO instead of the CSR bit when the node is present. ACTIVE_LOW:
+	 * asserting the line (logical 1) holds the card in reset. */
+	adda_nrst: adda-nrst {
+		compatible = "aes67,adda-nrst";
+		gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
 	};
 };

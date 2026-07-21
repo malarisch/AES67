@@ -1,0 +1,97 @@
+config AES67_FPGA_JTAG
+	bool "Cyclone FPGA JTAG bit-bang (chain scan / configuration)"
+	default y
+	depends on DT_HAS_AES67_CYCLONE_JTAG_ENABLED
+	depends on GPIO
+	help
+	  Bit-bang the FPGA's JTAG interface (TCK/TMS/TDI/TDO on GPIOs,
+	  devicetree node compatible "aes67,cyclone-jtag"). This first stage
+	  scans the chain and reads IDCODEs to verify the wiring and identify
+	  the device; JTAG SRAM configuration is a later addition.
+
+if AES67_FPGA_JTAG
+
+config AES67_FPGA_JTAG_SCAN_AT_BOOT
+	bool "Scan the JTAG chain at boot and log the IDCODEs"
+	default y
+	help
+	  Run a chain scan during driver init and log the devices found.
+	  Useful for bringing up hand-wired JTAG before any configuration
+	  logic exists. Ignored when AES67_FPGA_JTAG_BOOT_LOAD is set (that
+	  path scans and verifies the device itself before configuring).
+
+config AES67_FPGA_JTAG_BOOT_LOAD
+	bool "Configure the FPGA over JTAG at boot from an embedded bitstream"
+	help
+	  Extract the JTAG configuration data from the SVF named by
+	  AES67_FPGA_JTAG_BITSTREAM, embed it into the firmware image and
+	  load it into the FPGA's SRAM over JTAG during driver init — before
+	  spibone, eth_spi or the FPGA HAL touch the device. The chain is
+	  scanned and the IDCODE verified first, so a mis-wired or unexpected
+	  device is never configured blind.
+
+config AES67_FPGA_JTAG_BITSTREAM
+	string "Path to the Quartus JTAG SVF"
+	depends on AES67_FPGA_JTAG_BOOT_LOAD
+	default "../../FPGA/boards/altera/cyc2/output_files/cyc2.svf"
+	help
+	  Serial Vector Format file produced by Quartus for JTAG
+	  configuration of the FPGA (Programmer -> File -> Create
+	  JAM/SVF/JBC File, SVF, JTAG mode). Altera organises the JTAG
+	  configuration bitstream differently from the serial RBF, so the RBF
+	  cannot be shifted over JTAG; the build extracts the config data
+	  blob from the SVF (svf_to_bin.py) and embeds it into flash rodata.
+	  A relative path is resolved against the application source
+	  directory. Regenerate the SVF whenever the gateware changes.
+
+config AES67_FPGA_JTAG_CONFIG_RETRIES
+	int "JTAG configuration attempts (verified by USERCODE read-back)"
+	depends on AES67_FPGA_JTAG_BOOT_LOAD
+	default 8
+	range 1 32
+	help
+	  After each configuration pass the device's USERCODE register is
+	  read back and compared to the value embedded from the SVF. On a
+	  mismatch (a bit error corrupted the shift) the configuration is
+	  retried up to this many times. This masks intermittent TDI/TCK
+	  signal-integrity errors on hand-wired JTAG; each attempt reshifts
+	  the full bitstream, so keep an eye on how many are needed and fix
+	  the wiring / raise AES67_FPGA_JTAG_TCK_DELAY_US if it is more than
+	  a couple.
+
+config AES67_FPGA_JTAG_LINK_TEST_BITS
+	int "JTAG BYPASS link-test length in bits (0 = off)"
+	depends on AES67_FPGA_JTAG_BOOT_LOAD
+	default 20000
+	range 0 2000000
+	help
+	  Before configuring, shift this many pseudo-random bits through the
+	  device's 1-bit BYPASS register and count how many come back wrong.
+	  This runs the exact TCK/TDI/TDO wiring the configuration stream uses
+	  and reports its bit-error count, so a marginal hand-wired chain shows
+	  up as a hard number instead of an intermittent config failure. Any
+	  non-zero result means the wiring cannot carry the bitstream yet —
+	  raise AES67_FPGA_JTAG_TCK_DELAY_US and improve the wiring until it is
+	  zero. Set to 0 to skip the test once the link is known good.
+
+config AES67_FPGA_JTAG_TCK_DELAY_US
+	int "TCK half-period in microseconds (bit-bang)"
+	default 1
+	range 0 100
+	help
+	  Delay inserted on each TCK half-cycle. 0 clocks as fast as the
+	  GPIO calls allow (hundreds of kHz on the ESP32); increase it if a
+	  marginally wired chain needs a slower clock. The uncompressed
+	  bitstream is a few Mbit, so this directly sets the boot-time
+	  configuration duration.
+
+config AES67_FPGA_JTAG_INIT_PRIORITY
+	int "Init priority of the JTAG driver"
+	default 55
+	help
+	  After GPIO init and, once JTAG configuration is added, below the
+	  FPGA consumers (spibone at CONFIG_SPIBONE_INIT_PRIORITY, default
+	  60) so a JTAG-loaded bitstream is in place before the first
+	  Wishbone transaction.
+
+endif # AES67_FPGA_JTAG

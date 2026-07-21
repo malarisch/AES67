@@ -1,0 +1,113 @@
+From 94614434b5e85da51155fa012359580b9cf30649 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Thu, 16 Jul 2026 13:41:26 +0200
+Subject: [PATCH] net: ptp: ignore foreign-version PTP messages instead of
+ faulting
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Any device on the PTP multicast group can send a message the stack
+cannot parse — PTPv1 gear (e.g. Dante audio devices) shares the same
+group 224.0.1.129 and UDP ports 319/320, so on mixed networks
+foreign-version traffic is entirely expected.
+
+ptp_port_event_gen() treated every ptp_msg_post_recv() failure as
+PTP_EVT_FAULT_DETECTED, so a single Dante device emitting PTPv1 Syncs
+took the port down permanently ("Received message incomplient with
+supported PTP version" at error level for every packet, port stuck in
+FAULTY). This is also a trivial remote DoS: one unparseable multicast
+packet per fault-reset cycle keeps the port dead.
+
+Check the version first in ptp_msg_post_recv() (field offsets and
+message types are only meaningful for our major version), return
+-EPROTONOSUPPORT and log at debug level, and make ptp_port_event_gen()
+drop undecodable messages instead of raising a port fault, matching
+IEEE 1588-2019 expectations and linuxptp behaviour (EV_NONE on any
+message parse error).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/msg.c  | 25 +++++++++++++------------
+ subsys/net/lib/ptp/port.c |  8 +++++++-
+ 2 files changed, 20 insertions(+), 13 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/msg.c b/subsys/net/lib/ptp/msg.c
+index 4a2b0b2b3c..2f366fe038 100644
+--- a/subsys/net/lib/ptp/msg.c
++++ b/subsys/net/lib/ptp/msg.c
+@@ -76,20 +76,13 @@ static void msg_port_id_pre_send(struct ptp_port_id *port_id)
+ 	port_id->port_number = net_htons(port_id->port_number);
+ }
+ 
+-static int msg_header_post_recv(struct ptp_header *header)
++static void msg_header_post_recv(struct ptp_header *header)
+ {
+-	if ((header->version & 0xF) != PTP_MAJOR_VERSION) {
+-		/* Incompatible protocol version */
+-		return -1;
+-	}
+-
+ 	header->msg_length = net_ntohs(header->msg_length);
+ 	header->correction = net_ntohll(header->correction);
+ 	header->sequence_id = net_ntohs(header->sequence_id);
+ 
+ 	msg_port_id_post_recv(&header->src_port_id);
+-
+-	return 0;
+ }
+ 
+ static void msg_header_pre_send(struct ptp_header *header)
+@@ -459,6 +452,17 @@ int ptp_msg_post_recv(struct ptp_port *port, struct ptp_msg *msg, int cnt)
+ 	int64_t current;
+ 	int tlv_len;
+ 
++	/* Check the version before anything else: field offsets and message
++	 * types are only meaningful for our major version. Foreign-version
++	 * traffic (e.g. PTPv1 from Dante devices, which shares the same
++	 * multicast group and ports) is expected on mixed networks and is
++	 * silently ignored rather than treated as an error.
++	 */
++	if ((msg->header.version & 0xF) != PTP_MAJOR_VERSION) {
++		LOG_DBG("Ignoring message with foreign PTP version");
++		return -EPROTONOSUPPORT;
++	}
++
+ 	/* type is a 4-bit field (0-15) taken straight off the wire, but
+ 	 * msg_size[] only has entries up to PTP_MSG_MANAGEMENT. Reject
+ 	 * undefined types before indexing to avoid an out-of-bounds read.
+@@ -473,10 +477,7 @@ int ptp_msg_post_recv(struct ptp_port *port, struct ptp_msg *msg, int cnt)
+ 		return -EBADMSG;
+ 	}
+ 
+-	if (msg_header_post_recv(&msg->header)) {
+-		LOG_ERR("Received message incomplient with supported PTP version");
+-		return -EBADMSG;
+-	}
++	msg_header_post_recv(&msg->header);
+ 
+ 	/* Record local uptime for aging calculations */
+ 	msg->local_uptime_ms = k_uptime_get();
+diff --git a/subsys/net/lib/ptp/port.c b/subsys/net/lib/ptp/port.c
+index e275e5a26d..a2f796649a 100644
+--- a/subsys/net/lib/ptp/port.c
++++ b/subsys/net/lib/ptp/port.c
+@@ -1714,8 +1714,14 @@ enum ptp_port_event ptp_port_event_gen(struct ptp_port *port, int idx)
+ 
+ 	ret = ptp_msg_post_recv(port, msg, cnt);
+ 	if (ret) {
++		/* An unparseable or foreign-version message is external input
++		 * (any device on the multicast group can send one) and only
++		 * gets dropped; it is not a fault of this port. Faulting here
++		 * used to take the port down permanently on networks with
++		 * PTPv1 (e.g. Dante) devices.
++		 */
+ 		ptp_msg_unref(msg);
+-		return PTP_EVT_FAULT_DETECTED;
++		return PTP_EVT_NONE;
+ 	}
+ 
+ 	if (ptp_port_id_eq(&msg->header.src_port_id, &port->port_ds.id)) {
+-- 
+2.53.0
+
