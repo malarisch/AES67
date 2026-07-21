@@ -914,7 +914,7 @@ static int cmd_aes67_vendor(const struct shell *sh, size_t argc, char **argv)
 	cfg->vendor[AES67_VENDOR_MAX - 1] = '\0';
 	aes67_config_unlock();
 
-	sd_config_save();
+	aes67_config_persist();
 	shell_print(sh, "Vendor set to: %s", cfg->vendor);
 	return 0;
 }
@@ -933,7 +933,7 @@ static int cmd_aes67_product(const struct shell *sh, size_t argc, char **argv)
 	cfg->product[AES67_PRODUCT_MAX - 1] = '\0';
 	aes67_config_unlock();
 
-	sd_config_save();
+	aes67_config_persist();
 	shell_print(sh, "Product set to: %s", cfg->product);
 	return 0;
 }
@@ -952,7 +952,7 @@ static int cmd_aes67_serial(const struct shell *sh, size_t argc, char **argv)
 	cfg->serial[AES67_SERIAL_MAX - 1] = '\0';
 	aes67_config_unlock();
 
-	sd_config_save();
+	aes67_config_persist();
 	shell_print(sh, "Serial set to: %s", cfg->serial);
 	return 0;
 }
@@ -971,7 +971,7 @@ static int cmd_aes67_name(const struct shell *sh, size_t argc, char **argv)
 	cfg->device_name[AES67_DEVICE_NAME_MAX - 1] = '\0';
 	aes67_config_unlock();
 
-	sd_config_save();
+	aes67_config_persist();
 	shell_print(sh, "Device name set to: %s", cfg->device_name);
 	return 0;
 }

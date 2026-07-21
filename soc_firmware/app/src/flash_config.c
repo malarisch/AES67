@@ -20,6 +20,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/init.h>
 #include <string.h>
 
 #include "flash_config.h"
@@ -309,6 +310,12 @@ int flash_config_init(void)
 {
 	int ret;
 
+	/* Idempotent: the early SYS_INIT below already brings the backend up,
+	 * and main() calls this again during its normal bring-up. */
+	if (flash_ready) {
+		return 0;
+	}
+
 	k_mutex_init(&flash_mutex);
 
 	ret = cfg_backend_init();
@@ -503,3 +510,52 @@ const char *flash_config_status_str(enum flash_config_load_status status)
 		return "unknown";
 	}
 }
+
+/* ================================================================
+ * Early load
+ * ================================================================ */
+
+/*
+ * Load the stored configuration before the network stack starts.
+ *
+ * The device MAC is derived from the configured product serial number, and
+ * Zephyr's PTP stack derives its clock identity (EUI-64) from that MAC when
+ * it initialises at APPLICATION/CONFIG_PTP_INIT_PRIO. Loading the config
+ * here — after the flash driver (CONFIG_FLASH_INIT_PRIORITY) and before the
+ * network stack (POST_KERNEL/CONFIG_NET_INIT_PRIO) — is what makes the
+ * serial known early enough for both to use the final address.
+ *
+ * Failures are non-fatal: the compiled-in defaults simply stay in place and
+ * main() retries the load during its normal bring-up.
+ */
+#define FLASH_CONFIG_EARLY_INIT_PRIO 70
+
+BUILD_ASSERT(FLASH_CONFIG_EARLY_INIT_PRIO > CONFIG_FLASH_INIT_PRIORITY,
+	     "config must load after the flash driver is ready");
+#ifdef CONFIG_NET_INIT_PRIO
+BUILD_ASSERT(FLASH_CONFIG_EARLY_INIT_PRIO < CONFIG_NET_INIT_PRIO,
+	     "config must load before the network stack derives the MAC");
+#endif
+
+static int flash_config_early_load(void)
+{
+	int ret = flash_config_init();
+
+	if (ret < 0) {
+		LOG_WRN("Early flash config init failed (%d); using defaults", ret);
+		return 0;
+	}
+
+	ret = flash_config_load();
+	if (ret == -ENOENT) {
+		LOG_INF("No stored configuration in flash yet, using defaults");
+	} else if (ret < 0) {
+		LOG_WRN("Early flash config load failed (%d); using defaults", ret);
+	} else {
+		LOG_INF("Configuration loaded from flash (pre-network)");
+	}
+
+	return 0;
+}
+
+SYS_INIT(flash_config_early_load, POST_KERNEL, FLASH_CONFIG_EARLY_INIT_PRIO);

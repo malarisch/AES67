@@ -118,6 +118,33 @@ char *aes67_config_build_node_id(char *buf, size_t buflen);
  */
 char *aes67_config_build_hostname(char *buf, size_t buflen);
 
+/**
+ * @brief Derive the device MAC address from the configured serial number.
+ *
+ * Produces a stable, locally-administered unicast MAC of the form
+ * 02:AA:E6:70:<serial-16>. A purely numeric serial up to 65535 maps
+ * straight onto the low two bytes, so serial "0001" yields
+ * 02:AA:E6:70:00:01 and the serial stays readable in the MAC; any other
+ * serial is folded with FNV-1a into the same two bytes. The result is
+ * deterministic — the same serial always yields the same MAC.
+ *
+ * @param mac Output buffer for the six address bytes.
+ */
+void aes67_config_build_mac(uint8_t mac[6]);
+
+/**
+ * @brief Persist the current configuration to every available backend.
+ *
+ * Writes to the SD card and/or the SPI flash, whichever are compiled in.
+ * Boards without an SD card persist to flash alone, so callers must use
+ * this rather than sd_config_save() directly — otherwise a setting is
+ * silently lost on reboot.
+ *
+ * @return 0 if at least one backend stored the configuration, or a
+ *         negative errno if none did.
+ */
+int aes67_config_persist(void);
+
 #ifdef __cplusplus
 }
 #endif

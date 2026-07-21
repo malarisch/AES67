@@ -392,7 +392,7 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 			aes67_ptp_reconstruct((uint8_t)(sec & 0xF),
 					      nsec & 0x3FFFFFFF, &tx_ts);
 			/* Temporary SW-PTP bring-up diagnostics. */
-			LOG_WRN("TXTS report %llu.%09u (raw sec=%u nsec=%u, pre=%u/%u, polls=%d)",
+			LOG_DBG("TXTS report %llu.%09u (raw sec=%u nsec=%u, pre=%u/%u, polls=%d)",
 				tx_ts.second, tx_ts.nanosecond, sec & 0xF,
 				nsec & 0x3FFFFFFF, pre_sec & 0xF,
 				pre_nsec & 0x3FFFFFFF, i);
@@ -525,8 +525,11 @@ static void eth_spi_iface_init(struct net_if *iface)
 	data->iface = iface;
 	ethernet_init(iface);
 
-	/* Static locally-administered MAC. The FPGA learns it via the
-	 * HAL-level `write_mac` call once the net stack is up. */
+	/* Locally-administered fallback MAC, used only until main() has loaded
+	 * the stored configuration: it then derives the real address from the
+	 * product serial (aes67_config_build_mac) and re-applies it here. This
+	 * default matches the derived value for the default serial "0001".
+	 * The FPGA learns the final address via the HAL-level `write_mac`. */
 	data->mac_addr[0] = 0x02;
 	data->mac_addr[1] = 0xAA;
 	data->mac_addr[2] = 0xE6;

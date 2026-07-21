@@ -8,8 +8,16 @@
 #include "aes67_config.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <ctype.h>
+#include <errno.h>
 #include <zephyr/logging/log.h>
+#ifdef CONFIG_SD_CONFIG
+#include "sd_config.h"
+#endif
+#ifdef CONFIG_FLASH_CONFIG
+#include "flash_config.h"
+#endif
 
 LOG_MODULE_REGISTER(aes67_config, LOG_LEVEL_INF);
 
@@ -135,4 +143,73 @@ char *aes67_config_build_hostname(char *buf, size_t buflen)
 		}
 	}
 	return buf;
+}
+
+void aes67_config_build_mac(uint8_t mac[6])
+{
+	/* Locally-administered unicast prefix (bit 1 of byte 0 set, bit 0
+	 * clear), so no real OUI is needed. This is the same prefix the
+	 * Ethernet drivers use as their built-in default, which keeps the
+	 * default serial "0001" mapping to the historic 02:AA:E6:70:00:01. */
+	static const uint8_t prefix[4] = { 0x02, 0xAA, 0xE6, 0x70 };
+	const char *serial = g_config.serial;
+	uint32_t id;
+	char *end;
+
+	memcpy(mac, prefix, sizeof(prefix));
+
+	/* A plain decimal serial is carried verbatim in the low two bytes so
+	 * it stays readable in the MAC. Anything else (empty, non-numeric or
+	 * out of range) is folded with FNV-1a, which still gives a stable and
+	 * well-distributed value for the same serial. */
+	id = (uint32_t)strtoul(serial, &end, 10);
+	if (serial[0] == '\0' || *end != '\0' || id > 0xFFFFu) {
+		uint32_t h = 2166136261u;
+
+		for (const char *p = serial; *p != '\0'; p++) {
+			h = (h ^ (uint8_t)*p) * 16777619u;
+		}
+		id = (h ^ (h >> 16)) & 0xFFFFu;
+	}
+
+	mac[4] = (uint8_t)(id >> 8);
+	mac[5] = (uint8_t)id;
+}
+
+int aes67_config_persist(void)
+{
+	int ret = -ENODEV;
+
+#ifdef CONFIG_SD_CONFIG
+	{
+		int r = sd_config_save();
+
+		if (r == 0) {
+			ret = 0;
+		} else if (r != -ENODEV) {
+			/* -ENODEV just means "no card here"; anything else is
+			 * a real write failure worth reporting. */
+			LOG_WRN("Config save to SD failed: %d", r);
+		}
+	}
+#endif
+
+#ifdef CONFIG_FLASH_CONFIG
+	{
+		int r = flash_config_save();
+
+		if (r == 0) {
+			ret = 0;
+		} else {
+			LOG_WRN("Config save to flash failed: %d", r);
+		}
+	}
+#endif
+
+	if (ret != 0) {
+		LOG_ERR("Configuration not persisted — no storage backend "
+			"accepted it; changes will be lost on reboot");
+	}
+
+	return ret;
 }

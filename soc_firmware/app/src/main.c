@@ -6,6 +6,7 @@
 #include <zephyr/net/net_event.h>
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/net/hostname.h>
+#include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <stdio.h>
@@ -222,6 +223,74 @@ static void nrst_card_rescan_cb(void *unused)
 #endif
 
 /* ---- Entry point ---- */
+
+/* ---- MAC address derived from the product serial number ----
+ *
+ * Applies the configured serial's MAC to the interface. Callable more than
+ * once: if the address already matches it does nothing, so re-running it
+ * after a config reload never bounces a working interface. A link address
+ * can only be changed while the interface is not running, so the interface
+ * is taken down around the change when necessary.
+ */
+static void apply_serial_mac(struct net_if *iface)
+{
+	struct net_linkaddr *cur;
+	uint8_t mac[6];
+	bool was_up;
+	int ret;
+
+	if (iface == NULL) {
+		return;
+	}
+
+	aes67_config_build_mac(mac);
+
+	cur = net_if_get_link_addr(iface);
+	if (cur != NULL && cur->len == sizeof(mac) &&
+	    memcmp(cur->addr, mac, sizeof(mac)) == 0) {
+		return;		/* already correct */
+	}
+
+	was_up = net_if_is_admin_up(iface);
+	if (was_up) {
+		net_if_down(iface);
+	}
+
+	ret = net_if_set_link_addr(iface, mac, sizeof(mac), NET_LINK_ETHERNET);
+	if (ret < 0) {
+		LOG_WRN("Could not apply serial-derived MAC (err %d); keeping "
+			"the driver default", ret);
+	} else {
+		LOG_INF("MAC %02X:%02X:%02X:%02X:%02X:%02X (from serial \"%s\")",
+			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+			aes67_config_get()->serial);
+	}
+
+	if (was_up) {
+		net_if_up(iface);
+	}
+}
+
+/* The PTP stack derives its clock identity (EUI-64) from the interface MAC
+ * when it initialises, so the serial-derived address has to be in place
+ * before that happens: after the network stack has created the interfaces
+ * (POST_KERNEL/CONFIG_NET_INIT_PRIO) and before ptp_init()
+ * (APPLICATION/CONFIG_PTP_INIT_PRIO). The stored config is loaded earlier
+ * still, by flash_config's own pre-network SYS_INIT. */
+#define AES67_MAC_INIT_PRIO 50
+
+#if defined(CONFIG_PTP) && defined(CONFIG_PTP_INIT_PRIO)
+BUILD_ASSERT(AES67_MAC_INIT_PRIO < CONFIG_PTP_INIT_PRIO,
+	     "the MAC must be final before PTP derives its clock identity");
+#endif
+
+static int aes67_mac_init(void)
+{
+	apply_serial_mac(net_if_get_default());
+	return 0;
+}
+
+SYS_INIT(aes67_mac_init, APPLICATION, AES67_MAC_INIT_PRIO);
 
 #ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
 #ifdef CONFIG_DISPLAY_CTRL
@@ -471,6 +540,12 @@ int main(void)
 	g_iface = iface;
 
 	fpga_hal_register_recover_cb(fpga_reconfigure, NULL);
+
+	/* Re-assert the serial-derived MAC. Normally a no-op — aes67_mac_init()
+	 * already applied it before the PTP stack started — but the stored
+	 * config may have been reloaded above (e.g. from SD) with a different
+	 * serial. */
+	apply_serial_mac(iface);
 
 	fpga_write_mac_address(iface);
 

@@ -53,6 +53,41 @@
 #endif
 #include "card_manager.h"
 
+/*
+ * How the analog cards are hardware-reset differs per board:
+ *  - legacy STM32 boards give each card its own nRST GPIO ("mi-nrst" /
+ *    "lo-nrst" aliases), driven by the card driver itself;
+ *  - the ESP32 boards have a single nRST line shared by the display
+ *    controller and the AD/DA cards ("dc-nrst" alias), pulsed by
+ *    display_ctrl_hw_reset(), which also re-scans the cards through its
+ *    post-reset callbacks.
+ *
+ * The card drivers return -ENOTSUP when their own alias is absent, so the
+ * reset endpoints must pick the path the devicetree actually provides
+ * rather than assuming the per-card GPIO exists.
+ */
+#if defined(CONFIG_DISPLAY_CTRL) &&                                          \
+	((defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) &&                          \
+	  DT_NODE_EXISTS(DT_ALIAS(dc_nrst))) ||                              \
+	 defined(CONFIG_DISPLAY_CTRL_NRST_HAL))
+#define AES67_SHARED_NRST_AVAILABLE 1
+#else
+#define AES67_SHARED_NRST_AVAILABLE 0
+#endif
+
+#if defined(CONFIG_MI_CARD_NRST_GPIO) && DT_NODE_EXISTS(DT_ALIAS(mi_nrst))
+#define AES67_MI_OWN_NRST 1
+#else
+#define AES67_MI_OWN_NRST 0
+#endif
+
+#if defined(CONFIG_LO_CARD_NRST_GPIO) && DT_NODE_EXISTS(DT_ALIAS(lo_nrst))
+#define AES67_LO_OWN_NRST 1
+#else
+#define AES67_LO_OWN_NRST 0
+#endif
+
+
 /* local_memmem is a GNU extension not available in picolibc / Zephyr */
 static void *local_memmem(const void *haystack, size_t haystacklen,
 			  const void *needle, size_t needlelen)
@@ -1971,8 +2006,10 @@ static int api_handler(struct http_client_ctx *client,
 			}
 		} else if (strcmp(url, "/api/mi/reset") == 0) {
 			/* POST /api/mi/reset triggers hardware reset */
-#ifdef CONFIG_MI_CARD_NRST_GPIO
+#if AES67_MI_OWN_NRST
 			ret = mi_card_hw_reset();
+#elif AES67_SHARED_NRST_AVAILABLE
+			ret = display_ctrl_hw_reset();
 #else
 			ret = mi_card_reset();
 #endif
@@ -2000,8 +2037,10 @@ static int api_handler(struct http_client_ctx *client,
 			}
 		} else if (strcmp(url, "/api/lo/reset") == 0) {
 			/* POST /api/lo/reset triggers reset */
-#ifdef CONFIG_LO_CARD_NRST_GPIO
+#if AES67_LO_OWN_NRST
 			ret = lo_card_hw_reset();
+#elif AES67_SHARED_NRST_AVAILABLE
+			ret = display_ctrl_hw_reset();
 #else
 			ret = lo_card_reset();
 #endif
