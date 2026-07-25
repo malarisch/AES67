@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * RAVENNA-compliant RTSP server and client for AES67 stream control.
  *
  * Implements RFC 2326 RTSP protocol for:
@@ -27,7 +24,7 @@
 #include <ctype.h>
 
 #include "rtsp.h"
-#include "sap_sdp.h"
+#include "aes67_conn.h"
 #include "aes67_config.h"
 #include "ptp_bmc.h"
 #include "aes67_sdp_utils.h"
@@ -311,7 +308,7 @@ static int extract_stream_id_from_url(const char *url, uint8_t *stream_id_out)
 		}
 		name[n] = '\0';
 
-		const struct aes67_tx_stream *tx = sap_sdp_get_tx_streams();
+		const struct aes67_tx_stream *tx = aes67_conn_get_tx_streams();
 
 		for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
 			if (tx[i].active &&
@@ -398,7 +395,7 @@ static void destroy_session(struct rtsp_session *sess)
 
 static int build_sdp_for_stream(char *buf, size_t buf_size, uint8_t stream_id)
 {
-	const struct aes67_tx_stream *streams = sap_sdp_get_tx_streams();
+	const struct aes67_tx_stream *streams = aes67_conn_get_tx_streams();
 	const struct aes67_tx_stream *stream = &streams[stream_id];
 
 	if (!stream->active) {
@@ -521,7 +518,7 @@ static int handle_setup(int sock, const struct sockaddr_in *client_addr,
 	}
 
 	/* Verify stream is active */
-	const struct aes67_tx_stream *streams = sap_sdp_get_tx_streams();
+	const struct aes67_tx_stream *streams = aes67_conn_get_tx_streams();
 	if (!streams[stream_id].active) {
 		int pos = build_response_status(rtsp_send_buf, sizeof(rtsp_send_buf),
 						RTSP_STATUS_NOT_FOUND, req->cseq);
@@ -1430,7 +1427,7 @@ int rtsp_client_subscribe(const struct in_addr *server_addr,
 
 	/* Configure local RX stream with received SDP info */
 	uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = {0, 1, 2, 3, 4, 5, 6, 7};
-	ret = sap_sdp_configure_rx_stream(rx_stream_id,
+	ret = aes67_conn_configure_rx_stream(rx_stream_id,
 					  &mcast_addr,
 					  port,
 					  ch_map,

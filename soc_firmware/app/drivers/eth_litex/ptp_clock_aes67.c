@@ -59,6 +59,45 @@ static void wc_csr_write(uintptr_t addr, uint32_t val)
 /* Wallclock freq correction is a signed 20-bit ppb value (±524287). */
 #define AES67_MAX_PPB 524287
 
+/* Last rate correction written to the wallclock. Written by the PTP
+ * servo (rate_adjust) while following and by the leader relax tick
+ * while not — the role gates the two writers, so a plain variable with
+ * benign last-writer-wins races at role changes is sufficient. */
+static int32_t applied_ppb;
+
+static void wc_write_ppb(int32_t ppb)
+{
+	applied_ppb = ppb;
+	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+}
+
+void aes67_ptp_rate_reset(void)
+{
+	wc_write_ppb(0);
+	LOG_INF("Wallclock rate correction reset to 0 ppb");
+}
+
+bool aes67_ptp_rate_relax_step(int32_t step_ppb)
+{
+	int32_t ppb = applied_ppb;
+
+	if (ppb == 0) {
+		return true;
+	}
+
+	if (ppb > 0) {
+		ppb -= MIN(ppb, step_ppb);
+	} else {
+		ppb += MIN(-ppb, step_ppb);
+	}
+
+	wc_write_ppb(ppb);
+	if (ppb == 0) {
+		LOG_INF("Rate correction relaxed to 0 ppb");
+	}
+	return ppb == 0;
+}
+
 /* Read the live 48-bit wallclock seconds. */
 static uint64_t aes67_wc_read_seconds(void)
 {
@@ -149,7 +188,7 @@ static int ptp_aes67_rate_adjust(const struct device *dev, double ratio)
 		}
 	}
 
-	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+	wc_write_ppb((int32_t)ppb);
 	return 0;
 }
 

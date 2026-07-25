@@ -37,6 +37,7 @@
 #include "ui_display.h"
 #include "ptp_bmc.h"
 #include "ptp_ctrl.h"
+#include "aes67_conn.h"
 #include "sap_sdp.h"
 #include "webserver.h"
 #include "aes67_config.h"
@@ -55,6 +56,9 @@
 #endif
 #ifdef CONFIG_MDNS_SD
 #include "mdns_sd.h"
+#endif
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+#include "../drivers/eth_litex/eth_litex.h"
 #endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -127,6 +131,7 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 	}
 #endif
 
+	aes67_conn_notify_ip_ready(&dhcpv4->requested_ip);
 	sap_sdp_notify_ip_ready(&dhcpv4->requested_ip);
 
 #ifdef CONFIG_RTSP
@@ -169,34 +174,44 @@ static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 
 #ifdef CONFIG_DISPLAY_CTRL
 	if (display_ctrl_ready()) {
+		/* While the Ethernet link is down the panel shows "  LINK"
+		 * (set by fpga_poll); role fallout from the dead link (e.g.
+		 * LEADER -> LISTENING) must not repaint the status text.
+		 * The role LEDs stay live. */
+		bool link_up = fpga_poll_link_is_up();
+
 		switch (new_role) {
 		case PTP_ROLE_LEADER:
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_ON);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
-			display_ctrl_stop_status_cycle();
 			/* If wallclock already locked, go online immediately;
 			 * otherwise let fpga_poll handle when wc_locked fires */
-			if (ptp_ctrl_wallclock_locked()) {
-				display_ctrl_loading_animation_stop();
-				display_ctrl_start_metering();
-				display_ctrl_start_status_cycle("LEADER",
-					g_ip_valid ? &g_my_ip : NULL);
+			if (link_up) {
+				display_ctrl_stop_status_cycle();
+				if (ptp_ctrl_wallclock_locked()) {
+					display_ctrl_loading_animation_stop();
+					display_ctrl_start_metering();
+					display_ctrl_start_status_cycle("LEADER",
+						g_ip_valid ? &g_my_ip : NULL);
+				}
 			}
 			LOG_INF("LED: Master ON, Ext OFF");
 			break;
 		case PTP_ROLE_FOLLOWER:
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_OFF);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_ON);
-			display_ctrl_stop_status_cycle();
 			/* If wallclock already locked, go online;
 			 * otherwise show SYNCNG and let fpga_poll handle transition */
-			if (ptp_ctrl_wallclock_locked()) {
-				display_ctrl_loading_animation_stop();
-				display_ctrl_start_metering();
-				display_ctrl_start_status_cycle("FOLLOW",
-					g_ip_valid ? &g_my_ip : NULL);
-			} else {
-				display_ctrl_show_status("SYNCNG");
+			if (link_up) {
+				display_ctrl_stop_status_cycle();
+				if (ptp_ctrl_wallclock_locked()) {
+					display_ctrl_loading_animation_stop();
+					display_ctrl_start_metering();
+					display_ctrl_start_status_cycle("FOLLOW",
+						g_ip_valid ? &g_my_ip : NULL);
+				} else {
+					display_ctrl_show_status("SYNCNG");
+				}
 			}
 			LOG_INF("LED: Master OFF, Ext ON");
 			break;
@@ -204,8 +219,10 @@ static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 		default:
 			display_ctrl_set_sys_led(DC_SYSLED_MSTR, DC_SYSLED_BLINK1);
 			display_ctrl_set_sys_led(DC_SYSLED_EXT, DC_SYSLED_OFF);
-			display_ctrl_show_status("L  PTP");
-			display_ctrl_stop_status_cycle();
+			if (link_up) {
+				display_ctrl_show_status("L  PTP");
+				display_ctrl_stop_status_cycle();
+			}
 			LOG_INF("LED: Master BLINK, Ext OFF (listening)");
 			break;
 		}
@@ -354,12 +371,40 @@ int main(void)
 {
 	LOG_INF("AES67 System starting...");
 
-	/* Hold the IO card in reset from the very start.
-	 * The CS5368 ADCs must not leave reset until MCLK is stable.
-	 * nRST will be released later by card_manager_init() after
-	 * the Si5351A PLL has locked and clocks have settled. */
+#ifdef CONFIG_DISPLAY_CTRL_NRST_GPIO
+	/* Shared nRST line (display controller + card LPC + DSP): release it
+	 * immediately so both boot and I2C/UART communication works. Never
+	 * pulse this line at boot — an LPC reset reverts its GPOs to the
+	 * power-on defaults, which leave the converters live while the DSP
+	 * has no clock yet (FPGA unconfigured) = loud white noise. Instead
+	 * the card is put into a safe state over I2C right below. */
+	fpga_hal_set_adda_nrst(true);
+	LOG_INF("Shared nRST released (display + card LPC)");
+
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
+	{
+		const struct device *early_i2c =
+			DEVICE_DT_GET(DT_NODELABEL(i2c2));
+
+		/* Give the LPC time to boot, then mute the outputs and put
+		 * the converters into the card-level reset — BEFORE the
+		 * lengthy FPGA bitstream upload. They stay that way until
+		 * the first PTP/wallclock lock (card_manager_activate_outputs
+		 * from fpga_poll). */
+		k_msleep(200);
+		if (device_is_ready(early_i2c)) {
+			card_manager_early_mute(early_i2c);
+		}
+	}
+#endif
+#else
+	/* Dedicated ADDA reset (no display on the line): hold the card in
+	 * reset from the very start. The CS5368 ADCs must not leave reset
+	 * until MCLK is stable; nRST is released by card_manager_init()
+	 * after the Si5351A PLL has locked and the FPGA answers. */
 	fpga_hal_set_adda_nrst(false);
 	LOG_INF("ADDA nRST asserted (held in reset)");
+#endif
 
 	/* ---- Early Initialization (before FPGA ready) ---- */
 	ui_display_init();
@@ -405,16 +450,21 @@ int main(void)
 	}
 #endif
 
-	/* ---- Shared nRST: reset display controller + IO card hardware ---- */
+	/* ---- Shared nRST: prepare runtime hardware-reset capability ---- */
 #ifdef CONFIG_DISPLAY_CTRL
 #if defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) || defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
 	if (display_ctrl_nrst_init() < 0) {
 		LOG_WRN("Shared nRST init failed (hw reset unavailable)");
-	} else {
-		/* Pulse nRST before any driver init — this resets both the
-		 * display controller and the IO card (shared reset line). */
+	}
+#if defined(CONFIG_DISPLAY_CTRL_NRST_HAL)
+	else {
+		/* Legacy CSR-driven line: pulse nRST before any driver init to
+		 * reset display controller + IO card together. On the GPIO
+		 * (shared with the card LPC) boards this pulse must NOT happen
+		 * at boot — see the early-mute block at the top of main(). */
 		display_ctrl_hw_reset();
 	}
+#endif
 #endif
 #endif
 
@@ -593,6 +643,11 @@ int main(void)
 	 * clock quality, log intervals) into the stack — it booted with its
 	 * Kconfig defaults. */
 	LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining FPGA wallclock");
+	/* A warm FPGA (JTAG upload skipped, firmware rebooted) still carries
+	 * the previous run's rate correction — worst case the ±524287 ppb
+	 * clamp. Start from a neutral frequency; the servo takes over on the
+	 * first Sync, and if we end up leader the clock free-runs clean. */
+	aes67_ptp_rate_reset();
 	ptp_ctrl_apply_config();
 	/* ptp_bmc is not running: the fpga_poll thread samples the Zephyr
 	 * stack's role and fires the same display handler on changes. */
@@ -605,7 +660,12 @@ int main(void)
 	}
 #endif
 
-	/* ---- Start AES67 SAP/SDP announcements ---- */
+	/* ---- Start AES67 connection management + SAP announcements ---- */
+	int conn_ret = aes67_conn_init(iface);
+	if (conn_ret < 0) {
+		LOG_ERR("Failed to init connection management: %d", conn_ret);
+	}
+
 	int sap_ret = sap_sdp_start(iface);
 	if (sap_ret < 0) {
 		LOG_ERR("Failed to start SAP/SDP: %d", sap_ret);

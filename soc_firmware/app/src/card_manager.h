@@ -74,15 +74,43 @@ struct card_i2c_scan_result {
  * --------------------------------------------------------------------- */
 
 /**
+ * @brief Put a present card into a safe state as early as possible.
+ *
+ * Boot-path helper for boards whose shared nRST line (display + card
+ * LPC) must be released long before the FPGA is configured: probes the
+ * card LPC and immediately mutes the outputs / asserts the converter
+ * resets, so the clockless DSP's garbage never reaches the analog
+ * outputs. Absence of a card is not an error. Call before
+ * card_manager_init(); currently implemented for the LO card.
+ *
+ * @param i2c_dev  I2C device to use for card communication.
+ * @return 0 (best-effort), negative errno only on bad arguments.
+ */
+int card_manager_early_mute(const struct device *i2c_dev);
+
+/**
  * @brief Initialise the card manager.
  *
  * Performs an I2C bus scan, identifies connected boards, and calls the
- * appropriate driver init functions.
+ * appropriate driver init functions. Cards with an analog output path
+ * stay muted with their converters in reset until
+ * card_manager_activate_outputs().
  *
  * @param i2c_dev  I2C device to use for card communication.
  * @return 0 on success, negative errno on hard failure.
  */
 int card_manager_init(const struct device *i2c_dev);
+
+/**
+ * @brief Activate the audio outputs (call on first PTP/wallclock lock).
+ *
+ * Brings the converters out of reset (LO: DAC + DSP bring-up) and
+ * unmutes the outputs. Remembered across card_manager_rescan(), so a
+ * runtime nRST recovery restores the active state automatically.
+ *
+ * @return 0 on success, negative errno on failure.
+ */
+int card_manager_activate_outputs(void);
 
 /**
  * @brief Re-scan the bus and reinitialise all cards.

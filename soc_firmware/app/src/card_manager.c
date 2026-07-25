@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "../drivers/fpga_hal/fpga_hal.h"
+#include "card_settings.h"
 
 #ifdef CONFIG_MI_CARD
 #include "../drivers/mi_card/mi_card.h"
@@ -60,6 +61,7 @@ static const struct device     *s_i2c_dev;
 static struct card_info         s_cards[CARD_MAX_SLOTS];
 static struct card_i2c_scan_result s_scan;
 static struct k_mutex           s_lock;
+static bool                     s_outputs_allowed; /* PTP lock seen */
 
 /* -----------------------------------------------------------------------
  * Helpers
@@ -235,6 +237,46 @@ static int detect_and_init_slot0(void)
 	} else {
 		card->initialized = true;
 		LOG_INF("Card initialised: %s", card_type_name(card->type));
+
+		/* Restore persisted gain/48V/mute settings. For cards whose
+		 * converters are still gated on the PTP lock (LO) this is a
+		 * no-op here; activate_slot0_locked() re-applies. */
+		card_settings_apply();
+	}
+
+	return ret;
+}
+
+/* Bring the outputs of the detected card up. Caller holds s_lock. */
+static int activate_slot0_locked(void)
+{
+	const struct card_info *card = &s_cards[CARD_SLOT_MAIN];
+	int ret = 0;
+
+	if (!card->present) {
+		return 0;
+	}
+
+	switch (card->type) {
+#ifdef CONFIG_LO_CARD
+	case CARD_TYPE_LO:
+		ret = lo_card_activate();
+		if (ret == 0) {
+			/* Converters are up now — restore the persisted
+			 * clip/mute settings before opening the relays. */
+			card_settings_apply();
+			ret = lo_card_enable_outputs(true);
+		}
+		break;
+#endif
+#ifdef CONFIG_IO_CARD
+	case CARD_TYPE_IO:
+		ret = io_card_enable_outputs(true);
+		break;
+#endif
+	default:
+		/* MI card is input-only — nothing to unmute */
+		break;
 	}
 
 	return ret;
@@ -243,6 +285,38 @@ static int detect_and_init_slot0(void)
 /* -----------------------------------------------------------------------
  * Public API
  * --------------------------------------------------------------------- */
+
+int card_manager_early_mute(const struct device *i2c_dev)
+{
+	struct card_ident ident;
+
+	if (i2c_dev == NULL || !device_is_ready(i2c_dev)) {
+		return -ENODEV;
+	}
+
+	/* Pre-init boot path: single-threaded, s_lock not initialised yet. */
+	s_i2c_dev = i2c_dev;
+
+	if (lpc_read_ident(LPC_PRIMARY_ADDR, &ident) < 0 ||
+	    !board_id_is_known(ident.board_id)) {
+		LOG_INF("Early mute: no card LPC answering (yet)");
+		return 0;
+	}
+
+	switch (ident.board_id) {
+#ifdef CONFIG_LO_CARD
+	case BOARD_ID_LO:
+		lo_card_early_mute(i2c_dev);
+		break;
+#endif
+	default:
+		/* MI is input-only; the IO card's output path is brought up
+		 * muted by io_card_init() itself. */
+		break;
+	}
+
+	return 0;
+}
 
 int card_manager_init(const struct device *i2c_dev)
 {
@@ -254,11 +328,12 @@ int card_manager_init(const struct device *i2c_dev)
 	k_mutex_init(&s_lock);
 	s_i2c_dev = i2c_dev;
 
-	/* nRST has been held LOW since early boot (set in main()).
-	 * The cards' MCLK is derived by the FPGA, so main() only calls this
-	 * once the FPGA is configured and answering — the CS5368 ADCs need a
-	 * stable MCLK before nRST is released or their I2C won't come up.
-	 * Release nRST and give all card ICs time to initialise. */
+	/* On boards without a shared display/card reset line, nRST has been
+	 * held LOW since early boot (set in main()) — the cards' MCLK is
+	 * derived by the FPGA, so main() only calls this once the FPGA is
+	 * configured and answering (the CS5368 ADCs need a stable MCLK
+	 * before nRST is released or their I2C won't come up). On shared-
+	 * nRST boards the line is already high; this is a no-op there. */
 	LOG_INF("Card manager: releasing ADDA nRST...");
 	fpga_hal_set_adda_nrst(true);
 	k_msleep(200);  /* wait for all card ICs to come out of reset before I2C scan */
@@ -288,7 +363,32 @@ int card_manager_rescan(void)
 	 */
 	int ret = detect_and_init_slot0();
 
+	/*
+	 * Step 3: if the outputs were already activated (PTP lock seen),
+	 * restore the active state — this is the runtime-recovery path
+	 * (nRST pulse / card re-seated).
+	 */
+	if (ret == 0 && s_outputs_allowed) {
+		ret = activate_slot0_locked();
+	}
+
 	k_mutex_unlock(&s_lock);
+	return ret;
+}
+
+int card_manager_activate_outputs(void)
+{
+	int ret;
+
+	if (s_i2c_dev == NULL) {
+		return -ENODEV;
+	}
+
+	k_mutex_lock(&s_lock, K_FOREVER);
+	s_outputs_allowed = true;
+	ret = activate_slot0_locked();
+	k_mutex_unlock(&s_lock);
+
 	return ret;
 }
 

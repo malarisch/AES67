@@ -310,8 +310,9 @@ int flash_config_init(void)
 {
 	int ret;
 
-	/* Idempotent: the early SYS_INIT below already brings the backend up,
-	 * and main() calls this again during its normal bring-up. */
+	/* Idempotent: on FLASH_AREA builds the early SYS_INIT below already
+	 * brings the backend up, and main() calls this again during its
+	 * normal bring-up. */
 	if (flash_ready) {
 		return 0;
 	}
@@ -512,7 +513,7 @@ const char *flash_config_status_str(enum flash_config_load_status status)
 }
 
 /* ================================================================
- * Early load
+ * Early load (FLASH_AREA backend only)
  * ================================================================ */
 
 /*
@@ -527,7 +528,15 @@ const char *flash_config_status_str(enum flash_config_load_status status)
  *
  * Failures are non-fatal: the compiled-in defaults simply stay in place and
  * main() retries the load during its normal bring-up.
+ *
+ * FLASH_AREA backend only: the LITESPI backend has no Zephyr flash driver
+ * (no CONFIG_FLASH_INIT_PRIORITY) and its spi_flash master isn't usable
+ * until spi_flash_init() has disabled the MMAP port and reset the device,
+ * which happens much later (fw_update_init() in main). On LiteX the config
+ * is loaded from main() as before.
  */
+#if defined(CONFIG_FLASH_CONFIG_BACKEND_FLASH_AREA)
+
 #define FLASH_CONFIG_EARLY_INIT_PRIO 70
 
 BUILD_ASSERT(FLASH_CONFIG_EARLY_INIT_PRIO > CONFIG_FLASH_INIT_PRIORITY,
@@ -559,3 +568,5 @@ static int flash_config_early_load(void)
 }
 
 SYS_INIT(flash_config_early_load, POST_KERNEL, FLASH_CONFIG_EARLY_INIT_PRIO);
+
+#endif /* CONFIG_FLASH_CONFIG_BACKEND_FLASH_AREA */

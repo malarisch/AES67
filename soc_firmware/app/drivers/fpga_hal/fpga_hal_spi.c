@@ -306,9 +306,12 @@ int fpga_hal_set_adda_nrst(bool released)
 	}
 
 	if (!adda_nrst_configured) {
-		/* Come up asserted (active = in reset); the first caller is
-		 * main() holding the card in reset anyway. */
-		ret = gpio_pin_configure_dt(&adda_nrst_gpio, GPIO_OUTPUT_ACTIVE);
+		/* Configure straight into the requested state — this line is
+		 * shared with the display controller and the card LPC, and a
+		 * configure-asserted glitch would reset both. */
+		ret = gpio_pin_configure_dt(&adda_nrst_gpio,
+					    released ? GPIO_OUTPUT_INACTIVE
+						     : GPIO_OUTPUT_ACTIVE);
 		if (ret < 0) {
 			return ret;
 		}

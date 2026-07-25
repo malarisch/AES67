@@ -85,18 +85,24 @@ class AES67SoC(SoCCore):
                 "uartbone":     "AES67-LiteX-SoC-uartbone",
                 "aes67_bridge": "AES67-LiteX-Bridge",
             }[target]
+            # ident="" so LiteX skips the identifier ROM: no host reads
+            # identifier_mem on the CPU-less targets, and each ROM costs a
+            # block RAM (two per FPGA in spibone mode — master SoC + bridge).
             SoCCore.__init__(self, platform, sys_clk_freq,
                 cpu_type                 = "None",
                 bus_interconnect         = "crossbar",
                 integrated_rom_size      = 0,
                 integrated_sram_size     = 0,
                 integrated_main_ram_size = 0,
-                ident                    = ident,
-                ident_version            = True,
+                ident                    = "",
                 with_uart                = False,
                 with_timer               = False,
                 **kwargs,
             )
+            # Keep the target name visible in csr.csv/csr.json as a constant
+            # (this is what add_identifier() would have exported, minus the
+            # build timestamp and the ROM).
+            self.add_config("identifier", ident)
         else:
             # Boot flow: CPU resets to SPI flash where a tiny boot stub copies
             # the BIOS into main RAM and jumps there.  The BIOS therefore runs

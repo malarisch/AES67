@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * RAVENNA mDNS / DNS-SD — self-contained responder + browser.
  *
  * Replaces Zephyr's CONFIG_MDNS_RESPONDER for this application.  RAVENNA
@@ -45,7 +42,7 @@
 #include "mdns_sd.h"
 #include "aes67_config.h"
 #include "aes67_sdp_utils.h"
-#include "sap_sdp.h"
+#include "aes67_conn.h"
 #include "rtsp.h"
 
 LOG_MODULE_REGISTER(mdns_sd, LOG_LEVEL_INF);
@@ -77,16 +74,16 @@ static const char txt_ravenna[] = "type=ravenna";
 
 /* ---- Local advertisement state ---- */
 
-#define NAME_MAX          64
+#define MDNS_NAME_MAX          64
 #define FQDN_MAX          96
 #define MDNS_MAX_SESSIONS AES67_MAX_TX_STREAMS
 
-static char vendor_node_id[NAME_MAX];
-static char user_device_name[NAME_MAX];
+static char vendor_node_id[MDNS_NAME_MAX];
+static char user_device_name[MDNS_NAME_MAX];
 static char host_fqdn[FQDN_MAX];         /* "<hostname>.local" */
 
 static struct {
-	char name[NAME_MAX];             /* "" = slot unused */
+	char name[MDNS_NAME_MAX];             /* "" = slot unused */
 } sessions[MDNS_MAX_SESSIONS];
 
 /* ---- Discovered remote sessions (browser cache) ---- */
@@ -99,7 +96,7 @@ static struct {
 
 struct discovered_session {
 	bool     used;
-	char     instance[NAME_MAX];     /* session name (first label)  */
+	char     instance[MDNS_NAME_MAX];     /* session name (first label)  */
 	char     srv_target[FQDN_MAX];   /* SRV target host fqdn        */
 	struct in_addr host;             /* A record of srv_target      */
 	uint16_t port;                   /* SRV port                    */
@@ -458,7 +455,7 @@ static int add_instance(int off, int *answers, const char *instance,
 			const char *svc, uint16_t port, bool via_subtype,
 			bool with_details, uint32_t ptr_ttl)
 {
-	char fqdn[FQDN_MAX + NAME_MAX];
+	char fqdn[FQDN_MAX + MDNS_NAME_MAX];
 	struct in_addr ip = my_ipv4();
 	int n;
 
@@ -574,7 +571,7 @@ static int answer_question(int off, int *answers, const char *qname,
 
 	/* Instance-specific SRV/TXT queries: "<inst>._rtsp/_http._tcp.local" */
 	if (t_srv || t_txt) {
-		char inst[NAME_MAX];
+		char inst[MDNS_NAME_MAX];
 		bool is_rtsp;
 		size_t qlen = strlen(qname);
 		size_t svclen = strlen(SVC_RTSP);
@@ -595,7 +592,7 @@ static int answer_question(int off, int *answers, const char *qname,
 		}
 
 		uint16_t port = is_rtsp ? rtsp_port : 80;
-		char fqdn[FQDN_MAX + NAME_MAX];
+		char fqdn[FQDN_MAX + MDNS_NAME_MAX];
 		struct in_addr ip = my_ipv4();
 
 		instance_fqdn(fqdn, sizeof(fqdn), inst,
@@ -645,7 +642,7 @@ static void handle_query(const uint8_t *msg, size_t len,
 	out = begin_response(unicast_reply ? id : 0);
 
 	for (int q = 0; q < qdcount; q++) {
-		char qname[FQDN_MAX + NAME_MAX];
+		char qname[FQDN_MAX + MDNS_NAME_MAX];
 		size_t next;
 
 		if (name_parse(msg, len, off, qname, sizeof(qname), &next) < 0 ||
@@ -739,7 +736,7 @@ static void send_browse_query(void)
 static void send_followup_query(const struct discovered_session *d)
 {
 	uint8_t buf[192];
-	char fqdn[FQDN_MAX + NAME_MAX];
+	char fqdn[FQDN_MAX + MDNS_NAME_MAX];
 	int off;
 	int qd = 0;
 
@@ -787,12 +784,12 @@ static uint16_t instance_hash(const char *name)
 
 static void report_foreign_invalid(const struct discovered_session *d)
 {
-	struct sap_foreign_stream fs;
+	struct aes67_foreign_stream fs;
 
 	memset(&fs, 0, sizeof(fs));
 	fs.valid = false;
-	fs.msg_id_hash = instance_hash(d->instance);
-	sap_sdp_report_foreign_stream(&fs);
+	fs.id_hash = instance_hash(d->instance);
+	aes67_conn_report_foreign_stream(&fs);
 }
 
 static struct discovered_session *cache_find(const char *instance)
@@ -854,7 +851,7 @@ static void handle_response(const uint8_t *msg, size_t len)
 	uint16_t qd = sys_get_be16(&msg[4]);
 
 	for (int q = 0; q < qd; q++) {
-		char scratch[FQDN_MAX + NAME_MAX];
+		char scratch[FQDN_MAX + MDNS_NAME_MAX];
 		size_t next;
 
 		if (name_parse(msg, len, off, scratch, sizeof(scratch),
@@ -865,7 +862,7 @@ static void handle_response(const uint8_t *msg, size_t len)
 	}
 
 	for (int r = 0; r < counts; r++) {
-		char rname[FQDN_MAX + NAME_MAX];
+		char rname[FQDN_MAX + MDNS_NAME_MAX];
 		size_t next;
 
 		if (name_parse(msg, len, off, rname, sizeof(rname), &next) < 0 ||
@@ -883,8 +880,8 @@ static void handle_response(const uint8_t *msg, size_t len)
 		off = rdata + rdlen;
 
 		if (type == DNS_TYPE_PTR && name_eq(rname, SUBTYPE_RAVENNA)) {
-			char target[FQDN_MAX + NAME_MAX];
-			char inst[NAME_MAX];
+			char target[FQDN_MAX + MDNS_NAME_MAX];
+			char inst[MDNS_NAME_MAX];
 
 			if (name_parse(msg, len, rdata, target, sizeof(target),
 				       NULL) < 0) {
@@ -919,7 +916,7 @@ static void handle_response(const uint8_t *msg, size_t len)
 				continue;
 			}
 
-			char inst[NAME_MAX];
+			char inst[MDNS_NAME_MAX];
 
 			first_label(rname, inst, sizeof(inst));
 
@@ -984,12 +981,12 @@ static void handle_response(const uint8_t *msg, size_t len)
 static void report_foreign(const struct discovered_session *d,
 			   const struct aes67_sdp_parsed *sdp)
 {
-	struct sap_foreign_stream fs;
+	struct aes67_foreign_stream fs;
 
 	memset(&fs, 0, sizeof(fs));
 	fs.valid = true;
-	fs.via = SAP_FOREIGN_VIA_MDNS;
-	fs.msg_id_hash = instance_hash(d->instance);
+	fs.via = AES67_VIA_MDNS;
+	fs.id_hash = instance_hash(d->instance);
 	fs.origin_addr = d->host;
 	fs.mcast_addr = sdp->connection_addr;
 	fs.port = sdp->port;
@@ -1008,7 +1005,7 @@ static void report_foreign(const struct discovered_session *d,
 	} else {
 		strncpy(fs.name, d->instance, sizeof(fs.name) - 1);
 	}
-	sap_sdp_report_foreign_stream(&fs);
+	aes67_conn_report_foreign_stream(&fs);
 }
 
 static void describe_thread(void *a, void *b, void *c)
@@ -1118,7 +1115,7 @@ static void periodic_tick(void)
 			 * the session is still being announced — no need to
 			 * re-DESCRIBE, just refresh its timestamp. */
 			d->last_report_ms = now;
-			sap_sdp_touch_foreign_stream(instance_hash(d->instance));
+			aes67_conn_touch_foreign_stream(instance_hash(d->instance));
 		}
 	}
 
@@ -1247,6 +1244,24 @@ static void sanitize_label(char *s)
 	}
 }
 
+/* TX-stream change observer (registered with aes67_conn): advertise or
+ * withdraw the session record for the changed stream slot. */
+static void mdns_tx_stream_observer(uint8_t stream_id)
+{
+	struct aes67_tx_stream tx;
+
+	if (stream_id >= MDNS_MAX_SESSIONS) {
+		return;
+	}
+
+	if (aes67_conn_copy_tx_stream(stream_id, &tx) &&
+	    tx.dst_ip.s_addr != 0 && tx.name[0] != '\0') {
+		mdns_sd_set_session(stream_id, tx.name);
+	} else {
+		mdns_sd_set_session(stream_id, NULL);
+	}
+}
+
 int mdns_sd_start(void)
 {
 	struct aes67_device_config *cfg = aes67_config_get();
@@ -1271,7 +1286,7 @@ int mdns_sd_start(void)
 	/* TX streams restored from flash/SD config were configured before
 	 * this module started — pick them up now; the initial announcement
 	 * covers them once the socket is up. */
-	const struct aes67_tx_stream *tx = sap_sdp_get_tx_streams();
+	const struct aes67_tx_stream *tx = aes67_conn_get_tx_streams();
 
 	for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
 		if (tx[i].active && tx[i].dst_ip.s_addr != 0 &&
@@ -1283,6 +1298,10 @@ int mdns_sd_start(void)
 	}
 
 	mdns_started = true;
+
+	/* Follow TX-stream changes (RAVENNA §3.5.2): advertise/withdraw the
+	 * per-session record when a stream is configured or deactivated. */
+	aes67_conn_register_tx_observer(mdns_tx_stream_observer);
 
 	k_thread_create(&mdns_thread_data, mdns_stack,
 			K_THREAD_STACK_SIZEOF(mdns_stack),
@@ -1331,7 +1350,7 @@ int mdns_sd_set_session(uint8_t slot, const char *session_name)
 
 	if (!session_name || session_name[0] == '\0') {
 		if (sessions[slot].name[0] != '\0') {
-			char old[NAME_MAX];
+			char old[MDNS_NAME_MAX];
 
 			strncpy(old, sessions[slot].name, sizeof(old));
 			sessions[slot].name[0] = '\0';

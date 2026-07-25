@@ -147,7 +147,9 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
       src/ui_display.c
       src/ptp_bmc.c
       src/ptp_ctrl.c
+      src/aes67_conn.c
       src/sap_sdp.c
+      src/aes67_shell.c
       src/aes67_config.c
       src/config_json.c
       src/aes67_sdp_utils.c
@@ -156,8 +158,9 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
 
     # card_manager itself is portable — it only pulls in the per-card
     # drivers (mi/lo/io) when those Kconfigs are set, so it's safe to
-    # always compile.
-    target_sources(app PRIVATE src/card_manager.c)
+    # always compile. card_settings persists gain/48V/mute through the
+    # config_json backends and is likewise Kconfig-gated internally.
+    target_sources(app PRIVATE src/card_manager.c src/card_settings.c)
     # Si5351A PI controller is only meaningful on boards that ship the
     # clock generator. Boards without it (ESP32 SPI bring-up) skip the
     # PPB feedback loop entirely; pll_ctrl is stubbed in pll_ctrl.h.

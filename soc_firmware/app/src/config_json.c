@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * Shared JSON serialization / parsing for device configuration.
  * Extracted from sd_config.c so both SD card and SPI flash storage
  * can share the same format.
@@ -16,7 +13,9 @@
 
 #include "config_json.h"
 #include "aes67_config.h"
-#include "sap_sdp.h"
+#include "aes67_conn.h"
+#include "card_manager.h"
+#include "card_settings.h"
 
 LOG_MODULE_REGISTER(config_json, LOG_LEVEL_INF);
 
@@ -176,11 +175,101 @@ static int serialize_device_config(char *buf, size_t sz, int pos)
 }
 
 /* ================================================================
+ * Serialize analog-card settings (gain / 48V / mute)
+ * ================================================================ */
+
+static const char *card_type_to_str(uint8_t type)
+{
+	switch (type) {
+	case CARD_TYPE_MI: return "mi";
+	case CARD_TYPE_LO: return "lo";
+	case CARD_TYPE_IO: return "io";
+	default:           return "";
+	}
+}
+
+static uint8_t card_type_from_str(const char *s)
+{
+	if (s == NULL) {
+		return CARD_TYPE_NONE;
+	}
+	if (strcmp(s, "mi") == 0) {
+		return CARD_TYPE_MI;
+	}
+	if (strcmp(s, "lo") == 0) {
+		return CARD_TYPE_LO;
+	}
+	if (strcmp(s, "io") == 0) {
+		return CARD_TYPE_IO;
+	}
+	return CARD_TYPE_NONE;
+}
+
+/* "key": [v0,v1,...],\n — bools are written as 0/1 so one parser fits */
+static int json_i8_array(char *buf, size_t sz, int pos, const char *key,
+			 const int8_t *vals, int n)
+{
+	pos += snprintf(buf + pos, sz - pos, "  \"%s\": [", key);
+	for (int i = 0; i < n; i++) {
+		pos += snprintf(buf + pos, sz - pos, "%s%d",
+				i ? "," : "", vals[i]);
+	}
+	pos += snprintf(buf + pos, sz - pos, "],\n");
+	return pos;
+}
+
+static int json_bool01_array(char *buf, size_t sz, int pos, const char *key,
+			     const bool *vals, int n)
+{
+	pos += snprintf(buf + pos, sz - pos, "  \"%s\": [", key);
+	for (int i = 0; i < n; i++) {
+		pos += snprintf(buf + pos, sz - pos, "%s%d",
+				i ? "," : "", vals[i] ? 1 : 0);
+	}
+	pos += snprintf(buf + pos, sz - pos, "],\n");
+	return pos;
+}
+
+static int serialize_card_settings(char *buf, size_t sz, int pos)
+{
+	/* Refresh the shadow store from the live card if it is ready; a
+	 * not-yet-activated card (LO before PTP lock) keeps the values
+	 * loaded from the previous config. */
+	(void)card_settings_capture();
+
+	card_settings_lock();
+
+	const struct card_settings *cs = card_settings_get();
+
+	if (cs->valid && cs->card_type != CARD_TYPE_NONE) {
+		pos = json_str(buf, sz, pos, "card_type",
+			       card_type_to_str(cs->card_type), 1);
+		if (cs->num_in > 0) {
+			pos = json_i8_array(buf, sz, pos, "card_in_gain",
+					    cs->in_gain, cs->num_in);
+			pos = json_bool01_array(buf, sz, pos, "card_in_48v",
+						cs->in_phantom, cs->num_in);
+			pos = json_bool01_array(buf, sz, pos, "card_in_mute",
+						cs->in_mute, cs->num_in);
+		}
+		if (cs->num_out > 0) {
+			pos = json_i8_array(buf, sz, pos, "card_out_gain",
+					    cs->out_gain, cs->num_out);
+			pos = json_bool01_array(buf, sz, pos, "card_out_mute",
+						cs->out_mute, cs->num_out);
+		}
+	}
+
+	card_settings_unlock();
+	return pos;
+}
+
+/* ================================================================
  * Serialize TX streams to JSON
  * ================================================================ */
 static int serialize_tx_streams(char *buf, size_t sz, int pos)
 {
-	const struct aes67_tx_stream *streams = sap_sdp_get_tx_streams();
+	const struct aes67_tx_stream *streams = aes67_conn_get_tx_streams();
 	char ip_str[INET_ADDRSTRLEN];
 
 	pos = json_array_start(buf, sz, pos, "tx_streams", 1);
@@ -227,7 +316,7 @@ static int serialize_tx_streams(char *buf, size_t sz, int pos)
  * ================================================================ */
 static int serialize_rx_streams(char *buf, size_t sz, int pos)
 {
-	const struct aes67_rx_stream *streams = sap_sdp_get_rx_streams();
+	const struct aes67_rx_stream *streams = aes67_conn_get_rx_streams();
 	char ip_str[INET_ADDRSTRLEN];
 
 	pos = json_array_start(buf, sz, pos, "rx_streams", 1);
@@ -591,7 +680,7 @@ static int parse_tx_streams(const char *json)
 			num_ch = channel_count;
 		}
 
-		int ret = sap_sdp_configure_tx_stream(
+		int ret = aes67_conn_configure_tx_stream(
 			stream_id, &dst_ip, channel_count,
 			samples_per_packet, ch_ids, num_ch, ssrc,
 			stream_name[0] ? stream_name : NULL);
@@ -671,7 +760,7 @@ static int parse_rx_streams(const char *json)
 			}
 		}
 
-		int ret = sap_sdp_configure_rx_stream(
+		int ret = aes67_conn_configure_rx_stream(
 			stream_id, &dst_ip, dst_port, ch_map,
 			channel_count, output_delay, samples_per_channel);
 		if (ret == 0) {
@@ -690,6 +779,89 @@ static int parse_rx_streams(const char *json)
 }
 
 /* ================================================================
+ * Parse analog-card settings into the shadow store
+ * ================================================================ */
+
+/* Parse "key": [n0,n1,...] of up to @max ints into @out (i8) / @out_b
+ * (bool from 0/1); returns the number of parsed elements or 0. */
+static int parse_num_array(const char *json, const char *key,
+			   int8_t *out, bool *out_b, int max)
+{
+	const char *p = json_find_array(json, key);
+	int n = 0;
+
+	if (!p) {
+		return 0;
+	}
+	p++;	/* past '[' */
+
+	while (n < max) {
+		p = skip_ws(p);
+		if (*p == ']' || *p == '\0') {
+			break;
+		}
+		char *end;
+		long v = strtol(p, &end, 10);
+
+		if (end == p) {
+			break;
+		}
+		if (out) {
+			out[n] = (int8_t)v;
+		}
+		if (out_b) {
+			out_b[n] = (v != 0);
+		}
+		n++;
+		p = skip_ws(end);
+		if (*p == ',') {
+			p++;
+		}
+	}
+	return n;
+}
+
+static void parse_card_settings(const char *json)
+{
+	const char *v = json_find_key(json, "card_type");
+
+	if (!v) {
+		return;
+	}
+
+	uint8_t type = card_type_from_str(json_parse_str(v));
+
+	if (type == CARD_TYPE_NONE) {
+		return;
+	}
+
+	card_settings_lock();
+
+	struct card_settings *cs = card_settings_get();
+
+	memset(cs, 0, sizeof(*cs));
+	cs->card_type = type;
+	cs->num_in = parse_num_array(json, "card_in_gain",
+				     cs->in_gain, NULL,
+				     CARD_SETTINGS_MAX_IN);
+	parse_num_array(json, "card_in_48v", NULL, cs->in_phantom,
+			CARD_SETTINGS_MAX_IN);
+	parse_num_array(json, "card_in_mute", NULL, cs->in_mute,
+			CARD_SETTINGS_MAX_IN);
+	cs->num_out = parse_num_array(json, "card_out_gain",
+				      cs->out_gain, NULL,
+				      CARD_SETTINGS_MAX_OUT);
+	parse_num_array(json, "card_out_mute", NULL, cs->out_mute,
+			CARD_SETTINGS_MAX_OUT);
+	cs->valid = true;
+
+	card_settings_unlock();
+
+	LOG_INF("Card settings loaded (type=%s, %u in / %u out)",
+		card_type_to_str(type), cs->num_in, cs->num_out);
+}
+
+/* ================================================================
  * Public API
  * ================================================================ */
 
@@ -699,6 +871,7 @@ int config_json_serialize(char *buf, size_t sz)
 
 	pos = json_start(buf, sz);
 	pos = serialize_device_config(buf, sz, pos);
+	pos = serialize_card_settings(buf, sz, pos);
 	pos = serialize_tx_streams(buf, sz, pos);
 	pos = serialize_rx_streams(buf, sz, pos);
 	pos = json_end(buf, sz, pos);
@@ -709,7 +882,13 @@ int config_json_serialize(char *buf, size_t sz)
 int config_json_parse_and_apply(const char *json)
 {
 	parse_device_config(json);
+	parse_card_settings(json);
 	parse_tx_streams(json);
 	parse_rx_streams(json);
+
+	/* Push the card section into the drivers — a no-op if the card
+	 * isn't detected/ready yet; card_manager re-applies on detect and
+	 * on output activation. */
+	card_settings_apply();
 	return 0;
 }

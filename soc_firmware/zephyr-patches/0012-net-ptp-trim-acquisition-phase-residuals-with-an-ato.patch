@@ -1,0 +1,166 @@
+From caa16e62316f30b3f7ac22ba95300a71a04945fb Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Thu, 23 Jul 2026 18:49:05 +0200
+Subject: [PATCH] net: ptp: trim acquisition phase residuals with an atomic
+ phase jump
+
+Offsets below SYNC_SERVO_STEP_THRESHOLD_NS (5 ms) but far from zero were
+left to the servo to slew out: tens of seconds normally, minutes once
+the rate correction is clamped for media use
+(CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB=2000 -> 2 us/s). Such offsets are
+normal during acquisition:
+
+- a coarse get/compute/set step (offset beyond the +/-INT32_MAX ns
+  atomic-jump range, e.g. the boot epoch step) ages by the PHC bus
+  round-trip and lands up to ~1 ms off (observed: ~800 us over SPI);
+- a PHC that kept running across a controller reboot starts hundreds
+  of us off with no step at all (observed: ~300-500 us persisting for
+  minutes, with the servo commanding wild rate swings around it).
+
+Grant a trim budget (2 jumps) at boot and at every genuine step; while
+budget remains and the offset median window is full (so a single
+corrupted timestamp cannot trigger a bogus jump), a median offset above
+10 us is corrected with one precise in-hardware phase jump. The budget
+is deliberately NOT refilled by clock_servo_reset(): a trim jump itself
+resets the servo, and while the median window refills the rate
+correction is zero, so the clock drifts at the raw crystal offset
+(~5 ppm -> ~5 us per refill). A self-re-arming trim with a tight
+threshold therefore retriggers on its own drift - observed as a
+permanent ~1.7 us step loop at ~1 Hz with the servo pinned at 0 ppb.
+The 10 us threshold sits above one refill's worth of drift, and the
+budget bounds the loop for larger crystal offsets; the budget is
+dropped once a full-window median arrives at or below the threshold, so
+steady state only ever uses the normal step threshold.
+
+Candidate for upstream submission (together with the 0003 phase-jump
+step path).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/clock.c | 74 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index bc2bcdc653..e1c451b664 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -49,6 +49,29 @@ LOG_MODULE_REGISTER(ptp_clock, CONFIG_PTP_LOG_LEVEL);
+  * AES67 wallclock at +/-524287 ppb ~ 524 us/s), so larger offsets would
+  * take minutes to slew out while winding up the PI integral. */
+ #define SYNC_SERVO_STEP_THRESHOLD_NS (5LL * NSEC_PER_MSEC)
++/* Acquisition phase trim: offsets below SYNC_SERVO_STEP_THRESHOLD_NS but far
++ * from zero would be left to the servo to slew out - minutes when the rate
++ * correction is clamped for media use (CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB).
++ * Such offsets are normal at acquisition time: a coarse get/compute/set step
++ * (offset beyond the +/-INT32_MAX ns atomic-jump range, e.g. the boot epoch
++ * step) ages by the PHC bus round-trip and lands up to ~1 ms off, and a PHC
++ * that kept running across a controller reboot starts hundreds of us off
++ * with no step at all. While trim budget remains (granted at boot and by a
++ * genuine above-step-threshold step) and the offset median window is full, a
++ * median offset above the threshold is corrected with one precise in-hardware
++ * phase jump, so the servo starts from us-scale.
++ *
++ * The threshold must exceed the drift the free-running clock accumulates
++ * while the median window refills after a trim (each trim resets the servo,
++ * so the rate correction is zero during the refill): with a typical crystal
++ * offset of ~5 ppm and ~1 s of refill that is ~5 us. A threshold below that
++ * makes the trim retrigger on its own drift - a permanent step loop that
++ * keeps the servo reset forever (observed as ~1.7 us steps at ~1 Hz with
++ * "PPB applied 0" in between). The budget bounds the loop as a second line
++ * of defense even for larger crystal offsets.
++ */
++#define SYNC_SERVO_TRIM_THRESHOLD_NS 10000LL
++#define SYNC_SERVO_TRIM_BUDGET 2U
+ #define SYNC_SERVO_LOCK_OFFSET_NS (10LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_OUTLIER_NS (100LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_LOCK_SAMPLES 3U
+@@ -132,6 +155,16 @@ static struct {
+ #define OFFSET_OUTLIER_PRIME_SAMPLES 8U
+ #endif
+ 
++/* Remaining acquisition trim jumps. Granted at boot and refilled by a
++ * genuine above-step-threshold step (boot epoch step, GM change); each trim
++ * jump consumes one. Deliberately NOT refilled by clock_servo_reset(): a
++ * trim jump itself resets the servo, and a self-refilling trim turns into a
++ * permanent step loop (see SYNC_SERVO_TRIM_THRESHOLD_NS). Cleared when a
++ * full-window median arrives at or below the trim threshold - from then on
++ * only the normal step threshold applies until the next genuine step.
++ */
++static uint8_t phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
++
+ static int64_t offset_filter_samples[CONFIG_PTP_OFFSET_FILTER_LENGTH];
+ static struct clock_sample_filter offset_filter = {
+ 	.samples = offset_filter_samples,
+@@ -1133,10 +1166,22 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 	 */
+ 	offset = clock_filter_update(&offset_filter, raw_offset);
+ 
+-	/* If diff is too big, ptp_clk needs to be set first. */
+-	if (offset > SYNC_SERVO_STEP_THRESHOLD_NS ||
+-	    offset < -SYNC_SERVO_STEP_THRESHOLD_NS) {
++	/* If diff is too big, ptp_clk needs to be set first. During armed
++	 * acquisition trim (see phase_trim_pending) the much lower trim
++	 * threshold turns a persistent residual into one precise phase jump;
++	 * it only engages once the median window is full so a single bad
++	 * timestamp cannot trigger a bogus jump.
++	 */
++	bool median_full = (offset_filter.len <= 1U) ||
++			   (offset_filter.count >= offset_filter.len);
++	int64_t step_threshold = (phase_trim_budget > 0U && median_full)
++					 ? SYNC_SERVO_TRIM_THRESHOLD_NS
++					 : SYNC_SERVO_STEP_THRESHOLD_NS;
++
++	if (offset > step_threshold || offset < -step_threshold) {
+ 		int32_t dest_nsec;
++		bool trim_step = (offset <= SYNC_SERVO_STEP_THRESHOLD_NS &&
++				  offset >= -SYNC_SERVO_STEP_THRESHOLD_NS);
+ 
+ 		LOG_WRN("Clock offset exceeds step threshold (t1=%" PRIu64 ".%09u t2=%" PRIu64
+ 			".%09u delay=%lldns offset=%lldns phc_now=%" PRIu64 ".%09u |t2-phc|=%"
+@@ -1164,6 +1209,16 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 			}
+ 
+ 			LOG_WRN("Stepped clock by %lldns (phase jump)", -offset);
++
++			/* A trim jump consumes budget; a genuine step (new time
++			 * base: GM change within jump range) grants a fresh
++			 * allowance for trimming its own landing residual.
++			 */
++			if (trim_step) {
++				phase_trim_budget--;
++			} else {
++				phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
++			}
+ 		} else {
+ 			ret = ptp_clock_get(ptp_clk.phc, &current);
+ 			if (ret < 0) {
+@@ -1187,6 +1242,10 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 
+ 			LOG_WRN("Set clock time: %"PRIu64".%09u", current.second,
+ 				current.nanosecond);
++			/* Coarse set = genuine step (beyond jump range): grant
++			 * budget for trimming its bus-latency residual.
++			 */
++			phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
+ 		}
+ 
+ 		/* A hard step invalidates the timestamps used by the E2E delay path and
+@@ -1220,6 +1279,15 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 		return;
+ 	}
+ 
++	/* Below the (possibly lowered) step threshold. Once a full-window
++	 * median comes in at or below the trim threshold, acquisition is done:
++	 * drop the remaining trim budget so steady state only ever uses the
++	 * normal step threshold (until the next genuine step re-grants it).
++	 */
++	if (phase_trim_budget > 0U && median_full) {
++		phase_trim_budget = 0U;
++	}
++
+ 	LOG_DBG("Offset %lldns", offset);
+ 	ptp_clk.current_ds.offset_from_tt = clock_ns_to_timeinterval(offset);
+ 
+-- 
+2.53.0
+

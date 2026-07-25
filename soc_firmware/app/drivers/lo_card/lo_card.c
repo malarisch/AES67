@@ -210,6 +210,37 @@ static void channel_to_dac(uint8_t channel, uint8_t *dac_addr, uint8_t *vol_reg)
  * Public API
  ******************************************************************************/
 
+int lo_card_early_mute(const struct device *i2c_dev)
+{
+	/* Standalone boot-path helper: runs before lo_card_init() (no mutex,
+	 * no module state), straight after the shared nRST release. The LPC
+	 * powers up with the converters live and the DSP has no clock until
+	 * the FPGA is configured — kill the noise path immediately. */
+	const uint8_t glb_reset[2] = { LO_LPC_GLB_REG, 0x00 };
+	const uint8_t oe_mute[2]   = { LO_LPC_OE_REG, 0x00 };
+	int ret = -ENODEV;
+
+	if (i2c_dev == NULL || !device_is_ready(i2c_dev)) {
+		return -ENODEV;
+	}
+
+	for (int try = 0; try < 3; try++) {
+		ret = i2c_write(i2c_dev, oe_mute, sizeof(oe_mute), LO_LPC_ADDR);
+		if (ret == 0) {
+			break;
+		}
+		k_sleep(K_MSEC(10));
+	}
+	if (ret < 0) {
+		return -ENODEV;	/* no LO card (or LPC not booted) */
+	}
+
+	ret = i2c_write(i2c_dev, glb_reset, sizeof(glb_reset), LO_LPC_ADDR);
+
+	LOG_INF("Early mute: outputs muted, DSP+DACs held in reset");
+	return ret;
+}
+
 int lo_card_init(const struct device *i2c_dev)
 {
 	int ret;
@@ -230,6 +261,7 @@ int lo_card_init(const struct device *i2c_dev)
 	lo_data.i2c_dev = i2c_dev;
 	lo_data.output_enable = 0;
 	lo_data.global_enable = false;
+	lo_data.detected = false;
 	memset(lo_data.clip_db, 0, sizeof(lo_data.clip_db));
 
 #if defined(CONFIG_LO_CARD_NRST_GPIO) && LO_NRST_GPIO_VALID
@@ -260,16 +292,61 @@ int lo_card_init(const struct device *i2c_dev)
 	LOG_INF("LO card detected: soft_id=0x%02x, board_id=0x%02x, rev=0x%02x",
 		info.soft_id, info.board_id, info.hard_rev);
 
+	/* ---- Safe state until the media clock is valid ----
+	 * Relays muted, DSP + DACs held in the card-level reset. The
+	 * converters are only brought up by lo_card_activate(), which the
+	 * card manager gates on PTP/wallclock lock. */
+	uint8_t oe_off = 0;
+
+	ret = lpc_write(LO_LPC_OE_REG, &oe_off, 1);
+	if (ret < 0) {
+		LOG_ERR("Failed to mute outputs");
+		k_mutex_unlock(&lo_data.lock);
+		return ret;
+	}
+
+	lo_data.glb_reg = 0;
+	ret = update_global_reg();
+	if (ret < 0) {
+		LOG_ERR("Failed to assert converter reset");
+		k_mutex_unlock(&lo_data.lock);
+		return ret;
+	}
+
+	lo_data.detected = true;
+	k_mutex_unlock(&lo_data.lock);
+
+	LOG_INF("LO card in safe state (muted, converters in reset) — "
+		"waiting for media clock");
+	return 0;
+}
+
+int lo_card_activate(void)
+{
+	int ret;
+
+	k_mutex_lock(&lo_data.lock, K_FOREVER);
+
+	if (!lo_data.detected) {
+		k_mutex_unlock(&lo_data.lock);
+		return -ENODEV;
+	}
+	if (lo_data.initialized) {
+		k_mutex_unlock(&lo_data.lock);
+		return 0;
+	}
+
+	LOG_INF("Activating converters (media clock valid)");
+
 	/* ---- Reset sequence (matching MI card / enabling DSP) ----
 	 * The DSP (AD1941) requires a proper reset cycle to initialize.
 	 * 1. Assert reset (GlbReg = 0) — hold everything in reset
 	 * 2. Wait 500ms in reset state
 	 * 3. Release reset (GlbReg = NRST)
 	 * 4. Wait 500ms for boot
-	 *
 	 */
 
-	/* Step 1: Assert reset (hold DSP and DACs in reset) */
+	/* Step 1: Assert reset (normally already asserted since init) */
 	lo_data.glb_reg = 0;
 	ret = update_global_reg();
 	if (ret < 0) {
@@ -297,7 +374,8 @@ int lo_card_init(const struct device *i2c_dev)
 	/* All channels unmuted (output_enable bits set) */
 	lo_data.output_enable = 0xFF;
 
-	/* Disable all outputs initially (global enable off) */
+	/* Keep outputs globally disabled — the caller unmutes via
+	 * lo_card_enable_outputs(true) once activation succeeded. */
 	uint8_t oe_off = 0;
 	ret = lpc_write(LO_LPC_OE_REG, &oe_off, 1);
 	if (ret < 0) {
@@ -416,7 +494,7 @@ int lo_card_init(const struct device *i2c_dev)
 	lo_data.initialized = true;
 	k_mutex_unlock(&lo_data.lock);
 
-	LOG_INF("LO card initialized successfully");
+	LOG_INF("LO card activated (outputs still muted)");
 	return 0;
 }
 
@@ -644,14 +722,34 @@ int lo_card_get_96khz(void)
 	return enabled ? 1 : 0;
 }
 
+/* Re-run detect + safe state; if the card was already activated (media
+ * clock valid), bring it straight back up to its previous output state. */
+static int reinit_preserving_activation(void)
+{
+	bool was_active = lo_data.initialized;
+	bool outputs_on = lo_data.global_enable;
+	int ret;
+
+	lo_data.initialized = false;
+	ret = lo_card_init(lo_data.i2c_dev);
+	if (ret < 0 || !was_active) {
+		return ret;
+	}
+
+	ret = lo_card_activate();
+	if (ret == 0 && outputs_on) {
+		ret = lo_card_enable_outputs(true);
+	}
+	return ret;
+}
+
 int lo_card_reset(void)
 {
 	if (lo_data.i2c_dev == NULL) {
 		return -ENODEV;
 	}
 
-	lo_data.initialized = false;
-	return lo_card_init(lo_data.i2c_dev);
+	return reinit_preserving_activation();
 }
 
 #if defined(CONFIG_LO_CARD_NRST_GPIO)
@@ -682,8 +780,7 @@ int lo_card_hw_reset(void)
 	k_mutex_unlock(&lo_data.lock);
 
 	/* Reinitialize via I2C */
-	lo_data.initialized = false;
-	return lo_card_init(lo_data.i2c_dev);
+	return reinit_preserving_activation();
 #else
 	LOG_WRN("nRST GPIO not defined in device tree");
 	return -ENOTSUP;

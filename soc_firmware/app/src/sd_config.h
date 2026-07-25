@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * SD Card configuration storage module.
  *
  * Stores device configuration and stream settings on an SD card
@@ -73,8 +70,9 @@ bool sd_config_is_ready(void);
  *
  * Reads the JSON config file and applies settings to:
  * - Device configuration (aes67_config)
- * - TX streams (via sap_sdp_configure_tx_stream)
- * - RX streams (via sap_sdp_configure_rx_stream)
+ * - Analog-card settings (card_settings: gain / 48V / mute)
+ * - TX streams (via aes67_conn_configure_tx_stream)
+ * - RX streams (via aes67_conn_configure_rx_stream)
  *
  * Call this after FPGA is ready so stream configs can be written.
  *

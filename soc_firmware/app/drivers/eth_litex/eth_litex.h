@@ -1,10 +1,8 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
+
  * Public API for the LiteX SoC Ethernet driver.
  * Accesses the FPGA via LiteX CSR registers and a Wishbone-mapped
- * packet buffer (EthPacketBuffer) instead of the old FMC register window.
+ * packet buffer (EthPacketBuffer).
  *
  * All register addresses are imported from the LiteX-generated headers
  * (csr.h, mem.h, soc.h) so they stay in sync when the SoC is regenerated.
@@ -158,6 +156,28 @@ bool eth_litex_read_ppb_counts(const struct device *dev,
 
 /** The aes67 PTP hardware clock (FPGA wallclock) device, for get_ptp_clock. */
 const struct device *aes67_ptp_clock_device(void);
+
+/**
+ * Reset the wallclock rate correction to 0 ppb.
+ *
+ * Call once at boot before the PTP stack takes over: a warm FPGA (JTAG
+ * upload skipped, firmware rebooted) still carries the previous run's
+ * correction — worst case the ±524287 clamp — and would free-run/serve
+ * time up to ±524 ppm off until the servo's first update.
+ */
+void aes67_ptp_rate_reset(void);
+
+/**
+ * Move the applied rate correction one step towards 0 ppb (leader
+ * relax). When a board wins the BMCA after the grandmaster vanished,
+ * its wallclock still runs at the follower-era correction; snapping to
+ * zero would jump the served frequency, so the caller ramps it down
+ * gradually and downstream followers track the change.
+ *
+ * @param step_ppb  Maximum change per call (positive)
+ * @return true once the correction has reached 0
+ */
+bool aes67_ptp_rate_relax_step(int32_t step_ppb);
 
 /** Reconstruct a full RX/TX hardware timestamp from a captured (4-bit seconds,
  *  30-bit nanoseconds) pair using the live wallclock seconds. */

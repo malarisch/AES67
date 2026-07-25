@@ -38,4 +38,14 @@ void fpga_poll_notify_ip_valid(const struct in_addr *ip);
  */
 void fpga_poll_register_role_change_cb(ptp_bmc_change_cb_t cb);
 
+/**
+ * @brief Current Ethernet link state as sampled by the poll thread.
+ *
+ * Used to gate display repaints: while the link is down the panel shows
+ * "  LINK" and PTP role changes must not overwrite it. Reads as "up"
+ * until the first status sample so early-boot updates are never
+ * suppressed.
+ */
+bool fpga_poll_link_is_up(void);
+
 #endif /* FPGA_POLL_H */

@@ -1,4 +1,4 @@
-# Local Zephyr patches
+# Local Zephyr patches (alright to call it "AI slop")
 
 Zephyr is pinned in `soc_firmware/app/west-manifest/west.yml` to a main
 snapshot (see the `revision:` comment there). These patches are applied on
@@ -62,6 +62,33 @@ After a fresh clone / `west update`, re-apply with:
   DoS. Version now checked first, -EPROTONOSUPPORT at dbg level,
   parse errors → drop (linuxptp: EV_NONE) — candidate for upstream
   submission.
+- 0011 ptp servo: robust offset outlier gate + linreg phase-slew limit.
+  The 0009 delay-weight gate only catches queuing spikes (raw delay
+  rises); a corrupted timestamp that shifts the offset WITHOUT raising
+  the delay passes it and poisons up to 64 linreg fits — observed on one
+  board as periodic ~10 s bursts of ±200k ppb at 8 Hz sync while an
+  identical board stayed clean. New gate rejects samples deviating
+  > NSIGMA (8) × tracked-EWMA-noise (floor 5 µs) from the moving median;
+  median still absorbs rejected samples (genuine level change re-opens
+  the gate), escape hatch after 16 consecutive rejects. Additionally
+  CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB (default 0 = off; AES67 ESP32
+  conf: 2000) clamps the linreg intercept term for media-friendly
+  bounded frequency excursions — candidate for upstream submission
+  (gate part).
+- 0012 ptp step: acquisition phase trim via atomic phase jump. Offsets
+  below the 5 ms step threshold but far from zero were left to the
+  servo to slew out — minutes with the 2000 ppb media clamp from 0011.
+  Two observed cases: the coarse get/compute/set boot-epoch step ages by
+  the SPI round-trip and lands ~800 µs off; a warm FPGA wallclock
+  surviving an ESP32 reboot starts ~300–500 µs off with no step at all.
+  Design: trim BUDGET (2 jumps), granted at boot and by every genuine
+  step, consumed per trim, dropped once a full median lands ≤ threshold.
+  Deliberately NOT re-armed by servo reset, and threshold 10 µs > one
+  median-refill of free-run drift (~5 ppm × 1 s): a self-re-arming trim
+  with a 1 µs threshold retriggered on its own drift — permanent ~1.7 µs
+  step loop at 1 Hz, servo pinned at 0 ppb. Median-full gating keeps
+  single corrupted timestamps from triggering bogus jumps — candidate
+  for upstream submission.
 - 0008 esp32s3 soc: re-init the esp_flash default chip after PSRAM init.
   PSRAM timing tuning (octal @ 80 MHz) switches the shared MSPI core
   clock 80→160 MHz after esp_flash_config() captured the old source

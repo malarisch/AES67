@@ -1,11 +1,6 @@
 /*
  * Output Card Driver - 8-Channel DAC Line Output Board
- *
- * I2C control interface for the Line Output board with:
- * - LPC microcontroller at 0x40 (output enable, mute control)
- * - DSP chip at 0x14 (audio processing)
- * - 4x DAC chips at 0x4C-0x4F (clip level, mode control)
- *
+ 
  */
 
 #ifndef LO_CARD_H
@@ -112,7 +107,8 @@ struct lo_card_data {
 	uint8_t output_enable;          /* Bit per channel: 1=enabled, 0=disabled */
 	bool global_enable;             /* Master output enable */
 	int8_t clip_db[LO_NUM_CHANNELS]; /* Per-channel clip levels */
-	bool initialized;
+	bool detected;                  /* Card answered on I2C, safe state set */
+	bool initialized;               /* Converters activated (out of reset) */
 	struct k_mutex lock;
 };
 
@@ -121,12 +117,41 @@ struct lo_card_data {
  ******************************************************************************/
 
 /**
- * @brief Initialize the LO card driver
+ * @brief Put the card into a safe state as early as possible.
+ *
+ * Standalone raw-I2C helper for the boot path: mutes the output relays
+ * (OE = 0) and holds DSP + DACs in the card-level reset (GlbReg = 0).
+ * Callable before lo_card_init(), straight after the shared nRST line
+ * is released — the LPC boots with its converters live, and until the
+ * FPGA provides a clock the DSP output is loud garbage.
+ *
+ * @param i2c_dev I2C device to use
+ * @return 0 on success, -ENODEV if the LPC does not answer
+ */
+int lo_card_early_mute(const struct device *i2c_dev);
+
+/**
+ * @brief Initialize the LO card driver (detect + safe state).
+ *
+ * Detects the card and (re-)asserts the safe state: relays muted,
+ * DSP + DACs held in the card-level reset. The converters stay in
+ * reset until lo_card_activate() — the caller gates that on PTP lock.
  *
  * @param i2c_dev I2C device to use
  * @return 0 on success, negative errno on failure
  */
 int lo_card_init(const struct device *i2c_dev);
+
+/**
+ * @brief Activate the converters (call once the media clock is valid).
+ *
+ * Releases the card-level reset, initializes the DACs and the DSP and
+ * leaves the outputs globally disabled — unmute afterwards with
+ * lo_card_enable_outputs(true). Idempotent once activated.
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int lo_card_activate(void);
 
 /**
  * @brief Check if the LO board is present

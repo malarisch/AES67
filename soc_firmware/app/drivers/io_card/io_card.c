@@ -1,20 +1,6 @@
 /*
  * IO Card Driver - 16-Channel ADC Input / 8-Channel DAC Output Board
- *
- * Ported from original IoCard.c (c. kuehnel, intek, 24.3.2007).
- *
- * Hardware topology (verified):
- *   - 2x LPC preamp controllers (0x40, 0x41)  — directly on I2C bus
- *   - 2x CS5368 8-ch ADCs (0x4C, 0x4D)        — directly on I2C bus
- *   - 1x LPC output controller (0x43)          
- *   - 1x CS4385 8-ch DAC (0x18)               — directly on I2C bus
- *
- * I2C MUX usage:
- *   select_mux(IO_MUX_CH0)  -> enables channel 0, reaches output LPC (0x43)
- *   select_mux(IO_MUX_NONE) -> deselects MUX, returns to main bus
- *
- * Output channel scrambling (IOT_OI board type, board_id == IO_OUT_LPC_BOARD_ID_B):
- *   Physical address inside DAC depends on channel index. See io_out_clip_addr().
+
  */
 
 #include "io_card.h"
@@ -31,17 +17,8 @@
 
 LOG_MODULE_REGISTER(io_card, CONFIG_IO_CARD_LOG_LEVEL);
 
-/*******************************************************************************
- * Gain Lookup Table
- *
- * Index 0-72 maps gain_db = index + IO_IN_GAIN_MIN (-6..+66 dB) to
- * two-byte LPC channel register value:
- *   High byte (>> 8): bit 0 = attenuation pad active
- *   Low byte  (& 0xFF): bits 0-5 = analog gain register
- *
- * Indices 0-23:  Attenuation ON  (high byte = 0x01)
- * Indices 24-72: Attenuation OFF (high byte = 0x00)
- ******************************************************************************/
+
+ 
 static const uint16_t gain_table[IO_IN_GAIN_ENTRIES] = {
 	/* -6 to +17 dB: Attenuation ON */
 	0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x0108, 0x0109,
@@ -63,41 +40,17 @@ static const uint8_t in_lpc_addr[IO_NUM_IN_LPC] = {
 	IO_IN_LPC_ADDR1,
 };
 
-/* I2C addresses for the two ADC chips */
-static const uint8_t in_adc_addr[IO_NUM_IN_LPC] = {
-	IO_IN_ADC_ADDR0,
-	IO_IN_ADC_ADDR1,
-};
-
-/*******************************************************************************
- * ADC Channel Remapping Tables
- *
- * The 16in/8out IO board uses two CS5368 8-ch ADCs with non-sequential
- * channel mapping:
- *
- *   ADC 0 (0x4C): internal ch 0-3 → logical 0-3,   ch 4-7 → logical 8-11
- *   ADC 1 (0x4D): internal ch 0-3 → logical 4-7,   ch 4-7 → logical 12-15
- *
- * The FPGA receives ADC0 as channels 0-7 and ADC1 as channels 8-15.
- ******************************************************************************/
-
-/* logical channel → ADC index (0 or 1) */
 static const uint8_t logical_to_adc_idx[IO_NUM_IN_CHANNELS] = {
 	0, 0, 0, 0,  1, 1, 1, 1,  0, 0, 0, 0,  1, 1, 1, 1,
 };
 
-/* logical channel → bit position within that ADC's register */
 static const uint8_t logical_to_adc_bit[IO_NUM_IN_CHANNELS] = {
 	0, 1, 2, 3,  0, 1, 2, 3,  4, 5, 6, 7,  4, 5, 6, 7,
 };
-
-/* (adc_index, adc_bit) → logical channel */
 static const uint8_t adc_bit_to_logical[IO_NUM_IN_LPC][8] = {
 	{ 0,  1,  2,  3,  8,  9, 10, 11},   /* ADC 0 */
 	{ 4,  5,  6,  7, 12, 13, 14, 15},   /* ADC 1 */
 };
-
-/* logical channel → FPGA channel index (for TX stream config) */
 static const uint8_t logical_to_fpga[IO_NUM_IN_CHANNELS] = {
 	 0,  1,  2,  3,   /* logical  0- 3 → FPGA  0- 3 (ADC0 ch0-3) */
 	 8,  9, 10, 11,   /* logical  4- 7 → FPGA  8-11 (ADC1 ch0-3) */
@@ -105,18 +58,13 @@ static const uint8_t logical_to_fpga[IO_NUM_IN_CHANNELS] = {
 	12, 13, 14, 15,   /* logical 12-15 → FPGA 12-15 (ADC1 ch4-7) */
 };
 
-/* Clip hold: number of poll ticks the clip LED stays on */
 #define CLIP_HOLD_TICKS \
 	(CONFIG_IO_CARD_CLIP_HOLD_MS / CONFIG_IO_CARD_OVERFLOW_POLL_MS)
 
-/* Driver instance */
 static struct io_card_data io_data;
 
-/* Whether the output side uses scrambled channel addressing (IOT_OI) */
 static bool out_scrambled;
 
-/* Whether a PCA9540B/TCA9543A MUX is present on the bus.
- * Auto-detected during init.  When false, 0x43 is accessed directly. */
 static bool mux_present;
 
 /* Overflow polling thread */
@@ -163,17 +111,6 @@ static int lpc_read(uint8_t addr, uint8_t reg, uint8_t *data, size_t len)
 	return ret;
 }
 
-/**
- * @brief Select a MUX channel before accessing devices behind it.
- *
- * Writes the channel selector to the MUX device at CONFIG_IO_CARD_MUX_ADDR.
- * Pass IO_MUX_NONE to deselect all channels.
- *
- * This driver uses a simple 1-byte MUX command as used by PCA9540B / TCA9543A:
- *   0x04 = enable channel 0
- *   0x05 = enable channel 1
- *   0x00 = disable all channels
- */
 static int select_mux(uint8_t channel)
 {
 	uint8_t cmd = (channel == IO_MUX_NONE) ? 0x00 : (0x04 | (channel & 0x01));
@@ -234,13 +171,6 @@ static int out_lpc_read(uint8_t reg, uint8_t *data, size_t len)
 	return ret;
 }
 
-/*******************************************************************************
- * Internal: register helpers
- ******************************************************************************/
-
-/**
- * @brief Push a single input channel's register pair to the correct LPC chip.
- */
 static int update_in_channel_reg(uint8_t channel)
 {
 	uint8_t lpc_idx = channel / 8;
@@ -251,49 +181,27 @@ static int update_in_channel_reg(uint8_t channel)
 			 (uint8_t *)&io_data.in_chn_reg[channel], 2);
 }
 
-/**
- * @brief Push the global register for an input LPC chip.
- */
 static int update_in_glb_reg(uint8_t lpc_idx)
 {
 	return lpc_write(in_lpc_addr[lpc_idx], IO_LPC_GLB_REG,
 			 &io_data.in_glb_reg[lpc_idx], 1);
 }
 
-/**
- * @brief Push the output-enable register to the output LPC via MUX.
- */
 static int update_out_enable_reg(void)
 {
 	return out_lpc_write(IO_LPC_OE_REG, &io_data.out_enable[0], 1);
 }
 
-/**
- * @brief Push the global register to the output LPC via MUX.
- */
+
 static int update_out_glb_reg(void)
 {
 	return out_lpc_write(IO_LPC_GLB_REG, &io_data.out_glb_reg[0], 1);
 }
 
-/**
- * @brief Compute the DAC register address for a clip level write.
- *
- * CS4385 volume registers are arranged in pairs with a mixing control
- * register between each pair:
- *   Pair 1: 0x0B (A1), 0x0C (B1), 0x0D (mix)
- *   Pair 2: 0x0E (A2), 0x0F (B2), 0x10 (mix)
- *   Pair 3: 0x11 (A3), 0x12 (B3), 0x13 (mix)
- *   Pair 4: 0x14 (A4), 0x15 (B4)
- *
- * Formula: VOL_BASE_REG + ch + ch/2 gives the correct register for ch 0-7.
- * All 8 channels reside on a single CS4385 at IO_OUT_DAC_ADDR0.
- */
+
 static uint8_t io_out_clip_addr(uint8_t channel)
 {
-	/* DAC volume register layout: 3 registers per 2 channels (A, B, mix)
-	 * VOL_BASE_REG + ch + ch/2
-	 */
+
 	return (uint8_t)(IO_DAC_VOL_BASE_REG + channel + channel / 2);
 }
 

@@ -130,7 +130,12 @@ end generate;
             case rmii_sm is
                 when s_Idle =>
                     if (mii_en_prev = '0' and mii_en_in = '1') then
-                        rmii_sm <= s_Wait1;
+                        if (mii_in = "1101") then
+                            sof_tog <= not sof_tog;
+                            rmii_sm <= s_Idle;
+                        else
+                            rmii_sm <= s_Wait1;
+                        end if;
                     end if;
                 when s_Wait1 =>
                     if (mii_in = "1101") then

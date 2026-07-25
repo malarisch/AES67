@@ -5,7 +5,6 @@
  * (liblitespi/spiflash.c).  Always uses 8-bit transfers via the
  * LiteSPI master RXTX CSR.
  *
- * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/kernel.h>
@@ -68,14 +67,6 @@ static K_MUTEX_DEFINE(spi_mutex);
 static void spi_mmap_disable(void)
 {
 	csr_write_simple(0, CSR_MAIN_SPIFLASH_MMAP_EN_ADDR);
-}
-
-/**
- * Re-enable the MMAP port.  Call after master operations are complete.
- */
-static void spi_mmap_enable(void)
-{
-	csr_write_simple(1, CSR_MAIN_SPIFLASH_MMAP_EN_ADDR);
 }
 
 /* ── Low-level helpers (match LiteX BIOS protocol) ───────────────── */

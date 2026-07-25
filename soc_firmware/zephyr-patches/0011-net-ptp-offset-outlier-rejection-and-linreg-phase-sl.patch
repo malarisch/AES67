@@ -1,0 +1,239 @@
+From c5029895dc2f5644daba9c60f98d46dec27e871e Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Thu, 23 Jul 2026 18:38:50 +0200
+Subject: [PATCH] net: ptp: offset outlier rejection and linreg phase-slew
+ limit
+
+Two robustness additions to the software-PTP servo path, motivated by a
+board whose FPGA RX timestamps are sporadically corrupted in a way the
+delay-based sample weighting cannot see:
+
+1. CONFIG_PTP_OFFSET_OUTLIER_FILTER (default y): reject offset samples
+   whose deviation from the moving median exceeds
+   CONFIG_PTP_OFFSET_OUTLIER_NSIGMA (8) times the EWMA deviation of
+   accepted samples (floor CONFIG_PTP_OFFSET_OUTLIER_FLOOR_NS, 5 us)
+   before they reach the servo. The path-delay weight gate (0009) only
+   catches queuing spikes, where the raw delay rises; a corrupted
+   timestamp that shifts the offset without raising the delay passes it
+   and poisons up to 64 linreg regression fits (~8 s of +/-200k ppb
+   swings at an 8 Hz sync rate). Rejected samples still feed the moving
+   median, so a genuine time-base change re-opens the gate by itself;
+   CONFIG_PTP_OFFSET_OUTLIER_MAX_SKIPS (16) consecutive rejections
+   force-accept as a backstop. The dispersion estimate only learns from
+   accepted samples so outlier bursts cannot inflate their own
+   threshold.
+
+2. CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB (default 0 = upstream
+   behaviour): clamp the linreg intercept (phase-correction) term. For
+   media clocks this bounds the frequency excursion used to slew out
+   residual phase, keeping the disciplined clock inside an audio-safe
+   budget (e.g. 2 ppm) at all times.
+
+Candidate for upstream submission (part 1; part 2 is arguably
+media-specific).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ subsys/net/lib/ptp/Kconfig | 61 +++++++++++++++++++++++++++
+ subsys/net/lib/ptp/clock.c | 85 +++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 145 insertions(+), 1 deletion(-)
+
+diff --git a/subsys/net/lib/ptp/Kconfig b/subsys/net/lib/ptp/Kconfig
+index 75a1ca5fe2..fa0ed84205 100644
+--- a/subsys/net/lib/ptp/Kconfig
++++ b/subsys/net/lib/ptp/Kconfig
+@@ -360,6 +360,67 @@ config PTP_OFFSET_FILTER_LENGTH
+ 	  step, at the cost of about half the filter length in Sync intervals
+ 	  of additional response latency. Set to 1 to disable filtering.
+ 
++config PTP_OFFSET_OUTLIER_FILTER
++	bool "Robust outlier rejection for offset samples"
++	default y
++	help
++	  Reject individual offsetFromTimeTransmitter samples whose deviation
++	  from the moving median is far outside the tracked measurement noise
++	  before they reach the clock servo. This guards the servo against
++	  corrupted timestamps whose path delay looks normal - the delay-based
++	  sample weighting cannot catch those, and a single such sample can
++	  pollute an adaptive servo (linreg keeps up to 64 samples in its
++	  regression window) for many seconds. Rejected samples still enter
++	  the moving-median filter, so a genuine time-base change walks the
++	  median and re-opens the gate by itself; as a backstop, a deviation
++	  that persists for PTP_OFFSET_OUTLIER_MAX_SKIPS consecutive samples
++	  is accepted and the noise estimate is re-learned.
++
++config PTP_OFFSET_OUTLIER_NSIGMA
++	int "Outlier threshold as a multiple of the tracked deviation"
++	depends on PTP_OFFSET_OUTLIER_FILTER
++	default 8
++	range 3 100
++	help
++	  A sample is rejected when its deviation from the moving median
++	  exceeds this multiple of the exponentially averaged deviation of
++	  previously accepted samples.
++
++config PTP_OFFSET_OUTLIER_FLOOR_NS
++	int "Minimum outlier rejection threshold in nanoseconds"
++	depends on PTP_OFFSET_OUTLIER_FILTER
++	default 5000
++	range 100 100000000
++	help
++	  Lower bound for the rejection threshold, so that on a quiet network
++	  with near-zero tracked deviation ordinary timestamp jitter is not
++	  rejected.
++
++config PTP_OFFSET_OUTLIER_MAX_SKIPS
++	int "Consecutive rejections before a sample is accepted anyway"
++	depends on PTP_OFFSET_OUTLIER_FILTER
++	default 16
++	range 2 128
++	help
++	  Escape hatch against a persistent level change that the moving
++	  median cannot reach (e.g. after path asymmetry changes): after this
++	  many consecutive rejections the sample is accepted and the tracked
++	  deviation is re-seeded from it.
++
++config PTP_SERVO_PHASE_CORR_MAX_PPB
++	int "Limit for the linreg phase-correction rate in ppb"
++	depends on PTP_SERVO_LINREG
++	default 0
++	range 0 524287
++	help
++	  Clamp the temporary frequency offset the linreg servo applies to
++	  slew out a residual phase error (the regression intercept term).
++	  0 disables the clamp (upstream linuxptp behaviour). For media-clock
++	  applications a small budget (e.g. 2000 ppb) keeps the disciplined
++	  clock within audio frequency tolerance at all times: residual phase
++	  converges more slowly instead of being slewed out with large
++	  frequency excursions.
++
+ config PTP_MIN_PDELAY_REQ_LOG_INTERVAL
+ 	int "PDelay Req interval in Log2 base"
+ 	default 0
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index e1f5066c61..bc2bcdc653 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -116,6 +116,22 @@ static struct clock_sample_filter delay_filter = {
+ 	.len = CONFIG_PTP_PATH_DELAY_FILTER_LENGTH,
+ };
+ 
++#if defined(CONFIG_PTP_OFFSET_OUTLIER_FILTER)
++/* Robust outlier gate in front of the servo: tracks an exponential moving
++ * average of |raw offset - moving median| over ACCEPTED samples only (so a
++ * burst of outliers cannot inflate its own threshold), plus a consecutive-
++ * rejection counter for the escape hatch. Primed after a few accepted
++ * samples so start-up transients do not poison the noise estimate.
++ */
++static struct {
++	int64_t dispersion;
++	uint32_t rejects;
++	uint32_t primed;
++} offset_outlier;
++
++#define OFFSET_OUTLIER_PRIME_SAMPLES 8U
++#endif
++
+ static int64_t offset_filter_samples[CONFIG_PTP_OFFSET_FILTER_LENGTH];
+ static struct clock_sample_filter offset_filter = {
+ 	.samples = offset_filter_samples,
+@@ -908,6 +924,7 @@ static double ptp_servo_linreg(int64_t offset, uint64_t local_ts, double weight)
+ {
+ 	struct linreg_result *res;
+ 	unsigned int corr_interval;
++	double phase_corr;
+ 
+ 	/* Drop delay-spiked samples entirely (up to the starvation limit):
+ 	 * even strongly downweighted they wander the fit by microseconds
+@@ -944,7 +961,21 @@ static double ptp_servo_linreg(int64_t offset, uint64_t local_ts, double weight)
+ 	 * frequency error.
+ 	 */
+ 	corr_interval = linreg.size <= 4U ? 1U : linreg.size / 2U;
+-	linreg.clock_freq += res->intercept / linreg.update_interval / corr_interval;
++	phase_corr = res->intercept / linreg.update_interval / corr_interval;
++#if CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB > 0
++	/* Media-clock damping: bound how fast residual phase is slewed out
++	 * so the disciplined clock's frequency stays within the configured
++	 * budget of the true rate at all times (a large residual then takes
++	 * proportionally longer to converge instead of commanding a large
++	 * temporary frequency excursion).
++	 */
++	if (phase_corr > (double)CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB) {
++		phase_corr = (double)CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB;
++	} else if (phase_corr < -(double)CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB) {
++		phase_corr = -(double)CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB;
++	}
++#endif
++	linreg.clock_freq += phase_corr;
+ 
+ 	/* Clamp the frequency to the allowed maximum */
+ 	if (linreg.clock_freq > PTP_SERVO_MAX_FREQ_PPB) {
+@@ -985,6 +1016,9 @@ static void clock_servo_reset(void)
+ 	ptp_clk.sync_servo_outlier_samples = 0;
+ 	ptp_clk.sync_servo_locked = false;
+ 	clock_filter_reset(&offset_filter);
++#if defined(CONFIG_PTP_OFFSET_OUTLIER_FILTER)
++	memset(&offset_outlier, 0, sizeof(offset_outlier));
++#endif
+ 
+ 	ret = ptp_clock_rate_adjust(ptp_clk.phc, 1.0);
+ 	if (ret < 0) {
+@@ -1202,6 +1236,55 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 
+ 	ptp_clk.sync_servo_outlier_samples = 0;
+ 
++#if defined(CONFIG_PTP_OFFSET_OUTLIER_FILTER)
++	/* Robust per-sample outlier gate in front of the servo. The delay-
++	 * based sample weight only catches queuing spikes (raw delay above
++	 * the filtered delay); a corrupted timestamp that shifts the offset
++	 * WITHOUT raising the raw delay sails through it and - with the
++	 * linreg servo - pollutes up to LINREG_MAX_POINTS regression fits
++	 * for many seconds. Gate on the deviation of the raw offset from
++	 * the moving median instead. The median filter above has already
++	 * absorbed the sample, so a genuine time-base change walks the
++	 * median and re-opens the gate by itself; the skip counter is the
++	 * backstop for changes the median cannot reach.
++	 */
++	{
++		int64_t deviation = llabs(raw_offset - offset);
++		int64_t threshold =
++			MAX((int64_t)CONFIG_PTP_OFFSET_OUTLIER_NSIGMA * offset_outlier.dispersion,
++			    (int64_t)CONFIG_PTP_OFFSET_OUTLIER_FLOOR_NS);
++
++		if (offset_outlier.primed >= OFFSET_OUTLIER_PRIME_SAMPLES &&
++		    deviation > threshold) {
++			offset_outlier.rejects++;
++			if (offset_outlier.rejects <= CONFIG_PTP_OFFSET_OUTLIER_MAX_SKIPS) {
++				LOG_WRN("Rejecting offset outlier: raw=%lldns median=%lldns "
++					"deviation=%lldns threshold=%lldns (%u/%u)",
++					raw_offset, offset, deviation, threshold,
++					(unsigned int)offset_outlier.rejects,
++					(unsigned int)CONFIG_PTP_OFFSET_OUTLIER_MAX_SKIPS);
++				return;
++			}
++			/* Escape hatch: this is not noise but a persistent
++			 * change - accept it and re-learn the noise level.
++			 */
++			LOG_WRN("Offset deviation persisted for %u samples, accepting "
++				"(raw=%lldns)",
++				(unsigned int)offset_outlier.rejects, raw_offset);
++			offset_outlier.rejects = 0;
++			offset_outlier.dispersion = deviation;
++		} else {
++			offset_outlier.rejects = 0;
++			if (offset_outlier.primed < OFFSET_OUTLIER_PRIME_SAMPLES) {
++				offset_outlier.primed++;
++			}
++			/* EWMA (1/8) over accepted samples only. */
++			offset_outlier.dispersion +=
++				(deviation - offset_outlier.dispersion) / 8;
++		}
++	}
++#endif /* CONFIG_PTP_OFFSET_OUTLIER_FILTER */
++
+ #if defined(CONFIG_PTP_SERVO_LINREG)
+ 	/* The linreg servo gets the unfiltered offset, as in linuxptp: the
+ 	 * median's ~half-window group delay inside the loop turns the servo's
+-- 
+2.53.0
+

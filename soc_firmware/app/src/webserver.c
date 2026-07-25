@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * REST API + static-file web server for the AES67 device.
  *
  * Uses the Zephyr HTTP server subsystem.
@@ -26,6 +23,7 @@
 #include "ieee1588_utils.h"
 #include "ptp_bmc.h"
 #include "ptp_ctrl.h"
+#include "aes67_conn.h"
 #include "sap_sdp.h"
 #include "ui_display.h"
 #ifdef CONFIG_SD_CONFIG
@@ -52,6 +50,7 @@
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
 #include "card_manager.h"
+#include "card_settings.h"
 
 /*
  * How the analog cards are hardware-reset differs per board:
@@ -547,7 +546,7 @@ static int build_status_streams(char *buf, size_t sz)
 	char tmp[INET_ADDRSTRLEN];
 
 	/* TX streams */
-	const struct aes67_tx_stream *txs = sap_sdp_get_tx_streams();
+	const struct aes67_tx_stream *txs = aes67_conn_get_tx_streams();
 
 	p = json_add_key(buf, sz, p, "tx_streams");
 	p = json_start_array(buf, sz, p);
@@ -583,7 +582,7 @@ static int build_status_streams(char *buf, size_t sz)
 	p = json_end_array(buf, sz, p);
 
 	/* RX streams */
-	const struct aes67_rx_stream *rxs = sap_sdp_get_rx_streams();
+	const struct aes67_rx_stream *rxs = aes67_conn_get_rx_streams();
 
 	p = json_add_key(buf, sz, p, "rx_streams");
 	p = json_start_array(buf, sz, p);
@@ -622,13 +621,13 @@ static int build_status_streams(char *buf, size_t sz)
 
 	/* Discovered (foreign) streams */
 	int sap_count = 0;
-	const struct sap_foreign_stream *foreign =
-		sap_sdp_get_foreign_streams(&sap_count);
+	const struct aes67_foreign_stream *foreign =
+		aes67_conn_get_foreign_streams(&sap_count);
 
 	p = json_add_key(buf, sz, p, "discovered_streams");
 	p = json_start_array(buf, sz, p);
 
-	for (int i = 0; i < SAP_MAX_FOREIGN_STREAMS; i++) {
+	for (int i = 0; i < AES67_MAX_FOREIGN_STREAMS; i++) {
 		if (!foreign[i].valid) {
 			continue;
 		}
@@ -638,11 +637,11 @@ static int build_status_streams(char *buf, size_t sz)
 		 * Linux daemon's Registry::snapshot(): the freshest sighting
 		 * is the representative, the "via" transports are OR-ed, and
 		 * duplicates already emitted with an earlier row are skipped. */
-		const struct sap_foreign_stream *rep = &foreign[i];
+		const struct aes67_foreign_stream *rep = &foreign[i];
 		uint8_t via = foreign[i].via;
 		bool already_emitted = false;
 
-		for (int j = 0; j < SAP_MAX_FOREIGN_STREAMS; j++) {
+		for (int j = 0; j < AES67_MAX_FOREIGN_STREAMS; j++) {
 			if (j == i || !foreign[j].valid ||
 			    foreign[j].mcast_addr.s_addr !=
 				    foreign[i].mcast_addr.s_addr ||
@@ -684,9 +683,9 @@ static int build_status_streams(char *buf, size_t sz)
 		format_ip(tmp, sizeof(tmp), &rep->origin_addr);
 		p = json_add_str(buf, sz, p, "origin_addr", tmp);
 		p = json_add_str(buf, sz, p, "via",
-				 (via & SAP_FOREIGN_VIA_SAP) &&
-				 (via & SAP_FOREIGN_VIA_MDNS) ? "SAP + mDNS" :
-				 (via & SAP_FOREIGN_VIA_MDNS) ? "mDNS" : "SAP");
+				 (via & AES67_VIA_SAP) &&
+				 (via & AES67_VIA_MDNS) ? "SAP + mDNS" :
+				 (via & AES67_VIA_MDNS) ? "mDNS" : "SAP");
 		if (p > 1 && buf[p - 1] == ',') {
 			p--;
 		}
@@ -1012,7 +1011,7 @@ static int apply_tx_stream_json(const char *json, size_t len)
 		}
 	}
 
-	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &dst,
+	return aes67_conn_configure_tx_stream((uint8_t)stream_id, &dst,
 					   (uint8_t)channel_count,
 					   (uint8_t)samples_per_pkt,
 					   ch_ids, (uint8_t)channel_count,
@@ -1084,7 +1083,7 @@ static int apply_rx_stream_json(const char *json, size_t len)
 		}
 	}
 
-	return sap_sdp_configure_rx_stream((uint8_t)stream_id,
+	return aes67_conn_configure_rx_stream((uint8_t)stream_id,
 					   &dst_ip,
 					   (uint16_t)dst_port_val,
 					   ch_map,
@@ -1107,7 +1106,7 @@ static int delete_tx_stream(int stream_id)
 	struct in_addr zero_ip = {.s_addr = 0};
 	uint8_t zero_ch[8] = {0};
 
-	return sap_sdp_configure_tx_stream((uint8_t)stream_id, &zero_ip,
+	return aes67_conn_configure_tx_stream((uint8_t)stream_id, &zero_ip,
 					   0, 0, zero_ch, 0, 0, NULL);
 }
 
@@ -1125,7 +1124,7 @@ static int delete_rx_stream(int stream_id)
 	struct in_addr zero_ip = {.s_addr = 0};
 	uint8_t zero_map[AES67_MAX_CH_PER_STREAM] = {0};
 
-	return sap_sdp_configure_rx_stream((uint8_t)stream_id, &zero_ip, 0,
+	return aes67_conn_configure_rx_stream((uint8_t)stream_id, &zero_ip, 0,
 					   zero_map, 1, 0, 0);
 }
 
@@ -1350,7 +1349,7 @@ static int apply_lo_global_json(const char *json, size_t len)
 #endif /* CONFIG_LO_CARD */
 
 /* ================================================================
- * Card Manager — /api/cards/* builders and apply helpers
+ * Card Manager — /api/cards builders and apply helpers
  * ================================================================ */
 
 /**
@@ -2188,6 +2187,23 @@ static int api_handler(struct http_client_ctx *client,
 			json_len = snprintf(json_buf, JSON_BUF_SIZE,
 					    "{\"error\":\"not found\"}");
 			response_ctx->status = HTTP_404_NOT_FOUND;
+		}
+
+		/* Card endpoints: persist gain/48V/mute changes (debounced —
+		 * a dragged slider must not erase a flash sector per step).
+		 * Reset/scan endpoints re-apply the stored settings instead:
+		 * the re-initialised card is back at hardware defaults. */
+		if (ret == 0 && (strncmp(url, "/api/mi", 7) == 0 ||
+				 strncmp(url, "/api/lo", 7) == 0 ||
+				 strncmp(url, "/api/cards/", 11) == 0)) {
+			if (strstr(url, "/reset") != NULL ||
+			    strcmp(url, "/api/cards/scan") == 0) {
+				card_settings_apply();
+			} else {
+				if (card_settings_capture() == 0) {
+					card_settings_schedule_save();
+				}
+			}
 		}
 
 		post_body_len = 0;

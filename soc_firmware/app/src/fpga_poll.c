@@ -3,21 +3,20 @@
 #include <zephyr/logging/log.h>
 
 #include "../drivers/fpga_hal/fpga_hal.h"
-#ifdef CONFIG_IO_CARD
-#include "../drivers/io_card/io_card.h"
-#endif
-#ifdef CONFIG_LO_CARD
-#include "../drivers/lo_card/lo_card.h"
-#endif
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../drivers/display_ctrl/display_ctrl.h"
 #endif
+#include "card_manager.h"
 #include "fpga_regs.h"
 #include "pll_ctrl.h"
 #include "ui_display.h"
 #include "ptp_bmc.h"
 #include "ptp_ctrl.h"
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+#include "../drivers/eth_litex/eth_litex.h"
+#endif
 #include "sap_sdp.h"
+#include "aes67_conn.h"
 #include "aes67_config.h"
 #include "fpga_poll.h"
 
@@ -40,6 +39,15 @@ static struct in_addr g_poll_ip;
 static struct ui_fpga_metrics disp_metrics = {
 	.speed_code = 0xFF,
 };
+
+/* Link state for display gating: reads as "up" until the first status
+ * sample so early-boot display updates are never suppressed. */
+static bool link_state_valid;
+
+bool fpga_poll_link_is_up(void)
+{
+	return !link_state_valid || disp_metrics.link_up;
+}
 
 void fpga_poll_notify_ip_valid(const struct in_addr *ip)
 {
@@ -91,6 +99,25 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		/* Read combined status word */
 		uint32_t status = fpga_hal_read_status();
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+		/* ---- Leader rate relax (every 100 ms) ----
+		 * When this board wins the BMCA after the grandmaster
+		 * vanished, the wallclock still runs at the follower-era
+		 * rate correction — worst case pinned at ±524287 ppb, which
+		 * downstream followers (same ±524 ppm range) can never track.
+		 * Ramp the correction gently to 0 whenever the Zephyr servo
+		 * is not the one writing it (i.e. we are not a follower);
+		 * ~2.5 ppm/s keeps the frequency change trackable. */
+		{
+			struct ptp_ctrl_status relax_st;
+
+			ptp_ctrl_get_status(&relax_st);
+			if (relax_st.role != PTP_CTRL_ROLE_FOLLOWER) {
+				aes67_ptp_rate_relax_step(250);
+			}
+		}
+#endif
+
 		/* ---- Update display metrics every 1 second ---- */
 		if (poll_count >= 10) {
 			poll_count = 0;
@@ -122,8 +149,35 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			static int64_t link_down_since;
 			static bool link_down_handled;
 
+			link_state_valid = true;
+
 			if (disp_metrics.link_up && !link_prev_up) {
 				LOG_INF("Ethernet link up");
+
+#ifdef CONFIG_DISPLAY_CTRL
+				/* Restore the panel from "  LINK": long
+				 * outage goes through DHCP re-acquisition,
+				 * a short flap back to the PTP/role view. */
+				if (display_ctrl_ready()) {
+					if (link_down_handled) {
+						display_ctrl_show_status("  DHCP");
+					} else if (disp_metrics.wc_locked) {
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+						enum ptp_bmc_role role =
+							role_from_ctrl(ptp_st.role);
+#else
+						enum ptp_bmc_role role =
+							ptp_bmc_get_role();
+#endif
+						display_ctrl_start_status_cycle(
+							role == PTP_ROLE_LEADER ?
+							"LEADER" : "FOLLOW",
+							g_ip_valid ? &g_poll_ip : NULL);
+					} else {
+						display_ctrl_show_status("L  PTP");
+					}
+				}
+#endif
 
 				if (link_down_handled) {
 					k_msleep(500);
@@ -135,11 +189,22 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					LOG_INF("Short link flap — rejoining multicast groups");
 					ptp_bmc_notify_link_up();
 					sap_sdp_notify_link_up();
+					aes67_conn_notify_link_up();
 				}
 			} else if (!disp_metrics.link_up && link_prev_up) {
 				link_down_since = k_uptime_get();
 				link_down_handled = false;
 				LOG_INF("Ethernet link down");
+#ifdef CONFIG_DISPLAY_CTRL
+				/* Link loss trumps the PTP state on the
+				 * panel; role-change repaints are suppressed
+				 * while the link is down (on_bmc_change
+				 * checks fpga_poll_link_is_up()). */
+				if (display_ctrl_ready()) {
+					display_ctrl_stop_status_cycle();
+					display_ctrl_show_status("  LINK");
+				}
+#endif
 			} else if (!disp_metrics.link_up && !link_prev_up
 				   && !link_down_handled) {
 				if ((k_uptime_get() - link_down_since) > 1000) {
@@ -188,18 +253,16 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			}
 #endif
 
-			/* ---- Enable outputs on first wallclock lock ---- */
+			/* ---- Activate outputs on first wallclock lock ----
+			 * Until here every output card sits muted with its
+			 * converters in reset; the PTP/wallclock lock is the
+			 * signal that the media clock is real. */
 			{
 				static bool outputs_enabled;
 
 				if (disp_metrics.wc_locked && !outputs_enabled) {
-					LOG_INF("Wallclock locked — enabling outputs");
-#ifdef CONFIG_IO_CARD
-					io_card_enable_outputs(true);
-#endif
-#ifdef CONFIG_LO_CARD
-					lo_card_enable_outputs(true);
-#endif
+					LOG_INF("Wallclock locked — activating audio outputs");
+					card_manager_activate_outputs();
 					outputs_enabled = true;
 				}
 			}

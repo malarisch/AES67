@@ -1,7 +1,4 @@
 /*
- * Copyright (c) 2025
- * SPDX-License-Identifier: Apache-2.0
- *
  * Shared JSON serialization / parsing for device configuration.
  *
  * Used by both sd_config (SD card) and flash_config (SPI flash) to
@@ -30,8 +27,8 @@ int config_json_serialize(char *buf, size_t sz);
 /**
  * @brief Parse a JSON string and apply device + stream configuration.
  *
- * Calls aes67_config, sap_sdp_configure_tx_stream, and
- * sap_sdp_configure_rx_stream as appropriate.
+ * Calls aes67_config, aes67_conn_configure_tx_stream and
+ * aes67_conn_configure_rx_stream as appropriate.
  *
  * @param json  NUL-terminated JSON string.
  * @return 0 on success, negative errno on error.
