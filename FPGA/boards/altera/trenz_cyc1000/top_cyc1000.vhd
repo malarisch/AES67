@@ -8,6 +8,8 @@ USE ieee.numeric_std.all;
 
 use work.miim_types.all;
 
+use work.audioclks_pkg.all;
+
 ENTITY top_cyc1000 IS
 	generic (
 		SOC_TYPE : string := "LITEX_SDRAM"; 
@@ -117,6 +119,13 @@ END top_cyc1000;
 
 
 ARCHITECTURE bdf_type OF top_cyc1000 IS
+constant tdm_conf : t_audio_clock_cfg := (
+    mclk_speed => audio_clock_24_57,
+    bclk_speed => audio_clock_03_07,
+    dac_cfg => i2s_dac_config,
+    adc_cfg => i2s_adc_config
+    
+);
 signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);
 signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
 signal mii_txd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
@@ -160,20 +169,16 @@ begin
     AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
     RX_BYTE_DEPTH => RX_BYTE_DEPTH,
     AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    AUDIO_RX_TDM_CHANNELS => AUDIO_RX_TDM_CHANNELS,
     TX_MAX_STREAMS => TX_MAX_STREAMS,
     TX_CHANNELS => TX_CHANNELS,
     TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
     AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
     TX_BYTE_DEPTH => TX_BYTE_DEPTH,
     AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    AUDIO_TX_TDM_CHANNELS => AUDIO_TX_TDM_CHANNELS,
     USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
     ENABLE_METERING => ENABLE_METERING,
-    TDM_BCLK_MULT => TDM_BCLK_MULT,
-    TDM_FSCLK_50DUTY => TDM_FSCLK_50DUTY,
-    TDM_I2S_MODE => TDM_I2S_MODE,
-    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+    AUDIO_TDM_CONFIG => tdm_conf
   )
   port map (
     rst_n_i => c10_resetn,
@@ -208,7 +213,7 @@ begin
     --audioclk_512fs_o => AIN7,
     audioclk_mclk_o => D0,
     audioclk_bclk_o => AIN6,
-    audioclk_lrclk_o => AIN4,
+    audioclk_lrclk_dac_o => AIN4,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     sdram_a => sdram_a,

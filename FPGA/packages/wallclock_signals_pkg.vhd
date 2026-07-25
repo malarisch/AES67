@@ -11,8 +11,19 @@ package wallclock_signals_pkg is
         wallclock_do_phasejump_i : std_logic;
         wallclock_seconds_i     : std_logic_vector(47 downto 0);
         wallclock_nanoseconds_i : std_logic_vector(29 downto 0);
-        freq_correction_ppb_i   : signed(19 downto 0); 
+        freq_correction_ppb_i   : signed(19 downto 0);
     end record;
+
+
+    constant WALLCLOCK_SIGNALS_UNDRIVEN : t_wallclock_signals := (
+        wallclock_seconds_o      => (others => 'Z'),
+        wallclock_nanoseconds_o  => (others => 'Z'),
+        wallclock_set_i          => 'Z',
+        wallclock_do_phasejump_i => 'Z',
+        wallclock_seconds_i      => (others => 'Z'),
+        wallclock_nanoseconds_i  => (others => 'Z'),
+        freq_correction_ppb_i    => (others => 'Z')
+    );
 
     type t_eth_timestamp is record
         seconds : unsigned(3 downto 0);

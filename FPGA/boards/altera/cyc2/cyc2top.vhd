@@ -17,14 +17,14 @@ ENTITY cyc2top IS
 		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
 
 		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 64;
+		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
 		STATIC_PTP_CONF : 		BOOLEAN := true;
         ENABLE_METERING: BOOLEAN := false;
 
 		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         
-		TX_MAX_STREAMS : natural := 8;
-		RX_MAX_STREAMS : natural := 1;
+		TX_MAX_STREAMS : natural := 4;
+		RX_MAX_STREAMS : natural := 4;
 		
 		
 		
@@ -34,14 +34,14 @@ ENTITY cyc2top IS
     	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
 		
 
-		RX_CHANNELS		: natural := 0;
+		RX_CHANNELS		: natural := 8;
         
 		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
         RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
 		AUDIO_RX_TDM_OUTPUTS : natural := 4;
-		AUDIO_RX_TDM_CHANNELS : natural  := 2;
+		
 
-        TX_CHANNELS		: natural := 2; -- must be multiple of two for i2s, multiple of 8 for tdm8
+        TX_CHANNELS		: natural := 0; -- must be multiple of two for i2s, multiple of 8 for tdm8
         
 		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
         TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
@@ -105,7 +105,8 @@ constant tdm_conf : t_audio_clock_cfg := (
     adc_cfg => i2s_adc_config
     
 );
-signal tdm_out_reg : STD_LOGIC_VECTOR(3 downto 0);
+signal tdm_out_reg : STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
+signal tdm_in_reg : STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
 signal uart0_tx_reg : std_logic;
 signal uart0_rx_reg : std_logic;
 signal uart_ctrl_rx_reg : std_logic;
@@ -121,9 +122,10 @@ signal mclk_reg : std_logic;
 signal dbg_mac_tx_clk_o : std_logic;
 
 begin
+	tdm_in_reg <= tdm_in(AUDIO_TX_TDM_INPUTS - 1 downto 0);
 	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	tdm_out <= tdm_out_reg;
+	tdm_out(0) <= tdm_out_reg(0);
 	mclk <= mclk_reg;
 	 phy_rstn_o <= '1';
 	 bclk_adc <= not bclk;
@@ -135,10 +137,12 @@ begin
 	 phy3tx <= phy_tx;
 	 phy_rxdv <= crsdv(0); -- or crsdv(1) or crsdv(2) or crsdv(3);
 	 phy_rx <= phy0rx(0) & phy0rx(1) & phy0rx(2) &phy0rx(3); -- or phy1rx or phy2rx or phy3rx;
-     dbg_o <= mclk_reg & not bclk & fs & tdm_out_reg & '0';
+     --dbg_o <= mclk_reg & not bclk & fs & tdm_out_reg & '0';
     uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
 		  spictrl_miso <= miso;
     end generate;
+	 fs_adc <= fs;
+	 fs_dac <= fs;
 	soc_top_inst : entity work.soc_top
   generic map (
     clk_in_speed => clk_in_speed,
@@ -192,8 +196,9 @@ begin
     --audioclk_512fs_o => AIN7,
     audioclk_mclk_o => mclk_reg,
     audioclk_bclk_o => bclk,
-    audioclk_lrclk_adc_o => fs_adc,
-    audioclk_lrclk_dac_o => fs_dac,
+    audioclk_lrclk_adc_o => fs,
+    --audioclk_lrclk_dac_o => fs_dac,
+    audioclk_lrclk_ext_o => fs_ext,
     spibone_clk => spictrl_clk,
     spibone_cs_n => spictrl_cs,
     spibone_miso => miso,
@@ -201,7 +206,7 @@ begin
     spibone_irq_o => spictrl_irq,
     uartbone_rx => uart_ctrl_rx_reg,
     uartbone_tx => uart_ctrl_tx_reg,
-    tdm_in => tdm_in,
+    tdm_in => tdm_in_reg,
     tdm_out => tdm_out_reg,
     dbg_mac_tx_clk_o => dbg_mac_tx_clk_o
   );
