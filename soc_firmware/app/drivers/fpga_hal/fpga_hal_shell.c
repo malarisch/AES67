@@ -423,6 +423,48 @@ static int cmd_asym(const struct shell *sh, size_t argc, char **argv)
 	return ret;
 }
 
+static int cmd_peek(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t addr, val;
+
+	ARG_UNUSED(argc);
+
+	if (parse_u32(argv[1], &addr) < 0) {
+		shell_error(sh, "usage: fpga peek <byte-addr>");
+		return -EINVAL;
+	}
+
+	int ret = fpga_hal_csr_read(addr, &val);
+
+	if (ret < 0) {
+		shell_error(sh, "read failed: %d", ret);
+		return ret;
+	}
+	shell_print(sh, "[0x%08x] = 0x%08x (%u)", addr, val, val);
+	return 0;
+}
+
+static int cmd_poke(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t addr, val;
+
+	ARG_UNUSED(argc);
+
+	if (parse_u32(argv[1], &addr) < 0 || parse_u32(argv[2], &val) < 0) {
+		shell_error(sh, "usage: fpga poke <byte-addr> <value>");
+		return -EINVAL;
+	}
+
+	int ret = fpga_hal_csr_write(addr, val);
+
+	if (ret < 0) {
+		shell_error(sh, "write failed: %d", ret);
+		return ret;
+	}
+	shell_print(sh, "[0x%08x] <- 0x%08x", addr, val);
+	return 0;
+}
+
 /* ---- command tree ---- */
 
 SHELL_STATIC_SUBCMD_SET_CREATE(fpga_ctrl_cmds,
@@ -460,6 +502,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(fpga_cmds,
 		"Read/write PTP delayAsymmetry (ns, signed; +ve = M->S longer). "
 		"Usage: fpga asym [<signed_ns>]",
 		cmd_asym, 1, 1),
+	SHELL_CMD_ARG(peek, NULL,
+		"Read a CSR word (absolute byte address, see csr.csv). "
+		"Usage: fpga peek <addr>",
+		cmd_peek, 2, 0),
+	SHELL_CMD_ARG(poke, NULL,
+		"Write a CSR word. Usage: fpga poke <addr> <value>",
+		cmd_poke, 3, 0),
 	SHELL_SUBCMD_SET_END
 );
 

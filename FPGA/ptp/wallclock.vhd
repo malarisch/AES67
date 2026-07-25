@@ -14,8 +14,9 @@ entity wallclock is
         sys_clk_hz : natural := 125_000_000;
         -- Audio sample rate in Hz
         audio_fs : natural := 48_000;
-        pull_loop_gain_shift : natural := 10;
-        pull_int_gain_shift  : natural := 16
+        pull_loop_gain_shift : natural := 14;
+        pull_int_gain_shift  : natural := 16;
+        PTP_IN_SOFTWARE : boolean := false
     );
     port(
         clk                     : in  std_logic;
@@ -139,13 +140,20 @@ architecture Behavioral of wallclock is
     signal trim_next    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     signal trim_pending : std_logic := '0';
     signal phase_error_valid: std_logic := '0';
+    
 
     -- Pipeline register to break freq_correction → nco_increment critical path
     -- Original: 32×16 multiply + shift + add (~10ns combined)
     -- Split: Stage 1 (multiply) → Stage 2 (add). No shift now — the result
     -- is consumed at full 48-bit precision.
     signal ppb_adj_reg    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
+    signal ppb_adj_reg_last    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
+    signal ppb_adj_reg_avg    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
+    signal ppb_adj_reg_valid : std_logic;
     
+    signal mcu_nco_adj_valid_sync1 : std_logic;
+    signal mcu_nco_adj_valid_sync2 : std_logic;
+    signal mcu_nco_adj_valid_sync3 : std_logic;
     -- Sample divider: count 512 MCLK rising edges → 1 sample period.
     -- MCLK MSB rising edge = one MCLK cycle. 512 cycles = 1 fs period.
     signal mclk_cnt      : unsigned(8 downto 0) := (others => '0');
@@ -199,7 +207,7 @@ architecture Behavioral of wallclock is
     constant PHASE_ERR_TO_BIAS_SHIFT : natural :=
         NCO_PHASE_BITS - 9 - pull_loop_gain_shift;  -- 48-9-10 = 29
 
-    constant PULL_DEAD_BAND       : natural := 4;
+    constant PULL_DEAD_BAND       : natural := 1;
 
 
     constant PPB_TRIM_LIMIT_32 : integer :=
@@ -260,6 +268,7 @@ begin
     -- resize() is portable across GHDL / ModelSim / Quartus.
     wallclock_signals.wallclock_nanoseconds_o <= resize(unsigned(nsec_reg), 30);
     wallclock_signals.wallclock_seconds_o     <= sec_reg;
+
     second_pulse_o          <= second_pulse_int;
     audioclks_reg.mclk            <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
     audio_mclk_o <= std_logic(nco_phase(NCO_PHASE_BITS - 1));  -- NCO MSB = MCLK at ~24.576 MHz
@@ -273,7 +282,6 @@ begin
     mclk_cnt_o         <= mclk_cnt;
     media_edge_tick_o  <= media_edge_tick;
     ppb_adj_dbg_o      <= ppb_adj_reg(31 downto 0);
-    ppb_trim_dbg_o     <= resize(shift_right(ppb_trim, 16), 32);
     -- nco_phase_bias = phase_err << PHASE_ERR_TO_BIAS_SHIFT; recover
     bias_dbg_o         <= resize(shift_right(nco_phase_bias,
                                   PHASE_ERR_TO_BIAS_SHIFT), 32);
@@ -299,24 +307,37 @@ begin
     --   Stage 1: ppb_adj_reg <= freq_correction * NCO_PPB_SCALE  (full width)
     --   Stage 2: nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg
     -- ============================================================
-
+    
     nco_ppb_adj_proc: process(clk, reset_n)
     begin
         if reset_n = '0' then
             nco_ppb_adj_wait <= '0';
             ppb_adj_reg      <= (others => '0');
         elsif rising_edge(clk) then
+           
+            if (PTP_IN_SOFTWARE = true) then
+                 mcu_nco_adj_valid_sync1 <= wallclock_signals.nco_ppb_adj_valid_i;
+            mcu_nco_adj_valid_sync2 <= mcu_nco_adj_valid_sync1;
+            mcu_nco_adj_valid_sync3 <= mcu_nco_adj_valid_sync2;
+                if mcu_nco_adj_valid_sync2 /= mcu_nco_adj_valid_sync3 then
+                    ppb_adj_reg <= wallclock_signals.nco_ppb_adj_i;
+                end if;
+            else
             if (nco_ppb_adj_wait = '0') then
                 nco_ppb_adj_wait <= '1';
-
-                ppb_adj_reg <= resize(wallclock_signals.freq_correction_ppb_i * NCO_PPB_SCALE,
-                                      NCO_PHASE_BITS);
+                
+                
+                    ppb_adj_reg_last <= ppb_adj_reg;
+                    ppb_adj_reg <= resize(wallclock_signals.freq_correction_ppb_i * NCO_PPB_SCALE,
+                                          NCO_PHASE_BITS);
+                
             else
                 nco_ppb_adj_wait <= '0';
             end if;
         end if;
+        end if;
     end process;
-
+    ppb_adj_reg_valid <= '1' when ppb_adj_reg /= ppb_adj_reg_last and nco_ppb_adj_wait = '1' else '0';
     media_edge_tick <= '1' when (media_clock_reg /= media_clock_prev)
                        else '0';
 
@@ -369,41 +390,33 @@ begin
         end if;
     end process;
 
-
-
-    nco_i_proc: process (clk, reset_n) begin
-        if (reset_n = '0') then
-            ppb_trim     <= (others => '0');
-            trim_next    <= (others => '0');
-            trim_pending <= '0';
-        elsif rising_edge(clk) then
-            trim_pending <= '0';
-            if wallclock_set_3 = '0' and wallclock_set_2 = '1' then
-               ppb_trim <= (others => '0');
-            elsif (phase_error_valid = '1') then
-                trim_next <= shift_left(resize(phase_err, NCO_PHASE_BITS),
-                                        pull_int_gain_shift) + ppb_trim;
-                trim_pending <= '1';
-            elsif trim_pending = '1' then
-                if trim_next > PPB_TRIM_LIMIT then
-                    ppb_trim <= PPB_TRIM_LIMIT;
-                elsif trim_next < -PPB_TRIM_LIMIT then
-                    ppb_trim <= -PPB_TRIM_LIMIT;
-                else
-                    ppb_trim <= trim_next;
-                end if;
-            end if;
-
-        end if;
-    end process;
-
+    gen_nco_avg : if (PTP_IN_SOFTWARE = false) generate
+    average_inst: entity work.average
+     generic map(
+        DATA_WIDTH => NCO_PHASE_BITS,
+        DEPTH => 8
+    )
+     port map(
+        clk_i => clk,
+        rst_n_i => reset_n,
+        data_i => ppb_adj_reg,
+        data_valid_i => ppb_adj_reg_valid,
+        data_o => ppb_adj_reg_avg
+    );
+     end generate;
     nco_increment_proc: process(clk, reset_n) begin
 
         if (reset_n = '0') then
             nco_increment <= (others => '0');
         elsif (rising_edge(clk)) then
+        if (PTP_IN_SOFTWARE = true) then
 
-        nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + ppb_trim + nco_phase_bias;
+                nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg + nco_phase_bias;
+            
+        else
+            nco_increment <= NCO_BASE_INC_48 + ppb_adj_reg_avg + nco_phase_bias;
+        end if;
+
         end if;
     end process;
     

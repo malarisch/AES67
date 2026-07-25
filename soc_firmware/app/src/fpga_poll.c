@@ -25,7 +25,12 @@ LOG_MODULE_REGISTER(fpga_poll, LOG_LEVEL_INF);
 /* Polling interval for FPGA status registers */
 #define FPGA_POLL_INTERVAL_MS 100
 
-#define PPB_POLL_STACK_SIZE 2048
+/* This thread does far more than PPB polling since the bring-up staging:
+ * on the first wallclock lock it runs the whole card activation chain
+ * (card_manager -> lo_card_activate -> card_settings_apply -> I2C driver)
+ * plus logging — 2048 bytes overflowed silently on Xtensa (windowed ABI)
+ * and froze the system mid-activation. */
+#define PPB_POLL_STACK_SIZE 4096
 #define PPB_POLL_PRIORITY   K_PRIO_PREEMPT(10)
 
 K_THREAD_STACK_DEFINE(ppb_poll_stack, PPB_POLL_STACK_SIZE);
@@ -63,6 +68,27 @@ void fpga_poll_register_role_change_cb(ptp_bmc_change_cb_t cb)
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
+/* ---- Leader rate relax ----
+ * When this board wins the BMCA after the grandmaster vanished, the
+ * wallclock still runs at the follower-era rate correction — worst case
+ * pinned at ±524287 ppb, which downstream followers (same ±524 ppm
+ * range) can never track. Ramp the correction gently to 0 whenever the
+ * Zephyr servo is not the one writing it (i.e. we are not a follower);
+ * ~2.5 ppm/s keeps the frequency change trackable.
+ *
+ * The status struct is static deliberately: it is only touched by the
+ * poll thread, and keeping it off the thread stack matters — the same
+ * thread also runs the deep card-activation call chain. */
+static void leader_ppb_relax_tick(void)
+{
+	static struct ptp_ctrl_status relax_st;
+
+	ptp_ctrl_get_status(&relax_st);
+	if (relax_st.role != PTP_CTRL_ROLE_FOLLOWER) {
+		aes67_ptp_rate_relax_step(250);
+	}
+}
+
 static enum ptp_bmc_role role_from_ctrl(enum ptp_ctrl_role role)
 {
 	switch (role) {
@@ -100,22 +126,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 		uint32_t status = fpga_hal_read_status();
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-		/* ---- Leader rate relax (every 100 ms) ----
-		 * When this board wins the BMCA after the grandmaster
-		 * vanished, the wallclock still runs at the follower-era
-		 * rate correction — worst case pinned at ±524287 ppb, which
-		 * downstream followers (same ±524 ppm range) can never track.
-		 * Ramp the correction gently to 0 whenever the Zephyr servo
-		 * is not the one writing it (i.e. we are not a follower);
-		 * ~2.5 ppm/s keeps the frequency change trackable. */
-		{
-			struct ptp_ctrl_status relax_st;
-
-			ptp_ctrl_get_status(&relax_st);
-			if (relax_st.role != PTP_CTRL_ROLE_FOLLOWER) {
-				aes67_ptp_rate_relax_step(250);
-			}
-		}
+		/* Leader rate relax (every 100 ms) — see helper above. */
+		leader_ppb_relax_tick();
 #endif
 
 		/* ---- Update display metrics every 1 second ---- */

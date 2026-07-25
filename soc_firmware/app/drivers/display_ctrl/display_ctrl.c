@@ -801,7 +801,9 @@ int display_ctrl_boot_animation(void)
 #ifndef CONFIG_DISPLAY_CTRL_LOAD_ANIM_DELAY_MS
 #define CONFIG_DISPLAY_CTRL_LOAD_ANIM_DELAY_MS 15
 #endif
-#define LOADING_ANIM_STACK_SIZE 512
+/* UART writes + mutex + logging only — but 512 B is not enough headroom
+ * for the Xtensa windowed ABI (each nested call spills a register window). */
+#define LOADING_ANIM_STACK_SIZE 1024
 
 static K_THREAD_STACK_DEFINE(loading_anim_stack, LOADING_ANIM_STACK_SIZE);
 static struct k_thread loading_anim_thread;
@@ -1002,7 +1004,10 @@ int display_ctrl_all_off(void)
 #if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
 #include "../fpga_hal/fpga_hal.h"
 
-#define METERING_STACK_SIZE 512
+/* Calls fpga_hal_read_metering() every poll — on the external-MCU build
+ * that is the full spibone → SPI-driver chain. 512 B overflowed on the
+ * ESP32 (STACK_SENTINEL fatal in dc_meter, 2026-07-25). */
+#define METERING_STACK_SIZE 2048
 #define METERING_POLL_MS    20
 
 /* FPGA TX channel → logical input channel (inverse of logical_to_fpga in io_card.c)
@@ -1094,7 +1099,7 @@ void display_ctrl_start_metering(void)
  * Cycles every 2 s: "ONLINE" → "LEADER"/"FOLLOW" → IP part1 → IP part2
  ******************************************************************************/
 
-#define STATUS_CYCLE_STACK_SIZE 512
+#define STATUS_CYCLE_STACK_SIZE 1024
 #define STATUS_CYCLE_INTERVAL_MS 2000
 
 static K_THREAD_STACK_DEFINE(status_cycle_stack, STATUS_CYCLE_STACK_SIZE);

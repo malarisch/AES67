@@ -2,7 +2,7 @@
 
 from litex.gen import *
 
-from migen import Cat
+from migen import Cat, If
 from litex.soc.interconnect.csr import AutoCSR, CSRStorage, CSRStatus, CSRField
 
 
@@ -104,6 +104,9 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.o_wallclock_set             = Signal()
         self.o_wallclock_phasejump       = Signal()
         self.o_wallclock_ppb             = Signal(20)
+        # Software-smoothed NCO (media clock) correction (SoC -> FPGA)
+        self.o_nco_ppb_adj               = Signal(48)
+        self.o_nco_ppb_adj_valid         = Signal()
 
         # =====================================================================
         # CSR: Status registers (RO) — directly sampled from input signals
@@ -259,6 +262,12 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("phasejump", size=1, offset=1, description="Apply a one-shot phase jump to the FPGA wallclock"),
         ])
 
+        # Appended after wallclock_ctrl: keeps all pre-existing CSR addresses
+        # stable (old bitstreams stay compatible; they just ignore these).
+        self.nco_ppb_adj_lo = CSRStorage(32, description="NCO (media clock) increment adjustment [31:0] (signed, 48-bit NCO increment units = ppb x 55340 @ 48k/125MHz; SoC -> FPGA). Write LO first, then HI — the value commits on the HI write.")
+        self.nco_ppb_adj_hi = CSRStorage(32, description="NCO increment adjustment [47:32] (bits [15:0] used, sign extension; commits the value)")
+        self.nco_ppb_adj_valid = CSRStorage(1, description="Write strobe: pulse 1 -> 0 AFTER writing nco_ppb_adj_lo/hi — the NCO captures the value on any edge.")
+
         # =====================================================================
         # Wiring: input signals -> CSR status fields
         # =====================================================================
@@ -365,9 +374,17 @@ class AES67CSRs(LiteXModule, AutoCSR):
                 Cat(self.wallclock_seconds_out_lo.storage, self.wallclock_seconds_out_hi.storage[:16])),
             self.o_wallclock_nanoseconds_out.eq(self.wallclock_nanoseconds_out.storage[:30]),
             self.o_wallclock_ppb.eq(self.wallclock_ppb.storage),
+            self.o_nco_ppb_adj_valid.eq(self.nco_ppb_adj_valid.storage),
             self.o_wallclock_set.eq(self.wallclock_ctrl.fields.set),
             self.o_wallclock_phasejump.eq(self.wallclock_ctrl.fields.phasejump),
         ]
+
+        # 48-bit NCO correction: commit atomically on the HI write (the host
+        # writes LO first), so the NCO never sees a torn LO/HI pair — the HI
+        # word is the sign extension and a mismatch would be a ±2^40 glitch.
+        self.sync += If(self.nco_ppb_adj_hi.re,
+            self.o_nco_ppb_adj.eq(Cat(self.nco_ppb_adj_lo.storage,
+                                      self.nco_ppb_adj_hi.storage[:16])))
 
 
 def add_aes67_csr(soc, platform):
@@ -459,5 +476,7 @@ def add_aes67_csr(soc, platform):
         aes67_pads.wallclock_set.eq(csr.o_wallclock_set),
         aes67_pads.wallclock_phasejump.eq(csr.o_wallclock_phasejump),
         aes67_pads.wallclock_ppb.eq(csr.o_wallclock_ppb),
+        aes67_pads.nco_ppb_adj.eq(csr.o_nco_ppb_adj),
+        aes67_pads.nco_ppb_adj_valid.eq(csr.o_nco_ppb_adj_valid),
     ]
     return csr

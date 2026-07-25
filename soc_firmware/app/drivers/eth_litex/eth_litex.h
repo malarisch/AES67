@@ -179,6 +179,15 @@ void aes67_ptp_rate_reset(void);
  */
 bool aes67_ptp_rate_relax_step(int32_t step_ppb);
 
+/** Snapshot of the software NCO rate loop (shell/debug). */
+struct aes67_nco_status {
+	int32_t rate_ppb_m;            /* smoothed servo rate, milli-ppb */
+	int64_t written_units;         /* last 48-bit increment adjust written */
+	bool active;                   /* at least one adj write since boot */
+};
+
+void aes67_ptp_nco_status(struct aes67_nco_status *st);
+
 /** Reconstruct a full RX/TX hardware timestamp from a captured (4-bit seconds,
  *  30-bit nanoseconds) pair using the live wallclock seconds. */
 void aes67_ptp_reconstruct(uint8_t cap_sec, uint32_t cap_nsec, struct net_ptp_time *out);

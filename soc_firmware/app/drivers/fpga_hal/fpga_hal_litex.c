@@ -194,6 +194,20 @@ int fpga_hal_set_adda_nrst(bool released)
 	}
 }
 
+/* ---- Raw CSR access (debug peek/poke) ---- */
+
+int fpga_hal_csr_read(uint32_t addr, uint32_t *val)
+{
+	*val = litex_csr_read(addr);
+	return 0;
+}
+
+int fpga_hal_csr_write(uint32_t addr, uint32_t val)
+{
+	litex_csr_write(addr, val);
+	return 0;
+}
+
 /* ---- Status reads ---- */
 
 uint32_t fpga_hal_read_status(void)

@@ -31,7 +31,10 @@
 LOG_MODULE_REGISTER(ptp_bmc, LOG_LEVEL_INF);
 
 /* ---- Poll thread ---- */
-#define PTP_POLL_STACK_SIZE   1024
+/* The poll loop runs the role-change callback (display text + LED writes
+ * through the FPGA HAL) and FPGA status reads on this stack — over the
+ * SPI bridge on the external-MCU build that chain is deep. */
+#define PTP_POLL_STACK_SIZE   2048
 #define PTP_POLL_PRIORITY     K_PRIO_PREEMPT(8)
 #define PTP_POLL_PERIOD_MS    250
 

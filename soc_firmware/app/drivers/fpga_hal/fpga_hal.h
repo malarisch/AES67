@@ -209,6 +209,29 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits);
 int fpga_hal_set_adda_nrst(bool released);
 
 /* ========================================================================
+ * Raw CSR access (bring-up / debug)
+ * ======================================================================== */
+
+/**
+ * @brief Read one CSR word at an absolute byte address.
+ *
+ * Addresses come from the generated map (litex_soc/build/aes67_bridge/
+ * csr.csv) and are identical on the LiteX and SPI backends.
+ * Debug/bring-up tool ("fpga peek") — production code resolves
+ * registers by name through the generated headers instead.
+ *
+ * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ */
+int fpga_hal_csr_read(uint32_t addr, uint32_t *val);
+
+/**
+ * @brief Write one CSR word at an absolute byte address ("fpga poke").
+ *
+ * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ */
+int fpga_hal_csr_write(uint32_t addr, uint32_t val);
+
+/* ========================================================================
  * Status reads
  * ======================================================================== */
 

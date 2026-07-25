@@ -207,6 +207,22 @@ int fpga_hal_ctrl_clear_bits(uint32_t bits)
 	return eth_fmc_status_clear_bits(dev, fmc_bits);
 }
 
+/* ---- Raw CSR access: not available on the legacy FMC register file ---- */
+
+int fpga_hal_csr_read(uint32_t addr, uint32_t *val)
+{
+	ARG_UNUSED(addr);
+	ARG_UNUSED(val);
+	return -ENOTSUP;
+}
+
+int fpga_hal_csr_write(uint32_t addr, uint32_t val)
+{
+	ARG_UNUSED(addr);
+	ARG_UNUSED(val);
+	return -ENOTSUP;
+}
+
 /* ---- Status reads ---- */
 
 uint32_t fpga_hal_read_status(void)

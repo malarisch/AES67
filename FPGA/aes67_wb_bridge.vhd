@@ -122,6 +122,8 @@ component litex_soc_aes67_bridge
     aes67_ctrl_ip_addr : out std_logic_vector    (31 downto 0);
     aes67_ctrl_mac_addr : out std_logic_vector    (47 downto 0);
     aes67_ctrl_meter_clear : out std_logic;
+    aes67_ctrl_nco_ppb_adj : out std_logic_vector    (47 downto 0);
+    aes67_ctrl_nco_ppb_adj_valid : out std_logic;
     aes67_ctrl_parser_delay_asymmetry_ns : out std_logic_vector    (31 downto 0);
     aes67_ctrl_parser_min_filter_active_depth : out std_logic_vector     (7 downto 0);
     aes67_ctrl_parser_min_filter_enable : out std_logic;
@@ -318,6 +320,8 @@ signal mac_reset : STD_LOGIC;
 signal wallclock_signals : t_wallclock_signals;
 signal timestamps : t_eth_timestamps;
 signal aes67_ctrl_wallclock_ppb_reg : STD_LOGIC_VECTOR(19 downto 0);
+signal aes67_ctrl_nco_ppb_adj_reg : STD_LOGIC_VECTOR(47 downto 0);
+signal aes67_ctrl_nco_ppb_adj_valid_reg : STD_LOGIC;
 begin
 
     -- eth-ram read address: litex bridge drives std_logic_vector, ethernet_top
@@ -426,10 +430,15 @@ begin
         aes67_ctrl_wallclock_seconds_out => wallclock_signals.wallclock_seconds_i,
         aes67_ctrl_wallclock_set => wallclock_signals.wallclock_set_i,
         aes67_ctrl_wallclock_phasejump => wallclock_signals.wallclock_do_phasejump_i,
-        aes67_ctrl_wallclock_ppb => aes67_ctrl_wallclock_ppb_reg
-        
+        aes67_ctrl_wallclock_ppb => aes67_ctrl_wallclock_ppb_reg,
+        aes67_ctrl_nco_ppb_adj => aes67_ctrl_nco_ppb_adj_reg,
+        aes67_ctrl_nco_ppb_adj_valid => aes67_ctrl_nco_ppb_adj_valid_reg
     );
     wallclock_signals.freq_correction_ppb_i <= signed(aes67_ctrl_wallclock_ppb_reg);
+    -- Software-smoothed NCO correction (SW-PTP; hardware-PTP gateware
+    -- leaves valid at its reset value 0 and the NCO follows the servo).
+    wallclock_signals.nco_ppb_adj_i       <= signed(aes67_ctrl_nco_ppb_adj_reg);
+    wallclock_signals.nco_ppb_adj_valid_i <= aes67_ctrl_nco_ppb_adj_valid_reg;
     aes67_top_inst: entity work.aes67_top
      generic map(
         MII_WIDTH => MII_WIDTH,

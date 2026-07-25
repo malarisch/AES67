@@ -14,6 +14,10 @@
 #include "aes67_conn.h"
 #include "sap_sdp.h"
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+#include "../drivers/eth_litex/eth_litex.h"
+#endif
+
 static int cmd_aes67_status(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -280,6 +284,42 @@ static int cmd_aes67_nodeid(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+/* Print a milli-scaled value as "-1.234" (shell has no float printf). */
+static void print_milli(char *buf, size_t len, int32_t m)
+{
+	int32_t a = m < 0 ? -m : m;
+
+	snprintk(buf, len, "%s%d.%03d", m < 0 ? "-" : "", a / 1000, a % 1000);
+}
+#endif /* CONFIG_AES67_PTP_SOFTWARE */
+
+/* Defined for every build: SHELL_COND_CMD only nulls the handler pointer
+ * behind IS_ENABLED(), the symbol itself is always referenced. */
+static int cmd_aes67_nco(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#ifndef CONFIG_AES67_PTP_SOFTWARE
+	shell_error(sh, "not available (hardware-PTP build)");
+	return -ENOTSUP;
+#else
+	struct aes67_nco_status st;
+	char v[24];
+
+	aes67_ptp_nco_status(&st);
+
+	shell_print(sh, "NCO software loop: %s",
+		    st.active ? "active" : "no write yet");
+	print_milli(v, sizeof(v), st.rate_ppb_m);
+	shell_print(sh, "servo rate    : %s ppb (smoothed)", v);
+	shell_print(sh, "written adj   : %lld units",
+		    (long long)st.written_units);
+	return 0;
+#endif /* CONFIG_AES67_PTP_SOFTWARE */
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 	SHELL_CMD(status, NULL, "Show AES67 stream config and discovered streams",
 		  cmd_aes67_status),
@@ -298,6 +338,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 	SHELL_CMD(txstream, NULL,
 		  "Configure TX stream: aes67 txstream <id> <ip> <ch_count> <spp> <ch0> [ch1..7]",
 		  cmd_aes67_txstream),
+	SHELL_COND_CMD(CONFIG_AES67_PTP_SOFTWARE, nco, NULL,
+		       "Show NCO rate/phase loop state (SW PTP)",
+		       cmd_aes67_nco),
 	SHELL_SUBCMD_SET_END
 );
 

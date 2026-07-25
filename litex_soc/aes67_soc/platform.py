@@ -131,6 +131,9 @@ _io_common = [
         Subsignal("wallclock_set",             Pins(1)),
         Subsignal("wallclock_phasejump",       Pins(1)),
         Subsignal("wallclock_ppb",             Pins(20)),
+        # Software-smoothed NCO (media clock) correction (SoC -> FPGA)
+        Subsignal("nco_ppb_adj",               Pins(48)),
+        Subsignal("nco_ppb_adj_valid",         Pins(1)),
     ),
 
     # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)

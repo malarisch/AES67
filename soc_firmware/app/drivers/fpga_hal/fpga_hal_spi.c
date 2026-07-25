@@ -333,6 +333,18 @@ int fpga_hal_set_adda_nrst(bool released)
 
 #endif /* DT_NODE_EXISTS(ADDA_NRST_NODE) */
 
+/* ---- Raw CSR access (debug peek/poke) ---- */
+
+int fpga_hal_csr_read(uint32_t addr, uint32_t *val)
+{
+	return spibone_read(addr, val);
+}
+
+int fpga_hal_csr_write(uint32_t addr, uint32_t val)
+{
+	return spibone_write(addr, val);
+}
+
 /* ---- Status reads ---- */
 
 uint32_t fpga_hal_read_status(void)

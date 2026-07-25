@@ -24,6 +24,7 @@
  */
 
 #include <zephyr/device.h>
+#include <zephyr/kernel.h>
 #include <zephyr/drivers/ptp_clock.h>
 #include <zephyr/net/ptp_time.h>
 #include <zephyr/sys/util.h>
@@ -65,16 +66,132 @@ static void wc_csr_write(uintptr_t addr, uint32_t val)
  * benign last-writer-wins races at role changes is sufficient. */
 static int32_t applied_ppb;
 
+/* ---- NCO (media clock) rate loop ----
+ *
+ * The wallclock follows the servo tightly (accurate timestamps), but
+ * routing every servo twitch into the audio NCO lets network jitter
+ * reach the media clock. In SW-PTP gateware the whole NCO ppb loop
+ * therefore lives here: the servo ppb is smoothed over a long window,
+ * converted to 48-bit NCO increment units and written to the
+ * nco_ppb_adj CSRs, which the gateware adds to the NCO base increment
+ * as-is (valid = 1 bypasses its own multiply and 8-sample average).
+ *
+ * Conversion: mirrors wallclock.vhd's NCO_PPB_SCALE for the platform
+ * constants fs = 48 kHz, sys_clk = 125 MHz —
+ *   round(48000*512 / 125e6 * 2^32 / 1e9 * 65536) = 55340
+ * increment units per ppb. The Q16 smoothing accumulator feeds the
+ * multiply before the >>16, so sub-ppb resolution survives into the
+ * register (1 unit = 1/55340 ppb ≈ 18 nppb).
+ *
+ * Smoothing: Q16 EWMA over the applied wallclock ppb, updated on every
+ * rate write. The linreg servo applies roughly once per second, so
+ * SHIFT 10 gives a ~1024-sample (~17 min) time constant: the audio NCO
+ * sees only the long-term crystal drift, ±700 ppb servo wander is
+ * attenuated to the tens-of-ppb range. Fast transients (boot, GM
+ * change, relax ramp) bypass the window via the snap below; the
+ * residual lag from slow tempco drift is absorbed by the gateware's
+ * phase pull. Written only when the value changes; the EWMA settles
+ * exactly, so a locked clock costs no extra bus traffic. */
+#define NCO_SMOOTH_SHIFT   7
+#define NCO_UNITS_PER_PPB  55340LL
+
+/* Snap threshold for the rate EWMA: on larger steps the accumulator
+ * jumps instead of slewing. */
+#define NCO_RATE_SNAP_PPB  2000
+
+static int64_t nco_acc_q16;
+static int64_t nco_written_units;
+static bool nco_written_once;
+
+/* The servo rate path (PTP thread) and the leader relax tick
+ * (fpga_poll thread) both end in the LO/HI register pair; interleaved
+ * writers could tear the 48-bit commit (HI is the sign extension — a
+ * mismatch is a ±2^40 glitch). */
+static K_MUTEX_DEFINE(nco_lock);
+
+static void nco_write_adj(int64_t units)
+{
+	/* LO, HI (committed atomically CSR-side on the HI write), then a
+	 * valid pulse: the wallclock captures the stable 48-bit value on
+	 * any synchronized valid edge. */
+	wc_csr_write(CSR_AES67_CSR_NCO_PPB_ADJ_LO_ADDR,
+		     (uint32_t)((uint64_t)units & 0xFFFFFFFFu));
+	wc_csr_write(CSR_AES67_CSR_NCO_PPB_ADJ_HI_ADDR,
+		     (uint32_t)(((uint64_t)units >> 32) & 0xFFFFu));
+	wc_csr_write(CSR_AES67_CSR_NCO_PPB_ADJ_VALID_ADDR, 1);
+	wc_csr_write(CSR_AES67_CSR_NCO_PPB_ADJ_VALID_ADDR, 0);
+	nco_written_units = units;
+
+	if (!nco_written_once) {
+		nco_written_once = true;
+		LOG_INF("NCO: software rate loop active");
+	}
+}
+
+/* Call with nco_lock held. */
+static void nco_recompute(void)
+{
+	/* acc: ±524287 ppb << 16 ≈ ±2^35; × 55340 ≈ ±2^51 — fits int64,
+	 * and the >>16 result (±2^35) fits the 48-bit register. */
+	int64_t units = (nco_acc_q16 * NCO_UNITS_PER_PPB) >> 16;
+
+	if (units != nco_written_units || !nco_written_once) {
+		nco_write_adj(units);
+	}
+}
+
+static void nco_smooth_update(int32_t ppb)
+{
+	int64_t target = (int64_t)ppb << 16;
+	int64_t diff;
+
+	k_mutex_lock(&nco_lock, K_FOREVER);
+	/* Snap instead of slew on large steps (boot warm-up from 0, GM
+	 * changes, leader relax ramps): the long EWMA slewing up to a
+	 * ~9 ppm crystal offset would leave the NCO thousands of ppb slow
+	 * for a minute. The long window is for steady-state jitter, not
+	 * acquisition. */
+	diff = target - nco_acc_q16;
+	if (diff > ((int64_t)NCO_RATE_SNAP_PPB << 16) ||
+	    diff < -((int64_t)NCO_RATE_SNAP_PPB << 16)) {
+		nco_acc_q16 = target;
+	} else {
+		nco_acc_q16 += diff >> NCO_SMOOTH_SHIFT;
+	}
+	nco_recompute();
+	k_mutex_unlock(&nco_lock);
+}
+
+void aes67_ptp_nco_status(struct aes67_nco_status *st)
+{
+	k_mutex_lock(&nco_lock, K_FOREVER);
+	st->rate_ppb_m  = (int32_t)((nco_acc_q16 * 1000) >> 16);
+	st->written_units = nco_written_units;
+	st->active = nco_written_once;
+	k_mutex_unlock(&nco_lock);
+}
+
 static void wc_write_ppb(int32_t ppb)
 {
 	applied_ppb = ppb;
 	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+	nco_smooth_update(ppb);
 }
 
 void aes67_ptp_rate_reset(void)
 {
+	/* Neutral frequency for both register sets — a warm FPGA still
+	 * carries last run's values. Forcing nco_written_once low makes
+	 * wc_write_ppb() push adj=0 even though the local mirror already
+	 * reads 0. */
+	k_mutex_lock(&nco_lock, K_FOREVER);
+	nco_acc_q16 = 0;
+	nco_written_units = 0;
+	nco_written_once = false;
+	k_mutex_unlock(&nco_lock);
+
 	wc_write_ppb(0);
-	LOG_INF("Wallclock rate correction reset to 0 ppb");
+	LOG_INF("Wallclock + NCO rate corrections reset to 0 ppb");
 }
 
 bool aes67_ptp_rate_relax_step(int32_t step_ppb)

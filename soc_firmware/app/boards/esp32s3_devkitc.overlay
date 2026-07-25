@@ -67,7 +67,7 @@
 	fpga_spi: fpga@0 {
 		compatible = "aes67,spibone";
 		reg = <0>;
-		spi-max-frequency = <1000000>;
+		spi-max-frequency = <2000000>;
 		/* mcu_irq_o is driven active-HIGH by the FPGA (eth_buf
 		 * RX-ready event). Getting this wrong makes the RX thread
 		 * spin on an idle line. */

@@ -12,6 +12,10 @@ package wallclock_signals_pkg is
         wallclock_seconds_i     : std_logic_vector(47 downto 0);
         wallclock_nanoseconds_i : std_logic_vector(29 downto 0);
         freq_correction_ppb_i   : signed(19 downto 0);
+        nco_ppb_adj_i           : signed(47 downto 0);
+
+        nco_ppb_adj_valid_i     : std_logic;
+
     end record;
 
 
@@ -22,7 +26,9 @@ package wallclock_signals_pkg is
         wallclock_do_phasejump_i => 'Z',
         wallclock_seconds_i      => (others => 'Z'),
         wallclock_nanoseconds_i  => (others => 'Z'),
-        freq_correction_ppb_i    => (others => 'Z')
+        freq_correction_ppb_i    => (others => 'Z'),
+        nco_ppb_adj_i            => (others => 'Z'),
+        nco_ppb_adj_valid_i      => 'Z'
     );
 
     type t_eth_timestamp is record

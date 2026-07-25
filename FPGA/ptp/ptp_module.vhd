@@ -267,6 +267,8 @@ ptp_sw_gen: if (PTP_IN_SOFTWARE = true) generate
 	wallclock_signals.wallclock_set_i          <= wallclock_signals_io.wallclock_set_i;
 	wallclock_signals.wallclock_do_phasejump_i <= wallclock_signals_io.wallclock_do_phasejump_i;
 	wallclock_signals.freq_correction_ppb_i    <= wallclock_signals_io.freq_correction_ppb_i;
+	wallclock_signals.nco_ppb_adj_i            <= wallclock_signals_io.nco_ppb_adj_i;
+	wallclock_signals.nco_ppb_adj_valid_i      <= wallclock_signals_io.nco_ppb_adj_valid_i;
 
 	timestamps_o <= eth_timestamps;
 	tx_en_ptpfu <= '0';
@@ -276,6 +278,9 @@ end generate;
 
 ptp_hw_gen: if (PTP_IN_SOFTWARE = false) generate
 tx_en_switch <= tx_en_ptpfu_ALTERA_SYNTHESIZED;
+-- Software NCO correction is SW-PTP-only; keep the hardware servo path.
+wallclock_signals.nco_ppb_adj_i       <= (others => '0');
+wallclock_signals.nco_ppb_adj_valid_i <= '0';
 -- EUI-64 clock identity from MAC (same mapping as ptpv2_parser)
 my_clock_identity <= (mac_address(47 downto 40) XOR x"02")
                    & mac_address(39 downto 24)
@@ -563,7 +568,8 @@ second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 b2v_wallclock :  entity work.wallclock
 GENERIC MAP(audio_fs => 48000,
 			increment_interval => 8,
-			sys_clk_hz => 125000000
+			sys_clk_hz => 125000000,
+			PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
 			)
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
