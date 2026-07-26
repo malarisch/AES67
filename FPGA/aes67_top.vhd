@@ -173,6 +173,11 @@ ENTITY aes67_top IS
 		-- audio outputs
 		tdm8out_o : OUT STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
 		rx_sample_register : OUT STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
+
+		-- RX underrun-mute diagnostics (fixed width for the status CSR:
+		-- lower 4 streams / lower 8 channels, zero-padded)
+		rx_stream_underrun_o : OUT STD_LOGIC_VECTOR(3 downto 0);
+		rx_mute_channels_o : OUT STD_LOGIC_VECTOR(7 downto 0);
 		
 
 		-- audio inputs
@@ -196,6 +201,8 @@ signal audioclks : t_audio_clocks := AUDIO_CLOCKS_RESET;
 signal selected_audio_clock : t_audio_clocks_selected := AUDIO_CLOCKS_RESET_SELECTED;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal media_tick : STD_LOGIC;
+signal rx_stream_underrun : STD_LOGIC_VECTOR(RX_MAX_STREAMS - 1 downto 0);
+signal rx_mute_channels : STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
 signal second_pulse_sys : STD_LOGIC;
 signal mac_linkup : STD_LOGIC;
 -- mac_linkup_o is driven from internal mac_linkup below
@@ -514,12 +521,21 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- metering
 		 metering_clear_i => audio_meter_clear_i,
 		 metering_clip_o => audio_meter_rx_clip_o,
-		 metering_signal_o => audio_meter_rx_signal_o);
+		 metering_signal_o => audio_meter_rx_signal_o,
+
+		 -- underrun-mute diagnostics
+		 stream_underrun_o => rx_stream_underrun,
+		 mute_channels_o => rx_mute_channels);
+
+	rx_stream_underrun_o <= std_logic_vector(resize(unsigned(rx_stream_underrun), 4));
+	rx_mute_channels_o <= std_logic_vector(resize(unsigned(rx_mute_channels), 8));
 end generate;
 no_rx_gen: if rx_channels = 0 generate
 	audio_meter_rx_clip_o <= (others => '0');
 	audio_meter_rx_signal_o <= (others => '0');
 	rx_sample_register <= (others => '0');
+	rx_stream_underrun_o <= (others => '0');
+	rx_mute_channels_o <= (others => '0');
 	tdm8out_o <= (others => '0');
 	rtp_ram_addr <= (others => '0');
 end generate;

@@ -122,8 +122,8 @@ ARCHITECTURE bdf_type OF top_cyc1000 IS
 constant tdm_conf : t_audio_clock_cfg := (
     mclk_speed => audio_clock_24_57,
     bclk_speed => audio_clock_03_07,
-    dac_cfg => i2s_dac_config,
-    adc_cfg => i2s_adc_config
+    dac_cfg => i2s_lj_dac_config,
+    adc_cfg => i2s_lj_adc_config
     
 );
 signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);

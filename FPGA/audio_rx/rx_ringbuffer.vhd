@@ -46,6 +46,10 @@ entity rx_ringbuffer is
         metering_clip_o : out std_logic_vector(global_channel_count - 1 downto 0);
         metering_clear_i : in std_logic;
 
+
+        stream_underrun_o : out std_logic_vector(max_streams - 1 downto 0);
+        mute_channels_o   : out std_logic_vector(global_channel_count - 1 downto 0);
+
         -- ===== Simulation backdoor into sample_ram (see SIM_SAMPLE_RAM_BACKDOOR) =====
         -- Synchronous, byte-wide. Read has 1-cycle latency like the real RAM.
         -- Tie off / leave open in synthesis.
@@ -90,6 +94,11 @@ architecture Behavioral of rx_ringbuffer is
     signal sample_ram : t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram;
 
+    type t_stream_last_wr_ptr is array (0 to MAX_STREAMS - 1) of unsigned(SAMPLE_IDX_BITS - 1 downto 0);
+    signal stream_last_wr_ptr : t_stream_last_wr_ptr := (others => (others => '0'));
+    signal stream_underrun : STD_LOGIC_VECTOR(max_streams - 1 downto 0);
+    signal stream_underrun_reset : STD_LOGIC_VECTOR(max_streams - 1 downto 0);
+    signal mute_channels : std_logic_vector(global_channel_count-1 downto 0);
     -- Synthesis attributes for Block RAM inference (Intel/Altera, Cyclone 10 LP = M9K blocks)
     attribute ramstyle : string;
     attribute ramstyle of stream_ram : signal is "no_rw_check";
@@ -156,7 +165,11 @@ architecture Behavioral of rx_ringbuffer is
 
     -- Cached channel map from stream_ram (avoids repeated stream_ram reads during parsing)
     type t_channel_map is array (0 to 7) of unsigned(3 downto 0); -- hardcoded 8 channels per stream, as maximum per AES67 spec
+    type t_global_channel_map is array (0 to max_streams-1) of t_channel_map; -- hardcoded 8 channels per stream, as maximum per AES67 spec
     signal channel_map : t_channel_map := (others => (others => '0'));
+    signal global_channel_map : t_global_channel_map := (others => (others => (others=> '0')));
+    type t_global_stream_ch_count is array (0 to max_streams-1) of integer range 0 to 8;
+    signal global_stream_ch_count : t_global_stream_ch_count := (others => 0);
     signal metering_clear_i_sync1 : std_logic := '0';
     signal metering_clear_i_sync2 : std_logic := '0';
     signal metering_clear_last : std_logic := '0';
@@ -193,6 +206,50 @@ architecture Behavioral of rx_ringbuffer is
     constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
 begin
 
+    stream_underrun_o <= stream_underrun;
+    mute_channels_o   <= mute_channels;
+
+    -- stream underrun detector
+    stream_underrun_detector: process (sys_clk, reset_n)
+        variable dist : unsigned(SAMPLE_IDX_BITS - 1 downto 0);
+    begin
+        if (reset_n = '0') then
+            stream_underrun <= (others => '0');
+        elsif (rising_edge(sys_clk)) then
+            for i in 0 to max_streams - 1 loop
+                -- modular distance: MSB set <=> wr pointer behind rd pointer
+                dist := stream_last_wr_ptr(i) - unsigned(media_clock_i(SAMPLE_IDX_BITS-1 downto 0));
+                if (global_stream_ch_count(i) > 0) then
+                    if (stream_underrun_reset(i) = '1') then stream_underrun(i) <= '0';
+                    elsif (dist(SAMPLE_IDX_BITS-1) = '1') then
+                    stream_underrun(i) <= '1';
+                end if;
+            end if;
+            end loop;
+        end if;
+    end process;
+
+         process (sys_clk)
+            variable v_mute : std_logic_vector(global_channel_count - 1 downto 0);
+         begin
+            if(rising_edge(sys_clk)) then
+                v_mute := (others => '0');
+                for s in 0 to max_streams - 1 loop
+                    if (global_stream_ch_count(s) > 0 and stream_underrun(s) = '1') then
+                        for c in 0 to 7 loop
+                            if (c < global_stream_ch_count(s)) then
+                                v_mute(to_integer(global_channel_map(s)(c))) := '1';
+                            end if;
+                        end loop;
+                    end if;
+                end loop;
+                mute_channels <= v_mute;
+            end if;
+         end process;
+
+
+
+
     process(sys_clk, reset_n)
         variable comp_byte : integer range 0 to 32 := 0;
         variable wr_sample_pos : unsigned(SAMPLE_IDX_BITS - 1 downto 0);
@@ -214,10 +271,11 @@ begin
             
         elsif rising_edge(sys_clk) then
             sample_wr_en <= '0';
-
+            stream_underrun_reset <= (others => '0');
             -- ======== Packet parser state machine ========
             case packetParserState is
                 when s_Idle =>
+
                     if packet_ready_i_sync2 /= packet_ready_i_sync3 then
                         media_clock_latch <= media_clock_i;
                         packetParserState <= s_readHeader;
@@ -349,6 +407,7 @@ begin
                             end if;
 
                         when 5 =>
+                            global_channel_map(config_ram_read_ptr/32) <= channel_map;
                             -- Wait for channel_count data (2 cycles)
                             if ram_read_wait = '0' then
                                 ram_read_wait <= '1';
@@ -360,11 +419,14 @@ begin
                         when 6 =>
                             -- Latch channel_count, read delay (offset +15)
                             current_stream_channel_count <= to_integer(unsigned(stream_rd_data_r));
+                            
+                            
                             stream_rd_addr <= to_unsigned(config_ram_read_ptr + 15, 8);
                             prepare_step <= 7;
 
                         when 7 =>
                             -- Wait for delay data (2 cycles)
+                            global_stream_ch_count(config_ram_read_ptr/32) <= current_stream_channel_count;
                             if ram_read_wait = '0' then
                                 ram_read_wait <= '1';
                             else
@@ -395,7 +457,9 @@ begin
                             wr_addr_sample_base <= wr_sample_pos & to_unsigned(0, SAMPLE_SHIFT);
                             prepare_step <= 11;
 
-                        when 11 =>
+
+                        when 11 => 
+                            
                             -- Set initial write address: base + channel_map(0) * 4 + 0
                             -- Linear slot layout: MSB@offset0, mid@1, LSB@2, pad@3.
                             -- First byte from ETH is the MSB (RFC 3190 L24 big-endian),
@@ -468,6 +532,8 @@ begin
                                         + resize(channel_map(0) & "00", ADDR_BITS);
                                     wr_addr_current <= v_channel_addr;
                                 else
+                                    stream_last_wr_ptr(config_ram_read_ptr/32) <= wr_sample_pos + current_packet_sample_index;
+                                    stream_underrun_reset(config_ram_read_ptr/32) <= '1';
                                     current_packet_sample_index <= 0;
                                     packetParserState <= s_End;
                                 end if;
@@ -476,6 +542,7 @@ begin
                     end if;
 
                 when s_End =>
+                    
                     byte_count_parser <= 0;
                     current_read_channel_index <= 0;
                     current_packet_sample_index <= 0;
@@ -699,6 +766,8 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
     -- then carries MSB, mid, LSB, pad in time order, matching the datasheet.
     tdm_fetch_proc: process(sys_clk)
         variable v_ch_global : integer range 0 to global_channel_count - 1;
+
+        variable v_mute_ch   : integer range 0 to global_channel_count - 1;
         variable v_next_byte_in_slot : unsigned(1 downto 0);
         variable v_next_ch           : unsigned(clog2(TDM_CONFIG.tdm_channels)-1 downto 0);
         variable v_off               : unsigned(1 downto 0);
@@ -723,6 +792,11 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
                         tdm_fetch_pin_idx <= 0;
                         v_ch_global := 0 * TDM_CONFIG.tdm_channels + to_integer(v_next_ch);
+                        if v_off = 3 then
+                            v_mute_ch := (v_ch_global + 1) mod global_channel_count;
+                        else
+                            v_mute_ch := v_ch_global;
+                        end if;
                         sample_rd_addr <= sample_rd_ptr
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS)
                             + resize(v_off, ADDR_BITS) + 1;
@@ -734,12 +808,19 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
                 when tfs_capture =>
                     tdm_byte_shadow(tdm_fetch_pin_idx) <= sample_rd_data;
-
+                    if (mute_channels(v_mute_ch) = '1') then
+                        tdm_byte_shadow(tdm_fetch_pin_idx) <= (others => '0');
+                    end if;
                     if tdm_fetch_pin_idx = TDM_OUTPUTS - 1 then
                         tdm_fetch_state <= tfs_idle;
                     else
                         tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
                         v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CONFIG.tdm_channels + to_integer(tdm_fetch_ch);
+                        if tdm_byte_off = 3 then
+                            v_mute_ch := (v_ch_global + 1) mod global_channel_count;
+                        else
+                            v_mute_ch := v_ch_global;
+                        end if;
                         -- Same +1 as the pin-0 fetch in tfs_idle: the prefetch
                         -- bookkeeping lags one byte behind the wire, so the RAM
                         -- offset is byte_in_slot + 1. Same offset for every pin.
@@ -755,11 +836,15 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
 
                 when tfs_prime_cap =>
                     tdm_byte_latch(tdm_fetch_pin_idx) <= sample_rd_data;
+                    if (mute_channels(v_mute_ch) = '1') then
+                        tdm_byte_latch(tdm_fetch_pin_idx) <= (others => '0');
+                    end if;
                     if tdm_fetch_pin_idx = TDM_OUTPUTS - 1 then
                         tdm_fetch_state <= tfs_idle;
                     else
                         tdm_fetch_pin_idx <= tdm_fetch_pin_idx + 1;
                         v_ch_global := (tdm_fetch_pin_idx + 1) * TDM_CONFIG.tdm_channels + 0;
+                        v_mute_ch   := v_ch_global; -- prime reads offset 0, no carry
                         sample_rd_addr <= sample_rd_ptr_latch
                             + to_unsigned(v_ch_global * CHANNEL_STRIDE, ADDR_BITS);
                         tdm_fetch_state <= tfs_prime_wait;
@@ -775,6 +860,8 @@ tdm_out_parallel_proc_gen: if (PARALLEL_OUT = false) generate
                 tdm_byte_in_slot  <= to_unsigned(3, 2);
                 tdm_fetch_ch      <= (others => '1');
                 tdm_fetch_pin_idx <= 0;
+                v_ch_global       := 0; -- prime reads pin 0 / channel 0
+                v_mute_ch         := 0;
                 -- ch0, offset 0 (MSB). Read the latch directly: sample_rd_ptr
                 -- is committed from it in this same cycle and would still
                 -- hold the previous frame's pointer here.

@@ -68,6 +68,9 @@ _io_common = [
         Subsignal("ptp_offset",         Pins(32)),
         Subsignal("eth_tx_done",        Pins(1)),
         Subsignal("eth_rx_overflow",    Pins(1)),
+        # RX stream-underrun diagnostics (stream_underrun / mute_channels, LSBs)
+        Subsignal("rx_underrun",        Pins(4)),
+        Subsignal("rx_mute",            Pins(8)),
         # PTP BMA results (FPGA -> SoC, read-only status)
         Subsignal("ptp_is_leader",      Pins(1)),
         Subsignal("ptp_is_follower",    Pins(1)),

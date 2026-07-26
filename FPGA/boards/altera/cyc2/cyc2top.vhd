@@ -125,7 +125,7 @@ begin
 	tdm_in_reg <= tdm_in(AUDIO_TX_TDM_INPUTS - 1 downto 0);
 	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	tdm_out(0) <= tdm_out_reg(0);
+	tdm_out <= tdm_out_reg;
 	mclk <= mclk_reg;
 	 phy_rstn_o <= '1';
 	 bclk_adc <= not bclk;
