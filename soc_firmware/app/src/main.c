@@ -8,6 +8,7 @@
 #include <zephyr/net/hostname.h>
 #include <zephyr/init.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/reboot.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -365,6 +366,64 @@ static void fpga_jtag_bringup(void)
 	}
 #endif
 }
+
+#ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
+/* Health-monitor events (runs in the fpga_jtag_mon thread). */
+static void fpga_jtag_health_event(enum fpga_jtag_event evt,
+				   enum fpga_jtag_health health, void *ctx)
+{
+	ARG_UNUSED(ctx);
+
+	switch (evt) {
+	case FPGA_JTAG_EVT_FAULT:
+		/* The configuration SRAM is corrupt (SEU) or gone entirely —
+		 * the TDM/DSP path may be driving garbage into the DACs.
+		 * Force the analog outputs into their safe state (relays
+		 * muted, converters in reset) before the FPGA is touched. */
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
+		{
+			const struct device *i2c =
+				DEVICE_DT_GET(DT_NODELABEL(i2c2));
+
+			if (device_is_ready(i2c)) {
+				card_manager_early_mute(i2c);
+			}
+		}
+#endif
+#ifdef CONFIG_DISPLAY_CTRL
+		if (display_ctrl_ready()) {
+			display_ctrl_stop_status_cycle();
+			display_ctrl_loading_animation_stop();
+			display_ctrl_show_status(
+				health == FPGA_JTAG_HEALTH_CRC_ERROR ?
+				"CRCERR" : "FPGAER");
+		}
+#endif
+		break;
+
+	case FPGA_JTAG_EVT_RECOVERED:
+		/* The FPGA is reconfigured but blank: resets held, MAC/IP,
+		 * stream tables, PTP discipline and card clocking all gone.
+		 * Reboot and let the one proven bring-up path rebuild
+		 * everything — the fresh USERCODE makes the boot-time upload
+		 * skip, so this costs a boot, not another 6.5 s upload. */
+		LOG_ERR("FPGA reconfigured after a fault — rebooting for a "
+			"clean bring-up");
+		k_msleep(100);
+		sys_reboot(SYS_REBOOT_COLD);
+		break;
+
+	case FPGA_JTAG_EVT_RELOAD_FAILED:
+		/* Outputs stay muted; the monitor retries after a hold-off. */
+#ifdef CONFIG_DISPLAY_CTRL
+		if (display_ctrl_ready()) {
+			display_ctrl_show_status("FPGAER");
+		}
+#endif
+		break;
+	}
+}
+#endif /* CONFIG_AES67_FPGA_JTAG_MONITOR */
 #endif /* CONFIG_AES67_FPGA_JTAG_BOOT_LOAD */
 
 int main(void)
@@ -496,6 +555,22 @@ int main(void)
 	 * Scans the chain, skips the upload if the FPGA already holds this
 	 * bitstream, otherwise loads it with a 7-segment progress bar. */
 	fpga_jtag_bringup();
+
+#ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
+	/* Watch the FPGA from here on: periodic JTAG health checks (IDCODE,
+	 * USERCODE, CRC_ERROR pin). Started right after configuration rather
+	 * than at "system ready" so a failed boot upload keeps being retried
+	 * and a fault during the remaining bring-up is already caught. On a
+	 * confirmed fault the handler above mutes the outputs, the bitstream
+	 * is reloaded and the node reboots into a clean bring-up. */
+	fpga_jtag_monitor_start(fpga_jtag_health_event,
+#ifdef CONFIG_DISPLAY_CTRL
+				jtag_upload_progress,
+#else
+				NULL,
+#endif
+				NULL);
+#endif
 #endif
 
 #if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)

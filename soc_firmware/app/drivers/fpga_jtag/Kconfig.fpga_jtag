@@ -74,6 +74,42 @@ config AES67_FPGA_JTAG_LINK_TEST_BITS
 	  raise AES67_FPGA_JTAG_TCK_DELAY_US and improve the wiring until it is
 	  zero. Set to 0 to skip the test once the link is known good.
 
+config AES67_FPGA_JTAG_MONITOR
+	bool "Poll the FPGA's health over JTAG and reconfigure on fault"
+	depends on AES67_FPGA_JTAG_BOOT_LOAD
+	default y
+	help
+	  Provide a monitor thread (started by the application via
+	  fpga_jtag_monitor_start()) that periodically checks the FPGA over
+	  JTAG: the IDCODE proves the chain works, the USERCODE proves the
+	  configuration is still the embedded bitstream, and a SAMPLE
+	  boundary scan reads the dual-purpose CRC_ERROR pin, which the
+	  device latches high when its background CRC check finds corrupted
+	  configuration SRAM (SEU; requires CRC_ERROR_CHECKING ON in the
+	  Quartus .qsf). A confirmed fault fires the registered event
+	  callback (mute the outputs there), force-reloads the bitstream and
+	  reports the outcome so the application can finish recovery
+	  (typically a reboot for a clean bring-up).
+
+config AES67_FPGA_JTAG_MONITOR_INTERVAL_MS
+	int "Health-check interval in milliseconds"
+	depends on AES67_FPGA_JTAG_MONITOR
+	default 1000
+	range 100 60000
+	help
+	  One check is ~1300 bit-banged TCK cycles (a few milliseconds), so
+	  the default 1 s costs well under 1 % CPU.
+
+config AES67_FPGA_JTAG_MONITOR_STACK_SIZE
+	int "Monitor thread stack size in bytes"
+	depends on AES67_FPGA_JTAG_MONITOR
+	default 4096
+	help
+	  The thread runs the application's fault callback (card mute over
+	  I2C, display updates) and the full JTAG bitstream reload, so the
+	  stack must cover the deepest of those call chains, not just the
+	  monitor loop itself.
+
 config AES67_FPGA_JTAG_TCK_DELAY_US
 	int "TCK half-period in microseconds (bit-bang)"
 	default 1

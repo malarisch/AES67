@@ -135,10 +135,6 @@ architecture Behavioral of wallclock is
     signal nco_phase_prev : std_logic := '0';  -- Previous MSB for edge detect
     signal nco_increment  : signed(NCO_PHASE_BITS - 1 downto 0) := NCO_BASE_INC_48;
     signal phase_err  : signed(10 downto 0) := (others => '0');
-    -- I-term pipeline: trim_next holds the unclamped accumulator sum for
-    -- one cycle (trim_pending), the clamp is applied the cycle after.
-    signal trim_next    : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
-    signal trim_pending : std_logic := '0';
     signal phase_error_valid: std_logic := '0';
     
 
@@ -208,14 +204,6 @@ architecture Behavioral of wallclock is
         NCO_PHASE_BITS - 9 - pull_loop_gain_shift;  -- 48-9-10 = 29
 
     constant PULL_DEAD_BAND       : natural := 1;
-
-
-    constant PPB_TRIM_LIMIT_32 : integer :=
-        integer(real(audio_fs * 512) / real(sys_clk_hz)
-                * 4294967296.0 * 200.0e-6);
-    constant PPB_TRIM_LIMIT : signed(NCO_PHASE_BITS - 1 downto 0) :=
-        shift_left(to_signed(PPB_TRIM_LIMIT_32, NCO_PHASE_BITS), 16);
-    signal ppb_trim : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
 
     signal nco_phase_bias : signed(NCO_PHASE_BITS - 1 downto 0) := (others => '0');
     

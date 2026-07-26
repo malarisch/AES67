@@ -55,6 +55,9 @@ struct aes67_device_config {
 	uint8_t  ptp_clock_accuracy;          /* IEEE 1588: 0xFE=unknown */
 	int8_t   ptp_log_sync_interval;       /* AES67: -3  (125 ms) */
 	int8_t   ptp_log_announce_interval;   /* AES67:  0  (1 s)   */
+	/* IEEE 1588 delayAsymmetry in ns (positive = leader->follower path
+	 * longer). Compensates PHYs with unequal RX/TX latencies. */
+	int32_t  ptp_delay_asymmetry_ns;
 
 	/* -- PLL / PI controller -- */
 	int32_t  pi_kp_num;

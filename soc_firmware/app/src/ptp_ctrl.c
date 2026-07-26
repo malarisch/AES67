@@ -36,7 +36,8 @@ LOG_MODULE_REGISTER(ptp_ctrl, LOG_LEVEL_INF);
 #define PTP_CTRL_LOCK_THRESHOLD_NS 1000
 
 static void read_ptp_config(uint8_t *p1, uint8_t *p2, uint8_t *cc, uint8_t *acc,
-			    uint8_t *domain, int8_t *log_sync, int8_t *log_ann)
+			    uint8_t *domain, int8_t *log_sync, int8_t *log_ann,
+			    int32_t *asym_ns)
 {
 	aes67_config_lock();
 	const struct aes67_device_config *cfg = aes67_config_get();
@@ -48,6 +49,7 @@ static void read_ptp_config(uint8_t *p1, uint8_t *p2, uint8_t *cc, uint8_t *acc,
 	*domain   = cfg->ptp_domain;
 	*log_sync = cfg->ptp_log_sync_interval;
 	*log_ann  = cfg->ptp_log_announce_interval;
+	*asym_ns  = cfg->ptp_delay_asymmetry_ns;
 	aes67_config_unlock();
 }
 
@@ -171,8 +173,10 @@ void ptp_ctrl_apply_config(void)
 	struct ptp_port *port;
 	uint8_t p1, p2, cc, acc, domain;
 	int8_t log_sync, log_ann;
+	int32_t asym_ns;
 
-	read_ptp_config(&p1, &p2, &cc, &acc, &domain, &log_sync, &log_ann);
+	read_ptp_config(&p1, &p2, &cc, &acc, &domain, &log_sync, &log_ann,
+			&asym_ns);
 
 	k_sched_lock();
 
@@ -201,6 +205,12 @@ void ptp_ctrl_apply_config(void)
 	SYS_SLIST_FOR_EACH_CONTAINER(ptp_clock_ports_list(), port, node) {
 		port->port_ds.log_announce_interval = log_ann;
 		port->port_ds.log_sync_interval = log_sync;
+		/* IEEE 1588 delayAsymmetry (TimeInterval = ns << 16). The
+		 * stack folds it into the sync correction (E2E) and the
+		 * pdelay computation (P2P) — compensates PHYs with unequal
+		 * RX/TX latencies. */
+		port->port_ds.delay_asymmetry =
+			(ptp_timeinterval)((int64_t)asym_ns << 16);
 		/* Timers pick the new intervals up on their next re-arm. */
 	}
 
@@ -212,8 +222,8 @@ void ptp_ctrl_apply_config(void)
 	ptp_clock_signal_timeout();
 
 	LOG_INF("PTP(sw): applied config — pri1=%u pri2=%u class=%u acc=0x%02x "
-		"domain=%u logSync=%d logAnn=%d",
-		p1, p2, cc, acc, domain, log_sync, log_ann);
+		"domain=%u logSync=%d logAnn=%d asym=%dns",
+		p1, p2, cc, acc, domain, log_sync, log_ann, asym_ns);
 }
 
 #else /* !CONFIG_AES67_PTP_SOFTWARE */

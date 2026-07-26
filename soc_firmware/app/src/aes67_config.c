@@ -59,6 +59,7 @@ void aes67_config_reset_defaults(void)
 	g_config.ptp_clock_accuracy        = 0xFE;
 	g_config.ptp_log_sync_interval     = -3;
 	g_config.ptp_log_announce_interval = 0;
+	g_config.ptp_delay_asymmetry_ns    = 0;
 
 	/* PI controller */
 	g_config.pi_kp_num        = 1;

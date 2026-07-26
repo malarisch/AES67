@@ -17,6 +17,10 @@
 
 #include "fpga_hal.h"
 
+#ifdef CONFIG_AES67_FPGA_JTAG
+#include "../fpga_jtag/fpga_jtag.h"
+#endif
+
 /* ---- small helpers ---- */
 
 static int parse_u32(const char *s, uint32_t *out)
@@ -465,6 +469,34 @@ static int cmd_poke(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Body compiled out (not the function) so the SHELL_COND_CMD ternary below
+ * always has a symbol to reference. */
+static int cmd_jtag(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+#ifdef CONFIG_AES67_FPGA_JTAG
+	uint8_t bsc[76];
+	enum fpga_jtag_health h = fpga_jtag_health_check();
+	int bits = fpga_jtag_sample_boundary(bsc, sizeof(bsc));
+
+	shell_print(sh, "FPGA health:   %s", fpga_jtag_health_str(h));
+	shell_print(sh, "USERCODE:      0x%08X", fpga_jtag_read_usercode());
+	shell_print(sh, "CRC_ERROR pin: %s",
+		    fpga_jtag_crc_error() ? "ASSERTED" : "clear");
+	if (bits > 0) {
+		shell_print(sh, "Boundary sample (%d bits, LSB first — bit i "
+			    "= BSC cell i, CRC_ERROR = cell 588):", bits);
+		shell_hexdump(sh, bsc, (bits + 7) / 8);
+	}
+	return (h == FPGA_JTAG_HEALTH_OK) ? 0 : -EIO;
+#else
+	shell_error(sh, "JTAG driver not enabled");
+	return -ENOTSUP;
+#endif
+}
+
 /* ---- command tree ---- */
 
 SHELL_STATIC_SUBCMD_SET_CREATE(fpga_ctrl_cmds,
@@ -492,6 +524,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(fpga_cmds,
 	SHELL_CMD(ctrl,     &fpga_ctrl_cmds, "Control-bit set/clear/list.", NULL),
 	SHELL_CMD_ARG(adda, NULL, "AD/DA nRST control. Usage: fpga adda <0|1>", cmd_adda, 2, 0),
 	SHELL_CMD(meter,    NULL, "Read metering registers (and clear sticky bits).", cmd_meter),
+	SHELL_COND_CMD(CONFIG_AES67_FPGA_JTAG, jtag, NULL,
+		"JTAG health check (IDCODE, USERCODE, CRC_ERROR sample).",
+		cmd_jtag),
 	SHELL_CMD_ARG(tx,   NULL,
 		"Configure TX stream. Usage: fpga tx <stream> <dst_ip> <ch_cnt> <spp> <ssrc> [ch_id …]",
 		cmd_tx, 6, 8),

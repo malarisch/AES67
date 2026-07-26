@@ -24,6 +24,10 @@
 
 #include "fpga_jtag.h"
 
+#ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
+#include "fpga_jtag_meta.h"	/* FPGA_JTAG_USERCODE (from the SVF) */
+#endif
+
 LOG_MODULE_REGISTER(fpga_jtag, LOG_LEVEL_INF);
 
 struct fpga_jtag_config {
@@ -56,6 +60,7 @@ static const struct fpga_jtag_id fpga_jtag_ids[] = {
 #define ALTERA_IR_PROGRAM     0x002
 #define ALTERA_IR_STARTUP     0x003
 #define ALTERA_IR_CHECK_STATUS 0x004
+#define ALTERA_IR_SAMPLE      0x005
 #define ALTERA_IR_USERCODE    0x007
 #define ALTERA_IR_BYPASS      0x3FF
 
@@ -74,6 +79,23 @@ static const struct fpga_jtag_id fpga_jtag_ids[] = {
  * selects exactly bit 229 (LSB-indexed) and expects it set. */
 #define ALTERA_STATUS_DR_BITS 597U
 #define ALTERA_STATUS_DONE_BIT 229U
+
+/* SAMPLE/PRELOAD captures the pin states into the boundary-scan register —
+ * which is the same 597-bit register CHECK_STATUS shifts (BSDL EP2C8Q208
+ * BOUNDARY_LENGTH = 597; that is why the LSB-indexed bit numbers here and
+ * above line up with our shift order, cell 0 shifts out first). Cell 588 is
+ * the input cell of I/O pin 3 ("BSC group 196" in the BSDL), the
+ * dual-purpose CRC_ERROR output: with CRC_ERROR_CHECKING ON in the .qsf the
+ * device drives it low in user mode and latches it high when its background
+ * CRC check finds corrupted configuration SRAM (SEU). Cyclone II has no
+ * JTAG error-message register (that came with Cyclone III), so sampling
+ * this pin is the only way to see the CRC result over JTAG. SAMPLE is
+ * non-invasive per IEEE 1149.1 — safe while the device operates. */
+#define ALTERA_BSC_CRC_ERROR_BIT 588U
+
+/* Serialises the JTAG pins between the boot path, the health monitor and
+ * the shell. Zephyr mutexes nest, so public API calling public API is fine. */
+static K_MUTEX_DEFINE(fpga_jtag_lock);
 
 static const struct fpga_jtag_config *jtag_cfg(void)
 {
@@ -245,7 +267,7 @@ static uint32_t jtag_read_idcode(const struct fpga_jtag_config *cfg)
 	return val;
 }
 
-int fpga_jtag_scan_chain(uint32_t *idcodes, size_t max)
+static int fpga_jtag_scan_chain_locked(uint32_t *idcodes, size_t max)
 {
 	const struct fpga_jtag_config *cfg = jtag_cfg();
 	int count = 0;
@@ -276,6 +298,17 @@ int fpga_jtag_scan_chain(uint32_t *idcodes, size_t max)
 	}
 
 	return count;
+}
+
+int fpga_jtag_scan_chain(uint32_t *idcodes, size_t max)
+{
+	int ret;
+
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+	ret = fpga_jtag_scan_chain_locked(idcodes, max);
+	k_mutex_unlock(&fpga_jtag_lock);
+
+	return ret;
 }
 
 const char *fpga_jtag_idcode_name(uint32_t idcode)
@@ -351,14 +384,114 @@ uint32_t fpga_jtag_read_usercode(void)
 	const struct fpga_jtag_config *cfg = jtag_cfg();
 	uint32_t uc;
 
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
 	jtag_tap_reset(cfg);
 	jtag_tlr_to_rti(cfg);
 	jtag_shift_ir(cfg, ALTERA_IR_USERCODE);
 	jtag_rti_to_shift_dr(cfg);
 	uc = jtag_read_idcode(cfg);   /* 32 bits, LSB first, from the current DR */
 	jtag_tap_reset(cfg);
+	k_mutex_unlock(&fpga_jtag_lock);
 
 	return uc;
+}
+
+/* SAMPLE the boundary-scan register (a snapshot of every pin) and return
+ * the CRC_ERROR pin's input cell. Only meaningful on a configured device. */
+static bool fpga_jtag_crc_error_locked(const struct fpga_jtag_config *cfg)
+{
+	uint8_t bsc[(ALTERA_STATUS_DR_BITS + 7) / 8];
+
+	jtag_tap_reset(cfg);
+	jtag_tlr_to_rti(cfg);
+	jtag_shift_ir(cfg, ALTERA_IR_SAMPLE);
+	jtag_shift_dr_in(cfg, bsc, ALTERA_STATUS_DR_BITS);
+	jtag_tap_reset(cfg);
+
+	return (bsc[ALTERA_BSC_CRC_ERROR_BIT >> 3] >>
+		(ALTERA_BSC_CRC_ERROR_BIT & 7)) & 1;
+}
+
+enum fpga_jtag_health fpga_jtag_health_check(void)
+{
+	const struct fpga_jtag_config *cfg = jtag_cfg();
+	uint32_t idcodes[FPGA_JTAG_MAX_DEVICES];
+	enum fpga_jtag_health res = FPGA_JTAG_HEALTH_OK;
+	int n;
+
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+
+	/* Gate everything on the IDCODE: it proves the whole
+	 * TCK/TMS/TDI/TDO round trip. Without it a wiring dropout would be
+	 * indistinguishable from a lost configuration — both read USERCODE
+	 * as all-ones. */
+	n = fpga_jtag_scan_chain_locked(idcodes, ARRAY_SIZE(idcodes));
+	if (n != 1 || fpga_jtag_idcode_name(idcodes[0]) == NULL) {
+		res = FPGA_JTAG_HEALTH_LINK_DOWN;
+		goto out;
+	}
+
+#if defined(CONFIG_AES67_FPGA_JTAG_BOOT_LOAD) && (FPGA_JTAG_USERCODE != 0u)
+	if (fpga_jtag_read_usercode() != FPGA_JTAG_USERCODE) {
+		res = FPGA_JTAG_HEALTH_UNCONFIGURED;
+		goto out;
+	}
+#endif
+
+	if (fpga_jtag_crc_error_locked(cfg)) {
+		res = FPGA_JTAG_HEALTH_CRC_ERROR;
+	}
+out:
+	k_mutex_unlock(&fpga_jtag_lock);
+
+	return res;
+}
+
+bool fpga_jtag_crc_error(void)
+{
+	const struct fpga_jtag_config *cfg = jtag_cfg();
+	bool err;
+
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+	err = fpga_jtag_crc_error_locked(cfg);
+	k_mutex_unlock(&fpga_jtag_lock);
+
+	return err;
+}
+
+int fpga_jtag_sample_boundary(uint8_t *buf, size_t buf_len)
+{
+	const struct fpga_jtag_config *cfg = jtag_cfg();
+
+	if (buf == NULL || buf_len < (ALTERA_STATUS_DR_BITS + 7) / 8) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+	jtag_tap_reset(cfg);
+	jtag_tlr_to_rti(cfg);
+	jtag_shift_ir(cfg, ALTERA_IR_SAMPLE);
+	jtag_shift_dr_in(cfg, buf, ALTERA_STATUS_DR_BITS);
+	jtag_tap_reset(cfg);
+	k_mutex_unlock(&fpga_jtag_lock);
+
+	return ALTERA_STATUS_DR_BITS;
+}
+
+const char *fpga_jtag_health_str(enum fpga_jtag_health health)
+{
+	switch (health) {
+	case FPGA_JTAG_HEALTH_OK:
+		return "OK";
+	case FPGA_JTAG_HEALTH_LINK_DOWN:
+		return "JTAG chain unreadable";
+	case FPGA_JTAG_HEALTH_UNCONFIGURED:
+		return "configuration lost (USERCODE mismatch)";
+	case FPGA_JTAG_HEALTH_CRC_ERROR:
+		return "configuration SRAM corrupt (CRC_ERROR latched)";
+	default:
+		return "?";
+	}
 }
 
 /* Signal-integrity self-test: shift a pseudo-random pattern through the
@@ -430,16 +563,51 @@ static void fpga_jtag_report_scan(void)
 #endif
 
 #ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
-#include "fpga_jtag_meta.h"	/* FPGA_JTAG_USERCODE (from the SVF) */
-
 static const uint8_t fpga_jtag_bitstream[] = {
 #include "fpga_bitstream_jtag.inc"
 };
 
-int fpga_jtag_boot_load(fpga_jtag_progress_cb cb, void *ctx)
+/* The retried, USERCODE-verified configuration itself — shared by the boot
+ * load and the health monitor's forced reload. Caller holds the lock. */
+static int fpga_jtag_do_load(fpga_jtag_progress_cb cb, void *ctx)
+{
+	for (int attempt = 1; attempt <= CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES;
+	     attempt++) {
+		(void)fpga_jtag_configure(fpga_jtag_bitstream,
+					  sizeof(fpga_jtag_bitstream), cb, ctx);
+
+#if FPGA_JTAG_USERCODE != 0u
+		uint32_t uc = fpga_jtag_read_usercode();
+
+		if (uc == FPGA_JTAG_USERCODE) {
+			LOG_INF("FPGA configured over JTAG, USERCODE 0x%08X "
+				"verified (attempt %d)", uc, attempt);
+			return 0;
+		}
+
+		LOG_WRN("Config attempt %d/%d: USERCODE 0x%08X != expected "
+			"0x%08X, retrying", attempt,
+			CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES, uc,
+			FPGA_JTAG_USERCODE);
+#else
+		/* No USERCODE in the SVF: cannot verify, trust the first pass. */
+		LOG_WRN("No USERCODE in SVF — configured without read-back "
+			"verification");
+		return 0;
+#endif
+	}
+
+	LOG_ERR("FPGA JTAG configuration failed after %d attempts (USERCODE "
+		"never matched). Likely TDI/TCK signal integrity — raise "
+		"CONFIG_AES67_FPGA_JTAG_TCK_DELAY_US or improve the wiring.",
+		CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES);
+	return -EIO;
+}
+
+static int fpga_jtag_boot_load_locked(fpga_jtag_progress_cb cb, void *ctx)
 {
 	uint32_t idcodes[FPGA_JTAG_MAX_DEVICES];
-	int n = fpga_jtag_scan_chain(idcodes, ARRAY_SIZE(idcodes));
+	int n = fpga_jtag_scan_chain_locked(idcodes, ARRAY_SIZE(idcodes));
 
 	/* Verify a single, known device before shifting a bitstream into
 	 * it: JTAG has a read-back, so unlike Passive Serial we never
@@ -505,39 +673,190 @@ int fpga_jtag_boot_load(fpga_jtag_progress_cb cb, void *ctx)
 	LOG_INF("Configuring %s over JTAG (%zu bytes)", name,
 		sizeof(fpga_jtag_bitstream));
 
-	for (int attempt = 1; attempt <= CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES;
-	     attempt++) {
-		(void)fpga_jtag_configure(fpga_jtag_bitstream,
-					  sizeof(fpga_jtag_bitstream), cb, ctx);
+	return fpga_jtag_do_load(cb, ctx);
+}
 
-#if FPGA_JTAG_USERCODE != 0u
-		uint32_t uc = fpga_jtag_read_usercode();
+int fpga_jtag_boot_load(fpga_jtag_progress_cb cb, void *ctx)
+{
+	int ret;
 
-		if (uc == FPGA_JTAG_USERCODE) {
-			LOG_INF("FPGA configured over JTAG, USERCODE 0x%08X "
-				"verified (attempt %d)", uc, attempt);
-			return 0;
-		}
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+	ret = fpga_jtag_boot_load_locked(cb, ctx);
+	k_mutex_unlock(&fpga_jtag_lock);
 
-		LOG_WRN("Config attempt %d/%d: USERCODE 0x%08X != expected "
-			"0x%08X, retrying", attempt,
-			CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES, uc,
-			FPGA_JTAG_USERCODE);
-#else
-		/* No USERCODE in the SVF: cannot verify, trust the first pass. */
-		LOG_WRN("No USERCODE in SVF — configured without read-back "
-			"verification");
-		return 0;
-#endif
-	}
+	return ret;
+}
 
-	LOG_ERR("FPGA JTAG configuration failed after %d attempts (USERCODE "
-		"never matched). Likely TDI/TCK signal integrity — raise "
-		"CONFIG_AES67_FPGA_JTAG_TCK_DELAY_US or improve the wiring.",
-		CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES);
-	return -EIO;
+int fpga_jtag_reload(fpga_jtag_progress_cb cb, void *ctx)
+{
+	int ret;
+
+	k_mutex_lock(&fpga_jtag_lock, K_FOREVER);
+	LOG_WRN("Force-reloading the FPGA bitstream over JTAG (%zu bytes)",
+		sizeof(fpga_jtag_bitstream));
+	ret = fpga_jtag_do_load(cb, ctx);
+	k_mutex_unlock(&fpga_jtag_lock);
+
+	return ret;
 }
 #endif
+
+#ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
+static K_THREAD_STACK_DEFINE(fpga_jtag_monitor_stack,
+			     CONFIG_AES67_FPGA_JTAG_MONITOR_STACK_SIZE);
+static struct k_thread fpga_jtag_monitor_thread;
+static fpga_jtag_event_cb fpga_jtag_monitor_event_cb;
+static fpga_jtag_progress_cb fpga_jtag_monitor_progress_cb;
+static void *fpga_jtag_monitor_ctx;
+
+/* A failed reload almost always fails again immediately (wiring, dead
+ * device) — pace the multi-second upload attempts instead of running them
+ * back to back. */
+#define FPGA_JTAG_MONITOR_RELOAD_HOLDOFF_MS (30 * MSEC_PER_SEC)
+
+/* Rate-limit the link-down warning to roughly every 30 s of ticks. */
+#define FPGA_JTAG_MONITOR_LINK_LOG_TICKS 30U
+
+/* CRC-based recovery must prove itself before it may reconfigure: the
+ * CRC_ERROR sample is trusted only after it has read clear for this many
+ * consecutive checks after the monitor starts (long enough for at least
+ * one full background CRC pass over the SRAM). If it is asserted during
+ * the window, either the pin/BSC readout is unusable on this board or —
+ * the documented failure mode of this hand wiring — every JTAG load
+ * leaves residual bit errors that a reload can never fix; reconfiguring
+ * (and rebooting) on that signal would loop forever. In both cases CRC
+ * recovery is disabled for the session and only logged; IDCODE/USERCODE
+ * monitoring stays armed. */
+#define FPGA_JTAG_MONITOR_CRC_BASELINE_TICKS 10U
+
+static void fpga_jtag_monitor_fn(void *p1, void *p2, void *p3)
+{
+	uint32_t link_down_ticks = 0;
+	uint32_t crc_clean_ticks = 0;
+	uint32_t crc_dead_ticks = 0;
+	bool crc_armed = false;
+	bool crc_dead = false;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	for (;;) {
+		k_msleep(CONFIG_AES67_FPGA_JTAG_MONITOR_INTERVAL_MS);
+
+		enum fpga_jtag_health h = fpga_jtag_health_check();
+
+		if (h == FPGA_JTAG_HEALTH_OK) {
+			if (link_down_ticks != 0) {
+				LOG_INF("FPGA health: JTAG chain readable again");
+				link_down_ticks = 0;
+			}
+			if (!crc_armed && !crc_dead &&
+			    ++crc_clean_ticks >= FPGA_JTAG_MONITOR_CRC_BASELINE_TICKS) {
+				crc_armed = true;
+				LOG_INF("FPGA health: CRC_ERROR clear through the "
+					"baseline window — SEU auto-recovery armed");
+			}
+			continue;
+		}
+
+		if (h == FPGA_JTAG_HEALTH_CRC_ERROR && !crc_armed) {
+			if (!crc_dead) {
+				crc_dead = true;
+				LOG_ERR("FPGA health: CRC_ERROR already asserted "
+					"during the baseline window. Either this "
+					"JTAG load left residual bit errors in the "
+					"configuration SRAM (marginal wiring — a "
+					"reload cannot fix that) or the pin sample "
+					"is unusable. CRC auto-recovery DISABLED "
+					"for this session; IDCODE/USERCODE "
+					"monitoring continues. Diagnose: load via "
+					"USB-Blaster, then run 'fpga jtag'.");
+			} else if ((crc_dead_ticks++ % 600U) == 0U) {
+				LOG_WRN("FPGA health: CRC_ERROR still asserted "
+					"(auto-recovery disabled)");
+			}
+			continue;
+		}
+
+		if (h == FPGA_JTAG_HEALTH_LINK_DOWN) {
+			/* A dead chain is a wiring/power problem, not proof of
+			 * an FPGA fault — and a reload over it cannot succeed.
+			 * Keep watching instead of reconfiguring blind. */
+			if ((link_down_ticks++ %
+			     FPGA_JTAG_MONITOR_LINK_LOG_TICKS) == 0U) {
+				LOG_WRN("FPGA health: JTAG chain unreadable — "
+					"check wiring/power; not reconfiguring");
+			}
+			continue;
+		}
+		link_down_ticks = 0;
+
+		/* Confirm before committing to a multi-second reconfiguration:
+		 * both fault states are persistent (CRC_ERROR stays latched
+		 * until reconfig, a lost configuration stays lost), so a
+		 * genuine fault reads identically twice — a single corrupted
+		 * shift on marginal hand-wiring does not. */
+		if (fpga_jtag_health_check() != h) {
+			LOG_WRN("FPGA health: transient \"%s\" reading — ignored",
+				fpga_jtag_health_str(h));
+			continue;
+		}
+
+		LOG_ERR("FPGA fault: %s — muting outputs and reloading the "
+			"bitstream", fpga_jtag_health_str(h));
+
+		if (fpga_jtag_monitor_event_cb != NULL) {
+			fpga_jtag_monitor_event_cb(FPGA_JTAG_EVT_FAULT, h,
+						   fpga_jtag_monitor_ctx);
+		}
+
+		if (fpga_jtag_reload(fpga_jtag_monitor_progress_cb,
+				     fpga_jtag_monitor_ctx) == 0) {
+			if (fpga_jtag_monitor_event_cb != NULL) {
+				/* The handler is expected to reboot; if it
+				 * returns instead, resume watching. */
+				fpga_jtag_monitor_event_cb(
+					FPGA_JTAG_EVT_RECOVERED, h,
+					fpga_jtag_monitor_ctx);
+			}
+		} else {
+			if (fpga_jtag_monitor_event_cb != NULL) {
+				fpga_jtag_monitor_event_cb(
+					FPGA_JTAG_EVT_RELOAD_FAILED, h,
+					fpga_jtag_monitor_ctx);
+			}
+			k_msleep(FPGA_JTAG_MONITOR_RELOAD_HOLDOFF_MS);
+		}
+	}
+}
+
+int fpga_jtag_monitor_start(fpga_jtag_event_cb evt_cb,
+			    fpga_jtag_progress_cb progress_cb, void *ctx)
+{
+	static bool started;
+
+	if (started) {
+		return -EALREADY;
+	}
+	started = true;
+
+	fpga_jtag_monitor_event_cb = evt_cb;
+	fpga_jtag_monitor_progress_cb = progress_cb;
+	fpga_jtag_monitor_ctx = ctx;
+
+	k_thread_create(&fpga_jtag_monitor_thread, fpga_jtag_monitor_stack,
+			K_THREAD_STACK_SIZEOF(fpga_jtag_monitor_stack),
+			fpga_jtag_monitor_fn, NULL, NULL, NULL,
+			K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
+	k_thread_name_set(&fpga_jtag_monitor_thread, "fpga_jtag_mon");
+
+	LOG_INF("FPGA health monitor started (every %d ms)",
+		CONFIG_AES67_FPGA_JTAG_MONITOR_INTERVAL_MS);
+
+	return 0;
+}
+#endif /* CONFIG_AES67_FPGA_JTAG_MONITOR */
 
 static int fpga_jtag_init(const struct device *dev)
 {

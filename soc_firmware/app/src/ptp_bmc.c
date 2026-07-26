@@ -115,6 +115,7 @@ static void push_config_to_fpga(void)
 	uint8_t acc  = cfg->ptp_clock_accuracy;
 	int8_t  log_sync = cfg->ptp_log_sync_interval;
 	int8_t  log_ann  = cfg->ptp_log_announce_interval;
+	int32_t asym_ns  = cfg->ptp_delay_asymmetry_ns;
 	aes67_config_unlock();
 
 	my_dataset.gm_priority1 = pri1;
@@ -138,9 +139,22 @@ static void push_config_to_fpga(void)
 		LOG_ERR("PTP: write PTP config failed: %d", ret);
 	}
 
+	/* Persisted delayAsymmetry -> FPGA parser (read-modify-write keeps
+	 * the other live-tunable fields untouched). */
+	struct fpga_hal_ptp_tuning tuning;
+
+	fpga_hal_read_ptp_tuning(&tuning);
+	if (tuning.delay_asymmetry_ns != asym_ns) {
+		tuning.delay_asymmetry_ns = asym_ns;
+		ret = fpga_hal_write_ptp_tuning(&tuning);
+		if (ret < 0) {
+			LOG_ERR("PTP: write delayAsymmetry failed: %d", ret);
+		}
+	}
+
 	LOG_INF("PTP: pushed config — pri1=%u pri2=%u class=%u acc=0x%02x "
-		"logSync=%d logAnn=%d",
-		pri1, pri2, cc, acc, log_sync, log_ann);
+		"logSync=%d logAnn=%d asym=%dns",
+		pri1, pri2, cc, acc, log_sync, log_ann, asym_ns);
 }
 
 /* ---- Poll thread: watches FPGA status for role changes ---- */

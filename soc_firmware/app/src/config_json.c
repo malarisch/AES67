@@ -157,6 +157,8 @@ static int serialize_device_config(char *buf, size_t sz, int pos)
 		       cfg->ptp_log_sync_interval, 1);
 	pos = json_int(buf, sz, pos, "ptp_log_announce_interval",
 		       cfg->ptp_log_announce_interval, 1);
+	pos = json_int(buf, sz, pos, "ptp_delay_asymmetry_ns",
+		       cfg->ptp_delay_asymmetry_ns, 1);
 	pos = json_int(buf, sz, pos, "pi_kp_num", cfg->pi_kp_num, 1);
 	pos = json_int(buf, sz, pos, "pi_kp_den", cfg->pi_kp_den, 1);
 	pos = json_int(buf, sz, pos, "pi_ki_num", cfg->pi_ki_num, 1);
@@ -552,6 +554,9 @@ static int parse_device_config(const char *json)
 	}
 	if ((v = json_find_key(json, "ptp_log_announce_interval")) != NULL) {
 		cfg->ptp_log_announce_interval = (int8_t)json_parse_int(v);
+	}
+	if ((v = json_find_key(json, "ptp_delay_asymmetry_ns")) != NULL) {
+		cfg->ptp_delay_asymmetry_ns = json_parse_int(v);
 	}
 	if ((v = json_find_key(json, "pi_kp_num")) != NULL) {
 		cfg->pi_kp_num = json_parse_int(v);

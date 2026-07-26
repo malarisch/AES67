@@ -13,6 +13,7 @@
 #include "aes67_config.h"
 #include "aes67_conn.h"
 #include "sap_sdp.h"
+#include "ptp_ctrl.h"
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 #include "../drivers/eth_litex/eth_litex.h"
@@ -133,6 +134,43 @@ static int cmd_aes67_announce(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
+	return 0;
+}
+
+static int cmd_aes67_asym(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 2) {
+		shell_print(sh, "delayAsymmetry = %d ns",
+			    aes67_config_get()->ptp_delay_asymmetry_ns);
+		shell_print(sh, "  (positive = leader->follower path longer)");
+		return 0;
+	}
+
+	char *end;
+	long ns = strtol(argv[1], &end, 0);
+
+	if (argv[1][0] == '\0' || *end != '\0' ||
+	    ns < -1000000000L || ns > 1000000000L) {
+		shell_error(sh, "Usage: aes67 asym [<signed_ns>] (|ns| <= 1e9)");
+		return -EINVAL;
+	}
+
+	aes67_config_lock();
+	aes67_config_get()->ptp_delay_asymmetry_ns = (int32_t)ns;
+	aes67_config_unlock();
+
+	/* Live into the PTP stack (SW) / FPGA parser (HW)... */
+	ptp_ctrl_apply_config();
+
+	/* ...and into persistent storage. */
+	int ret = aes67_config_persist();
+
+	if (ret < 0) {
+		shell_error(sh, "delayAsymmetry <- %ld ns (persist FAILED: %d)",
+			    ns, ret);
+		return ret;
+	}
+	shell_print(sh, "delayAsymmetry <- %ld ns (persisted)", ns);
 	return 0;
 }
 
@@ -341,6 +379,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(aes67_cmds,
 	SHELL_COND_CMD(CONFIG_AES67_PTP_SOFTWARE, nco, NULL,
 		       "Show NCO rate/phase loop state (SW PTP)",
 		       cmd_aes67_nco),
+	SHELL_CMD_ARG(asym, NULL,
+		      "Get/set persistent PTP delayAsymmetry (ns, signed; "
+		      "+ve = leader->follower longer): aes67 asym [<ns>]",
+		      cmd_aes67_asym, 1, 1),
 	SHELL_SUBCMD_SET_END
 );
 
