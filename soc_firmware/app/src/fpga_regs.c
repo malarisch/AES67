@@ -48,28 +48,28 @@ int fpga_write_ip_address(const struct in_addr *addr)
 	return 0;
 }
 
-int fpga_wait_for_link_up(uint32_t timeout_ms)
+void fpga_wait_for_link_up(void)
 {
 	uint32_t elapsed = 0;
 
 	LOG_INF("Waiting for Ethernet link...");
 
-	while (1) {
-		uint32_t status = fpga_hal_read_status();
-
-		if (status & FPGA_HAL_ETH_LINK_UP) {
-			LOG_INF("Link up after %u ms", elapsed);
-			return 0;
-		}
-
-		if (timeout_ms > 0 && elapsed >= timeout_ms) {
-			LOG_WRN("Link-up timeout (%u ms)", timeout_ms);
-			return -ETIMEDOUT;
-		}
-
+	while (!(fpga_hal_read_status() & FPGA_HAL_ETH_LINK_UP)) {
 		k_msleep(100);
 		elapsed += 100;
+
+		/* Deliberately without a timeout: everything the boot does from
+		 * here on (DHCP, PTP, discovery, stream setup) needs the wire.
+		 * Giving up after N seconds only produced a node that looked
+		 * booted but had none of that — so keep waiting and keep
+		 * saying why. */
+		if (elapsed % 5000 == 0) {
+			LOG_WRN("Still no Ethernet link after %u s — check the "
+				"cable / link partner", elapsed / 1000);
+		}
 	}
+
+	LOG_INF("Link up after %u ms", elapsed);
 }
 
 int32_t fpga_calculate_ppb(uint32_t count_wc, uint32_t count_pll)

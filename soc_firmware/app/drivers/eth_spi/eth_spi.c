@@ -49,6 +49,10 @@ LOG_MODULE_REGISTER(eth_spi, CONFIG_ETH_SPI_LOG_LEVEL);
  * handful of iterations covers it; the cap only guards a wedged MAC. */
 #define TX_DONE_POLL_LIMIT 64
 
+/* Frames drained back-to-back before the RX thread stops to check whether the
+ * ring is actually making progress (and lets other threads have the bus). */
+#define RX_DRAIN_BURST 64
+
 /* Egress-timestamp latch poll (see eth_spi_tx_frame): bounds the wait for our
  * frame's capture to appear. Each iteration is two CSR reads (~60 µs at
  * 10 MHz); the frame itself needs µs on the wire plus MAC arbitration. */
@@ -231,6 +235,13 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 	return true;
 }
 
+/* One status read, no carrier handling — that stays in the link thread so the
+ * heavy net_if_carrier_*() chain only ever runs from there. */
+static bool eth_spi_link_read(void)
+{
+	return (fpga_hal_read_status() & FPGA_HAL_ETH_LINK_UP) != 0;
+}
+
 static void eth_spi_rx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
@@ -245,15 +256,52 @@ static void eth_spi_rx_thread(void *p1, void *p2, void *p3)
 		 * rx_ready probe, so a timeout wake costs one short read). */
 		k_sem_take(&data->rx_sem, K_MSEC(CONFIG_ETH_SPI_POLL_INTERVAL_MS));
 
+		/* No carrier: nothing new can arrive, and the ring may be
+		 * frozen mid-frame — see the stall handling below. Leave it
+		 * alone until the link is back. */
+		if (!data->link_up) {
+			continue;
+		}
+
 		/* Drain until the rx_ready register (authoritative, unlike
 		 * the IRQ pin level) reports the buffer empty. Bounded so a
-		 * saturated line cannot monopolise same-priority threads; on
-		 * hitting the cap we self-wake and continue immediately. */
+		 * saturated line cannot monopolise same-priority threads. */
+		unsigned int caps = 0;
+
 		for (int burst = 0; eth_spi_rx_one(data); burst++) {
-			if (burst >= 64) {
-				k_sem_give(&data->rx_sem);
+			if (burst < RX_DRAIN_BURST) {
+				continue;
+			}
+
+			/* RX_DRAIN_BURST frames back to back and the ring still
+			 * claims more. Either the line really is saturated, or
+			 * the ring has stopped advancing: buf_rx_valid and the
+			 * ack handshake both live in the mac_rx_clock domain
+			 * (litex_eth_buffer_bridge.vhd), so if the PHY's receive
+			 * clock dies with a frame queued — cable pulled — the
+			 * ready flag sticks at 1 and every read hands back the
+			 * same stale frame, forever.
+			 *
+			 * Read the link right here rather than trusting
+			 * data->link_up: a spinning RX thread owns the SPI bus
+			 * and would keep the link supervision thread from ever
+			 * finding out, which is exactly how this used to take
+			 * the whole node down without a single log line. */
+			if (!eth_spi_link_read()) {
+				LOG_ERR("RX ring still reports data with the link "
+					"down — stale frame stuck in the FPGA ring, "
+					"draining stopped until the link returns");
 				break;
 			}
+
+			/* Genuinely busy: yield the bus for a moment so the
+			 * link, TX and application threads make progress. */
+			if (++caps % 100 == 0) {
+				LOG_WRN("RX drained %u frames without the ring "
+					"going idle", caps * RX_DRAIN_BURST);
+			}
+			k_sleep(K_MSEC(1));
+			burst = 0;
 		}
 	}
 }
@@ -490,13 +538,19 @@ static int eth_spi_send(const struct device *dev, struct net_pkt *pkt)
 
 /* ---- Link supervision ---- */
 
+/* Runs on the system workqueue, deliberately: net_if_carrier_on/off() drags a
+ * long chain through the network stack (IGMP joins/leaves for every group the
+ * node has joined, TCP teardown, IPv6 stop — all of which transmit). That
+ * chain wants the workqueue's cooperative priority and its stack, which is
+ * sized for it (CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE in prj.conf). Do not move
+ * this to a thread of its own without giving it the same room. */
 static void eth_spi_link_work(struct k_work *work)
 {
 	struct k_work_delayable *dwork = CONTAINER_OF(work, struct k_work_delayable, work);
 	struct eth_spi_data *data = CONTAINER_OF(dwork, struct eth_spi_data, link_work);
 
 	if (!data->iface) {
-		return;
+		goto out;
 	}
 
 	uint32_t st = fpga_hal_read_status();
@@ -504,14 +558,15 @@ static void eth_spi_link_work(struct k_work *work)
 
 	if (up && !data->link_up) {
 		data->link_up = true;
-		net_if_carrier_on(data->iface);
 		LOG_INF("Ethernet link up");
+		net_if_carrier_on(data->iface);
 	} else if (!up && data->link_up) {
 		data->link_up = false;
-		net_if_carrier_off(data->iface);
 		LOG_INF("Ethernet link down");
+		net_if_carrier_off(data->iface);
 	}
 
+out:
 	k_work_schedule(dwork, K_MSEC(500));
 }
 
@@ -632,8 +687,6 @@ static int eth_spi_init(const struct device *dev)
 		CONFIG_ETH_SPI_POLL_INTERVAL_MS);
 #endif
 
-	k_work_init_delayable(&data->link_work, eth_spi_link_work);
-
 	/* Preemptible priorities — the SPI transport can (rarely) stall on a
 	 * hung bus, and we never want that to freeze the shell or the rest
 	 * of the system. COOP would do exactly that. */
@@ -657,6 +710,7 @@ static int eth_spi_init(const struct device *dev)
 	k_thread_name_set(&data->poll_thread, "eth_spi_poll");
 #endif
 
+	k_work_init_delayable(&data->link_work, eth_spi_link_work);
 	k_work_schedule(&data->link_work, K_MSEC(100));
 
 	LOG_INF("eth_spi init complete (spibone transport)");

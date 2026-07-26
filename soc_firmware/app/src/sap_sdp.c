@@ -25,7 +25,11 @@
 LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_INF);
 
 /* ---- Thread resources ---- */
-#define SAP_STACK_SIZE   2048
+/* The RX path keeps a SAP_TX_BUF_SIZE receive buffer on the stack and runs
+ * SDP parsing + the aes67_conn foreign registry (which logs) at its deepest
+ * point — with immediate-mode logging that is ~2 KiB on top. 2048 overflowed
+ * the moment the first real SAP announcements arrived. */
+#define SAP_STACK_SIZE   6144
 #define SAP_PRIORITY     K_PRIO_PREEMPT(12)
 
 K_THREAD_STACK_DEFINE(sap_stack, SAP_STACK_SIZE);

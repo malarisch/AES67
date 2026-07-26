@@ -97,6 +97,43 @@ After a fresh clone / `west update`, re-apply with:
   (261) while XIP keeps working. ESP-IDF inits the chip after PSRAM for
   this reason — candidate for upstream submission.
 
+- 0013 net_if: use a link-local IPv4 address as the last-resort source
+  address regardless of CONFIG_NET_IPV4_AUTO. The firmware configures its
+  own 169.254.x.y fallback (MAC-derived, added by main.c) instead of using
+  Zephyr's autoconf, because NET_IPV4_AUTO force-selects NET_IPV4_ACD and
+  ACD has a lock inversion: ipv4_acd_timeout() holds the ACD mutex while
+  calling net_if_ipv4_acd_succeeded()/net_if_send_data() (which take
+  net_if_lock), while net_if_ipv4_addr_rm() holds net_if_lock and calls
+  net_ipv4_acd_cancel() (which takes the ACD mutex). Any address removal
+  concurrent with an ACD timer tick — a link-down carrier teardown or a
+  net_dhcpv4_stop() from another thread — deadlocks both threads with no
+  panic and no log output. Without this patch the self-configured address
+  would only be usable for link-local destinations; everything multicast
+  (mDNS, SAP, PTP) would go out from 0.0.0.0 — candidate for upstream
+  submission.
+
+- 0014 ptp: marshal link events to the PTP thread. port_link_monitor()
+  (net_mgmt thread) ran ptp_port_event_handle(FAULT_DETECTED) directly on
+  link-down: port_disable() -> zsock_close() on the sockets the PTP thread
+  was sleeping on in zsock_poll(-1) — freeing net_contexts still registered
+  with the poller (k_poll wait-list use-after-free). On the ESP32-S3 this
+  froze the whole system silently (no fault; the K_PRIO_COOP(1) PTP thread
+  starves everything preemptible), triggered by pulling the cable while
+  TIME_TRANSMITTER. Now the monitor records the event atomically and wakes
+  the PTP thread (ptp_clock_signal_timeout); the thread handles it at the
+  top of its loop, so sockets are only closed/reopened by their poller —
+  candidate for upstream submission.
+
+- 0015 ptp: re-arm the acquisition trim (0012) when a full-median offset
+  parks beyond 100 us for 16 consecutive samples. Steady-state offsets of
+  hundreds of us (drift across a FAULTY/link-down phase, GM wander, peer
+  restart) sit below the 5 ms step threshold with no trim budget left, so
+  only the 2000 ppb media-clamped slew remained: 0.5-1 ms took 4-8
+  minutes (observed parked at ~500 us, ppb frequency-matched). Hysteresis
+  10 us disarm / 100 us re-arm (both >> ~5 us median-refill drift) plus
+  the 16-sample streak keep the 0012 self-retrigger loop impossible —
+  candidate for upstream submission.
+
 Dropped since the v4.2.0 era (now upstream): uptime-based message aging
 (3ccd07b2), servo epoch reset after clock step, configurable PI servo gains
 (9803584), ingress-timestamp validity guards. (The phase-jump step came back

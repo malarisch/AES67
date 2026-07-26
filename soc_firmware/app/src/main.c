@@ -67,10 +67,296 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 /* Forward declarations */
 static void fpga_reconfigure(void *user_data);
 
+/* ---- Boot faults ----
+ *
+ * Anything the node cannot do its job without stops the boot right here
+ * instead of limping on half-configured: a node that "booted fine" but has no
+ * FPGA bus, no MCLK, no MAC in the FPGA or no PTP is far harder to diagnose
+ * than one that says what broke and stays put.
+ *
+ * The analog outputs are forced into their safe state (the failing step may
+ * have left the converters unclocked or live), the panel shows @p code and the
+ * reason is repeated on the console forever. The shell and the JTAG health
+ * monitor keep running for a post-mortem; nothing else is started.
+ *
+ * @p code is a 6-character 7-segment string (0-9, A-U, X, Y, space, minus).
+ */
+static FUNC_NORETURN void boot_fatal(const char *code, const char *what, int err)
+{
+#if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
+	{
+		const struct device *i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+
+		if (device_is_ready(i2c)) {
+			card_manager_early_mute(i2c);
+		}
+	}
+#endif
+
+#ifdef CONFIG_DISPLAY_CTRL
+	if (display_ctrl_ready()) {
+		display_ctrl_stop_status_cycle();
+		display_ctrl_loading_animation_stop();
+		display_ctrl_show_status(code);
+	}
+#endif
+
+	while (1) {
+		LOG_ERR("BOOT FAILED [%s]: %s (err %d) — node stopped", code,
+			what, err);
+		k_sleep(K_SECONDS(10));
+	}
+}
+
 static struct net_if *g_iface;
 static struct in_addr g_my_ip;
 static bool g_ip_valid;
+static bool g_ip_is_ll;
+/* The node's address is no longer on the interface (lease lost / link went
+ * down) but is kept as the announced identity until the DHCP grace period
+ * has run out. */
+static bool g_ip_stale;
 static bool g_dhcp_running;
+
+/* ---- Node address: DHCP first, link-local fallback after a grace period ----
+ *
+ * A deliberately dumb state machine:
+ *
+ *   boot -> link up -> DHCP start -> no lease after AES67_DHCP_GRACE_MS?
+ *        -> put the link-local 169.254.x.y address (RFC 3927, MAC-derived,
+ *           reboot-stable) on the interface and run on it; DHCP keeps trying
+ *        -> a lease binds (any time): switch to it, take the link-local
+ *           address OFF the interface again
+ *   link down -> back to start: the identity is kept, and the next link-up
+ *        re-arms the full grace period before link-local is (re)considered.
+ *
+ * Until the first address exists the node is silent: every service
+ * (SAP/RTSP/mDNS/streams) gates on the ip-ready notification, and the stack
+ * drops stray transmissions for lack of a source address. Adopting the
+ * link-local address any earlier just made those services start up and act
+ * on a config that is wrong the moment the lease lands.
+ *
+ * Zephyr's own autoconf (CONFIG_NET_IPV4_AUTO) is deliberately not used: it
+ * force-selects the ACD module, whose lock order deadlocks against any
+ * address removal from another thread (see prj.conf). The trade-off is no
+ * conflict detection — acceptable because the address is derived from a
+ * unique MAC rather than randomly drawn.
+ *
+ * Applying an address is a deep call chain: an SPI write to the FPGA, a panel
+ * repaint over UART, IGMP joins for the restored RX streams. It therefore runs
+ * on this module's own thread — the net-mgmt event thread that used to do it
+ * has a small stack, and the system workqueue is shared with the network stack
+ * itself. g_my_ip/g_ip_valid/g_ip_is_ll are only ever written there.
+ */
+#define IPCFG_STACK_SIZE  8192
+#define LL_RETRY_MS       5000
+
+/* How long DHCP gets to (re)produce a lease before the node adopts the
+ * link-local address as its identity. Counted from every link-up (boot
+ * included) and from losing a lease — a cable pull must not flip the
+ * announced identity to 169.254.x.y and back within seconds. */
+#define AES67_DHCP_GRACE_MS 30000
+
+static K_THREAD_STACK_DEFINE(ipcfg_stack, IPCFG_STACK_SIZE);
+static struct k_work_q ipcfg_wq;
+static struct k_work_delayable ll_work;
+static struct k_work apply_ip_work;
+
+static struct k_spinlock pending_ip_lock;
+static struct in_addr pending_ip;
+static bool pending_ip_is_ll;
+static bool pending_ip_valid;
+
+static void ll_addr_from_mac(struct in_addr *out);
+
+/* Hand a freshly obtained address to everything that needs to know about it.
+ * Callable repeatedly — the switch from link-local to a DHCP lease (or to a
+ * new lease) just runs it again with the new address. */
+static void apply_node_ip(const struct in_addr *addr, bool link_local)
+{
+	const uint8_t *ip = (const uint8_t *)&addr->s_addr;
+	int ret;
+
+	g_my_ip = *addr;
+	g_ip_valid = true;
+	g_ip_is_ll = link_local;
+	g_ip_stale = false;
+
+	LOG_INF("Node address %u.%u.%u.%u (%s)", ip[0], ip[1], ip[2], ip[3],
+		link_local ? "link-local" : "DHCP");
+
+	ret = fpga_write_ip_address(addr);
+	if (ret < 0) {
+		LOG_ERR("FPGA did not take the node IP (err %d) — RTP and "
+			"hardware PTP will use a stale address", ret);
+	}
+
+	ui_display_set_ip(addr);
+	fpga_poll_notify_ip_valid(addr);
+
+	ptp_bmc_notify_ip_ready();
+
+#ifdef CONFIG_DISPLAY_CTRL
+	if (display_ctrl_ready()) {
+		display_ctrl_show_status("L  PTP");
+		display_ctrl_update_status_cycle_ip(addr);
+	}
+#endif
+
+	aes67_conn_notify_ip_ready(addr);
+	sap_sdp_notify_ip_ready(addr);
+
+#ifdef CONFIG_RTSP
+	rtsp_notify_ip_ready(addr);
+#endif
+
+	/* Steady state carries exactly one address: once a DHCP lease is the
+	 * identity, the link-local fallback comes off the interface again.
+	 * (Both exist only for the instant of the switchover — Zephyr's DHCP
+	 * client adds its address on ACK before we run, which is why
+	 * NET_IF_UNICAST_IPV4_ADDR_COUNT is 2.) */
+	if (!link_local) {
+		struct in_addr ll;
+		struct net_if *found = NULL;
+
+		ll_addr_from_mac(&ll);
+		if (net_if_ipv4_addr_lookup(&ll, &found) != NULL &&
+		    found == g_iface) {
+			net_if_ipv4_addr_rm(g_iface, &ll);
+			LOG_INF("Link-local address removed (lease active)");
+		}
+	}
+}
+
+/* Runs on the ipcfg thread, so it may call apply_node_ip() directly. */
+static void apply_ip_work_fn(struct k_work *work)
+{
+	k_spinlock_key_t key;
+	struct in_addr addr;
+	bool is_ll;
+
+	ARG_UNUSED(work);
+
+	key = k_spin_lock(&pending_ip_lock);
+	if (!pending_ip_valid) {
+		k_spin_unlock(&pending_ip_lock, key);
+		return;
+	}
+	addr = pending_ip;
+	is_ll = pending_ip_is_ll;
+	pending_ip_valid = false;
+	k_spin_unlock(&pending_ip_lock, key);
+
+	apply_node_ip(&addr, is_ll);
+}
+
+/* Hand an address over to the ipcfg thread (callable from any context). */
+static void node_ip_set(const struct in_addr *addr, bool link_local)
+{
+	k_spinlock_key_t key = k_spin_lock(&pending_ip_lock);
+
+	pending_ip = *addr;
+	pending_ip_is_ll = link_local;
+	pending_ip_valid = true;
+	k_spin_unlock(&pending_ip_lock, key);
+
+	k_work_submit_to_queue(&ipcfg_wq, &apply_ip_work);
+}
+
+/* RFC 3927 §2.1 picks 169.254.1.0 – 169.254.254.255 pseudo-randomly from a
+ * stable per-node identifier; the MAC is exactly that, and it keeps the
+ * address the same across reboots. */
+static void ll_addr_from_mac(struct in_addr *out)
+{
+	uint8_t mac[6];
+	uint8_t *b = (uint8_t *)&out->s_addr;
+	uint32_t hash = 2166136261u;		/* FNV-1a */
+	uint32_t idx;
+
+	aes67_config_build_mac(mac);
+
+	for (size_t i = 0; i < sizeof(mac); i++) {
+		hash = (hash ^ mac[i]) * 16777619u;
+	}
+
+	idx = hash % (254u * 256u);
+	b[0] = 169;
+	b[1] = 254;
+	b[2] = 1 + (uint8_t)(idx / 256u);
+	b[3] = (uint8_t)(idx % 256u);
+}
+
+/* Put the fallback address on the interface (idempotent). It is a manual
+ * address, so the stack leaves it alone across carrier transitions — it is
+ * simply always there, ready for whenever DHCP is not. */
+static bool ll_addr_ensure(struct in_addr *out)
+{
+	struct in_addr netmask = { { { 255, 255, 0, 0 } } };
+	struct net_if *found = NULL;
+	struct in_addr ll;
+
+	ll_addr_from_mac(&ll);
+	*out = ll;
+
+	if (net_if_ipv4_addr_lookup(&ll, &found) != NULL && found == g_iface) {
+		return true;
+	}
+
+	if (net_if_ipv4_addr_add(g_iface, &ll, NET_ADDR_MANUAL, 0) == NULL) {
+		LOG_ERR("Could not add the link-local address %u.%u.%u.%u — "
+			"out of IPv4 address slots?",
+			ll.s4_addr[0], ll.s4_addr[1], ll.s4_addr[2],
+			ll.s4_addr[3]);
+		return false;
+	}
+
+	net_if_ipv4_set_netmask_by_addr(g_iface, &ll, &netmask);
+
+	LOG_INF("Link-local address %u.%u.%u.%u configured (derived from the "
+		"MAC)", ll.s4_addr[0], ll.s4_addr[1], ll.s4_addr[2],
+		ll.s4_addr[3]);
+	return true;
+}
+
+/* No lease: make sure the fallback address exists and run on it. */
+static void ll_work_fn(struct k_work *work)
+{
+	struct in_addr ll;
+
+	ARG_UNUSED(work);
+
+	if (!g_iface || (g_ip_valid && !g_ip_is_ll && !g_ip_stale)) {
+		return;		/* running on a live lease — nothing to do */
+	}
+
+	if (!net_if_is_up(g_iface)) {
+		/* No carrier: nobody can see an identity change, and DHCP has
+		 * no chance to answer anyway. Stay as we are — link-up runs
+		 * dhcp_restart(), which re-arms the grace period. */
+		return;
+	}
+
+	if (!ll_addr_ensure(&ll)) {
+		k_work_reschedule_for_queue(&ipcfg_wq, &ll_work,
+					    K_MSEC(LL_RETRY_MS));
+		return;
+	}
+
+	if (g_ip_is_ll && net_ipv4_addr_cmp(&g_my_ip, &ll)) {
+		return;		/* already on it */
+	}
+
+	LOG_WRN("No DHCP lease — running on the link-local address (the DHCP "
+		"client keeps trying)");
+	apply_node_ip(&ll, true);
+}
+
+/* Fall back to the link-local address; used at boot and whenever the current
+ * address disappears. */
+static void ll_arm(k_timeout_t delay)
+{
+	k_work_reschedule_for_queue(&ipcfg_wq, &ll_work, delay);
+}
 
 /* ---- DHCP management ---- */
 
@@ -89,21 +375,22 @@ static void dhcp_restart(void)
 	if (g_iface) {
 		fpga_write_mac_address(g_iface);
 	}
-	g_ip_valid = false;
+	if (g_ip_valid && !g_ip_is_ll) {
+		g_ip_stale = true;	/* keep the identity through the grace period */
+	}
 	net_dhcpv4_start(g_iface);
 	g_dhcp_running = true;
+
+	/* Grace period counts from link-up: the (possibly different) network
+	 * gets AES67_DHCP_GRACE_MS to hand out a lease before the node's
+	 * announced identity falls back to the link-local address. */
+	ll_arm(K_MSEC(AES67_DHCP_GRACE_MS));
 }
 
-static struct net_mgmt_event_callback dhcp_cb;
+static struct net_mgmt_event_callback ipv4_cb;
 
-static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
-			  uint64_t mgmt_event,
-			  struct net_if *iface)
+static void on_dhcp_bound(struct net_mgmt_event_callback *cb)
 {
-	if (mgmt_event != NET_EVENT_IPV4_DHCP_BOUND) {
-		return;
-	}
-
 	const struct net_if_dhcpv4 *dhcpv4 =
 		(const struct net_if_dhcpv4 *)cb->info;
 
@@ -116,28 +403,49 @@ static void on_dhcp_bound(struct net_mgmt_event_callback *cb,
 
 	LOG_INF("DHCP bound: %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 
-	g_my_ip = dhcpv4->requested_ip;
-	g_ip_valid = true;
-
-	fpga_write_ip_address(&dhcpv4->requested_ip);
-	ui_display_set_ip(&dhcpv4->requested_ip);
-	fpga_poll_notify_ip_valid(&dhcpv4->requested_ip);
-
-	ptp_bmc_notify_ip_ready();
-
-#ifdef CONFIG_DISPLAY_CTRL
-	if (display_ctrl_ready()) {
-		display_ctrl_show_status("L  PTP");
-		display_ctrl_update_status_cycle_ip(&dhcpv4->requested_ip);
+	if (g_ip_is_ll) {
+		LOG_INF("Leaving the link-local address for the DHCP lease");
 	}
-#endif
 
-	aes67_conn_notify_ip_ready(&dhcpv4->requested_ip);
-	sap_sdp_notify_ip_ready(&dhcpv4->requested_ip);
+	node_ip_set(&dhcpv4->requested_ip, false);
+}
 
-#ifdef CONFIG_RTSP
-	rtsp_notify_ip_ready(&dhcpv4->requested_ip);
-#endif
+/* The DHCP address went away — lease expired/released, or the stack dropped
+ * it on link-down. Keep it as the announced identity (FPGA registers, SAP,
+ * RTSP, display all stay put) and give DHCP the grace period to bring a
+ * lease back; only then fall back to link-local. */
+static void on_ipv4_addr_del(const struct in_addr *addr)
+{
+	if (!g_ip_valid || g_ip_is_ll || !net_ipv4_addr_cmp(addr, &g_my_ip)) {
+		return;
+	}
+
+	LOG_WRN("DHCP address removed (lease lost or link down) — keeping the "
+		"identity for the %u s DHCP grace period",
+		AES67_DHCP_GRACE_MS / 1000U);
+
+	g_ip_stale = true;
+	ll_arm(K_MSEC(AES67_DHCP_GRACE_MS));
+}
+
+static void on_ipv4_event(struct net_mgmt_event_callback *cb,
+			  uint64_t mgmt_event,
+			  struct net_if *iface)
+{
+	ARG_UNUSED(iface);
+
+	switch (mgmt_event) {
+	case NET_EVENT_IPV4_DHCP_BOUND:
+		on_dhcp_bound(cb);
+		break;
+	case NET_EVENT_IPV4_ADDR_DEL:
+		if (cb->info_length == sizeof(struct in_addr)) {
+			on_ipv4_addr_del((const struct in_addr *)cb->info);
+		}
+		break;
+	default:
+		break;
+	}
 }
 
 /* ---- FPGA Recovery Callback ---- */
@@ -149,16 +457,24 @@ static void fpga_reconfigure(void *user_data)
 	LOG_INF("FPGA recovery: re-writing configuration registers");
 
 	if (g_iface) {
-		fpga_write_mac_address(g_iface);
+		if (fpga_write_mac_address(g_iface) < 0) {
+			LOG_ERR("FPGA recovery: MAC write failed — the node "
+				"will not receive its own traffic");
+		}
 
-		if (g_ip_valid) {
-			fpga_write_ip_address(&g_my_ip);
+		if (g_ip_valid && fpga_write_ip_address(&g_my_ip) < 0) {
+			LOG_ERR("FPGA recovery: IP write failed");
 		}
 	}
 
 	/* A reset FPGA comes back with every domain held (reset CSR = all-ones);
 	 * the node is already configured, so release them all to resume operation. */
-	fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
+	int rst_ret = fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
+
+	if (rst_ret < 0) {
+		LOG_ERR("FPGA recovery: reset domains stayed held (err %d) — "
+			"the data plane is dead", rst_ret);
+	}
 
 	ptp_bmc_notify_fpga_ready();
 
@@ -249,8 +565,12 @@ static void nrst_card_rescan_cb(void *unused)
  * after a config reload never bounces a working interface. A link address
  * can only be changed while the interface is not running, so the interface
  * is taken down around the change when necessary.
+ *
+ * Returns 0, or a negative errno if the interface could not be brought back
+ * up — a MAC that cannot be applied is survivable (the driver default stays
+ * in place), a dead interface is not.
  */
-static void apply_serial_mac(struct net_if *iface)
+static int apply_serial_mac(struct net_if *iface)
 {
 	struct net_linkaddr *cur;
 	uint8_t mac[6];
@@ -258,7 +578,7 @@ static void apply_serial_mac(struct net_if *iface)
 	int ret;
 
 	if (iface == NULL) {
-		return;
+		return -ENODEV;
 	}
 
 	aes67_config_build_mac(mac);
@@ -266,7 +586,7 @@ static void apply_serial_mac(struct net_if *iface)
 	cur = net_if_get_link_addr(iface);
 	if (cur != NULL && cur->len == sizeof(mac) &&
 	    memcmp(cur->addr, mac, sizeof(mac)) == 0) {
-		return;		/* already correct */
+		return 0;	/* already correct */
 	}
 
 	was_up = net_if_is_admin_up(iface);
@@ -276,7 +596,7 @@ static void apply_serial_mac(struct net_if *iface)
 
 	ret = net_if_set_link_addr(iface, mac, sizeof(mac), NET_LINK_ETHERNET);
 	if (ret < 0) {
-		LOG_WRN("Could not apply serial-derived MAC (err %d); keeping "
+		LOG_ERR("Could not apply serial-derived MAC (err %d); keeping "
 			"the driver default", ret);
 	} else {
 		LOG_INF("MAC %02X:%02X:%02X:%02X:%02X:%02X (from serial \"%s\")",
@@ -285,8 +605,15 @@ static void apply_serial_mac(struct net_if *iface)
 	}
 
 	if (was_up) {
-		net_if_up(iface);
+		ret = net_if_up(iface);
+		if (ret < 0) {
+			LOG_ERR("Interface stayed down after the MAC change "
+				"(err %d)", ret);
+			return ret;
+		}
 	}
+
+	return 0;
 }
 
 /* The PTP stack derives its clock identity (EUI-64) from the interface MAC
@@ -304,8 +631,9 @@ BUILD_ASSERT(AES67_MAC_INIT_PRIO < CONFIG_PTP_INIT_PRIO,
 
 static int aes67_mac_init(void)
 {
-	apply_serial_mac(net_if_get_default());
-	return 0;
+	/* Reported as a SYS_INIT failure when the interface cannot be brought
+	 * back up; main() turns that into a hard stop a moment later. */
+	return apply_serial_mac(net_if_get_default());
 }
 
 SYS_INIT(aes67_mac_init, APPLICATION, AES67_MAC_INIT_PRIO);
@@ -333,8 +661,12 @@ static void jtag_upload_progress(uint8_t percent, void *ctx)
 
 /* Configure the FPGA over JTAG at boot. Runs after the display is up so the
  * upload can show progress; skips the upload if the FPGA already holds this
- * bitstream (USERCODE match). */
-static void fpga_jtag_bringup(void)
+ * bitstream (USERCODE match).
+ *
+ * Returns 0 on success or a negative errno; the caller ends the boot on
+ * failure, but only after the health monitor is running so a marginal upload
+ * still gets its retry. */
+static int fpga_jtag_bringup(void)
 {
 	fpga_jtag_progress_cb cb = NULL;
 
@@ -345,14 +677,13 @@ static void fpga_jtag_bringup(void)
 	int ret = fpga_jtag_boot_load(cb, NULL);
 
 	if (ret < 0) {
-		LOG_ERR("FPGA JTAG configuration failed (err %d); the FPGA will "
-			"not respond over spibone", ret);
+		LOG_ERR("FPGA JTAG configuration failed (err %d)", ret);
 #ifdef CONFIG_DISPLAY_CTRL
 		if (display_ctrl_ready()) {
 			display_ctrl_show_status("FPGAER");
 		}
 #endif
-		return;
+		return ret;
 	}
 
 	if (ret == 1) {
@@ -365,6 +696,7 @@ static void fpga_jtag_bringup(void)
 		display_ctrl_show_status("  FPGA");
 	}
 #endif
+	return 0;
 }
 
 #ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
@@ -437,13 +769,23 @@ int main(void)
 	 * power-on defaults, which leave the converters live while the DSP
 	 * has no clock yet (FPGA unconfigured) = loud white noise. Instead
 	 * the card is put into a safe state over I2C right below. */
-	fpga_hal_set_adda_nrst(true);
+	{
+		int nrst_ret = fpga_hal_set_adda_nrst(true);
+
+		if (nrst_ret < 0) {
+			boot_fatal("E NRST",
+				   "shared nRST could not be released — display "
+				   "controller and card LPC stay in reset and "
+				   "the outputs cannot be muted", nrst_ret);
+		}
+	}
 	LOG_INF("Shared nRST released (display + card LPC)");
 
 #if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
 	{
 		const struct device *early_i2c =
 			DEVICE_DT_GET(DT_NODELABEL(i2c2));
+		int mute_ret;
 
 		/* Give the LPC time to boot, then mute the outputs and put
 		 * the converters into the card-level reset — BEFORE the
@@ -451,8 +793,18 @@ int main(void)
 		 * the first PTP/wallclock lock (card_manager_activate_outputs
 		 * from fpga_poll). */
 		k_msleep(200);
-		if (device_is_ready(early_i2c)) {
-			card_manager_early_mute(early_i2c);
+		if (!device_is_ready(early_i2c)) {
+			boot_fatal("E  I2C",
+				   "card I2C bus (i2c2) not ready — the outputs "
+				   "cannot be put into their safe state",
+				   -ENODEV);
+		}
+
+		mute_ret = card_manager_early_mute(early_i2c);
+		if (mute_ret < 0) {
+			boot_fatal("E  I2C",
+				   "early mute failed — the card may drive "
+				   "garbage into the converters", mute_ret);
 		}
 	}
 #endif
@@ -461,7 +813,16 @@ int main(void)
 	 * reset from the very start. The CS5368 ADCs must not leave reset
 	 * until MCLK is stable; nRST is released by card_manager_init()
 	 * after the Si5351A PLL has locked and the FPGA answers. */
-	fpga_hal_set_adda_nrst(false);
+	{
+		int nrst_ret = fpga_hal_set_adda_nrst(false);
+
+		if (nrst_ret < 0) {
+			boot_fatal("E NRST",
+				   "ADDA nRST could not be asserted — the "
+				   "converters are not held in reset while the "
+				   "FPGA is still unconfigured", nrst_ret);
+		}
+	}
 	LOG_INF("ADDA nRST asserted (held in reset)");
 #endif
 
@@ -480,24 +841,43 @@ int main(void)
 	/* ---- SPI Flash Config Initialization ---- */
 	int flash_cfg_ret = flash_config_init();
 	if (flash_cfg_ret < 0) {
-		LOG_WRN("Flash config not available: %d", flash_cfg_ret);
+		/* Not fatal — the node runs on defaults — but nothing the user
+		 * configures from here on will survive a reboot. */
+		LOG_ERR("Flash config store unavailable (err %d): settings will "
+			"NOT persist", flash_cfg_ret);
 	}
 #endif
 
 #ifdef CONFIG_SI5351A
-	/* ---- Si5351A Clock Generator Setup ---- */
-	const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
+	/* ---- Si5351A Clock Generator Setup ----
+	 * CLK0 is the converters' MCLK. Without it the CS5368 ADCs never come
+	 * up on I2C and the audio path is dead, so a failure here ends the
+	 * boot rather than producing a silent node. */
+	{
+		const struct device *clkgen = DEVICE_DT_GET(DT_NODELABEL(si5351a));
+		int ret;
 
-	if (!device_is_ready(clkgen)) {
-		LOG_ERR("Si5351A device not ready");
-	} else {
+		if (!device_is_ready(clkgen)) {
+			boot_fatal("E  CLK",
+				   "Si5351A not ready — no MCLK for the "
+				   "converters", -ENODEV);
+		}
+
 		LOG_INF("Si5351A device ready, configuring clocks...");
 
-		int ret = si5351a_set_frequency(clkgen, 0, 24576000);
+		ret = si5351a_set_frequency(clkgen, 0, 24576000);
 		if (ret) {
-			LOG_ERR("Failed to set CLK0: %d", ret);
+			boot_fatal("E  CLK",
+				   "Si5351A CLK0 (24.576 MHz MCLK) could not be "
+				   "set", ret);
 		}
-		si5351a_set_drive_strength(clkgen, 0, SI5351A_DRIVE_8MA);
+
+		ret = si5351a_set_drive_strength(clkgen, 0, SI5351A_DRIVE_8MA);
+		if (ret) {
+			boot_fatal("E  CLK",
+				   "Si5351A CLK0 drive strength could not be set",
+				   ret);
+		}
 
 		LOG_INF("Si5351A clocks configured: CLK0=24.576 MHz");
 
@@ -554,7 +934,7 @@ int main(void)
 	/* ---- Configure the FPGA over JTAG (display is up, shows progress) ----
 	 * Scans the chain, skips the upload if the FPGA already holds this
 	 * bitstream, otherwise loads it with a 7-segment progress bar. */
-	fpga_jtag_bringup();
+	int jtag_ret = fpga_jtag_bringup();
 
 #ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
 	/* Watch the FPGA from here on: periodic JTAG health checks (IDCODE,
@@ -563,25 +943,53 @@ int main(void)
 	 * and a fault during the remaining bring-up is already caught. On a
 	 * confirmed fault the handler above mutes the outputs, the bitstream
 	 * is reloaded and the node reboots into a clean bring-up. */
-	fpga_jtag_monitor_start(fpga_jtag_health_event,
+	int mon_ret = fpga_jtag_monitor_start(fpga_jtag_health_event,
 #ifdef CONFIG_DISPLAY_CTRL
-				jtag_upload_progress,
+					      jtag_upload_progress,
 #else
-				NULL,
+					      NULL,
 #endif
-				NULL);
+					      NULL);
+
+	if (mon_ret < 0) {
+		LOG_ERR("FPGA JTAG health monitor did not start (err %d) — a "
+			"configuration fault will go unnoticed", mon_ret);
+	}
 #endif
+
+	/* Only now: with the monitor armed a marginal upload still gets its
+	 * retry (and reboots the node on recovery). Without a configured FPGA
+	 * there is nothing left to boot into. */
+	if (jtag_ret < 0) {
+		boot_fatal("FPGAER",
+			   "FPGA JTAG configuration failed — no data plane and "
+			   "no spibone bus", jtag_ret);
+	}
 #endif
 
 #if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)
 	/* ---- Verify the Wishbone bus answers now that the FPGA is up ---- */
-	fpga_hal_spibone_probe();
+	{
+		int probe_ret = fpga_hal_spibone_probe();
+
+		if (probe_ret < 0) {
+			boot_fatal("E  BUS",
+				   "spibone probe failed — the FPGA is "
+				   "configured but does not answer on the "
+				   "Wishbone bus", probe_ret);
+		}
+	}
 #endif
 
 	/* ---- Wait for FPGA to be ready before network operations ---- */
-	if (fpga_hal_wait_ready(30000) < 0) {
-		LOG_ERR("FPGA not ready after 30s - network services will not start");
-		return -1;
+	{
+		int rdy_ret = fpga_hal_wait_ready(30000);
+
+		if (rdy_ret < 0) {
+			boot_fatal("E FPGA",
+				   "FPGA did not become ready within 30 s",
+				   rdy_ret);
+		}
 	}
 
 #if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
@@ -597,17 +1005,22 @@ int main(void)
 #endif
 	{
 		const struct device *card_i2c = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+		int cm_ret;
 
 		if (!device_is_ready(card_i2c)) {
-			LOG_ERR("Card I2C bus (i2c2) not ready");
-		} else {
-			int cm_ret = card_manager_init(card_i2c);
-
-			if (cm_ret < 0) {
-				LOG_WRN("Card manager init error: %d", cm_ret);
-			}
-			/* Individual result is logged by card_manager */
+			boot_fatal("E  I2C",
+				   "card I2C bus (i2c2) not ready — no card "
+				   "control and no way to mute the outputs",
+				   -ENODEV);
 		}
+
+		/* An empty slot is legitimate (network-only node), so a scan
+		 * that finds nothing is a warning, not the end of the boot. */
+		cm_ret = card_manager_init(card_i2c);
+		if (cm_ret < 0) {
+			LOG_WRN("Card manager init error: %d", cm_ret);
+		}
+		/* Individual result is logged by card_manager */
 	}
 #endif
 
@@ -618,9 +1031,15 @@ int main(void)
 	if (sd_config_is_ready()) {
 		int cfg_ret = sd_config_load();
 		if (cfg_ret == -ENOENT) {
+			int save_ret;
+
 			LOG_INF("No config file on SD card, using defaults");
 			/* Save defaults to create the file */
-			sd_config_save();
+			save_ret = sd_config_save();
+			if (save_ret < 0) {
+				LOG_ERR("Could not write the default config to "
+					"SD: %d", save_ret);
+			}
 			config_loaded = true;
 		} else if (cfg_ret < 0) {
 			LOG_ERR("Failed to load config from SD: %d", cfg_ret);
@@ -638,8 +1057,14 @@ int main(void)
 	if (!config_loaded) {
 		int fcfg_ret = flash_config_load();
 		if (fcfg_ret == -ENOENT) {
+			int save_ret;
+
 			LOG_INF("No config in flash, using defaults");
-			flash_config_save();
+			save_ret = flash_config_save();
+			if (save_ret < 0) {
+				LOG_ERR("Could not write the default config to "
+					"flash: %d", save_ret);
+			}
 		} else if (fcfg_ret < 0) {
 			LOG_ERR("Failed to load config from flash: %d",
 				fcfg_ret);
@@ -651,15 +1076,24 @@ int main(void)
 
 	/* Apply configured hostname to network stack */
 	char hostname_buf[AES67_NODE_ID_MAX];
+	int hn_ret;
+
 	aes67_config_build_hostname(hostname_buf, sizeof(hostname_buf));
-	net_hostname_set(hostname_buf, strlen(hostname_buf));
-	LOG_INF("Hostname set to: %s", hostname_buf);
+	hn_ret = net_hostname_set(hostname_buf, strlen(hostname_buf));
+	if (hn_ret < 0) {
+		LOG_ERR("Hostname \"%s\" could not be set: %d — DHCP and mDNS "
+			"will advertise the built-in default", hostname_buf,
+			hn_ret);
+	} else {
+		LOG_INF("Hostname set to: %s", hostname_buf);
+	}
 
 	/* ---- Network Initialization (after FPGA ready) ---- */
 	struct net_if *iface = net_if_get_default();
+
 	if (!iface) {
-		LOG_ERR("No network interface found");
-		return -1;
+		boot_fatal("E  NET", "no network interface — the Ethernet "
+			   "driver did not come up", -ENODEV);
 	}
 
 	g_iface = iface;
@@ -670,13 +1104,25 @@ int main(void)
 	 * already applied it before the PTP stack started — but the stored
 	 * config may have been reloaded above (e.g. from SD) with a different
 	 * serial. */
-	apply_serial_mac(iface);
+	int mac_ret = apply_serial_mac(iface);
 
-	fpga_write_mac_address(iface);
+	if (mac_ret < 0) {
+		boot_fatal("E  MAC", "the interface stayed down after the MAC "
+			   "change", mac_ret);
+	}
 
-	net_mgmt_init_event_callback(&dhcp_cb, on_dhcp_bound,
-				     NET_EVENT_IPV4_DHCP_BOUND);
-	net_mgmt_add_event_callback(&dhcp_cb);
+	/* Without the MAC in the FPGA the hardware filter drops every frame
+	 * addressed to this node — RTP and hardware PTP included. */
+	mac_ret = fpga_write_mac_address(iface);
+	if (mac_ret < 0) {
+		boot_fatal("E  MAC", "the MAC address could not be written to "
+			   "the FPGA", mac_ret);
+	}
+
+	net_mgmt_init_event_callback(&ipv4_cb, on_ipv4_event,
+				     NET_EVENT_IPV4_DHCP_BOUND |
+				     NET_EVENT_IPV4_ADDR_DEL);
+	net_mgmt_add_event_callback(&ipv4_cb);
 
 #ifdef CONFIG_DISPLAY_CTRL
 	if (display_ctrl_ready()) {
@@ -692,9 +1138,14 @@ int main(void)
 	 * the buffer-bridge TX — eth_tx_done stops asserting, so DHCP TX times out.
 	 * Bring everything up at once and never touch the reset CSR again while
 	 * traffic flows. */
-	fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
+	int rst_ret = fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
 
-	fpga_wait_for_link_up(30000);
+	if (rst_ret < 0) {
+		boot_fatal("E  RST", "the FPGA reset domains could not be "
+			   "released — MAC, PTP and audio stay held", rst_ret);
+	}
+
+	fpga_wait_for_link_up();
 
 	k_msleep(500);
 
@@ -704,9 +1155,25 @@ int main(void)
 	}
 #endif
 
-	LOG_INF("Starting DHCP...");
+	/* Address configuration runs on its own thread — see the node-address
+	 * block at the top of this file. */
+	static const struct k_work_queue_config ipcfg_wq_cfg = { .name = "ipcfg" };
+
+	k_work_queue_init(&ipcfg_wq);
+	k_work_queue_start(&ipcfg_wq, ipcfg_stack,
+			   K_THREAD_STACK_SIZEOF(ipcfg_stack),
+			   K_PRIO_PREEMPT(8), &ipcfg_wq_cfg);
+	k_work_init(&apply_ip_work, apply_ip_work_fn);
+	k_work_init_delayable(&ll_work, ll_work_fn);
+
+	LOG_INF("Starting DHCP (%u s grace before the link-local fallback)...",
+		AES67_DHCP_GRACE_MS / 1000U);
 	net_dhcpv4_start(iface);
 	g_dhcp_running = true;
+	/* The link is already up (fpga_wait_for_link_up above), so this is the
+	 * link-up edge of the state machine: DHCP gets the full grace period
+	 * before ll_work adopts the link-local address. */
+	ll_arm(K_MSEC(AES67_DHCP_GRACE_MS));
 
 	/* ---- Start PTP ---- */
 	/* All reset domains (PTP + audio included) were already released together
@@ -730,29 +1197,39 @@ int main(void)
 #else
 	ptp_bmc_register_change_cb(on_bmc_change);
 	int bmc_ret = ptp_bmc_start(iface);
+
 	if (bmc_ret < 0) {
-		LOG_ERR("Failed to start PTP BMC: %d", bmc_ret);
+		boot_fatal("E  PTP", "the PTP BMC did not start — the node can "
+			   "neither follow nor be a grandmaster", bmc_ret);
 	}
 #endif
 
 	/* ---- Start AES67 connection management + SAP announcements ---- */
 	int conn_ret = aes67_conn_init(iface);
+
 	if (conn_ret < 0) {
-		LOG_ERR("Failed to init connection management: %d", conn_ret);
+		boot_fatal("E CONN", "connection management did not start — no "
+			   "stream setup", conn_ret);
 	}
 
 	int sap_ret = sap_sdp_start(iface);
+
 	if (sap_ret < 0) {
-		LOG_ERR("Failed to start SAP/SDP: %d", sap_ret);
+		boot_fatal("E  SAP", "SAP/SDP did not start — the node would be "
+			   "invisible to other AES67 devices", sap_ret);
 	}
 
-	/* ---- Start HTTP server (REST API + Web UI) ---- */
+	/* ---- Start HTTP server (REST API + Web UI) ----
+	 * From here on failures are loud but not fatal: the audio path is up
+	 * and killing a streaming node over a missing management service is
+	 * worse than running without it. */
 #ifdef CONFIG_SPI_FLASH_LITESPI
 	fw_update_init();
 #endif
 	int web_ret = webserver_start();
 	if (web_ret < 0) {
-		LOG_ERR("Failed to start HTTP server: %d", web_ret);
+		LOG_ERR("HTTP server did not start (err %d) — no web UI and no "
+			"REST API", web_ret);
 	}
 
 #ifdef CONFIG_RTSP

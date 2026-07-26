@@ -50,6 +50,14 @@ extern "C" {
 #define AES67_STATUS_ETH_RX_OVF     BIT(CSR_AES67_CSR_STATUS_ETH_RX_OVERFLOW_OFFSET)
 #define AES67_STATUS_PTP_IS_LEADER  BIT(CSR_AES67_CSR_STATUS_PTP_IS_LEADER_OFFSET)
 #define AES67_STATUS_PTP_IS_FOLLOWER BIT(CSR_AES67_CSR_STATUS_PTP_IS_FOLLOWER_OFFSET)
+/* RX stream-underrun diagnostics: per-stream underrun flags and the
+ * resulting per-channel mute mask (for monitoring / web UI). */
+#define AES67_STATUS_RX_UNDERRUN_SHIFT CSR_AES67_CSR_STATUS_RX_UNDERRUN_OFFSET
+#define AES67_STATUS_RX_UNDERRUN_MASK  (((1U << CSR_AES67_CSR_STATUS_RX_UNDERRUN_SIZE) - 1) \
+                                        << AES67_STATUS_RX_UNDERRUN_SHIFT)
+#define AES67_STATUS_RX_MUTE_SHIFT     CSR_AES67_CSR_STATUS_RX_MUTE_OFFSET
+#define AES67_STATUS_RX_MUTE_MASK      (((1U << CSR_AES67_CSR_STATUS_RX_MUTE_SIZE) - 1) \
+                                        << AES67_STATUS_RX_MUTE_SHIFT)
 
 /* ---- Control register bit fields (CSR_AES67_CSR_CTRL) ---- */
 #define AES67_CTRL_PPB_START        BIT(CSR_AES67_CSR_CTRL_PLL_PPB_START_OFFSET)

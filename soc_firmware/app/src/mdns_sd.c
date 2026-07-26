@@ -357,6 +357,11 @@ static struct in_addr my_ipv4(void)
 		return zero;
 	}
 	addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+	if (addr == NULL) {
+		/* No lease: the node runs on its Zeroconf address, which is
+		 * exactly the case where mDNS is how anyone finds it. */
+		addr = net_if_ipv4_get_ll(iface, NET_ADDR_PREFERRED);
+	}
 	return addr ? *addr : zero;
 }
 

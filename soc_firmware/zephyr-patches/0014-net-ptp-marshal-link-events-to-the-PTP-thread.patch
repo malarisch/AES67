@@ -1,0 +1,107 @@
+From a71427d3265b9d5fbfe91c6380ac77672eab5568 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Sun, 26 Jul 2026 17:22:37 +0200
+Subject: [PATCH] net: ptp: marshal link events to the PTP thread
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+port_link_monitor() runs in the net_mgmt thread and called
+ptp_port_event_handle() directly. Handling PTP_EVT_FAULT_DETECTED there
+runs port_disable() -> ptp_transport_close() -> zsock_close() on sockets
+the PTP thread is concurrently sleeping on inside zsock_poll(..., -1).
+Closing a socket another thread is polling releases a net_context whose
+k_poll events are still registered with the poller — a use-after-free in
+the k_poll wait lists. On a no-MMU target (ESP32-S3) this corrupts the
+wait queues and locks the system up with no exception; with the PTP
+thread at K_PRIO_COOP(1) every preemptible thread starves, so the freeze
+is completely silent. Reproduced deterministically by pulling the
+Ethernet cable while the port was in TIME_TRANSMITTER state
+(pollfd_invalidate()'s eventfd wakeup fires only after the close, too
+late). It also ran the whole port state machine on two threads at once.
+
+Record the fault event on the port (atomic) and wake the PTP thread via
+ptp_clock_signal_timeout() instead; the PTP thread consumes the event at
+the top of its loop, so sockets are only ever closed and reopened by the
+thread that polls them. The state-decision request stays in the monitor
+(it only sets a flag and signals the eventfd).
+
+Signed-off-by: Mala <mala.wolff00@gmail.com>
+---
+ subsys/net/lib/ptp/port.c | 15 ++++++++++++++-
+ subsys/net/lib/ptp/port.h |  6 ++++++
+ subsys/net/lib/ptp/ptp.c  |  8 ++++++++
+ 3 files changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/subsys/net/lib/ptp/port.c b/subsys/net/lib/ptp/port.c
+index a2f796649a..65ec620174 100644
+--- a/subsys/net/lib/ptp/port.c
++++ b/subsys/net/lib/ptp/port.c
+@@ -1627,7 +1627,19 @@ static __maybe_unused void port_link_monitor(struct net_mgmt_event_callback *cb,
+ 		ptp_clock_state_decision_req();
+ 	}
+ 
+-	ptp_port_event_handle(port, event, false);
++	/* This callback runs in the net_mgmt thread. Do NOT run the state
++	 * machine here: handling a fault event closes (and later reopens)
++	 * the port's sockets, while the PTP thread may be sleeping in
++	 * zsock_poll() on those very descriptors. Closing a socket another
++	 * thread is polling frees a net_context that is still registered
++	 * with the poller — a use-after-free that corrupts the k_poll wait
++	 * lists (observed as a full silent lockup on Xtensa). Record the
++	 * event and wake the PTP thread; the sockets belong to it.
++	 */
++	if (event != PTP_EVT_NONE) {
++		atomic_set(&port->link_evt, event);
++		ptp_clock_signal_timeout();
++	}
+ }
+ 
+ void ptp_port_init(struct net_if *iface, void *user_data)
+@@ -1652,6 +1664,7 @@ void ptp_port_init(struct net_if *iface, void *user_data)
+ 	port->best = NULL;
+ 	port->socket[PTP_SOCKET_EVENT] = -1;
+ 	port->socket[PTP_SOCKET_GENERAL] = -1;
++	atomic_set(&port->link_evt, PTP_EVT_NONE);
+ 
+ 	port->state_machine = dds->time_receiver_only ? ptp_tr_state_machine : ptp_state_machine;
+ 	port->last_sync_fup = NULL;
+diff --git a/subsys/net/lib/ptp/port.h b/subsys/net/lib/ptp/port.h
+index 1e612a5ce1..2eefa5d8bb 100644
+--- a/subsys/net/lib/ptp/port.h
++++ b/subsys/net/lib/ptp/port.h
+@@ -50,6 +50,12 @@ struct ptp_port {
+ 	uint8_t			       link_status;
+ 	/** Link event callback. */
+ 	struct net_mgmt_event_callback link_cb;
++	/** Link fault event pending for the PTP thread (enum ptp_port_event).
++	 *  Written by the net_mgmt thread, consumed by the PTP thread — the
++	 *  state machine must only run there, because handling the event
++	 *  closes and reopens the sockets the PTP thread polls.
++	 */
++	atomic_t		       link_evt;
+ 	/** Structure of system timers used by the Port. */
+ 	struct {
+ 		struct k_timer	       announce;
+diff --git a/subsys/net/lib/ptp/ptp.c b/subsys/net/lib/ptp/ptp.c
+index c2c21b1af7..d510e91558 100644
+--- a/subsys/net/lib/ptp/ptp.c
++++ b/subsys/net/lib/ptp/ptp.c
+@@ -52,6 +52,14 @@ static void ptp_thread(void *p1, void *p2, void *p3)
+ 		fd = ptp_clock_poll_sockets();
+ 
+ 		SYS_SLIST_FOR_EACH_CONTAINER(ptp_clock_ports_list(), port, node) {
++			/* Link fault events are recorded by port_link_monitor
++			 * (net_mgmt thread) and handled here so that sockets
++			 * are only ever closed/reopened by this thread. */
++			event = (enum ptp_port_event)atomic_set(&port->link_evt,
++								PTP_EVT_NONE);
++			if (event != PTP_EVT_NONE) {
++				ptp_port_event_handle(port, event, false);
++			}
+ 
+ 			for (int i = 0; i < ARRAY_SIZE(timer_offset); i++) {
+ 				timer = (struct k_timer *)((uint8_t *)port +
+-- 
+2.53.0
+

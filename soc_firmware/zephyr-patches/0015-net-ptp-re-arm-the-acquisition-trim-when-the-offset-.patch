@@ -1,0 +1,126 @@
+From 3745097c4fc9e3e3739c885210f897557dddad0f Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Sun, 26 Jul 2026 18:32:36 +0200
+Subject: [PATCH] net: ptp: re-arm the acquisition trim when the offset parks
+ far from zero
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The acquisition trim (budgeted atomic phase jumps for offsets below the
+step threshold) is granted at boot and by genuine steps, and dropped once
+a full-window median lands at or below the trim threshold. An offset that
+rebuilds to hundreds of microseconds in steady state — drift accumulated
+while the port sat FAULTY across a link-down, a grandmaster whose own
+clock wandered, a restarted peer daemon — therefore finds no budget: it
+is below the step threshold, so the only mechanism left is the clamped
+phase slew (CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB, typically 2000 ppb =
+2 us/s for media use), which needs 4-8 minutes for 0.5-1 ms. Observed on
+hardware: offset parked at ~500 us, servo frequency-matched (ppb moving
+by tens), no convergence to speak of.
+
+Re-grant the budget when a full-window median stays beyond a re-arm
+threshold (100 us) for 16 consecutive samples; the existing machinery
+then executes one precise in-hardware trim jump and disarms again at the
+10 us threshold. The wide hysteresis band (10 us disarm vs 100 us
+re-arm, both far above the ~5 us median-refill drift) keeps the known
+failure mode of a self-re-arming trim — retriggering on its own
+post-reset drift in a permanent step loop — impossible, and the
+16-sample streak requirement means bursts and single outliers (already
+EMA-gated upstream of the servo) cannot re-arm it.
+
+Signed-off-by: Mala <mala.wolff00@gmail.com>
+---
+ subsys/net/lib/ptp/clock.c | 47 +++++++++++++++++++++++++++++++++++---
+ 1 file changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/subsys/net/lib/ptp/clock.c b/subsys/net/lib/ptp/clock.c
+index e1c451b664..3c156eb0b6 100644
+--- a/subsys/net/lib/ptp/clock.c
++++ b/subsys/net/lib/ptp/clock.c
+@@ -72,6 +72,22 @@ LOG_MODULE_REGISTER(ptp_clock, CONFIG_PTP_LOG_LEVEL);
+  */
+ #define SYNC_SERVO_TRIM_THRESHOLD_NS 10000LL
+ #define SYNC_SERVO_TRIM_BUDGET 2U
++/* Re-arm the trim when the clock parks far from zero in steady state: an
++ * offset can rebuild to hundreds of us without any step happening at all
++ * (drift accumulated while the port was FAULTY across a link-down, a
++ * grandmaster whose own clock wandered, a restarted peer daemon). Below the
++ * step threshold there is then no budget, and the clamped phase slew
++ * (CONFIG_PTP_SERVO_PHASE_CORR_MAX_PPB, e.g. 2000 ppb = 2 us/s) needs
++ * minutes for what one precise in-hardware jump fixes at acquisition.
++ * A full-window median beyond SYNC_SERVO_TRIM_REARM_NS for
++ * SYNC_SERVO_TRIM_REARM_SAMPLES consecutive samples re-grants the budget;
++ * the existing machinery then trims and disarms again at <= the trim
++ * threshold. The wide hysteresis band (10 us disarm vs 100 us re-arm,
++ * >> the ~5 us median-refill drift) keeps the 0012 failure mode - a trim
++ * retriggering on its own post-reset drift - impossible.
++ */
++#define SYNC_SERVO_TRIM_REARM_NS 100000LL
++#define SYNC_SERVO_TRIM_REARM_SAMPLES 16U
+ #define SYNC_SERVO_LOCK_OFFSET_NS (10LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_OUTLIER_NS (100LL * NSEC_PER_MSEC)
+ #define SYNC_SERVO_LOCK_SAMPLES 3U
+@@ -164,6 +180,8 @@ static struct {
+  * only the normal step threshold applies until the next genuine step.
+  */
+ static uint8_t phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
++/* Consecutive full-median samples parked beyond SYNC_SERVO_TRIM_REARM_NS. */
++static uint8_t phase_trim_far_samples;
+ 
+ static int64_t offset_filter_samples[CONFIG_PTP_OFFSET_FILTER_LENGTH];
+ static struct clock_sample_filter offset_filter = {
+@@ -1219,6 +1237,7 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 			} else {
+ 				phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
+ 			}
++			phase_trim_far_samples = 0U;
+ 		} else {
+ 			ret = ptp_clock_get(ptp_clk.phc, &current);
+ 			if (ret < 0) {
+@@ -1246,6 +1265,7 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 			 * budget for trimming its bus-latency residual.
+ 			 */
+ 			phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
++			phase_trim_far_samples = 0U;
+ 		}
+ 
+ 		/* A hard step invalidates the timestamps used by the E2E delay path and
+@@ -1282,10 +1302,31 @@ static void clock_synchronize_with_delay(uint64_t ingress, uint64_t egress,
+ 	/* Below the (possibly lowered) step threshold. Once a full-window
+ 	 * median comes in at or below the trim threshold, acquisition is done:
+ 	 * drop the remaining trim budget so steady state only ever uses the
+-	 * normal step threshold (until the next genuine step re-grants it).
++	 * normal step threshold. It is re-granted by the next genuine step -
++	 * or by the median parking beyond the re-arm threshold, which turns a
++	 * would-be minutes-long clamped slew into one precise trim jump.
+ 	 */
+-	if (phase_trim_budget > 0U && median_full) {
+-		phase_trim_budget = 0U;
++	if (median_full) {
++		if (offset <= SYNC_SERVO_TRIM_THRESHOLD_NS &&
++		    offset >= -SYNC_SERVO_TRIM_THRESHOLD_NS) {
++			phase_trim_far_samples = 0U;
++			if (phase_trim_budget > 0U) {
++				phase_trim_budget = 0U;
++			}
++		} else if (phase_trim_budget == 0U &&
++			   (offset >= SYNC_SERVO_TRIM_REARM_NS ||
++			    offset <= -SYNC_SERVO_TRIM_REARM_NS)) {
++			phase_trim_far_samples++;
++			if (phase_trim_far_samples >= SYNC_SERVO_TRIM_REARM_SAMPLES) {
++				LOG_WRN("Offset parked at %lldns for %u samples - "
++					"re-arming the acquisition trim",
++					offset, SYNC_SERVO_TRIM_REARM_SAMPLES);
++				phase_trim_budget = SYNC_SERVO_TRIM_BUDGET;
++				phase_trim_far_samples = 0U;
++			}
++		} else {
++			phase_trim_far_samples = 0U;
++		}
+ 	}
+ 
+ 	LOG_DBG("Offset %lldns", offset);
+-- 
+2.53.0
+

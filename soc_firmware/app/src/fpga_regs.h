@@ -24,10 +24,11 @@ int fpga_write_ip_address(const struct in_addr *addr);
 /**
  * @brief Wait for Ethernet link-up by polling FPGA status.
  *
- * @param timeout_ms  Maximum time to wait (0 = no timeout)
- * @return 0 on link-up, -ETIMEDOUT on timeout
+ * Blocks until the link is up — there is no timeout. Nothing after this point
+ * in the boot works without a link, and a "timed out, carry on anyway" node is
+ * harder to diagnose than one that plainly says it is waiting for a cable.
  */
-int fpga_wait_for_link_up(uint32_t timeout_ms);
+void fpga_wait_for_link_up(void);
 
 /**
  * @brief Calculate PPB from raw edge counter values.
