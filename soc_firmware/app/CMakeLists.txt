@@ -155,8 +155,17 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
       src/aes67_config.c
       src/config_json.c
       src/aes67_sdp_utils.c
-      src/webserver.c
+      src/webapi/json_util.c
+      src/webapi/webapi_core.c
+      src/webapi/webapi_network.c
+      src/webapi/webapi_fpga.c
+      src/webapi/webapi_ptp.c
+      src/webapi/webapi_streams.c
+      src/webapi/webapi_config.c
+      src/webapi/webapi_system.c
+      src/webapi/webapi_cards.c
     )
+    target_sources_ifdef(CONFIG_DISPLAY_CTRL app PRIVATE src/webapi/webapi_display.c)
 
     # card_manager itself is portable — it only pulls in the per-card
     # drivers (mi/lo/io) when those Kconfigs are set, so it's safe to
