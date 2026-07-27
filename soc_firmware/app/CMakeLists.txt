@@ -116,28 +116,62 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
     zephyr_linker_section(NAME http_resource_desc_aes67_http
                           KVMA RAM_REGION GROUP RODATA_REGION)
 
-    # Generate gzipped web UI include at build time.
+    # Generate the single-file React UI when its local npm dependencies are
+    # available.  The generated gzip include is checked in as a fallback so a
+    # normal firmware build does not need Node.js or network access.
+    set(WEBUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/webui)
     set(WEB_SRC  ${CMAKE_CURRENT_SOURCE_DIR}/src/web/index.html)
     set(WEB_GZ   ${CMAKE_CURRENT_BINARY_DIR}/index.html.gz)
     set(WEB_INC  ${CMAKE_CURRENT_SOURCE_DIR}/src/index.html.gz.inc)
-    add_custom_command(
-      OUTPUT  ${WEB_INC}
-      COMMAND gzip -c -9 ${WEB_SRC} > ${WEB_GZ}
-      COMMAND xxd -i < ${WEB_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${WEB_INC}
-      DEPENDS ${WEB_SRC}
-      COMMENT "Generating gzipped web UI include"
-    )
+
+    if(EXISTS "${WEBUI_DIR}/node_modules/.package-lock.json")
+      find_program(NPM_EXECUTABLE npm REQUIRED)
+      file(GLOB_RECURSE WEBUI_SOURCES CONFIGURE_DEPENDS
+        ${WEBUI_DIR}/src/*.ts
+        ${WEBUI_DIR}/src/*.tsx
+        ${WEBUI_DIR}/src/*.css
+      )
+      add_custom_command(
+        OUTPUT  ${WEB_SRC}
+        COMMAND ${NPM_EXECUTABLE} run build
+        WORKING_DIRECTORY ${WEBUI_DIR}
+        DEPENDS
+          ${WEBUI_SOURCES}
+          ${WEBUI_DIR}/index.html
+          ${WEBUI_DIR}/package.json
+          ${WEBUI_DIR}/package-lock.json
+          ${WEBUI_DIR}/vite.config.ts
+          ${WEBUI_DIR}/tsconfig.app.json
+          ${WEBUI_DIR}/tsconfig.node.json
+        COMMENT "Building single-file React web UI"
+      )
+    endif()
+
+    if(EXISTS "${WEB_SRC}" OR EXISTS "${WEBUI_DIR}/node_modules/.package-lock.json")
+      add_custom_command(
+        OUTPUT  ${WEB_INC}
+        COMMAND gzip -n -c -9 ${WEB_SRC} > ${WEB_GZ}
+        COMMAND xxd -i < ${WEB_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${WEB_INC}
+        DEPENDS ${WEB_SRC}
+        COMMENT "Generating gzipped React web UI include"
+      )
+    else()
+      message(STATUS
+        "Web UI dependencies are not installed; using checked-in index.html.gz.inc")
+    endif()
 
     set(DBG_SRC  ${CMAKE_CURRENT_SOURCE_DIR}/src/web/debug.html)
     set(DBG_GZ   ${CMAKE_CURRENT_BINARY_DIR}/debug.html.gz)
     set(DBG_INC  ${CMAKE_CURRENT_SOURCE_DIR}/src/debug.html.gz.inc)
-    add_custom_command(
-      OUTPUT  ${DBG_INC}
-      COMMAND gzip -c -9 ${DBG_SRC} > ${DBG_GZ}
-      COMMAND xxd -i < ${DBG_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${DBG_INC}
-      DEPENDS ${DBG_SRC}
-      COMMENT "Generating gzipped debug page include"
-    )
+    if(EXISTS "${DBG_SRC}")
+      add_custom_command(
+        OUTPUT  ${DBG_INC}
+        COMMAND gzip -c -9 ${DBG_SRC} > ${DBG_GZ}
+        COMMAND xxd -i < ${DBG_GZ} | sed "s/^unsigned.*$$//" | sed "/^$$/d" | sed "$$ s/}\\;$$//" > ${DBG_INC}
+        DEPENDS ${DBG_SRC}
+        COMMENT "Generating gzipped debug page include"
+      )
+    endif()
 
     add_custom_target(web_assets DEPENDS ${WEB_INC} ${DBG_INC})
 
