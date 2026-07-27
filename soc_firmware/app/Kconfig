@@ -2,26 +2,30 @@
 rsource "drivers/Kconfig"
 
 config AES67_PTP_SOFTWARE
-	bool "Run PTP in software (Zephyr IEEE 1588 stack) instead of FPGA hardware PTP"
-	default n
+	bool "Build software-PTP support (Zephyr IEEE 1588 stack)"
+	default y
 	depends on FPGA_HAL_LITEX || FPGA_HAL_SPI
 	depends on PTP
 	help
-	  Use Zephyr's IEEE 1588 PTP stack (CONFIG_PTP) to discipline the FPGA
-	  wallclock, instead of the FPGA's hardware PTP state machine + servo.
-	  Works on the integrated softcore (FPGA_HAL_LITEX) and on an external
-	  MCU over spibone (FPGA_HAL_SPI). Requires the gateware built with
-	  `--ptp-in-software` / PTP_IN_SOFTWARE=true (exposes wallclock in/out,
-	  set/phasejump/ppb, the TX-timestamp CSR and the RX-timestamp trailer).
-	  The Ethernet driver (eth_litex / eth_spi) then advertises ETHERNET_PTP,
-	  returns the aes67 PHC via get_ptp_clock, stamps RX frames from the FPGA
-	  trailer and reports TX timestamps. The firmware's FPGA-BMC path
-	  (ptp_bmc.c) is not started in this mode.
+	  Compile support for running PTP in software: Zephyr's IEEE 1588
+	  stack (CONFIG_PTP) disciplining the FPGA wallclock through the
+	  aes67 PHC. Works on the integrated softcore (FPGA_HAL_LITEX) and
+	  on an external MCU over spibone (FPGA_HAL_SPI).
 
-	  Do not `select` PTP here: it would form a Kconfig dependency loop with
-	  the FPGA_HAL backend choice (PTP -> NET_SOCKETS -> ... -> SPI). Enable
-	  this mode via the ptpsw.conf overlay, which turns on CONFIG_PTP and this
-	  option together.
+	  This is a COMPILE-TIME capability, not a mode selection: both the
+	  software stack and the FPGA-BMC path (ptp_bmc.c) are built into
+	  every image. At boot the firmware reads the gateware's static
+	  build configuration (system_cfg CSRs) and starts whichever service
+	  the bitstream was built for — PTP_IN_SOFTWARE gateware gets the
+	  Zephyr stack (application-managed start, see
+	  CONFIG_PTP_APP_MANAGED_START), hardware-PTP gateware gets ptp_bmc
+	  and the Zephyr stack stays dormant. The Ethernet drivers likewise
+	  decide at runtime whether to advertise ETHERNET_PTP, hand out the
+	  aes67 PHC and parse the RX-timestamp trailer.
+
+	  Do not `select` PTP here: it would form a Kconfig dependency loop
+	  with the FPGA_HAL backend choice (PTP -> NET_SOCKETS -> ... -> SPI).
+	  CONFIG_PTP is enabled in prj.conf instead.
 
 # Extends the symbol of the same name from Zephyr's ESP32 WiFi driver
 # (drivers/wifi/esp32/Kconfig.esp32), where it is hidden behind `if

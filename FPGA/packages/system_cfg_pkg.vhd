@@ -175,7 +175,7 @@ package system_cfg_pkg is
         PHY_CONFIG => std_lan8720a_cfg,
         AUDIO_CONFIG => audio_config_cyc,
         STATIC_PTP_CONFIG => true,
-        PTP_IN_SOFTWARE => false,
+        PTP_IN_SOFTWARE => true,
         ENABLE_METERING => false,
         PTP_MOVING_AVERAGE_DEPTH => 4
     );
@@ -183,15 +183,16 @@ package system_cfg_pkg is
 end package;
 
 package body system_cfg_pkg is
+    -- A variable of unconstrained type string is not allowed; returning
+    -- string literals directly sizes the (unconstrained) return type per call.
     function platform_to_string (platform : in t_platforms) return string is
-        variable v_platform_string : string := "";
         begin
-            if (platform = ALTERA) then v_platform_string := "ALTERA";
-            elsif platform = GOWIN then v_platform_string := "GOWIN";
-            elsif platform = LATTICE then v_platform_string := "LATTICE";
-            elsif platform = XILINX then v_platform_string := "XILINX";    
+            if (platform = ALTERA) then return "ALTERA";
+            elsif platform = GOWIN then return "GOWIN";
+            elsif platform = LATTICE then return "LATTICE";
+            elsif platform = XILINX then return "XILINX";
             end if;
-        return v_platform_string;
+        return "UNKNOWN";
         end;
     
     function To_Std_Logic(L : boolean) return std_logic is

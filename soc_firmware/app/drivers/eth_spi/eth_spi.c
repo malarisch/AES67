@@ -86,8 +86,8 @@ struct eth_spi_data {
 	bool tx_started;   /* first eth_tx_request pulsed (tx_done valid) */
 
 	/* RX holds the raw buffer contents: frame + 4-byte FCS (+ the 5-byte
-	 * hardware-timestamp trailer in --ptp-in-software gateware). */
-	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + 4 + ETH_LITEX_RX_TRAILER_LEN];
+	 * hardware-timestamp trailer in PTP_IN_SOFTWARE gateware). */
+	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + 4 + ETH_LITEX_RX_TRAILER_MAX];
 	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_SPI_RX_STACK_SIZE);
@@ -136,6 +136,9 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 	uint32_t ready, raw_len = 0;
 	int len = 0;
 	int ret;
+	/* Trailer presence is a property of the loaded bitstream (system_cfg):
+	 * 5 bytes on PTP_IN_SOFTWARE gateware, 0 on hardware-PTP gateware. */
+	const uint16_t trailer = eth_litex_rx_trailer_len();
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 	struct net_ptp_time rx_ts;
 	bool rx_have_ts = false;
@@ -160,17 +163,17 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 	ret = spibone_read_locked(CSR_ETH_BUF_RX_LEN_ADDR, &raw_len);
 	if (ret == 0) {
 		/* The MAC stores the frame including its 4-byte FCS (followed by
-		 * the 5-byte timestamp trailer in --ptp-in-software gateware);
+		 * the 5-byte timestamp trailer in PTP_IN_SOFTWARE gateware);
 		 * the network stack expects a bare frame. */
-		len = (int)(raw_len & 0xFFFF) - 4 - ETH_LITEX_RX_TRAILER_LEN;
+		len = (int)(raw_len & 0xFFFF) - 4 - trailer;
 		if (len < 14 || len > ETH_LITEX_MAX_PKT_SIZE) {
 			LOG_WRN("RX invalid len %d (raw %u) — dropping", len, raw_len);
 			len = 0;
 		} else {
-			/* In PTP mode read through the FCS to reach the trailer;
+			/* With a trailer read through the FCS to reach it;
 			 * otherwise stop at the frame end. */
-			size_t rd_len = ETH_LITEX_RX_TRAILER_LEN != 0
-					? (size_t)len + 4 + ETH_LITEX_RX_TRAILER_LEN
+			size_t rd_len = trailer != 0
+					? (size_t)len + 4 + trailer
 					: (size_t)len;
 
 			ret = spibone_read_burst_locked(ETH_BUF_RX_MEM,
@@ -196,7 +199,7 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 	/* Trailer: [seconds(1)][nanoseconds(4, little-endian)] after the FCS.
 	 * Reconstructed outside the bus lock — it reads the live wallclock
 	 * seconds over the same bus. */
-	{
+	if (trailer != 0) {
 		const uint8_t *tr = &data->rx_buf[len + 4];
 		uint32_t ts_nsec = (uint32_t)tr[1] |
 				   ((uint32_t)tr[2] << 8) |
@@ -335,7 +338,10 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 	uint32_t ctrl;
 	int ret;
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	bool want_ts = (pkt != NULL) && net_pkt_is_tx_timestamping(pkt);
+	/* Egress timestamps only exist in PTP_IN_SOFTWARE gateware (and only
+	 * the software PTP stack requests them). */
+	bool want_ts = fpga_hal_ptp_in_software() &&
+		       (pkt != NULL) && net_pkt_is_tx_timestamping(pkt);
 	uint32_t pre_sec = 0, pre_nsec = 0;
 #endif
 
@@ -607,11 +613,17 @@ static enum ethernet_hw_caps eth_spi_get_capabilities(const struct device *dev,
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(iface);
+
+	enum ethernet_hw_caps caps = ETHERNET_LINK_100BASE;
+
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	return ETHERNET_LINK_100BASE | ETHERNET_PTP;
-#else
-	return ETHERNET_LINK_100BASE;
+	/* ETHERNET_PTP only when the loaded gateware actually provides the
+	 * software-PTP surface (timestamp trailer + wallclock CSRs). */
+	if (fpga_hal_ptp_in_software()) {
+		caps |= ETHERNET_PTP;
+	}
 #endif
+	return caps;
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
@@ -620,7 +632,10 @@ static const struct device *eth_spi_get_ptp_clock(const struct device *dev,
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(iface);
-	return aes67_ptp_clock_device();
+
+	/* NULL keeps the Zephyr PTP stack away from this interface when the
+	 * gateware runs hardware PTP (its ptp_clock_init() then bails out). */
+	return fpga_hal_ptp_in_software() ? aes67_ptp_clock_device() : NULL;
 }
 #endif
 

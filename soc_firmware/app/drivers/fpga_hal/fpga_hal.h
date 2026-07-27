@@ -38,6 +38,14 @@ extern "C" {
 #define FPGA_HAL_PTP_IS_LEADER       BIT(11)
 #define FPGA_HAL_PTP_IS_FOLLOWER     BIT(12)
 
+/* RX stream-underrun diagnostics: per-stream underrun flags (streams 3..0)
+ * and the resulting per-channel underrun-mute mask (channels 7..0). Layout
+ * mirrors the FPGA status CSR; 0 on backends without the fields. */
+#define FPGA_HAL_RX_UNDERRUN_SHIFT   16
+#define FPGA_HAL_RX_UNDERRUN_MASK    (0xFUL << FPGA_HAL_RX_UNDERRUN_SHIFT)
+#define FPGA_HAL_RX_MUTE_SHIFT       20
+#define FPGA_HAL_RX_MUTE_MASK        (0xFFUL << FPGA_HAL_RX_MUTE_SHIFT)
+
 /* ---- Control flags (backend-independent) ---- */
 #define FPGA_HAL_CTRL_PPB_START       BIT(0)
 #define FPGA_HAL_CTRL_RESET_WALLCLOCK BIT(1)
@@ -230,6 +238,63 @@ int fpga_hal_csr_read(uint32_t addr, uint32_t *val);
  * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
  */
 int fpga_hal_csr_write(uint32_t addr, uint32_t val);
+
+/* ========================================================================
+ * Static FPGA build configuration (system_cfg CSRs)
+ * ======================================================================== */
+
+/**
+ * Static configuration the gateware was built with (the syscfg generic,
+ * see FPGA/packages/system_cfg_pkg.vhd). Constant per bitstream; exposed
+ * read-only through the aes67_bridge system_cfg_{flags,rx,tx} CSRs.
+ *
+ * The firmware reads this once at boot (after the FPGA is up) and starts
+ * the matching services — most importantly hardware vs. software PTP —
+ * instead of baking the choice in at compile time.
+ */
+struct fpga_hal_system_cfg {
+	/* flags */
+	bool ptp_in_software;   /* host PTP stack disciplines the wallclock;
+				 * RX frames carry the timestamp trailer */
+	bool static_ptp_config; /* servo tuning fixed via VHDL generic */
+	bool metering;          /* audio metering CSRs are live */
+	/* RX / DA path */
+	uint8_t  rx_max_streams;
+	uint8_t  rx_channels;
+	uint16_t rx_buffer_depth;
+	/* TX / AD path */
+	uint8_t  tx_max_streams;
+	uint8_t  tx_channels;
+	uint16_t tx_buffer_depth;
+};
+
+/**
+ * @brief Read the system_cfg CSRs from the FPGA (uncached).
+ *
+ * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ */
+int fpga_hal_read_system_cfg(struct fpga_hal_system_cfg *cfg);
+
+/**
+ * @brief Read the system_cfg CSRs and latch them into the process-wide
+ *        cache consulted by fpga_hal_syscfg() / fpga_hal_ptp_in_software().
+ *
+ * Call once at boot after the FPGA answers on the bus (and again from the
+ * FPGA-recovery path — the value is per bitstream). Until the first
+ * successful load the cache reads as all-zero (hardware PTP, no metering).
+ *
+ * @return 0 on success, negative errno on bus error.
+ */
+int fpga_hal_syscfg_load(void);
+
+/** @brief Cached static configuration (all-zero before the first load). */
+const struct fpga_hal_system_cfg *fpga_hal_syscfg(void);
+
+/** @brief True once fpga_hal_syscfg_load() has succeeded. */
+bool fpga_hal_syscfg_valid(void);
+
+/** @brief Convenience: cached ptp_in_software flag (false before load). */
+bool fpga_hal_ptp_in_software(void);
 
 /* ========================================================================
  * Status reads

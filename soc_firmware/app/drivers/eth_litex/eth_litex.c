@@ -44,7 +44,7 @@ struct eth_litex_data {
 	struct k_sem rx_sem;           /* Signaled by ISR on RX packet */
 	bool link_up;                  /* Cached link state for edge detection */
 
-	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + ETH_LITEX_RX_TRAILER_LEN];
+	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + ETH_LITEX_RX_TRAILER_MAX];
 	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
@@ -626,7 +626,10 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 		first_tx = false;
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-		bool want_ts = net_pkt_is_tx_timestamping(pkt);
+		/* Egress timestamps only exist in PTP_IN_SOFTWARE gateware (and
+		 * only the software PTP stack requests them). */
+		bool want_ts = fpga_hal_ptp_in_software() &&
+			       net_pkt_is_tx_timestamping(pkt);
 		uint32_t pre_sec = 0, pre_nsec = 0;
 
 		/* Snapshot the egress-timestamp CSR while the previous frame is
@@ -762,35 +765,42 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 		uint16_t raw_len = litex_csr_read(CSR_ETH_BUF_RX_LEN_ADDR) & 0xFFFF;
 		uint16_t pkt_len;
 
+		/* PTP_IN_SOFTWARE gateware appends a 5-byte timestamp trailer
+		 * after the FCS; whether it is present comes from the loaded
+		 * bitstream's system_cfg (0 on hardware-PTP gateware). */
+		uint16_t trailer = eth_litex_rx_trailer_len();
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 		struct net_ptp_time rx_ts;
 		bool rx_have_ts = false;
+#endif
 
-		/* Read the whole raw buffer (frame + FCS + 5-byte timestamp trailer),
-		 * peel the trailer off the end and reconstruct the RX timestamp, then
-		 * strip the FCS from what remains. */
+		/* Read the whole raw buffer (frame + FCS + optional timestamp
+		 * trailer), peel the trailer off the end and reconstruct the RX
+		 * timestamp, then strip the FCS from what remains. */
 		raw_len = MIN(raw_len, (uint16_t)sizeof(data->rx_buf));
 		eth_buf_read_packet(data->rx_buf, raw_len);
 
-		if (raw_len >= ETH_LITEX_RX_TRAILER_LEN + 4) {
-			uint16_t t = raw_len - ETH_LITEX_RX_TRAILER_LEN;
-			uint32_t ts_nsec = (uint32_t)data->rx_buf[t + 1] |
-					   ((uint32_t)data->rx_buf[t + 2] << 8) |
-					   ((uint32_t)data->rx_buf[t + 3] << 16) |
-					   ((uint32_t)data->rx_buf[t + 4] << 24);
+		if (raw_len >= trailer + 4) {
+			uint16_t t = raw_len - trailer;
 
-			aes67_ptp_reconstruct(data->rx_buf[t], ts_nsec, &rx_ts);
-			rx_have_ts = true;
-			pkt_len = t - 4; /* drop trailer, then the 4-byte FCS */
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+			if (trailer != 0) {
+				uint32_t ts_nsec =
+					(uint32_t)data->rx_buf[t + 1] |
+					((uint32_t)data->rx_buf[t + 2] << 8) |
+					((uint32_t)data->rx_buf[t + 3] << 16) |
+					((uint32_t)data->rx_buf[t + 4] << 24);
+
+				aes67_ptp_reconstruct(data->rx_buf[t], ts_nsec,
+						      &rx_ts);
+				rx_have_ts = true;
+			}
+#endif
+			/* Drop the trailer (if any), then the 4-byte FCS. */
+			pkt_len = t - 4;
 		} else {
 			pkt_len = 0;
 		}
-#else
-		/* The MAC includes the 4-byte FCS in the frame.  Strip it
-		 * before handing to the network stack which expects frames
-		 * without FCS. */
-		pkt_len = (raw_len >= 4) ? raw_len - 4 : 0;
-#endif
 
 		if (pkt_len < 14 || pkt_len > ETH_LITEX_MAX_PKT_SIZE) {
 			LOG_WRN("RX invalid len %u (raw %u)", pkt_len, raw_len);
@@ -799,10 +809,6 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-#ifndef CONFIG_AES67_PTP_SOFTWARE
-		/* Read packet data from RX buffer (already read above in PTP mode) */
-		eth_buf_read_packet(data->rx_buf, pkt_len);
-#endif
 		LOG_HEXDUMP_DBG(data->rx_buf, pkt_len, "RX frame");
 		/* Debug: log ethertype and dst port for TCP packets */
 		{
@@ -956,11 +962,17 @@ static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(iface);
+
+	enum ethernet_hw_caps caps = ETHERNET_LINK_100BASE;
+
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	return ETHERNET_LINK_100BASE | ETHERNET_PTP;
-#else
-	return ETHERNET_LINK_100BASE;
+	/* ETHERNET_PTP only when the loaded gateware actually provides the
+	 * software-PTP surface (timestamp trailer + wallclock CSRs). */
+	if (fpga_hal_ptp_in_software()) {
+		caps |= ETHERNET_PTP;
+	}
 #endif
+	return caps;
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
@@ -969,7 +981,10 @@ static const struct device *eth_litex_get_ptp_clock(const struct device *dev,
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(iface);
-	return aes67_ptp_clock_device();
+
+	/* NULL keeps the Zephyr PTP stack away from this interface when the
+	 * gateware runs hardware PTP (its ptp_clock_init() then bails out). */
+	return fpga_hal_ptp_in_software() ? aes67_ptp_clock_device() : NULL;
 }
 #endif
 

@@ -123,6 +123,9 @@ _io_common = [
         Subsignal("tx_meter_signal",    Pins(16)),  # TX signal detect (1 bit per channel)
         Subsignal("tx_meter_clip",      Pins(16)),  # TX clip detect (1 bit per channel)
         Subsignal("meter_clear",        Pins(1)),   # Metering clear toggle (SoC -> FPGA)
+        # Static FPGA build configuration (FPGA -> SoC, constant per bitstream;
+        # layout per system_cfg_pkg.vhd's system_cfg_to_vector())
+        Subsignal("system_cfg",               Pins(72)),
         # PTP-in-software wallclock interface (FPGA -> SoC)
         Subsignal("wallclock_seconds_in",     Pins(48)),
         Subsignal("wallclock_nanoseconds_in", Pins(30)),

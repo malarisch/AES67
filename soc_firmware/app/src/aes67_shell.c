@@ -340,9 +340,14 @@ static int cmd_aes67_nco(const struct shell *sh, size_t argc, char **argv)
 	ARG_UNUSED(argv);
 
 #ifndef CONFIG_AES67_PTP_SOFTWARE
-	shell_error(sh, "not available (hardware-PTP build)");
+	shell_error(sh, "not available (no software-PTP support in this build)");
 	return -ENOTSUP;
 #else
+	if (!fpga_hal_ptp_in_software()) {
+		shell_error(sh, "not available (gateware runs hardware PTP)");
+		return -ENOTSUP;
+	}
+
 	struct aes67_nco_status st;
 	char v[24];
 

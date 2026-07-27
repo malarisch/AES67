@@ -317,6 +317,27 @@ static int extract_stream_id_from_url(const char *url, uint8_t *stream_id_out)
 				return 0;
 			}
 		}
+
+		/* mDNS announces device-unique instance names in the form
+		 * "<device name> <stream name>" (bare stream names collide
+		 * between boards on the link) — accept that prefixed form by
+		 * matching the stream name as a space-separated suffix. */
+		size_t nlen = strlen(name);
+
+		for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
+			size_t sl;
+
+			if (!tx[i].active) {
+				continue;
+			}
+			sl = strlen(tx[i].name);
+			if (sl > 0 && sl < nlen &&
+			    name[nlen - sl - 1] == ' ' &&
+			    strcasecmp(name + (nlen - sl), tx[i].name) == 0) {
+				*stream_id_out = tx[i].stream_id;
+				return 0;
+			}
+		}
 		LOG_WRN("RTSP: by-name: no TX stream named \"%s\"", name);
 		return -ENOENT;
 	}

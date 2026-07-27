@@ -60,6 +60,7 @@
 #endif
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 #include "../drivers/eth_litex/eth_litex.h"
+#include <zephyr/net/ptp.h>  /* ptp_start() — application-managed stack start */
 #endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -169,6 +170,37 @@ static bool pending_ip_valid;
 
 static void ll_addr_from_mac(struct in_addr *out);
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+/* Start the Zephyr PTP stack exactly once, deferred to the FIRST node
+ * address (DHCP lease or link-local fallback). Started any earlier the
+ * stack cannot transmit ("src addr is unspecified" -> send failure ->
+ * port FAULT -> re-init), which showed up as the BMC role flapping
+ * FOLLOWER<->LISTENING once a second until an address existed. Runs on
+ * the ipcfg thread via apply_node_ip(). */
+static void ptp_sw_start_once(void)
+{
+	static bool ptp_started;
+	int ret;
+
+	if (ptp_started || !fpga_hal_ptp_in_software()) {
+		return;
+	}
+
+	ret = ptp_start();
+	if (ret < 0) {
+		boot_fatal("E  PTP", "the software PTP stack did not start — "
+			   "the node can neither follow nor be a grandmaster",
+			   ret);
+	}
+
+	/* Push the stored PTP config (priorities, clock quality, log
+	 * intervals) — the stack comes up with its Kconfig defaults. */
+	ptp_ctrl_apply_config();
+	ptp_started = true;
+	LOG_INF("PTP: software stack started");
+}
+#endif /* CONFIG_AES67_PTP_SOFTWARE */
+
 /* Hand a freshly obtained address to everything that needs to know about it.
  * Callable repeatedly — the switch from link-local to a DHCP lease (or to a
  * new lease) just runs it again with the new address. */
@@ -194,6 +226,11 @@ static void apply_node_ip(const struct in_addr *addr, bool link_local)
 	ui_display_set_ip(addr);
 	fpga_poll_notify_ip_valid(addr);
 
+#ifdef CONFIG_AES67_PTP_SOFTWARE
+	/* Software PTP starts with the first address (no-op afterwards and
+	 * in hardware-PTP mode). */
+	ptp_sw_start_once();
+#endif
 	ptp_bmc_notify_ip_ready();
 
 #ifdef CONFIG_DISPLAY_CTRL
@@ -465,6 +502,13 @@ static void fpga_reconfigure(void *user_data)
 		if (g_ip_valid && fpga_write_ip_address(&g_my_ip) < 0) {
 			LOG_ERR("FPGA recovery: IP write failed");
 		}
+	}
+
+	/* The bitstream (and with it the static build configuration) may have
+	 * been re-uploaded — refresh the cache before anything consults it. */
+	if (fpga_hal_syscfg_load() < 0) {
+		LOG_ERR("FPGA recovery: system_cfg re-read failed — keeping "
+			"the previous configuration");
 	}
 
 	/* A reset FPGA comes back with every domain held (reset CSR = all-ones);
@@ -992,6 +1036,26 @@ int main(void)
 		}
 	}
 
+	/* ---- Read the FPGA's static build configuration ----
+	 * The system_cfg CSRs report what the loaded bitstream was built with
+	 * (hardware vs. software PTP, metering, stream limits). Everything
+	 * downstream — the Ethernet drivers' PTP capability and RX-trailer
+	 * parsing, the ptp_ctrl dispatch, which PTP service gets started —
+	 * keys off this cache, so it MUST be loaded before the reset domains
+	 * are released and the first frame can arrive. */
+#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
+	{
+		int cfg_ret = fpga_hal_syscfg_load();
+
+		if (cfg_ret < 0) {
+			boot_fatal("E  CFG",
+				   "the FPGA system_cfg register could not be "
+				   "read — cannot tell which PTP mode the "
+				   "gateware was built for", cfg_ret);
+		}
+	}
+#endif
+
 #if DT_NODE_EXISTS(DT_NODELABEL(i2c2))
 	/* ---- Analog I/O Card Autodetect (depends on the FPGA) ----
 	 * The AD/DA cards are clocked by the FPGA, so they stay silent on I2C
@@ -1175,34 +1239,60 @@ int main(void)
 	 * before ll_work adopts the link-local address. */
 	ll_arm(K_MSEC(AES67_DHCP_GRACE_MS));
 
-	/* ---- Start PTP ---- */
-	/* All reset domains (PTP + audio included) were already released together
-	 * before the link came up; see the note there on why staging is unsafe. */
+	/* ---- Start PTP ----
+	 * Both PTP services are compiled in; which one runs is decided here,
+	 * from the gateware's static build configuration (system_cfg CSRs,
+	 * loaded above). All reset domains (PTP + audio included) were already
+	 * released together before the link came up; see the note there on why
+	 * staging is unsafe. */
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-	/* Software PTP: Zephyr's IEEE 1588 stack (CONFIG_PTP) auto-starts via
-	 * SYS_INIT and disciplines the FPGA wallclock through the aes67 PHC; the
-	 * FPGA hardware BMC is not used. Push the stored PTP config (priorities,
-	 * clock quality, log intervals) into the stack — it booted with its
-	 * Kconfig defaults. */
-	LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining FPGA wallclock");
-	/* A warm FPGA (JTAG upload skipped, firmware rebooted) still carries
-	 * the previous run's rate correction — worst case the ±524287 ppb
-	 * clamp. Start from a neutral frequency; the servo takes over on the
-	 * first Sync, and if we end up leader the clock free-runs clean. */
-	aes67_ptp_rate_reset();
-	ptp_ctrl_apply_config();
-	/* ptp_bmc is not running: the fpga_poll thread samples the Zephyr
-	 * stack's role and fires the same display handler on changes. */
-	fpga_poll_register_role_change_cb(on_bmc_change);
-#else
-	ptp_bmc_register_change_cb(on_bmc_change);
-	int bmc_ret = ptp_bmc_start(iface);
+	if (fpga_hal_ptp_in_software()) {
+		/* Software PTP: the gateware has no hardware BMC/servo; Zephyr's
+		 * IEEE 1588 stack disciplines the FPGA wallclock through the
+		 * aes67 PHC. The stack no longer auto-starts via SYS_INIT
+		 * (CONFIG_PTP_APP_MANAGED_START) — start it now that the FPGA
+		 * (and on external MCUs its configuration) is up, then push the
+		 * stored PTP config (priorities, clock quality, log intervals):
+		 * it comes up with its Kconfig defaults.
+		 *
+		 * NOT started here: at this point DHCP has only just begun and
+		 * the interface has no address yet. A stack started now opens
+		 * its sockets fine but every Delay_Req transmit fails ("src
+		 * addr is unspecified"), faulting the port — observed as the
+		 * BMC role flapping FOLLOWER<->LISTENING once a second for the
+		 * whole 30 s link-local grace period. The actual ptp_start()
+		 * is chained to the first node address in apply_node_ip(). */
+		LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining "
+			"FPGA wallclock — starting with the first node address");
+		/* A warm FPGA (JTAG upload skipped, firmware rebooted) still
+		 * carries the previous run's rate correction — worst case the
+		 * ±524287 ppb clamp. Start from a neutral frequency now, so the
+		 * wallclock free-runs clean while we wait for an address; the
+		 * servo takes over on its first Sync. */
+		aes67_ptp_rate_reset();
+		/* ptp_bmc is not running: the fpga_poll thread samples the
+		 * Zephyr stack's role and fires the same display handler on
+		 * changes. (Safe before ptp_start(): the stack's static
+		 * datasets read as an empty ports list -> LISTENING.) */
+		fpga_poll_register_role_change_cb(on_bmc_change);
+	} else
+#endif /* CONFIG_AES67_PTP_SOFTWARE */
+	{
+		/* Hardware PTP: the FPGA runs BMC + servo; ptp_bmc feeds it
+		 * announce data and monitors the BMA outcome. The Zephyr PTP
+		 * stack (if compiled in) is never started — no thread, no
+		 * sockets, no traffic. */
+		LOG_INF("PTP: FPGA hardware engine (BMC + servo)");
+		ptp_bmc_register_change_cb(on_bmc_change);
 
-	if (bmc_ret < 0) {
-		boot_fatal("E  PTP", "the PTP BMC did not start — the node can "
-			   "neither follow nor be a grandmaster", bmc_ret);
+		int bmc_ret = ptp_bmc_start(iface);
+
+		if (bmc_ret < 0) {
+			boot_fatal("E  PTP", "the PTP BMC did not start — the "
+				   "node can neither follow nor be a "
+				   "grandmaster", bmc_ret);
+		}
 	}
-#endif
 
 	/* ---- Start AES67 connection management + SAP announcements ---- */
 	int conn_ret = aes67_conn_init(iface);

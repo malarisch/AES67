@@ -140,6 +140,7 @@ component litex_soc_aes67_bridge
     aes67_ctrl_servo_mon_sample_count : in std_logic_vector    (15 downto 0);
     aes67_ctrl_servo_unlock_threshold_ns : out std_logic_vector    (31 downto 0);
     aes67_ctrl_servo_warmup_samples : out std_logic_vector     (7 downto 0);
+    aes67_ctrl_system_cfg : in std_logic_vector    (71 downto 0);
     aes67_ctrl_tx_meter_clip : in std_logic_vector    (15 downto 0);
     aes67_ctrl_tx_meter_signal : in std_logic_vector    (15 downto 0);
     aes67_ctrl_tx_reset : out std_logic;
@@ -294,6 +295,11 @@ signal mac_resetn : STD_LOGIC;
 
 signal mac_reset : STD_LOGIC;
 
+-- Static build configuration, exposed read-only to the control host so the
+-- firmware can select its services (HW vs SW PTP, metering, stream limits)
+-- at runtime instead of at compile time.
+constant c_system_cfg_vector : std_logic_vector(71 downto 0) := system_cfg_to_vector(syscfg);
+
 signal wallclock_signals : t_wallclock_signals;
 signal timestamps : t_eth_timestamps;
 signal aes67_ctrl_wallclock_ppb_reg : STD_LOGIC_VECTOR(19 downto 0);
@@ -356,6 +362,7 @@ begin
         aes67_ctrl_servo_mon_sample_count => servo_mon_sample_count_o,
         aes67_ctrl_servo_unlock_threshold_ns => servo_unlock_threshold_ns_i,
         aes67_ctrl_servo_warmup_samples => servo_warmup_samples_i,
+        aes67_ctrl_system_cfg => c_system_cfg_vector,
         aes67_ctrl_tx_meter_clip => (others => '0'),
         aes67_ctrl_tx_meter_signal => (others => '0'),
         aes67_ctrl_wallclock_configured => wallclock_configured_o,

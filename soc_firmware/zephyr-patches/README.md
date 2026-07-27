@@ -134,6 +134,14 @@ After a fresh clone / `west update`, re-apply with:
   the 16-sample streak keep the 0012 self-retrigger loop impossible —
   candidate for upstream submission.
 
+- 0016 ptp: CONFIG_PTP_APP_MANAGED_START — suppress the SYS_INIT start of
+  the PTP stack and expose ptp_start() instead. The firmware ships ONE
+  binary for both PTP gateware modes, reads the FPGA's system_cfg CSRs at
+  boot (on external MCUs the FPGA is configured long after SYS_INIT) and
+  only starts the software stack when the gateware says PTP_IN_SOFTWARE;
+  otherwise no PTP thread/sockets/traffic exist and the FPGA's hardware
+  PTP engine owns the wire — candidate for upstream submission.
+
 Dropped since the v4.2.0 era (now upstream): uptime-based message aging
 (3ccd07b2), servo epoch reset after clock step, configurable PI servo gains
 (9803584), ingress-timestamp validity guards. (The phase-jump step came back

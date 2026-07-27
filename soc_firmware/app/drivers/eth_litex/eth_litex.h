@@ -73,14 +73,22 @@ extern "C" {
 /* Maximum Ethernet frame size (without FCS): 6 dst + 6 src + 4 VLAN + 2 EtherType + 1500 payload */
 #define ETH_LITEX_MAX_PKT_SIZE 1518
 
-/* In --ptp-in-software gateware the buffer bridge appends a 5-byte RX
+/* In PTP_IN_SOFTWARE gateware the buffer bridge appends a 5-byte RX
  * hardware-timestamp trailer ([seconds(1)][nanoseconds(4, little-endian)])
- * after the frame (which still carries its FCS). */
-#ifdef CONFIG_AES67_PTP_SOFTWARE
-#define ETH_LITEX_RX_TRAILER_LEN 5
-#else
-#define ETH_LITEX_RX_TRAILER_LEN 0
-#endif
+ * after the frame (which still carries its FCS).  Whether the trailer is
+ * present is a property of the loaded bitstream, reported through the
+ * system_cfg CSRs — use eth_litex_rx_trailer_len() at runtime; the MAX
+ * constant only sizes buffers. */
+#define ETH_LITEX_RX_TRAILER_MAX 5
+
+/* From the FPGA HAL's system_cfg cache (fpga_hal.h) — declared here instead
+ * of pulling the whole HAL header into every driver translation unit. */
+extern bool fpga_hal_ptp_in_software(void);
+
+static inline uint16_t eth_litex_rx_trailer_len(void)
+{
+	return fpga_hal_ptp_in_software() ? ETH_LITEX_RX_TRAILER_MAX : 0;
+}
 
 /* TX-timestamp latch poll budget: latch-change detection after tx_request
  * (50 µs per iteration → ~6 ms, covers the MAC delaying the MCU frame
@@ -161,6 +169,10 @@ bool eth_litex_read_ppb_counts(const struct device *dev,
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 #include <zephyr/net/ptp_time.h>
+
+/* NOTE: with runtime PTP-mode dispatch this block is compiled into every
+ * build that CAN run software PTP; the functions only have an effect when
+ * the gateware reports PTP_IN_SOFTWARE (fpga_hal_ptp_in_software()). */
 
 /** The aes67 PTP hardware clock (FPGA wallclock) device, for get_ptp_clock. */
 const struct device *aes67_ptp_clock_device(void);

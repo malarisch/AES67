@@ -111,6 +111,7 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
       # ptp_ctrl's software backend reads the Zephyr PTP stack's internal
       # datasets — the public zephyr/net/ptp.h exposes no status/config API.
       target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/lib/ptp)
+      target_sources(app PRIVATE src/ptp_ctrl_sw.c)
     endif()
     zephyr_linker_section(NAME http_resource_desc_aes67_http
                           KVMA RAM_REGION GROUP RODATA_REGION)
@@ -147,6 +148,7 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
       src/ui_display.c
       src/ptp_bmc.c
       src/ptp_ctrl.c
+      src/ptp_ctrl_hw.c
       src/aes67_conn.c
       src/sap_sdp.c
       src/aes67_shell.c

@@ -4,13 +4,14 @@
  *
  * The endpoint runs PTP either in the FPGA (hardware BMC + servo, monitored
  * and configured through ptp_bmc.c / fpga_hal) or in software (Zephyr's
- * IEEE 1588 stack, CONFIG_AES67_PTP_SOFTWARE, disciplining the FPGA wallclock
- * through the aes67 PHC). The web UI and REST API must not care which one is
- * active: this module maps status reads and configuration writes onto
- * whichever stack is running.
+ * IEEE 1588 stack disciplining the FPGA wallclock through the aes67 PHC).
+ * The web UI and REST API must not care which one is active: this module
+ * maps status reads and configuration writes onto whichever stack is
+ * running.
  *
- * Backend selection is a compile-time decision (CONFIG_AES67_PTP_SOFTWARE),
- * matching the rest of the firmware.
+ * Both backends are compiled in; the active one is selected at boot from
+ * the gateware's static build configuration (system_cfg CSRs — see
+ * fpga_hal_ptp_in_software()), not at compile time.
  */
 
 #ifndef PTP_CTRL_H_

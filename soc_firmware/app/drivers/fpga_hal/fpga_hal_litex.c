@@ -244,6 +244,12 @@ uint32_t fpga_hal_read_status(void)
 	uint32_t speed = (raw & AES67_STATUS_ETH_SPEED_MASK) >> AES67_STATUS_ETH_SPEED_SHIFT;
 	hal |= (speed << FPGA_HAL_ETH_SPEED_SHIFT);
 
+	/* RX stream-underrun diagnostics (CSR layout matches the HAL layout) */
+	hal |= ((raw & AES67_STATUS_RX_UNDERRUN_MASK) >> AES67_STATUS_RX_UNDERRUN_SHIFT)
+	       << FPGA_HAL_RX_UNDERRUN_SHIFT;
+	hal |= ((raw & AES67_STATUS_RX_MUTE_MASK) >> AES67_STATUS_RX_MUTE_SHIFT)
+	       << FPGA_HAL_RX_MUTE_SHIFT;
+
 	/* PPB valid is in a separate register on LiteX */
 	uint32_t ppb_wc, ppb_pll;
 	if (eth_litex_read_ppb_counts(dev, &ppb_wc, &ppb_pll)) {

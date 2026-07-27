@@ -1,0 +1,103 @@
+From 9e9be977ca109230047119456c2d8ec8252f24c0 Mon Sep 17 00:00:00 2001
+From: Mala <mala.wolff00@gmail.com>
+Date: Mon, 27 Jul 2026 15:48:23 +0200
+Subject: [PATCH 16/16] net: ptp: optional application-managed stack start
+
+Add CONFIG_PTP_APP_MANAGED_START: suppress the automatic SYS_INIT start
+of the PTP stack and expose ptp_start() instead, so an application can
+decide at runtime whether the software PTP stack should own the clock.
+
+The AES67 endpoint firmware ships one binary for gateware built with
+either a hardware PTP engine or PTP-in-software; it reads the FPGA's
+static build configuration register at boot (after the FPGA is
+configured, which on external-MCU setups happens well after SYS_INIT)
+and only then starts the software stack. With the SYS_INIT start the
+stack would either bind before the hardware capability is known or
+generate PTP traffic that fights the FPGA's own PTP engine.
+---
+ include/zephyr/net/ptp.h   | 14 ++++++++++++++
+ subsys/net/lib/ptp/Kconfig | 11 +++++++++++
+ subsys/net/lib/ptp/ptp.c   | 19 +++++++++++++++++++
+ 3 files changed, 44 insertions(+)
+
+diff --git a/include/zephyr/net/ptp.h b/include/zephyr/net/ptp.h
+index f61f32d9a7..c2d82b6150 100644
+--- a/include/zephyr/net/ptp.h
++++ b/include/zephyr/net/ptp.h
+@@ -34,6 +34,20 @@ extern "C" {
+ 
+ #define PTP_VERSION (PTP_MINOR_VERSION << 4 | PTP_MAJOR_VERSION) /**< PTP version IEEE-1588:2019 */
+ 
++#ifdef CONFIG_PTP_APP_MANAGED_START
++/**
++ * @brief Start the PTP stack.
++ *
++ * Only available with @kconfig{CONFIG_PTP_APP_MANAGED_START}, which
++ * suppresses the automatic SYS_INIT start. Initializes the PTP clock,
++ * binds ports to the Ethernet interfaces and starts the PTP thread.
++ *
++ * @return 0 on success, -EALREADY if already started, -ENODEV if no
++ *         PTP hardware clock is available on the interface.
++ */
++int ptp_start(void);
++#endif
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/subsys/net/lib/ptp/Kconfig b/subsys/net/lib/ptp/Kconfig
+index fa0ed84205..a04d99e464 100644
+--- a/subsys/net/lib/ptp/Kconfig
++++ b/subsys/net/lib/ptp/Kconfig
+@@ -43,6 +43,17 @@ config PTP_INIT_PRIO
+ 	int "Startup priority for the PTP stack init"
+ 	default 96
+ 
++config PTP_APP_MANAGED_START
++	bool "Application-managed PTP stack start"
++	help
++	  Do not start the PTP stack automatically via SYS_INIT. The
++	  application decides at runtime whether (and when) to bring the
++	  stack up by calling ptp_start() — e.g. after probing hardware
++	  capabilities that determine whether a hardware PTP engine or
++	  this software stack should own the clock. Until ptp_start() is
++	  called no PTP thread runs, no sockets are opened and no PTP
++	  traffic is generated.
++
+ config PTP_SERVICE_THREAD_PRIO
+ 	int "Priority of the PTP service thread"
+ 	default NUM_PREEMPT_PRIORITIES
+diff --git a/subsys/net/lib/ptp/ptp.c b/subsys/net/lib/ptp/ptp.c
+index d510e91558..51c9990824 100644
+--- a/subsys/net/lib/ptp/ptp.c
++++ b/subsys/net/lib/ptp/ptp.c
+@@ -123,7 +123,26 @@ static int ptp_init(void)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_PTP_APP_MANAGED_START
++int ptp_start(void)
++{
++	static bool started;
++	int ret;
++
++	if (started) {
++		return -EALREADY;
++	}
++
++	ret = ptp_init();
++	if (ret == 0) {
++		started = true;
++	}
++
++	return ret;
++}
++#else
+ SYS_INIT(ptp_init, APPLICATION, CONFIG_PTP_INIT_PRIO);
++#endif
+ 
+ static enum net_verdict ptp_recv(struct net_if *iface, uint16_t ptype,
+ 				 struct net_pkt *pkt)
+-- 
+2.53.0
+

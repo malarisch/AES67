@@ -111,12 +111,21 @@ static void *local_memmem(const void *haystack, size_t haystacklen,
 LOG_MODULE_REGISTER(webserver, LOG_LEVEL_INF);
 
 /* ================================================================
- * HTTP service definition — port 80, max 2 concurrent clients
+ * HTTP service definition — port 80.
+ *
+ * Concurrency follows CONFIG_HTTP_SERVER_MAX_CLIENTS (the size of the
+ * server's client table). Browsers park up to 6 idle keep-alive
+ * connections, and each one occupies a client slot until the 30 s
+ * inactivity timeout; once all slots are taken the server stops polling
+ * the listen socket entirely — new connections then hang in the backlog
+ * or get reset. With the old hard-coded 4 that showed up as multi-second
+ * unresponsiveness and connection resets during normal dashboard use.
  * ================================================================ */
 
 static uint16_t http_port = 80;
 
-HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port, 4, 10, NULL, NULL, NULL);
+HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port,
+		    CONFIG_HTTP_SERVER_MAX_CLIENTS, 10, NULL, NULL, NULL);
 
 /* ================================================================
  * JSON response buffer (shared, one request at a time since
@@ -229,22 +238,28 @@ static int read_fpga_status(struct ui_fpga_metrics *m)
 	m->speed_code = (status & FPGA_HAL_ETH_SPEED_MASK) >>
 			FPGA_HAL_ETH_SPEED_SHIFT;
 
+	m->rx_underrun = (status & FPGA_HAL_RX_UNDERRUN_MASK) >>
+			 FPGA_HAL_RX_UNDERRUN_SHIFT;
+	m->rx_mute     = (status & FPGA_HAL_RX_MUTE_MASK) >>
+			 FPGA_HAL_RX_MUTE_SHIFT;
+
 	m->path_delay_ns = fpga_hal_read_path_delay();
 	m->leader_offset_ns = fpga_hal_read_ptp_offset();
 
-#ifdef CONFIG_AES67_PTP_SOFTWARE
-	/* With PTP in software the FPGA servo readouts (lock/offset/path delay
-	 * CSRs) read constant 0; source these from the Zephyr PTP stack instead
-	 * so the dashboard (summary, FPGA tab, offset chart) shows the same
+	/* With PTP in software (runtime-detected from the gateware's
+	 * system_cfg) the FPGA servo readouts (lock/offset/path delay CSRs)
+	 * read constant 0; source these from the Zephyr PTP stack instead so
+	 * the dashboard (summary, FPGA tab, offset chart) shows the same
 	 * picture in both PTP modes. */
-	struct ptp_ctrl_status pst;
+	if (fpga_hal_ptp_in_software()) {
+		struct ptp_ctrl_status pst;
 
-	ptp_ctrl_get_status(&pst);
-	m->wc_locked        = pst.locked;
-	m->path_delay_ns    = pst.path_delay_ns;
-	m->leader_offset_ns = pst.offset_ns;
-	m->ptp_leader_lost  = false;
-#endif
+		ptp_ctrl_get_status(&pst);
+		m->wc_locked        = pst.locked;
+		m->path_delay_ns    = pst.path_delay_ns;
+		m->leader_offset_ns = pst.offset_ns;
+		m->ptp_leader_lost  = false;
+	}
 
 	/* Read raw counters and calculate PPB */
 	uint32_t count_wc = 0, count_pll = 0;
@@ -286,14 +301,37 @@ static int build_status_network(char *buf, size_t sz)
 		}
 
 		struct net_if_ipv4 *ipv4 = iface->config.ip.ipv4;
+		const struct net_if_addr_ipv4 *best = NULL;
 
-		if (ipv4 && ipv4->unicast[0].ipv4.is_used) {
+		/* The interface carries up to NET_IF_UNICAST_IPV4_ADDR_COUNT
+		 * (2) addresses, and slot order is arbitrary: during the
+		 * link-local -> DHCP switchover both exist, and after the LL
+		 * address is removed the lease may well live in slot 1 while
+		 * slot 0 is empty. Reading unicast[0] blindly therefore
+		 * reported 0.0.0.0 / the stale LL address depending on slot
+		 * layout. Scan all slots and prefer a non-link-local address —
+		 * that is the node identity main.c announces everywhere else. */
+		if (ipv4) {
+			ARRAY_FOR_EACH(ipv4->unicast, slot) {
+				const struct net_if_addr_ipv4 *a =
+					&ipv4->unicast[slot];
+
+				if (!a->ipv4.is_used) {
+					continue;
+				}
+				if (best == NULL ||
+				    net_ipv4_is_ll_addr(&best->ipv4.address.in_addr)) {
+					best = a;
+				}
+			}
+		}
+
+		if (best != NULL) {
 			format_ip(tmp, sizeof(tmp),
-				  &ipv4->unicast[0].ipv4.address.in_addr);
+				  &best->ipv4.address.in_addr);
 			p = json_add_str(buf, sz, p, "ip", tmp);
 
-			format_ip(tmp, sizeof(tmp),
-				  &ipv4->unicast[0].netmask);
+			format_ip(tmp, sizeof(tmp), &best->netmask);
 			p = json_add_str(buf, sz, p, "netmask", tmp);
 
 			format_ip(tmp, sizeof(tmp), &ipv4->gw);
@@ -413,6 +451,8 @@ static int build_status_fpga(char *buf, size_t sz)
 		p = json_add_int(buf, sz, p, "ppb_offset", m.ppb_offset);
 
 		p = json_add_str(buf, sz, p, "phy_speed", eth_speed_to_text(m.speed_code));
+		p = json_add_int(buf, sz, p, "rx_underrun", m.rx_underrun);
+		p = json_add_int(buf, sz, p, "rx_mute", m.rx_mute);
 	} else {
 		p = json_add_str(buf, sz, p, "error",
 				  "FPGA not available");
@@ -583,6 +623,10 @@ static int build_status_streams(char *buf, size_t sz)
 
 	/* RX streams */
 	const struct aes67_rx_stream *rxs = aes67_conn_get_rx_streams();
+	/* Per-stream underrun flags from the FPGA status CSR (streams 3..0;
+	 * the FPGA slot index equals the table index). */
+	uint32_t rx_underrun = (fpga_hal_read_status() & FPGA_HAL_RX_UNDERRUN_MASK) >>
+			       FPGA_HAL_RX_UNDERRUN_SHIFT;
 
 	p = json_add_key(buf, sz, p, "rx_streams");
 	p = json_start_array(buf, sz, p);
@@ -602,6 +646,8 @@ static int build_status_streams(char *buf, size_t sz)
 				   rxs[i].output_delay);
 		p = json_add_uint(buf, sz, p, "samples_per_channel",
 				   rxs[i].samples_per_channel);
+		p = json_add_bool(buf, sz, p, "underrun",
+				   i < 4 && ((rx_underrun >> i) & 1U));
 
 		p = json_add_key(buf, sz, p, "ch_map");
 		p = json_start_array(buf, sz, p);
@@ -1772,15 +1818,6 @@ static int api_handler(struct http_client_ctx *client,
 	const char *url = (const char *)client->url_buffer;
 	enum http_method method = client->method;
 
-#ifdef CONFIG_SPI_FLASH_LITESPI
-	/* Firmware update needs streaming (body too large to buffer).
-	 * Delegate immediately, including abort notifications. */
-	if (strcmp(url, "/api/fw_update") == 0) {
-		return fw_update_http_handler(client, status,
-					      request_ctx, response_ctx);
-	}
-#endif
-
 	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
 	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
 		/* Terminal notifications — no response may be produced, and
@@ -2321,6 +2358,48 @@ static struct http_resource_detail_dynamic api_resource_detail = {
 
 HTTP_RESOURCE_DEFINE(api_resource, aes67_http, "/api/*",
 		     &api_resource_detail);
+
+#ifdef CONFIG_SPI_FLASH_LITESPI
+/* ================================================================
+ * Firmware update — its OWN resource, deliberately not part of the
+ * "/api" wildcard above. Zephyr serialises each dynamic resource via a
+ * per-resource "holder": while the (minutes-long, streaming) firmware
+ * POST is in flight it holds its resource, and every other request on
+ * the SAME resource is answered 409 Conflict. With fw_update inside
+ * the API wildcard, the dashboard auto-refresh (or a retry after a
+ * dropped upload, until the dead client passes the 30 s inactivity
+ * reap) collided with the upload — observed as spurious 409s on
+ * /api/fw_update. Exact-match resources take precedence over
+ * wildcards, so this carve-out wins regardless of definition order.
+ * ================================================================ */
+static int fw_update_resource_handler(struct http_client_ctx *client,
+				      enum http_transaction_status status,
+				      const struct http_request_ctx *request_ctx,
+				      struct http_response_ctx *response_ctx,
+				      void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	/* Streaming handler (body far too large to buffer), including
+	 * abort notifications. */
+	return fw_update_http_handler(client, status, request_ctx,
+				      response_ctx);
+}
+
+static struct http_resource_detail_dynamic fw_update_resource_detail = {
+	.common = {
+		.type = HTTP_RESOURCE_TYPE_DYNAMIC,
+		.bitmask_of_supported_http_methods =
+			BIT(HTTP_GET) | BIT(HTTP_POST) | BIT(HTTP_OPTIONS),
+		.content_type = "application/json",
+	},
+	.cb = fw_update_resource_handler,
+	.user_data = NULL,
+};
+
+HTTP_RESOURCE_DEFINE(fw_update_resource, aes67_http, "/api/fw_update",
+		     &fw_update_resource_detail);
+#endif /* CONFIG_SPI_FLASH_LITESPI */
 
 /* ================================================================
  * Static web UI — served as gzipped blob from /

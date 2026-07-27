@@ -324,7 +324,7 @@ ethtool -T eth0      # shows HW TX/RX + a PHC index
 ptp4l -H -i eth0 -m  # hardware timestamping, disciplines the FPGA wallclock
 ```
 
-`aes67_regs.h` is generated from the LiteX `csr.csv` (`make regs CSV=…`) so register addresses track the gateware. The same software-PTP idea also runs on the **integrated softcore**: build the Zephyr firmware with the [ptpsw.conf](soc_firmware/app/ptpsw.conf) overlay (`CONFIG_PTP` + the [ptp_clock_aes67.c](soc_firmware/app/drivers/eth_litex/ptp_clock_aes67.c) PHC driver) to discipline the wallclock from Zephyr's IEEE 1588 stack instead of the FPGA hardware PTP.
+`aes67_regs.h` is generated from the LiteX `csr.csv` (`make regs CSV=…`) so register addresses track the gateware. The same software-PTP idea also runs on the **integrated softcore**: the Zephyr firmware always contains both PTP services (`CONFIG_PTP` + the [ptp_clock_aes67.c](soc_firmware/app/drivers/eth_litex/ptp_clock_aes67.c) PHC driver alongside the FPGA-BMC path) and picks one at boot from the gateware's static build configuration (`system_cfg` CSRs) — `PTP_IN_SOFTWARE` bitstreams get the Zephyr IEEE 1588 stack, hardware-PTP bitstreams get the FPGA engine.
 
 ---
 
@@ -406,10 +406,8 @@ cd soc_firmware/app
 source ../.venv/bin/activate
 west build -b litex_vexriscv_cyclone10 -p           # single-chip (HyperRAM)
 west build -b litex_vexriscv_cyc1000 -p             # single-chip (SDRAM)
-
-# software-PTP variant (host/Zephyr disciplines the wallclock):
-west build . -b litex_vexriscv_cyc1000 -d build-ptpsw -- -DEXTRA_CONF_FILE=ptpsw.conf
 ```
+One image serves both PTP modes: the firmware reads the gateware's `system_cfg` CSRs at boot and starts either the FPGA hardware PTP path or Zephyr's IEEE 1588 stack (software PTP) accordingly.
 LiteX builds produce a `.fbi` flash image (binary + length + CRC-32) for loading via the LiteX BIOS.
 
 ### Host control plane (Rust)

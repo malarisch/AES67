@@ -68,7 +68,7 @@ void fpga_poll_register_role_change_cb(ptp_bmc_change_cb_t cb)
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE
-/* ---- Leader rate relax ----
+/* ---- Leader rate relax (software-PTP gateware only) ----
  * When this board wins the BMCA after the grandmaster vanished, the
  * wallclock still runs at the follower-era rate correction — worst case
  * pinned at ±524287 ppb, which downstream followers (same ±524 ppm
@@ -83,11 +83,17 @@ static void leader_ppb_relax_tick(void)
 {
 	static struct ptp_ctrl_status relax_st;
 
+	if (!fpga_hal_ptp_in_software()) {
+		/* Hardware-PTP gateware: the FPGA servo owns the rate. */
+		return;
+	}
+
 	ptp_ctrl_get_status(&relax_st);
 	if (relax_st.role != PTP_CTRL_ROLE_FOLLOWER) {
 		aes67_ptp_rate_relax_step(250);
 	}
 }
+#endif
 
 static enum ptp_bmc_role role_from_ctrl(enum ptp_ctrl_role role)
 {
@@ -100,7 +106,6 @@ static enum ptp_bmc_role role_from_ctrl(enum ptp_ctrl_role role)
 		return PTP_ROLE_LISTENING;
 	}
 }
-#endif
 
 /**
  * @brief Background thread that continuously measures the PPB offset
@@ -135,19 +140,18 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			poll_count = 0;
 
 			disp_metrics.ppb_valid = !!(status & FPGA_HAL_CLK_PPB_VALID);
-#ifdef CONFIG_AES67_PTP_SOFTWARE
-			/* SW PTP: the status word's wc_locked bit comes from the
-			 * FPGA hardware servo, which the SW-PTP gateware does not
-			 * build (the bit is stuck at 0). Lock state lives in the
-			 * Zephyr stack. */
+
+			/* Mode-invariant PTP snapshot: ptp_ctrl dispatches to the
+			 * FPGA servo CSRs (hardware PTP) or the Zephyr stack
+			 * (software PTP) based on the gateware's system_cfg. The
+			 * status word's wc_locked bit is only driven by the
+			 * hardware servo, so it cannot be used directly; the
+			 * hardware backend folds it into .locked instead. */
 			struct ptp_ctrl_status ptp_st;
 
 			ptp_ctrl_get_status(&ptp_st);
 			disp_metrics.wc_locked = ptp_st.role == PTP_CTRL_ROLE_LEADER ||
 						 ptp_st.locked;
-#else
-			disp_metrics.wc_locked = !!(status & FPGA_HAL_CLK_WC_LOCKED);
-#endif
 			disp_metrics.wc_phasejump = !!(status & FPGA_HAL_CLK_WC_PHASEJUMP);
 			disp_metrics.wc_configured = !!(status & FPGA_HAL_CLK_WC_CONFIGURED);
 			disp_metrics.ptp_leader_lost = !!(status & FPGA_HAL_CLK_PTP_LEADER_LOST);
@@ -174,13 +178,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					if (link_down_handled) {
 						display_ctrl_show_status("  DHCP");
 					} else if (disp_metrics.wc_locked) {
-#ifdef CONFIG_AES67_PTP_SOFTWARE
 						enum ptp_bmc_role role =
 							role_from_ctrl(ptp_st.role);
-#else
-						enum ptp_bmc_role role =
-							ptp_bmc_get_role();
-#endif
 						display_ctrl_start_status_cycle(
 							role == PTP_ROLE_LEADER ?
 							"LEADER" : "FOLLOW",
@@ -243,12 +242,8 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 						display_ctrl_start_metering();
 						display_ctrl_stop_status_cycle();
 
-#ifdef CONFIG_AES67_PTP_SOFTWARE
 						enum ptp_bmc_role role =
 							role_from_ctrl(ptp_st.role);
-#else
-						enum ptp_bmc_role role = ptp_bmc_get_role();
-#endif
 						const char *role_str =
 							(role == PTP_ROLE_LEADER) ? "LEADER" : "FOLLOW";
 						display_ctrl_start_status_cycle(
@@ -279,11 +274,11 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				}
 			}
 
-#ifdef CONFIG_AES67_PTP_SOFTWARE
-			/* ptp_bmc is not running in SW mode: detect role changes
-			 * here and feed them to the same handler main.c registers
-			 * with ptp_bmc in hardware mode (role LEDs, status cycle). */
-			{
+			/* ptp_bmc is not running with software PTP: detect role
+			 * changes here and feed them to the same handler main.c
+			 * registers with ptp_bmc in hardware mode (role LEDs,
+			 * status cycle). */
+			if (fpga_hal_ptp_in_software()) {
 				static enum ptp_bmc_role prev_role = PTP_ROLE_LISTENING;
 				enum ptp_bmc_role cur_role = role_from_ctrl(ptp_st.role);
 
@@ -293,17 +288,11 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				}
 			}
 
-			/* Path delay / leader offset: the HW PTP CSRs read 0 in
-			 * SW-PTP gateware; take them from the Zephyr stack. */
+			/* Path delay / leader offset — mode-invariant via ptp_ctrl
+			 * (FPGA CSRs in hardware mode, Zephyr stack in software
+			 * mode; the HW CSRs read 0 in SW-PTP gateware). */
 			disp_metrics.path_delay_ns = ptp_st.path_delay_ns;
 			disp_metrics.leader_offset_ns = ptp_st.offset_ns;
-#else
-			/* Path delay */
-			disp_metrics.path_delay_ns = fpga_hal_read_path_delay();
-
-			/* Leader offset */
-			disp_metrics.leader_offset_ns = fpga_hal_read_ptp_offset();
-#endif
 
 			/* PPB offset */
 			int32_t ppb_current;

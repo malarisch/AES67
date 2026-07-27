@@ -61,6 +61,9 @@
 #define AES67_REG_AES67_CSR_NCO_PPB_ADJ_LO                 0x900100d8u
 #define AES67_REG_AES67_CSR_NCO_PPB_ADJ_HI                 0x900100dcu
 #define AES67_REG_AES67_CSR_NCO_PPB_ADJ_VALID              0x900100e0u
+#define AES67_REG_AES67_CSR_SYSTEM_CFG_FLAGS               0x900100e4u
+#define AES67_REG_AES67_CSR_SYSTEM_CFG_RX                  0x900100e8u
+#define AES67_REG_AES67_CSR_SYSTEM_CFG_TX                  0x900100ecu
 #define AES67_REG_CTRL_RESET                               0x90010800u
 #define AES67_REG_CTRL_SCRATCH                             0x90010804u
 #define AES67_REG_CTRL_BUS_ERRORS                          0x90010808u

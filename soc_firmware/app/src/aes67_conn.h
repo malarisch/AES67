@@ -69,7 +69,13 @@ struct aes67_rx_stream {
 
 /* ---- Discovered foreign streams ---- */
 
-#define AES67_MAX_FOREIGN_STREAMS  8
+/* Sized generously: SAP and mDNS sightings of the SAME RTP flow are kept
+ * as separate entries (merged only in the web UI), so every real stream
+ * can occupy two slots — a single RAVENNA daemon with a handful of
+ * sessions plus a few of our own boards overflowed the previous 8-slot
+ * table, and overflowing means discoveries are silently dropped (~64 B
+ * per slot, so 32 costs ~2 KB). */
+#define AES67_MAX_FOREIGN_STREAMS  32
 #define AES67_FOREIGN_NAME_MAX     32
 
 /* Discovery transport a foreign-stream sighting came from (bitmask —

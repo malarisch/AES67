@@ -13,6 +13,9 @@
  *  Responder (§3.5.1 node services, §3.5.2 session advertisement):
  *    - A    <hostname>.local
  *    - PTR/SRV/TXT for <node>._http._tcp.local and <node>._rtsp._tcp.local
+ *      (both the vendor node ID and the user-defined device name)
+ *    - PTR  _ravenna._sub._{http,rtsp}._tcp.local -> vendor node ID
+ *      (node-level RAVENNA subtype browsing)
  *    - PTR/SRV/TXT for <session>._rtsp._tcp.local per active TX stream
  *    - PTR  _ravenna_session._sub._rtsp._tcp.local -> session instances
  *    - PTR  _services._dns-sd._udp.local (service type enumeration)
@@ -68,6 +71,10 @@ LOG_MODULE_REGISTER(mdns_sd, LOG_LEVEL_INF);
 #define SVC_RTSP         "_rtsp._tcp.local"
 #define SVC_HTTP         "_http._tcp.local"
 #define SUBTYPE_RAVENNA  "_ravenna_session._sub._rtsp._tcp.local"
+/* Node-level "ravenna" subtypes (RAVENNA §3.5.1): registered with the
+ * vendor node ID only, so browsers can discover RAVENNA nodes as such. */
+#define SUBTYPE_RAV_RTSP "_ravenna._sub._rtsp._tcp.local"
+#define SUBTYPE_RAV_HTTP "_ravenna._sub._http._tcp.local"
 #define SVC_ENUM         "_services._dns-sd._udp.local"
 
 static const char txt_ravenna[] = "type=ravenna";
@@ -88,11 +95,19 @@ static struct {
 
 /* ---- Discovered remote sessions (browser cache) ---- */
 
-#define MDNS_MAX_DISCOVERED  8
+#define MDNS_MAX_DISCOVERED  24
 #define BROWSE_INTERVAL_MS   (60 * 1000)
 #define CACHE_EXPIRY_MS      (3 * BROWSE_INTERVAL_MS + 15000)
 #define REPORT_REFRESH_MS    (20 * 1000)
 #define DESCRIBE_MAX_FAILS   3
+/* Minimum spacing between DESCRIBE attempts for one session. A changed
+ * SRV port / A record legitimately re-arms a DESCRIBE — but when two
+ * sources keep answering DIFFERENT records for the same name (mDNS
+ * reflector, stale cache, duplicate hostname), "changed" fires on every
+ * packet and the client hammers the server in an endless
+ * connect/DESCRIBE/close loop at round-trip rate (~2/s observed). The
+ * backoff turns any such fight into a slow trickle. */
+#define DESCRIBE_MIN_INTERVAL_MS (10 * 1000)
 
 struct discovered_session {
 	bool     used;
@@ -107,6 +122,7 @@ struct discovered_session {
 	int64_t  last_seen_ms;           /* last PTR/SRV/A refresh      */
 	int64_t  last_report_ms;         /* last foreign-table report   */
 	int64_t  next_followup_ms;       /* next SRV/A follow-up query  */
+	int64_t  next_describe_ms;       /* DESCRIBE rate limit         */
 };
 
 static struct discovered_session discovered[MDNS_MAX_DISCOVERED];
@@ -453,11 +469,11 @@ static void finish_response(int off, int answers,
 	send_packet(tx_buf, off, unicast_dst);
 }
 
-/* Add PTR + SRV + TXT + A for one service instance.  `via_subtype` selects
- * the PTR record's owner name.  Additionals that don't fit are dropped
- * (receivers re-query). */
+/* Add PTR + SRV + TXT + A for one service instance.  `subtype` (NULL for
+ * none) selects the PTR record's owner name.  Additionals that don't fit
+ * are dropped (receivers re-query). */
 static int add_instance(int off, int *answers, const char *instance,
-			const char *svc, uint16_t port, bool via_subtype,
+			const char *svc, uint16_t port, const char *subtype,
 			bool with_details, uint32_t ptr_ttl)
 {
 	char fqdn[FQDN_MAX + MDNS_NAME_MAX];
@@ -467,7 +483,7 @@ static int add_instance(int off, int *answers, const char *instance,
 	instance_fqdn(fqdn, sizeof(fqdn), instance, svc);
 
 	n = add_ptr(tx_buf, sizeof(tx_buf), off,
-		    via_subtype ? SUBTYPE_RAVENNA : svc, fqdn, ptr_ttl);
+		    subtype ? subtype : svc, fqdn, ptr_ttl);
 	if (n < 0) {
 		return off;
 	}
@@ -531,23 +547,38 @@ static int answer_question(int off, int *answers, const char *qname,
 				continue;
 			}
 			off = add_instance(off, answers, sessions[i].name,
-					   SVC_RTSP, rtsp_port, true, true,
+					   SVC_RTSP, rtsp_port,
+					   SUBTYPE_RAVENNA, true,
 					   TTL_SERVICE);
 		}
 		return off;
 	}
 
+	/* Node-level RAVENNA subtype browsing (§3.5.1): vendor node ID only */
+	if (t_ptr && name_eq(qname, SUBTYPE_RAV_RTSP)) {
+		off = add_instance(off, answers, vendor_node_id, SVC_RTSP,
+				   rtsp_port, SUBTYPE_RAV_RTSP, true,
+				   TTL_SERVICE);
+		return off;
+	}
+
+	if (t_ptr && name_eq(qname, SUBTYPE_RAV_HTTP)) {
+		off = add_instance(off, answers, vendor_node_id, SVC_HTTP,
+				   80, SUBTYPE_RAV_HTTP, true, TTL_SERVICE);
+		return off;
+	}
+
 	if (t_ptr && name_eq(qname, SVC_RTSP)) {
 		off = add_instance(off, answers, vendor_node_id, SVC_RTSP,
-				   rtsp_port, false, true, TTL_SERVICE);
+				   rtsp_port, NULL, true, TTL_SERVICE);
 		off = add_instance(off, answers, user_device_name, SVC_RTSP,
-				   rtsp_port, false, true, TTL_SERVICE);
+				   rtsp_port, NULL, true, TTL_SERVICE);
 		for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
 			if (sessions[i].name[0] == '\0') {
 				continue;
 			}
 			off = add_instance(off, answers, sessions[i].name,
-					   SVC_RTSP, rtsp_port, false, false,
+					   SVC_RTSP, rtsp_port, NULL, false,
 					   TTL_SERVICE);
 		}
 		return off;
@@ -555,9 +586,9 @@ static int answer_question(int off, int *answers, const char *qname,
 
 	if (t_ptr && name_eq(qname, SVC_HTTP)) {
 		off = add_instance(off, answers, vendor_node_id, SVC_HTTP,
-				   80, false, true, TTL_SERVICE);
+				   80, NULL, true, TTL_SERVICE);
 		off = add_instance(off, answers, user_device_name, SVC_HTTP,
-				   80, false, true, TTL_SERVICE);
+				   80, NULL, true, TTL_SERVICE);
 		return off;
 	}
 
@@ -675,17 +706,22 @@ static void announce_all(uint32_t ptr_ttl)
 {
 	int off, answers;
 
-	/* Node services + hostname */
+	/* Node services + hostname; the vendor node ID additionally carries
+	 * the node-level "ravenna" subtypes (§3.5.1). */
 	answers = 0;
 	off = begin_response(0);
 	off = add_instance(off, &answers, vendor_node_id, SVC_RTSP,
-			   CONFIG_RTSP_PORT, false, true, ptr_ttl);
+			   CONFIG_RTSP_PORT, NULL, true, ptr_ttl);
+	off = add_instance(off, &answers, vendor_node_id, SVC_RTSP,
+			   CONFIG_RTSP_PORT, SUBTYPE_RAV_RTSP, false, ptr_ttl);
 	off = add_instance(off, &answers, user_device_name, SVC_RTSP,
-			   CONFIG_RTSP_PORT, false, true, ptr_ttl);
+			   CONFIG_RTSP_PORT, NULL, true, ptr_ttl);
 	off = add_instance(off, &answers, vendor_node_id, SVC_HTTP, 80,
-			   false, false, ptr_ttl);
+			   NULL, false, ptr_ttl);
+	off = add_instance(off, &answers, vendor_node_id, SVC_HTTP, 80,
+			   SUBTYPE_RAV_HTTP, false, ptr_ttl);
 	off = add_instance(off, &answers, user_device_name, SVC_HTTP, 80,
-			   false, false, ptr_ttl);
+			   NULL, false, ptr_ttl);
 	finish_response(off, answers, NULL, 0);
 
 	/* Sessions: base PTR + subtype PTR + SRV/TXT/A each */
@@ -696,9 +732,10 @@ static void announce_all(uint32_t ptr_ttl)
 		answers = 0;
 		off = begin_response(0);
 		off = add_instance(off, &answers, sessions[i].name, SVC_RTSP,
-				   CONFIG_RTSP_PORT, false, true, ptr_ttl);
+				   CONFIG_RTSP_PORT, NULL, true, ptr_ttl);
 		off = add_instance(off, &answers, sessions[i].name, SVC_RTSP,
-				   CONFIG_RTSP_PORT, true, false, ptr_ttl);
+				   CONFIG_RTSP_PORT, SUBTYPE_RAVENNA, false,
+				   ptr_ttl);
 		finish_response(off, answers, NULL, 0);
 	}
 }
@@ -710,9 +747,9 @@ static void goodbye_session(const char *name)
 
 	off = begin_response(0);
 	off = add_instance(off, &answers, name, SVC_RTSP, CONFIG_RTSP_PORT,
-			   false, false, 0);
+			   NULL, false, 0);
 	off = add_instance(off, &answers, name, SVC_RTSP, CONFIG_RTSP_PORT,
-			   true, false, 0);
+			   SUBTYPE_RAVENNA, false, 0);
 	finish_response(off, answers, NULL, 0);
 }
 
@@ -936,7 +973,12 @@ static void handle_response(const uint8_t *msg, size_t len)
 				       sizeof(d->srv_target), NULL) < 0) {
 				continue;
 			}
-			if (d->port != port) {
+			if (d->have_srv && d->port != port) {
+				/* Loud on purpose: constant port "changes"
+				 * mean two sources answer different records
+				 * for this name (see DESCRIBE_MIN_INTERVAL). */
+				LOG_INF("mDNS: session '%s' SRV port %u -> %u — re-DESCRIBE",
+					inst, d->port, port);
 				d->described = false;
 			}
 			d->port = port;
@@ -958,7 +1000,18 @@ static void handle_response(const uint8_t *msg, size_t len)
 					d->used = false;
 					continue;
 				}
-				if (d->host.s_addr != a.s_addr) {
+				if (d->have_a && d->host.s_addr != a.s_addr) {
+					char o[INET_ADDRSTRLEN], n[INET_ADDRSTRLEN];
+
+					zsock_inet_ntop(AF_INET, &d->host, o, sizeof(o));
+					zsock_inet_ntop(AF_INET, &a, n, sizeof(n));
+					/* Loud on purpose: a host that keeps
+					 * "changing" means two sources answer
+					 * different A records for the same
+					 * name — the classic driver of an
+					 * endless re-DESCRIBE loop. */
+					LOG_INF("mDNS: session '%s' host %s -> %s — re-DESCRIBE",
+						d->instance, o, n);
 					d->described = false;
 				}
 				d->host = a;
@@ -972,7 +1025,8 @@ static void handle_response(const uint8_t *msg, size_t len)
 	for (int i = 0; i < MDNS_MAX_DISCOVERED; i++) {
 		if (discovered[i].used && discovered[i].have_srv &&
 		    discovered[i].have_a && !discovered[i].described &&
-		    discovered[i].fail_count < DESCRIBE_MAX_FAILS) {
+		    discovered[i].fail_count < DESCRIBE_MAX_FAILS &&
+		    now >= discovered[i].next_describe_ms) {
 			k_sem_give(&describe_sem);
 			break;
 		}
@@ -1028,10 +1082,15 @@ static void describe_thread(void *a, void *b, void *c)
 			k_mutex_lock(&mdns_lock, K_FOREVER);
 			if (!discovered[i].used || !discovered[i].have_srv ||
 			    !discovered[i].have_a || discovered[i].described ||
-			    discovered[i].fail_count >= DESCRIBE_MAX_FAILS) {
+			    discovered[i].fail_count >= DESCRIBE_MAX_FAILS ||
+			    k_uptime_get() < discovered[i].next_describe_ms) {
 				k_mutex_unlock(&mdns_lock);
 				continue;
 			}
+			/* Arm the rate limit BEFORE the (slow, blocking)
+			 * DESCRIBE so parallel wakes cannot double-fire. */
+			discovered[i].next_describe_ms =
+				k_uptime_get() + DESCRIBE_MIN_INTERVAL_MS;
 			snap = discovered[i];
 			k_mutex_unlock(&mdns_lock);
 
@@ -1113,6 +1172,13 @@ static void periodic_tick(void)
 		    now >= d->next_followup_ms) {
 			send_followup_query(d);
 			d->next_followup_ms = now + 3000;
+		}
+		/* A DESCRIBE deferred by the rate limit has no packet to wake
+		 * the worker when the backoff expires — re-arm it from here. */
+		if (d->have_srv && d->have_a && !d->described &&
+		    d->fail_count < DESCRIBE_MAX_FAILS &&
+		    now >= d->next_describe_ms) {
+			k_sem_give(&describe_sem);
 		}
 		if (d->described &&
 		    now - d->last_report_ms > REPORT_REFRESH_MS) {
@@ -1249,6 +1315,31 @@ static void sanitize_label(char *s)
 	}
 }
 
+/* DNS-SD instance names MUST be unique per device on the link. Announcing
+ * the bare TX-stream name meant two boards with the default config both
+ * advertised "TX Stream 0" — literally identical PTR records that every
+ * browser on the net (ours included) collapses into ONE cache entry whose
+ * SRV/A then ping-pongs between the two hosts (observed as an endless
+ * host-A<->B re-DESCRIBE loop). RAVENNA convention: "<device> <session>".
+ * The server's by-name DESCRIBE resolver accepts the prefixed form via a
+ * suffix match (rtsp.c), so interop is keeps working in both directions. */
+static void make_session_instance(char *out, size_t sz, const char *tx_name)
+{
+	int n;
+
+	if (user_device_name[0] != '\0') {
+		n = snprintf(out, sz, "%s %s", user_device_name, tx_name);
+	} else {
+		n = snprintf(out, sz, "%s", tx_name);
+	}
+	if (n < 0 || (size_t)n >= sz) {
+		/* Truncated to the DNS label limit — acceptable, the prefix
+		 * keeps the name unique. */
+		out[sz - 1] = '\0';
+	}
+	sanitize_label(out);
+}
+
 /* TX-stream change observer (registered with aes67_conn): advertise or
  * withdraw the session record for the changed stream slot. */
 static void mdns_tx_stream_observer(uint8_t stream_id)
@@ -1296,9 +1387,9 @@ int mdns_sd_start(void)
 	for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
 		if (tx[i].active && tx[i].dst_ip.s_addr != 0 &&
 		    tx[i].name[0] != '\0') {
-			strncpy(sessions[i].name, tx[i].name,
-				sizeof(sessions[i].name) - 1);
-			sanitize_label(sessions[i].name);
+			make_session_instance(sessions[i].name,
+					      sizeof(sessions[i].name),
+					      tx[i].name);
 		}
 	}
 
@@ -1338,6 +1429,24 @@ void mdns_sd_update_device_name(void)
 		sizeof(user_device_name) - 1);
 	user_device_name[sizeof(user_device_name) - 1] = '\0';
 	sanitize_label(user_device_name);
+
+	/* Session instances carry the device name as their unique prefix —
+	 * withdraw the old names and rebuild them from the TX table. */
+	const struct aes67_tx_stream *tx = aes67_conn_get_tx_streams();
+
+	for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
+		if (sessions[i].name[0] != '\0' && mdns_sock >= 0) {
+			goodbye_session(sessions[i].name);
+		}
+		sessions[i].name[0] = '\0';
+		if (tx[i].active && tx[i].dst_ip.s_addr != 0 &&
+		    tx[i].name[0] != '\0') {
+			make_session_instance(sessions[i].name,
+					      sizeof(sessions[i].name),
+					      tx[i].name);
+		}
+	}
+
 	announce_pending = 2;
 	announce_next_ms = k_uptime_get();
 	k_mutex_unlock(&mdns_lock);
@@ -1368,14 +1477,17 @@ int mdns_sd_set_session(uint8_t slot, const char *session_name)
 		return 0;
 	}
 
-	if (strcmp(sessions[slot].name, session_name) != 0) {
+	char inst[MDNS_NAME_MAX];
+
+	make_session_instance(inst, sizeof(inst), session_name);
+
+	if (strcmp(sessions[slot].name, inst) != 0) {
 		if (sessions[slot].name[0] != '\0' && mdns_sock >= 0) {
 			goodbye_session(sessions[slot].name);
 		}
-		strncpy(sessions[slot].name, session_name,
+		strncpy(sessions[slot].name, inst,
 			sizeof(sessions[slot].name) - 1);
 		sessions[slot].name[sizeof(sessions[slot].name) - 1] = '\0';
-		sanitize_label(sessions[slot].name);
 		announce_pending = 2;
 		announce_next_ms = k_uptime_get();
 		LOG_INF("mDNS: advertising session \"%s\"",

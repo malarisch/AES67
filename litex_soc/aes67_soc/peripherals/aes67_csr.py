@@ -53,6 +53,9 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.i_wallclock_nanoseconds_in = Signal(30)
         self.i_tx_timestamp_sec_in      = Signal(4)
         self.i_tx_timestamp_nsec_in     = Signal(30)
+        # Static FPGA build configuration (system_cfg_pkg.vhd's
+        # system_cfg_to_vector(syscfg), 72 bits, constant per bitstream)
+        self.i_system_cfg               = Signal(72)
 
         # =====================================================================
         # Output signals (directly active to external FPGA logic)
@@ -277,6 +280,30 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.nco_ppb_adj_valid = CSRStorage(1, description="Write strobe: pulse 1 -> 0 AFTER writing nco_ppb_adj_lo/hi — the NCO captures the value on any edge.")
 
         # =====================================================================
+        # Static FPGA build configuration (RO) — the syscfg generic the gateware
+        # was built with (system_cfg_pkg.vhd, system_cfg_to_vector()).  Constant
+        # per bitstream; the firmware reads it once at boot and starts the
+        # matching services (hardware vs. software PTP, metering, stream/channel
+        # limits) instead of baking the choice in at compile time.  Appended
+        # after nco_ppb_adj_valid so every pre-existing CSR address is stable.
+        # =====================================================================
+        self.system_cfg_flags = CSRStatus(32, fields=[
+            CSRField("ptp_in_software",   size=1, offset=0, description="Gateware built with PTP_IN_SOFTWARE (host PTP stack disciplines the wallclock; RX frames carry the timestamp trailer)"),
+            CSRField("static_ptp_config", size=1, offset=1, description="Gateware built with STATIC_PTP_CONFIG (servo tuning fixed via generic)"),
+            CSRField("metering",          size=1, offset=2, description="Gateware built with ENABLE_METERING (audio metering CSRs are live)"),
+        ])
+        self.system_cfg_rx = CSRStatus(32, fields=[
+            CSRField("max_streams",  size=8,  offset=0,  description="RX/DA path: maximum RTP streams"),
+            CSRField("channels",     size=8,  offset=8,  description="RX/DA path: audio channels"),
+            CSRField("buffer_depth", size=16, offset=16, description="RX/DA path: ring buffer depth (samples)"),
+        ])
+        self.system_cfg_tx = CSRStatus(32, fields=[
+            CSRField("max_streams",  size=8,  offset=0,  description="TX/AD path: maximum RTP streams"),
+            CSRField("channels",     size=8,  offset=8,  description="TX/AD path: audio channels"),
+            CSRField("buffer_depth", size=16, offset=16, description="TX/AD path: ring buffer depth (samples)"),
+        ])
+
+        # =====================================================================
         # Wiring: input signals -> CSR status fields
         # =====================================================================
         self.comb += [
@@ -302,6 +329,20 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.status.fields.wallclock_locked.eq(self.i_wallclock_locked),
             self.ptp_path_delay.status.eq(self.i_ptp_path_delay),
             self.ptp_offset.status.eq(self.i_ptp_offset),
+
+            # Static build configuration — bit layout per system_cfg_to_vector()
+            # (system_cfg_pkg.vhd): [71]=ptp_in_software, [70]=static_ptp_config,
+            # [69]=metering, [68:64]=reserved, [63:56]/[55:48]/[47:32]=RX
+            # max_streams/channels/buffer_depth, [31:24]/[23:16]/[15:0]=TX dito.
+            self.system_cfg_flags.fields.ptp_in_software.eq(self.i_system_cfg[71]),
+            self.system_cfg_flags.fields.static_ptp_config.eq(self.i_system_cfg[70]),
+            self.system_cfg_flags.fields.metering.eq(self.i_system_cfg[69]),
+            self.system_cfg_rx.fields.max_streams.eq(self.i_system_cfg[56:64]),
+            self.system_cfg_rx.fields.channels.eq(self.i_system_cfg[48:56]),
+            self.system_cfg_rx.fields.buffer_depth.eq(self.i_system_cfg[32:48]),
+            self.system_cfg_tx.fields.max_streams.eq(self.i_system_cfg[24:32]),
+            self.system_cfg_tx.fields.channels.eq(self.i_system_cfg[16:24]),
+            self.system_cfg_tx.fields.buffer_depth.eq(self.i_system_cfg[0:16]),
         ]
 
         # =====================================================================
@@ -436,6 +477,8 @@ def add_aes67_csr(soc, platform):
         csr.i_wallclock_nanoseconds_in.eq(aes67_pads.wallclock_nanoseconds_in),
         csr.i_tx_timestamp_sec_in.eq(aes67_pads.tx_timestamp_sec_in),
         csr.i_tx_timestamp_nsec_in.eq(aes67_pads.tx_timestamp_nsec_in),
+        # Static FPGA build configuration (constant vector from the bridge top)
+        csr.i_system_cfg.eq(aes67_pads.system_cfg),
         # Outputs: CSR -> pads
         aes67_pads.pll_ppb_start.eq(csr.o_pll_ppb_start),
         aes67_pads.mac_addr.eq(csr.o_mac_addr),
