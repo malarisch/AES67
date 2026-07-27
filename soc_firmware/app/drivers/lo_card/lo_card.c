@@ -13,17 +13,6 @@
 #include <zephyr/logging/log.h>
 #include <string.h>
 
-#if defined(CONFIG_LO_CARD_NRST_GPIO)
-#include <zephyr/drivers/gpio.h>
-#define LO_NRST_NODE DT_ALIAS(lo_nrst)
-#if DT_NODE_EXISTS(LO_NRST_NODE)
-static const struct gpio_dt_spec lo_nrst_gpio = GPIO_DT_SPEC_GET(LO_NRST_NODE, gpios);
-#define LO_NRST_GPIO_VALID 1
-#else
-#define LO_NRST_GPIO_VALID 0
-#endif
-#endif /* CONFIG_LO_CARD_NRST_GPIO */
-
 LOG_MODULE_REGISTER(lo_card, CONFIG_LO_CARD_LOG_LEVEL);
 
 /* Driver instance data */
@@ -34,10 +23,6 @@ static struct lo_card_data lo_data = {
 	.global_enable = false,
 	.initialized = false,
 };
-
-#if defined(CONFIG_LO_CARD_NRST_GPIO) && LO_NRST_GPIO_VALID
-static bool nrst_gpio_ready = false;
-#endif
 
 /*******************************************************************************
  * Internal helper functions
@@ -263,23 +248,6 @@ int lo_card_init(const struct device *i2c_dev)
 	lo_data.global_enable = false;
 	lo_data.detected = false;
 	memset(lo_data.clip_db, 0, sizeof(lo_data.clip_db));
-
-#if defined(CONFIG_LO_CARD_NRST_GPIO) && LO_NRST_GPIO_VALID
-	/* Perform hardware reset before detection */
-	if (nrst_gpio_ready) {
-		LOG_INF("Performing board hardware reset via nRST GPIO...");
-
-		/* Assert reset (active low) */
-		gpio_pin_set_dt(&lo_nrst_gpio, 1);
-		k_sleep(K_MSEC(CONFIG_LO_CARD_NRST_PULSE_MS));
-
-		/* Release reset */
-		gpio_pin_set_dt(&lo_nrst_gpio, 0);
-
-		/* Wait for board to initialize */
-		k_sleep(K_MSEC(CONFIG_LO_CARD_NRST_RECOVERY_MS));
-	}
-#endif
 
 	/* Check if board is present */
 	struct lo_board_info info;
@@ -752,64 +720,3 @@ int lo_card_reset(void)
 	return reinit_preserving_activation();
 }
 
-#if defined(CONFIG_LO_CARD_NRST_GPIO)
-int lo_card_hw_reset(void)
-{
-#if LO_NRST_GPIO_VALID
-	if (!nrst_gpio_ready) {
-		LOG_ERR("nRST GPIO not initialized");
-		return -ENODEV;
-	}
-
-	LOG_INF("Performing hardware reset via nRST GPIO");
-
-	k_mutex_lock(&lo_data.lock, K_FOREVER);
-
-	/* Assert reset (active low, so set to logical 1 with GPIO_ACTIVE_LOW) */
-	gpio_pin_set_dt(&lo_nrst_gpio, 1);
-
-	/* Hold reset for configured duration */
-	k_sleep(K_MSEC(CONFIG_LO_CARD_NRST_PULSE_MS));
-
-	/* Release reset */
-	gpio_pin_set_dt(&lo_nrst_gpio, 0);
-
-	/* Wait for board to recover */
-	k_sleep(K_MSEC(CONFIG_LO_CARD_NRST_RECOVERY_MS));
-
-	k_mutex_unlock(&lo_data.lock);
-
-	/* Reinitialize via I2C */
-	return reinit_preserving_activation();
-#else
-	LOG_WRN("nRST GPIO not defined in device tree");
-	return -ENOTSUP;
-#endif
-}
-
-int lo_card_nrst_gpio_init(void)
-{
-#if LO_NRST_GPIO_VALID
-	int ret;
-
-	if (!gpio_is_ready_dt(&lo_nrst_gpio)) {
-		LOG_ERR("nRST GPIO device not ready");
-		return -ENODEV;
-	}
-
-	/* Configure as output, initially deasserted (not in reset) */
-	ret = gpio_pin_configure_dt(&lo_nrst_gpio, GPIO_OUTPUT_INACTIVE);
-	if (ret < 0) {
-		LOG_ERR("Failed to configure nRST GPIO: %d", ret);
-		return ret;
-	}
-
-	nrst_gpio_ready = true;
-	LOG_INF("LO card nRST GPIO initialized");
-	return 0;
-#else
-	LOG_WRN("nRST GPIO not defined in device tree");
-	return -ENOTSUP;
-#endif
-}
-#endif /* CONFIG_LO_CARD_NRST_GPIO */

@@ -1264,7 +1264,7 @@ int display_ctrl_nrst_init(void)
 }
 
 #elif defined(CONFIG_DISPLAY_CTRL_NRST_GPIO)
-/* ---- GPIO backend (STM32H7): nRST via direct GPIO pin ---- */
+/* ---- GPIO backend (ESP32): nRST via direct GPIO pin ---- */
 
 int display_ctrl_hw_reset(void)
 {

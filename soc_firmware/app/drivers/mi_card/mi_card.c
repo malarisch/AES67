@@ -16,17 +16,6 @@
 #include "../display_ctrl/display_ctrl.h"
 #endif
 
-#if defined(CONFIG_MI_CARD_NRST_GPIO)
-#include <zephyr/drivers/gpio.h>
-#define MI_NRST_NODE DT_ALIAS(mi_nrst)
-#if DT_NODE_EXISTS(MI_NRST_NODE)
-static const struct gpio_dt_spec mi_nrst_gpio = GPIO_DT_SPEC_GET(MI_NRST_NODE, gpios);
-#define MI_NRST_GPIO_VALID 1
-#else
-#define MI_NRST_GPIO_VALID 0
-#endif
-#endif /* CONFIG_MI_CARD_NRST_GPIO */
-
 LOG_MODULE_REGISTER(mi_card, CONFIG_MI_CARD_LOG_LEVEL);
 
 /*******************************************************************************
@@ -61,10 +50,6 @@ static struct mi_card_data mi_data = {
 	.glb_reg = 0,
 	.initialized = false
 };
-
-#if defined(CONFIG_MI_CARD_NRST_GPIO) && MI_NRST_GPIO_VALID
-static bool nrst_gpio_ready = false;
-#endif
 
 /*******************************************************************************
  * Internal helper functions
@@ -188,23 +173,6 @@ int mi_card_init(const struct device *i2c_dev)
 	k_mutex_lock(&mi_data.lock, K_FOREVER);
 
 	mi_data.i2c_dev = i2c_dev;
-
-#if defined(CONFIG_MI_CARD_NRST_GPIO) && MI_NRST_GPIO_VALID
-	/* Perform hardware reset before detection */
-	if (nrst_gpio_ready) {
-		LOG_INF("Performing board hardware reset via nRST GPIO...");
-
-		/* Assert reset (active low) */
-		gpio_pin_set_dt(&mi_nrst_gpio, 1);
-		k_sleep(K_MSEC(CONFIG_MI_CARD_NRST_PULSE_MS));
-
-		/* Release reset */
-		gpio_pin_set_dt(&mi_nrst_gpio, 0);
-
-		/* Wait for board to initialize */
-		k_sleep(K_MSEC(CONFIG_MI_CARD_NRST_RECOVERY_MS));
-	}
-#endif
 
 	/* Check if board is present */
 	struct mi_board_info info;
@@ -708,65 +676,3 @@ int mi_card_reset(void)
 	return mi_card_init(mi_data.i2c_dev);
 }
 
-#if defined(CONFIG_MI_CARD_NRST_GPIO)
-int mi_card_hw_reset(void)
-{
-#if MI_NRST_GPIO_VALID
-	if (!nrst_gpio_ready) {
-		LOG_ERR("nRST GPIO not initialized");
-		return -ENODEV;
-	}
-
-	LOG_INF("Performing hardware reset via nRST GPIO");
-
-	k_mutex_lock(&mi_data.lock, K_FOREVER);
-
-	/* Assert reset (active low, so set to logical 1 with GPIO_ACTIVE_LOW) */
-	gpio_pin_set_dt(&mi_nrst_gpio, 1);
-
-	/* Hold reset for configured duration */
-	k_sleep(K_MSEC(CONFIG_MI_CARD_NRST_PULSE_MS));
-
-	/* Release reset */
-	gpio_pin_set_dt(&mi_nrst_gpio, 0);
-
-	/* Wait for board to recover */
-	k_sleep(K_MSEC(CONFIG_MI_CARD_NRST_RECOVERY_MS));
-
-	k_mutex_unlock(&mi_data.lock);
-
-	/* Reinitialize via I2C */
-	mi_data.initialized = false;
-	return mi_card_init(mi_data.i2c_dev);
-#else
-	LOG_WRN("nRST GPIO not defined in device tree");
-	return -ENOTSUP;
-#endif
-}
-
-int mi_card_nrst_gpio_init(void)
-{
-#if MI_NRST_GPIO_VALID
-	int ret;
-
-	if (!gpio_is_ready_dt(&mi_nrst_gpio)) {
-		LOG_ERR("nRST GPIO device not ready");
-		return -ENODEV;
-	}
-
-	/* Configure as output, initially deasserted (not in reset) */
-	ret = gpio_pin_configure_dt(&mi_nrst_gpio, GPIO_OUTPUT_INACTIVE);
-	if (ret < 0) {
-		LOG_ERR("Failed to configure nRST GPIO: %d", ret);
-		return ret;
-	}
-
-	nrst_gpio_ready = true;
-	LOG_INF("MI card nRST GPIO initialized (PA8)");
-	return 0;
-#else
-	LOG_WRN("nRST GPIO not defined in device tree");
-	return -ENOTSUP;
-#endif
-}
-#endif /* CONFIG_MI_CARD_NRST_GPIO */

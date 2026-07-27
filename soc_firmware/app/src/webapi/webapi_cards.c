@@ -31,17 +31,11 @@
 #endif
 
 /*
- * How the analog cards are hardware-reset differs per board:
- *  - legacy STM32 boards give each card its own nRST GPIO ("mi-nrst" /
- *    "lo-nrst" aliases), driven by the card driver itself;
- *  - the ESP32 boards have a single nRST line shared by the display
- *    controller and the AD/DA cards ("dc-nrst" alias), pulsed by
- *    display_ctrl_hw_reset(), which also re-scans the cards through its
- *    post-reset callbacks.
- *
- * The card drivers return -ENOTSUP when their own alias is absent, so the
- * reset endpoints must pick the path the devicetree actually provides
- * rather than assuming the per-card GPIO exists.
+ * Hardware reset of the analog cards goes through the single nRST line
+ * shared by the display controller and the AD/DA cards ("dc-nrst" alias
+ * or the FPGA adda_nrst CSR), pulsed by display_ctrl_hw_reset(), which
+ * also re-scans the cards through its post-reset callbacks. Without that
+ * line the reset endpoints fall back to the cards' I2C soft reset.
  */
 #if defined(CONFIG_DISPLAY_CTRL) &&                                          \
 	((defined(CONFIG_DISPLAY_CTRL_NRST_GPIO) &&                          \
@@ -50,18 +44,6 @@
 #define AES67_SHARED_NRST_AVAILABLE 1
 #else
 #define AES67_SHARED_NRST_AVAILABLE 0
-#endif
-
-#if defined(CONFIG_MI_CARD_NRST_GPIO) && DT_NODE_EXISTS(DT_ALIAS(mi_nrst))
-#define AES67_MI_OWN_NRST 1
-#else
-#define AES67_MI_OWN_NRST 0
-#endif
-
-#if defined(CONFIG_LO_CARD_NRST_GPIO) && DT_NODE_EXISTS(DT_ALIAS(lo_nrst))
-#define AES67_LO_OWN_NRST 1
-#else
-#define AES67_LO_OWN_NRST 0
 #endif
 
 /* Settings changed -> capture into the shadow store, save debounced. */
@@ -237,9 +219,7 @@ static int post_mi_reset(struct webapi_request *req)
 {
 	int ret;
 
-#if AES67_MI_OWN_NRST
-	ret = mi_card_hw_reset();
-#elif AES67_SHARED_NRST_AVAILABLE
+#if AES67_SHARED_NRST_AVAILABLE
 	ret = display_ctrl_hw_reset();
 #else
 	ret = mi_card_reset();
@@ -360,9 +340,7 @@ static int post_lo_reset(struct webapi_request *req)
 {
 	int ret;
 
-#if AES67_LO_OWN_NRST
-	ret = lo_card_hw_reset();
-#elif AES67_SHARED_NRST_AVAILABLE
+#if AES67_SHARED_NRST_AVAILABLE
 	ret = display_ctrl_hw_reset();
 #else
 	ret = lo_card_reset();

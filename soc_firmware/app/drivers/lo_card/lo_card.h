@@ -232,24 +232,6 @@ int lo_card_get_96khz(void);
  */
 int lo_card_reset(void);
 
-#ifdef CONFIG_LO_CARD_NRST_GPIO
-/**
- * @brief Hardware reset the LO card via nRST GPIO
- *
- * @return 0 on success, negative errno on failure
- */
-int lo_card_hw_reset(void);
-
-/**
- * @brief Initialize the nRST GPIO pin
- *
- * Must be called before lo_card_hw_reset() can be used.
- *
- * @return 0 on success, negative errno on failure
- */
-int lo_card_nrst_gpio_init(void);
-#endif /* CONFIG_LO_CARD_NRST_GPIO */
-
 #ifdef __cplusplus
 }
 #endif

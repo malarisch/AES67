@@ -211,7 +211,7 @@ uint32_t eth_litex_read_status(const struct device *dev)
  * The StreamConfigRAM modules are Wishbone-mapped with 1 byte per 32-bit word.
  * TX_STREAM_CFG_BASE = 0x90004000, RX_STREAM_CFG_BASE = 0x90005000.
  * Each stream occupies 32 bytes (addresses stream_id*32 .. stream_id*32+31).
- * The byte layout matches the FMC register protocol (config_ram_address_map.md).
+ * Byte layout documented in config_ram_address_map.md.
  */
 
 static inline void stream_cfg_write_byte(uintptr_t base, uint8_t addr, uint8_t val)
@@ -285,7 +285,7 @@ int eth_litex_write_rx_stream_config(const struct device *dev,
 	ARG_UNUSED(dev);
 
 	/* The Wishbone StreamConfigRAM writes directly into the rx_ringbuffer's
-	 * stream_ram — no base-address indirection like the FMC protocol (0x59).
+	 * stream_ram — no base-address indirection.
 	 * Layout in stream_ram (17 bytes at stream_id * 32):
 	 *   0..3:  dest IP (big-endian)
 	 *   4..5:  dest UDP port (big-endian)

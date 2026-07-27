@@ -6,8 +6,8 @@
  *
  * Provides a uniform API for application code to access FPGA configuration
  * registers, regardless of the underlying transport:
- *   - FMC bus (STM32H7 → eth_fmc_basic driver)
  *   - LiteX CSR (VexRiscv → eth_litex driver)
+ *   - SPI (external MCU → spibone bridge)
  *
  * Application code should include only this header and call fpga_hal_*()
  * functions.  The active backend is selected at build time via Kconfig.
@@ -67,8 +67,8 @@ typedef void (*fpga_hal_recover_cb_t)(void *user_data);
 /**
  * @brief Get the FPGA HAL device pointer.
  *
- * Returns the underlying driver device ("eth_fmc0" or "eth_litex0")
- * depending on which backend is active.
+ * Returns the underlying driver device depending on which backend
+ * is active.
  *
  * @return Pointer to device, or NULL if not found.
  */
@@ -81,8 +81,8 @@ const struct device *fpga_hal_get_dev(void);
 /**
  * @brief Check if the FPGA is ready for register access.
  *
- * On FMC: polls GPIO / FMC bus for valid responses.
  * On LiteX: always returns true (SoC contains the FPGA logic).
+ * On SPI: true once the spibone bus answers.
  */
 bool fpga_hal_is_ready(void);
 
@@ -228,14 +228,14 @@ int fpga_hal_set_adda_nrst(bool released);
  * Debug/bring-up tool ("fpga peek") — production code resolves
  * registers by name through the generated headers instead.
  *
- * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ * @return 0 on success, negative errno.
  */
 int fpga_hal_csr_read(uint32_t addr, uint32_t *val);
 
 /**
  * @brief Write one CSR word at an absolute byte address ("fpga poke").
  *
- * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ * @return 0 on success, negative errno.
  */
 int fpga_hal_csr_write(uint32_t addr, uint32_t val);
 
@@ -271,7 +271,7 @@ struct fpga_hal_system_cfg {
 /**
  * @brief Read the system_cfg CSRs from the FPGA (uncached).
  *
- * @return 0 on success, negative errno (FMC backend: -ENOTSUP).
+ * @return 0 on success, negative errno.
  */
 int fpga_hal_read_system_cfg(struct fpga_hal_system_cfg *cfg);
 

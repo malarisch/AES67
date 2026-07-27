@@ -508,8 +508,7 @@ int display_ctrl_all_off(void);
  ******************************************************************************/
 
 /* Metering and the status cycle need fpga_hal_read_metering(), which the
- * LiteX and SPI (external MCU) HAL backends provide — not the legacy FMC
- * one. */
+ * LiteX and SPI (external MCU) HAL backends provide. */
 #if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
 /**
  * @brief Start the metering polling thread
@@ -554,8 +553,8 @@ void display_ctrl_update_status_cycle_ip(const struct in_addr *ip);
  * invoked so that other drivers can re-initialise.
  *
  * The actual mechanism depends on the platform:
- * - GPIO backend (STM32H7): direct GPIO pin toggle
- * - HAL backend (LiteX):    FPGA CSR bit via fpga_hal_set_adda_nrst()
+ * - GPIO backend (ESP32):  direct GPIO pin toggle
+ * - HAL backend (LiteX):   FPGA CSR bit via fpga_hal_set_adda_nrst()
  *
  * @return 0 on success, negative errno on failure
  */

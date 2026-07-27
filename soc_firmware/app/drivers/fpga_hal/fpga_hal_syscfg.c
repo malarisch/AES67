@@ -65,7 +65,7 @@ int fpga_hal_read_system_cfg(struct fpga_hal_system_cfg *cfg)
 	return 0;
 }
 
-#else /* !CSR_AES67_CSR_SYSTEM_CFG_FLAGS_ADDR (FMC backend) */
+#else /* !CSR_AES67_CSR_SYSTEM_CFG_FLAGS_ADDR (headers without system_cfg) */
 
 int fpga_hal_read_system_cfg(struct fpga_hal_system_cfg *cfg)
 {

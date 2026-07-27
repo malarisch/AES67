@@ -93,14 +93,14 @@ add_subdirectory(drivers)
 
 # ---------- Application sources ----------
 # The full control plane (HTTP / mDNS / RTSP / SD / card manager) builds
-# for every HAL backend that has networking — LiteX, FMC, and SPI (ESP32).
+# for every HAL backend that has networking — LiteX and SPI (ESP32).
 # Hardware that only exists on specific boards (Si5351A, analog cards,
 # display controller, SPI flash, SD card) is gated inside main.c on the
 # matching Kconfig symbols, so the SPI build simply leaves those out.
 # The legacy bring-up stub is still selectable via CONFIG_APP_SPI_BRINGUP.
 if(CONFIG_APP_SPI_BRINGUP)
     target_sources(app PRIVATE src/main_spi_bringup.c)
-elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_FMC OR CONFIG_FPGA_HAL_SPI)
+elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI)
     # HTTP server: register per-service resource linker sections.
     zephyr_linker_sources(SECTIONS sections-rom.ld)
     # ESP32-S3 PSRAM: keep net-stack thread stacks in internal DRAM while the

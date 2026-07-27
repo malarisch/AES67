@@ -26,31 +26,6 @@ config LO_CARD_INIT_PRIORITY
 	  Device driver initialization priority for LO card.
 	  Must be initialized after I2C bus.
 
-config LO_CARD_NRST_GPIO
-	bool "Enable hardware reset via nRST GPIO"
-	default y
-	depends on GPIO
-	help
-	  Enable hardware reset functionality via a dedicated GPIO pin.
-	  The GPIO is active-low (asserted low to reset the board).
-
-config LO_CARD_NRST_PULSE_MS
-	int "nRST pulse duration in milliseconds"
-	default 100
-	range 1 100
-	depends on LO_CARD_NRST_GPIO
-	help
-	  Duration of the reset pulse in milliseconds.
-
-config LO_CARD_NRST_RECOVERY_MS
-	int "Post-reset recovery time in milliseconds"
-	default 1000
-	range 10 1000
-	depends on LO_CARD_NRST_GPIO
-	help
-	  Time to wait after releasing reset before accessing I2C.
-	  The board needs time to initialize its internal PLLs/clocks.
-
 config LO_CARD_I2C_RETRIES
 	int "I2C retry count for failed transactions"
 	default 10

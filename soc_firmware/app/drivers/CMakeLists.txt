@@ -1,5 +1,3 @@
-add_subdirectory_ifdef(CONFIG_ETH_SPI_BASIC eth_spi_basic)
-add_subdirectory_ifdef(CONFIG_ETH_FMC_BASIC eth_fmc_basic)
 add_subdirectory_ifdef(CONFIG_ETH_LITEX eth_litex)
 add_subdirectory_ifdef(CONFIG_SPIBONE spibone)
 add_subdirectory_ifdef(CONFIG_AES67_FPGA_JTAG fpga_jtag)

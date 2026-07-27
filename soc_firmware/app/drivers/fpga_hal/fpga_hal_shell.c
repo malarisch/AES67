@@ -4,7 +4,7 @@
  *
  * Zephyr shell bindings for the FPGA HAL.
  *
- * Works on every backend (LiteX, FMC, SPI) since everything is routed
+ * Works on every backend (LiteX, SPI) since everything is routed
  * through the backend-independent fpga_hal_*() API.
  */
 

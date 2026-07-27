@@ -255,27 +255,6 @@ int mi_card_get_channel_config(uint8_t channel, struct mi_channel_config *config
  */
 int mi_card_reset(void);
 
-#ifdef CONFIG_MI_CARD_NRST_GPIO
-/**
- * @brief Hardware reset the MI card via nRST GPIO
- *
- * Pulses the nRST GPIO low to perform a hardware reset,
- * then reinitializes the card via I2C.
- *
- * @return 0 on success, negative errno on failure
- */
-int mi_card_hw_reset(void);
-
-/**
- * @brief Initialize the nRST GPIO pin
- *
- * Must be called before mi_card_hw_reset() can be used.
- *
- * @return 0 on success, negative errno on failure
- */
-int mi_card_nrst_gpio_init(void);
-#endif /* CONFIG_MI_CARD_NRST_GPIO */
-
 #ifdef __cplusplus
 }
 #endif

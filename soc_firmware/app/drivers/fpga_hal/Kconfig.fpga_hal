@@ -8,15 +8,8 @@ if FPGA_HAL
 
 choice FPGA_HAL_BACKEND
 	prompt "FPGA HAL backend"
-	default FPGA_HAL_FMC if ETH_FMC_BASIC
 	default FPGA_HAL_LITEX if ETH_LITEX
 	default FPGA_HAL_SPI if SPIBONE
-
-config FPGA_HAL_FMC
-	bool "FMC backend (STM32H7)"
-	depends on ETH_FMC_BASIC
-	help
-	  Use the FMC Ethernet bridge driver for FPGA register access.
 
 config FPGA_HAL_LITEX
 	bool "LiteX CSR backend"

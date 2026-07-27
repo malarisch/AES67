@@ -1,10 +1,6 @@
 # Backend-neutral: system_cfg read + cache (built for every backend).
 target_sources(app PRIVATE fpga_hal_syscfg.c)
 
-if(CONFIG_FPGA_HAL_FMC)
-  target_sources(app PRIVATE fpga_hal_fmc.c)
-endif()
-
 if(CONFIG_FPGA_HAL_SPI)
   target_sources(app PRIVATE fpga_hal_spi.c)
 
