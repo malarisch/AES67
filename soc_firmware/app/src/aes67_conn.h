@@ -235,6 +235,19 @@ typedef void (*aes67_conn_tx_observer_t)(uint8_t stream_id);
  */
 int aes67_conn_register_tx_observer(aes67_conn_tx_observer_t cb);
 
+/**
+ * Called after an RX stream changed (configured or deactivated), with
+ * the table already updated — same contract as the TX observer.
+ */
+typedef void (*aes67_conn_rx_observer_t)(uint8_t stream_id);
+
+/**
+ * @brief Register an RX-stream change observer (max 4, no unregister).
+ *
+ * @return 0 on success, -ENOMEM if the observer slots are exhausted
+ */
+int aes67_conn_register_rx_observer(aes67_conn_rx_observer_t cb);
+
 /* ---- Foreign stream registry ---- */
 
 /**

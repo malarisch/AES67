@@ -20,6 +20,7 @@
 #define MDNS_SD_H_
 
 #include <zephyr/kernel.h>
+#include <zephyr/net/net_ip.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -79,6 +80,23 @@ int mdns_sd_set_session(uint8_t slot, const char *session_name);
  * @return 0 on success, negative errno on error
  */
 int mdns_sd_remove_session(const char *session_name);
+
+#ifdef CONFIG_NMOS_REGISTRATION
+/* One usable NMOS Registration API discovered via mDNS ("usable" =
+ * SRV+A+TXT complete, api_proto=http, api_ver contains v1.3). */
+struct mdns_nmos_registry {
+	struct in_addr ip;
+	uint16_t port;
+	uint8_t pri;   /* TXT pri — lower wins */
+};
+
+/**
+ * @brief Snapshot the usable NMOS registries, sorted by priority.
+ *
+ * @return Number of entries written to out (0 = peer-to-peer operation)
+ */
+int mdns_sd_get_nmos_registries(struct mdns_nmos_registry *out, int max);
+#endif
 
 #ifdef __cplusplus
 }

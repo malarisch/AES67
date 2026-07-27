@@ -214,6 +214,11 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI)
     target_sources_ifdef(CONFIG_SPI_FLASH_LITESPI app PRIVATE src/fw_update.c)
     target_sources_ifdef(CONFIG_RTSP              app PRIVATE src/rtsp.c)
     target_sources_ifdef(CONFIG_MDNS_SD           app PRIVATE src/mdns_sd.c)
+    target_sources_ifdef(CONFIG_NMOS              app PRIVATE
+      src/nmos/nmos_node.c
+      src/nmos/nmos_api.c
+    )
+    target_sources_ifdef(CONFIG_NMOS_REGISTRATION app PRIVATE src/nmos/nmos_reg.c)
     target_sources_ifdef(CONFIG_SD_CONFIG         app PRIVATE src/sd_config.c)
     target_sources_ifdef(CONFIG_FLASH_CONFIG      app PRIVATE src/flash_config.c)
 

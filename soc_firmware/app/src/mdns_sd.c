@@ -47,6 +47,9 @@
 #include "aes67_sdp_utils.h"
 #include "aes67_conn.h"
 #include "rtsp.h"
+#ifdef CONFIG_NMOS
+#include "nmos/nmos.h"
+#endif
 
 LOG_MODULE_REGISTER(mdns_sd, LOG_LEVEL_INF);
 
@@ -76,8 +79,11 @@ LOG_MODULE_REGISTER(mdns_sd, LOG_LEVEL_INF);
 #define SUBTYPE_RAV_RTSP "_ravenna._sub._rtsp._tcp.local"
 #define SUBTYPE_RAV_HTTP "_ravenna._sub._http._tcp.local"
 #define SVC_ENUM         "_services._dns-sd._udp.local"
+/* NMOS IS-04 node advertisement (P2P discovery, withdrawn once the node
+ * is registered with a registry). */
+#define SVC_NMOS         "_nmos-node._tcp.local"
 
-static const char txt_ravenna[] = "type=ravenna";
+static const char *const txt_ravenna[] = {"type=ravenna"};
 
 /* ---- Local advertisement state ---- */
 
@@ -126,6 +132,34 @@ struct discovered_session {
 };
 
 static struct discovered_session discovered[MDNS_MAX_DISCOVERED];
+
+#ifdef CONFIG_NMOS_REGISTRATION
+/* ---- Discovered NMOS Registration APIs (_nmos-register._tcp) ---- */
+
+#define SVC_NMOS_REG "_nmos-register._tcp.local"
+/* Sized for the nmos-testing tool, which advertises up to 8 registry
+ * instances at once (6 mocks + invalid-version/-protocol + a timeout
+ * simulator); an overflowing cache silently hides registries and fails
+ * the priority/failover tests. */
+#define NMOS_MAX_REGISTRIES 10
+
+struct nmos_registry {
+	bool     used;
+	char     instance[MDNS_NAME_MAX];
+	char     srv_target[FQDN_MAX];
+	struct in_addr host;
+	uint16_t port;
+	bool     have_srv;
+	bool     have_a;
+	bool     have_txt;
+	bool     suitable;        /* api_proto=http, api_ver contains v1.3 */
+	uint8_t  pri;             /* TXT pri, lower wins */
+	int64_t  last_seen_ms;
+	int64_t  next_followup_ms;
+};
+
+static struct nmos_registry registries[NMOS_MAX_REGISTRIES];
+#endif /* CONFIG_NMOS_REGISTRATION */
 
 /* ---- Module state ---- */
 
@@ -324,21 +358,36 @@ static int add_srv(uint8_t *buf, size_t size, int off, const char *instance_fqdn
 	return off;
 }
 
+/* TXT record from a list of "key=value" strings (RFC 6763 §6). An empty
+ * list yields the single empty string an empty TXT record requires. */
 static int add_txt(uint8_t *buf, size_t size, int off, const char *instance_fqdn,
-		   uint32_t ttl)
+		   uint32_t ttl, const char *const *txt, int ntxt)
 {
-	size_t tl = strlen(txt_ravenna);
 	int rd;
 
 	off = rr_header(buf, size, off, instance_fqdn, DNS_TYPE_TXT,
 			DNS_CLASS_IN | DNS_CLASS_FLUSH, ttl);
-	if (off < 0 || (size_t)off + 1 + tl > size) {
+	if (off < 0) {
 		return -1;
 	}
 	rd = off;
-	buf[off++] = (uint8_t)tl;
-	memcpy(&buf[off], txt_ravenna, tl);
-	off += tl;
+
+	if (ntxt <= 0) {
+		if ((size_t)off + 1 > size) {
+			return -1;
+		}
+		buf[off++] = 0;
+	}
+	for (int i = 0; i < ntxt; i++) {
+		size_t tl = strlen(txt[i]);
+
+		if (tl > 255 || (size_t)off + 1 + tl > size) {
+			return -1;
+		}
+		buf[off++] = (uint8_t)tl;
+		memcpy(&buf[off], txt[i], tl);
+		off += tl;
+	}
 	rr_rdlen(buf, rd, off);
 	return off;
 }
@@ -472,9 +521,10 @@ static void finish_response(int off, int answers,
 /* Add PTR + SRV + TXT + A for one service instance.  `subtype` (NULL for
  * none) selects the PTR record's owner name.  Additionals that don't fit
  * are dropped (receivers re-query). */
-static int add_instance(int off, int *answers, const char *instance,
-			const char *svc, uint16_t port, const char *subtype,
-			bool with_details, uint32_t ptr_ttl)
+static int add_instance_txt(int off, int *answers, const char *instance,
+			    const char *svc, uint16_t port, const char *subtype,
+			    bool with_details, uint32_t ptr_ttl,
+			    const char *const *txt, int ntxt)
 {
 	char fqdn[FQDN_MAX + MDNS_NAME_MAX];
 	struct in_addr ip = my_ipv4();
@@ -499,7 +549,7 @@ static int add_instance(int off, int *answers, const char *instance,
 		off = n;
 		(*answers)++;
 	}
-	n = add_txt(tx_buf, sizeof(tx_buf), off, fqdn, TTL_SERVICE);
+	n = add_txt(tx_buf, sizeof(tx_buf), off, fqdn, TTL_SERVICE, txt, ntxt);
 	if (n > 0) {
 		off = n;
 		(*answers)++;
@@ -513,6 +563,82 @@ static int add_instance(int off, int *answers, const char *instance,
 	}
 	return off;
 }
+
+/* RAVENNA instances all carry the fixed type=ravenna TXT record. */
+static int add_instance(int off, int *answers, const char *instance,
+			const char *svc, uint16_t port, const char *subtype,
+			bool with_details, uint32_t ptr_ttl)
+{
+	return add_instance_txt(off, answers, instance, svc, port, subtype,
+				with_details, ptr_ttl, txt_ravenna,
+				ARRAY_SIZE(txt_ravenna));
+}
+
+#ifdef CONFIG_NMOS
+/* ---- NMOS _nmos-node._tcp advertisement ----
+ *
+ * TXT records per IS-04: api_proto/api_ver/api_auth always, the ver_*
+ * collection counters only in P2P mode. Rebuilt from the NMOS module's
+ * state before every use (responder thread only, so the static scratch
+ * is race-free). periodic_tick() polls for changes: a ver_* bump must
+ * hit the wire as an unsolicited announcement, and a node that became
+ * registered must withdraw the advertisement with a goodbye. */
+#define NMOS_TXT_MAX 9
+
+static struct nmos_mdns_info nmos_info;      /* last polled state */
+static char nmos_txt_store[NMOS_TXT_MAX][16];
+static const char *nmos_txt[NMOS_TXT_MAX];
+static int nmos_txt_count;
+
+static void nmos_txt_refresh(void)
+{
+	int n = 0;
+
+	nmos_txt[n] = "api_proto=http";
+	n++;
+	nmos_txt[n] = "api_ver=v1.3";
+	n++;
+	nmos_txt[n] = "api_auth=false";
+	n++;
+
+	if (nmos_info.p2p) {
+		static const char *const keys[6] = {
+			"slf", "src", "flw", "dvc", "snd", "rcv",
+		};
+		const uint8_t vals[6] = {
+			nmos_info.ver_slf, nmos_info.ver_src,
+			nmos_info.ver_flw, nmos_info.ver_dvc,
+			nmos_info.ver_snd, nmos_info.ver_rcv,
+		};
+
+		for (int i = 0; i < 6; i++) {
+			snprintf(nmos_txt_store[n], sizeof(nmos_txt_store[n]),
+				 "ver_%s=%u", keys[i], vals[i]);
+			nmos_txt[n] = nmos_txt_store[n];
+			n++;
+		}
+	}
+	nmos_txt_count = n;
+}
+
+static int add_nmos_instance(int off, int *answers, const char *subtype,
+			     bool with_details, uint32_t ptr_ttl)
+{
+	nmos_txt_refresh();
+	return add_instance_txt(off, answers, vendor_node_id, SVC_NMOS, 80,
+				subtype, with_details, ptr_ttl,
+				nmos_txt, nmos_txt_count);
+}
+
+static void goodbye_nmos(void)
+{
+	int off, answers = 0;
+
+	off = begin_response(0);
+	off = add_nmos_instance(off, &answers, NULL, false, 0);
+	finish_response(off, answers, NULL, 0);
+}
+#endif /* CONFIG_NMOS */
 
 /* Answer one parsed question.  Returns updated offset. */
 static int answer_question(int off, int *answers, const char *qname,
@@ -538,8 +664,28 @@ static int answer_question(int off, int *answers, const char *qname,
 			off = n;
 			(*answers)++;
 		}
+#ifdef CONFIG_NMOS
+		if (nmos_info.advertise) {
+			n = add_ptr(tx_buf, sizeof(tx_buf), off, SVC_ENUM,
+				    SVC_NMOS, TTL_SERVICE);
+			if (n > 0) {
+				off = n;
+				(*answers)++;
+			}
+		}
+#endif
 		return off;
 	}
+
+#ifdef CONFIG_NMOS
+	if (t_ptr && name_eq(qname, SVC_NMOS)) {
+		if (nmos_info.advertise) {
+			off = add_nmos_instance(off, answers, NULL, true,
+						TTL_SERVICE);
+		}
+		return off;
+	}
+#endif
 
 	if (t_ptr && name_eq(qname, SUBTYPE_RAVENNA)) {
 		for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
@@ -605,19 +751,40 @@ static int answer_question(int off, int *answers, const char *qname,
 		return off;
 	}
 
-	/* Instance-specific SRV/TXT queries: "<inst>._rtsp/_http._tcp.local" */
+	/* Instance-specific SRV/TXT queries: "<inst>._rtsp/_http._tcp.local"
+	 * (and "<node>._nmos-node._tcp.local" when advertised). */
 	if (t_srv || t_txt) {
 		char inst[MDNS_NAME_MAX];
-		bool is_rtsp;
+		const char *svc;
+		const char *const *txt = txt_ravenna;
+		int ntxt = ARRAY_SIZE(txt_ravenna);
+		bool is_nmos = false;
+		uint16_t port;
 		size_t qlen = strlen(qname);
 		size_t svclen = strlen(SVC_RTSP);
 
 		if (qlen > svclen + 1 &&
 		    name_eq(qname + (qlen - svclen), SVC_RTSP)) {
-			is_rtsp = true;
+			svc = SVC_RTSP;
+			port = rtsp_port;
 		} else if (qlen > svclen + 1 &&
 			   name_eq(qname + (qlen - svclen), SVC_HTTP)) {
-			is_rtsp = false;
+			svc = SVC_HTTP;
+			port = 80;
+#ifdef CONFIG_NMOS
+		} else if (qlen > strlen(SVC_NMOS) + 1 &&
+			   name_eq(qname + (qlen - strlen(SVC_NMOS)),
+				   SVC_NMOS)) {
+			if (!nmos_info.advertise) {
+				return off;
+			}
+			svc = SVC_NMOS;
+			port = 80;
+			is_nmos = true;
+			nmos_txt_refresh();
+			txt = nmos_txt;
+			ntxt = nmos_txt_count;
+#endif
 		} else {
 			return off;
 		}
@@ -626,13 +793,15 @@ static int answer_question(int off, int *answers, const char *qname,
 		if (!is_own_session(inst)) {
 			return off;
 		}
+		/* The NMOS service exists only under the vendor node ID. */
+		if (is_nmos && !name_eq(inst, vendor_node_id)) {
+			return off;
+		}
 
-		uint16_t port = is_rtsp ? rtsp_port : 80;
 		char fqdn[FQDN_MAX + MDNS_NAME_MAX];
 		struct in_addr ip = my_ipv4();
 
-		instance_fqdn(fqdn, sizeof(fqdn), inst,
-			      is_rtsp ? SVC_RTSP : SVC_HTTP);
+		instance_fqdn(fqdn, sizeof(fqdn), inst, svc);
 
 		if (t_srv) {
 			n = add_srv(tx_buf, sizeof(tx_buf), off, fqdn, port);
@@ -643,7 +812,7 @@ static int answer_question(int off, int *answers, const char *qname,
 		}
 		if (t_txt) {
 			n = add_txt(tx_buf, sizeof(tx_buf), off, fqdn,
-				    TTL_SERVICE);
+				    TTL_SERVICE, txt, ntxt);
 			if (n > 0) {
 				off = n;
 				(*answers)++;
@@ -724,6 +893,17 @@ static void announce_all(uint32_t ptr_ttl)
 			   NULL, false, ptr_ttl);
 	finish_response(off, answers, NULL, 0);
 
+#ifdef CONFIG_NMOS
+	/* NMOS node advertisement in its own packet (the node-services
+	 * packet runs close to the MTU already). */
+	if (nmos_info.advertise) {
+		answers = 0;
+		off = begin_response(0);
+		off = add_nmos_instance(off, &answers, NULL, true, ptr_ttl);
+		finish_response(off, answers, NULL, 0);
+	}
+#endif
+
 	/* Sessions: base PTR + subtype PTR + SRV/TXT/A each */
 	for (int i = 0; i < MDNS_MAX_SESSIONS; i++) {
 		if (sessions[i].name[0] == '\0') {
@@ -759,18 +939,32 @@ static void goodbye_session(const char *name)
 
 static void send_browse_query(void)
 {
-	uint8_t buf[96];
+	uint8_t buf[160];
 	int off;
+	int qd = 1;
 
 	memset(buf, 0, 12);
-	sys_put_be16(1, &buf[4]);  /* QDCOUNT */
 	off = name_put(buf, sizeof(buf), 12, SUBTYPE_RAVENNA);
 	if (off < 0 || (size_t)off + 4 > sizeof(buf)) {
 		return;
 	}
 	sys_put_be16(DNS_TYPE_PTR, &buf[off]);
 	sys_put_be16(DNS_CLASS_IN, &buf[off + 2]);
-	send_packet(buf, off + 4, NULL);
+	off += 4;
+
+#ifdef CONFIG_NMOS_REGISTRATION
+	int n = name_put(buf, sizeof(buf), off, SVC_NMOS_REG);
+
+	if (n > 0 && (size_t)n + 4 <= sizeof(buf)) {
+		sys_put_be16(DNS_TYPE_PTR, &buf[n]);
+		sys_put_be16(DNS_CLASS_IN, &buf[n + 2]);
+		off = n + 4;
+		qd++;
+	}
+#endif
+
+	sys_put_be16(qd, &buf[4]);  /* QDCOUNT */
+	send_packet(buf, off, NULL);
 }
 
 /* Follow-up SRV (+ implicit A via additionals) query for an incomplete
@@ -873,6 +1067,148 @@ static void cache_remove(struct discovered_session *d)
 	d->used = false;
 }
 
+#ifdef CONFIG_NMOS_REGISTRATION
+/* ---- NMOS registry cache ---- */
+
+static struct nmos_registry *reg_cache_find(const char *instance)
+{
+	for (int i = 0; i < NMOS_MAX_REGISTRIES; i++) {
+		if (registries[i].used &&
+		    name_eq(registries[i].instance, instance)) {
+			return &registries[i];
+		}
+	}
+	return NULL;
+}
+
+static struct nmos_registry *reg_cache_get(const char *instance)
+{
+	struct nmos_registry *r = reg_cache_find(instance);
+
+	if (r) {
+		return r;
+	}
+	for (int i = 0; i < NMOS_MAX_REGISTRIES; i++) {
+		if (!registries[i].used) {
+			r = &registries[i];
+			memset(r, 0, sizeof(*r));
+			r->used = true;
+			strncpy(r->instance, instance, sizeof(r->instance) - 1);
+			LOG_INF("mDNS: NMOS registry '%s' discovered", instance);
+			return r;
+		}
+	}
+	return NULL;
+}
+
+/* TXT rdata: length-prefixed "key=value" strings. The registry advert
+ * carries pri/api_proto/api_ver/api_auth (IS-04 Discovery). */
+static void reg_parse_txt(struct nmos_registry *r, const uint8_t *rdata,
+			  uint16_t rdlen)
+{
+	bool proto_ok = false, ver_ok = false;
+	uint16_t off = 0;
+
+	r->pri = 255;
+	while (off < rdlen) {
+		uint8_t sl = rdata[off++];
+		char kv[64];
+
+		if (sl == 0 || off + sl > rdlen) {
+			break;
+		}
+		size_t cl = MIN((size_t)sl, sizeof(kv) - 1);
+
+		memcpy(kv, &rdata[off], cl);
+		kv[cl] = '\0';
+		off += sl;
+
+		if (strncasecmp(kv, "pri=", 4) == 0) {
+			long v = strtol(kv + 4, NULL, 10);
+
+			r->pri = (v >= 0 && v <= 255) ? (uint8_t)v : 255;
+		} else if (strncasecmp(kv, "api_proto=", 10) == 0) {
+			proto_ok = (strcasecmp(kv + 10, "http") == 0);
+		} else if (strncasecmp(kv, "api_ver=", 8) == 0) {
+			/* comma-separated list, e.g. "v1.0,v1.1,v1.2,v1.3" */
+			ver_ok = (strstr(kv + 8, "v1.3") != NULL);
+		}
+	}
+	r->have_txt = true;
+	r->suitable = proto_ok && ver_ok;
+}
+
+/* Follow-up query for whatever an incomplete registry entry is missing. */
+static void reg_send_followup(const struct nmos_registry *r)
+{
+	uint8_t buf[192];
+	char fqdn[FQDN_MAX + MDNS_NAME_MAX];
+	int off = 12;
+	int qd = 0;
+
+	memset(buf, 0, 12);
+
+	if (!r->have_srv || !r->have_txt) {
+		instance_fqdn(fqdn, sizeof(fqdn), r->instance, SVC_NMOS_REG);
+		off = name_put(buf, sizeof(buf), off, fqdn);
+		if (off < 0 || (size_t)off + 4 > sizeof(buf)) {
+			return;
+		}
+		sys_put_be16(DNS_TYPE_ANY, &buf[off]);
+		sys_put_be16(DNS_CLASS_IN, &buf[off + 2]);
+		off += 4;
+		qd++;
+	} else if (!r->have_a) {
+		off = name_put(buf, sizeof(buf), off, r->srv_target);
+		if (off < 0 || (size_t)off + 4 > sizeof(buf)) {
+			return;
+		}
+		sys_put_be16(DNS_TYPE_A, &buf[off]);
+		sys_put_be16(DNS_CLASS_IN, &buf[off + 2]);
+		off += 4;
+		qd++;
+	}
+
+	if (qd > 0) {
+		sys_put_be16(qd, &buf[4]);
+		send_packet(buf, off, NULL);
+	}
+}
+
+int mdns_sd_get_nmos_registries(struct mdns_nmos_registry *out, int max)
+{
+	int n = 0;
+
+	k_mutex_lock(&mdns_lock, K_FOREVER);
+	for (int i = 0; i < NMOS_MAX_REGISTRIES && n < max; i++) {
+		const struct nmos_registry *r = &registries[i];
+
+		if (!r->used || !r->have_srv || !r->have_a || !r->have_txt ||
+		    !r->suitable) {
+			continue;
+		}
+		out[n].ip = r->host;
+		out[n].port = r->port;
+		out[n].pri = r->pri;
+		n++;
+	}
+	k_mutex_unlock(&mdns_lock);
+
+	/* Sort by priority (n <= 4, insertion sort is plenty). */
+	for (int i = 1; i < n; i++) {
+		struct mdns_nmos_registry tmp = out[i];
+		int j = i - 1;
+
+		while (j >= 0 && out[j].pri > tmp.pri) {
+			out[j + 1] = out[j];
+			j--;
+		}
+		out[j + 1] = tmp;
+	}
+	return n;
+}
+#endif /* CONFIG_NMOS_REGISTRATION */
+
 /* Parse a response packet: collect subtype PTRs, SRVs and As that belong to
  * (potential) RAVENNA sessions. */
 static void handle_response(const uint8_t *msg, size_t len)
@@ -920,6 +1256,69 @@ static void handle_response(const uint8_t *msg, size_t len)
 			return;
 		}
 		off = rdata + rdlen;
+
+#ifdef CONFIG_NMOS_REGISTRATION
+		if (type == DNS_TYPE_PTR && name_eq(rname, SVC_NMOS_REG)) {
+			char target[FQDN_MAX + MDNS_NAME_MAX];
+			char inst[MDNS_NAME_MAX];
+
+			if (name_parse(msg, len, rdata, target, sizeof(target),
+				       NULL) < 0) {
+				continue;
+			}
+			first_label(target, inst, sizeof(inst));
+			if (inst[0] == '\0') {
+				continue;
+			}
+
+			struct nmos_registry *r;
+
+			if (ttl == 0) {
+				r = reg_cache_find(inst);
+				if (r) {
+					LOG_INF("mDNS: NMOS registry '%s' gone",
+						r->instance);
+					r->used = false;
+				}
+				continue;
+			}
+			r = reg_cache_get(inst);
+			if (r) {
+				r->last_seen_ms = now;
+			}
+			continue;
+		}
+		if (type == DNS_TYPE_SRV || type == DNS_TYPE_TXT) {
+			size_t rl = strlen(rname);
+			size_t sl = strlen(SVC_NMOS_REG);
+
+			if (rl > sl + 1 &&
+			    name_eq(rname + (rl - sl), SVC_NMOS_REG)) {
+				char inst[MDNS_NAME_MAX];
+
+				first_label(rname, inst, sizeof(inst));
+
+				struct nmos_registry *r = reg_cache_get(inst);
+
+				if (!r) {
+					continue;
+				}
+				r->last_seen_ms = now;
+				if (type == DNS_TYPE_SRV && rdlen >= 7) {
+					r->port = sys_get_be16(&msg[rdata + 4]);
+					if (name_parse(msg, len, rdata + 6,
+						       r->srv_target,
+						       sizeof(r->srv_target),
+						       NULL) == 0) {
+						r->have_srv = true;
+					}
+				} else if (type == DNS_TYPE_TXT) {
+					reg_parse_txt(r, &msg[rdata], rdlen);
+				}
+				continue;
+			}
+		}
+#endif /* CONFIG_NMOS_REGISTRATION */
 
 		if (type == DNS_TYPE_PTR && name_eq(rname, SUBTYPE_RAVENNA)) {
 			char target[FQDN_MAX + MDNS_NAME_MAX];
@@ -1018,6 +1417,19 @@ static void handle_response(const uint8_t *msg, size_t len)
 				d->have_a = true;
 				d->last_seen_ms = now;
 			}
+#ifdef CONFIG_NMOS_REGISTRATION
+			for (int i = 0; i < NMOS_MAX_REGISTRIES; i++) {
+				struct nmos_registry *r = &registries[i];
+
+				if (!r->used || !r->have_srv ||
+				    !name_eq(r->srv_target, rname)) {
+					continue;
+				}
+				r->host = a;
+				r->have_a = true;
+				r->last_seen_ms = now;
+			}
+#endif
 		}
 	}
 
@@ -1183,6 +1595,28 @@ static void periodic_tick(void)
 
 	k_mutex_lock(&mdns_lock, K_FOREVER);
 
+#ifdef CONFIG_NMOS
+	/* Poll the NMOS advertisement state: ver_* bumps must hit the wire
+	 * as unsolicited announcements, and a node that registered with a
+	 * registry withdraws _nmos-node._tcp with a goodbye. */
+	{
+		struct nmos_mdns_info ni;
+
+		nmos_get_mdns_info(&ni);
+		if (memcmp(&ni, &nmos_info, sizeof(ni)) != 0) {
+			bool withdrawn = nmos_info.advertise && !ni.advertise;
+
+			nmos_info = ni;
+			if (withdrawn) {
+				goodbye_nmos();
+			} else if (ni.advertise) {
+				announce_pending = MAX(announce_pending, 2);
+				announce_next_ms = now;
+			}
+		}
+	}
+#endif
+
 	if (announce_pending > 0 && now >= announce_next_ms) {
 		announce_all(TTL_SERVICE);
 		announce_pending--;
@@ -1202,6 +1636,26 @@ static void periodic_tick(void)
 			browse_next_ms = now + BROWSE_INTERVAL_MS;
 		}
 	}
+
+#ifdef CONFIG_NMOS_REGISTRATION
+	for (int i = 0; i < NMOS_MAX_REGISTRIES; i++) {
+		struct nmos_registry *r = &registries[i];
+
+		if (!r->used) {
+			continue;
+		}
+		if (now - r->last_seen_ms > CACHE_EXPIRY_MS) {
+			LOG_INF("mDNS: NMOS registry '%s' expired", r->instance);
+			r->used = false;
+			continue;
+		}
+		if ((!r->have_srv || !r->have_a || !r->have_txt) &&
+		    now >= r->next_followup_ms) {
+			reg_send_followup(r);
+			r->next_followup_ms = now + 3000;
+		}
+	}
+#endif
 
 	for (int i = 0; i < MDNS_MAX_DISCOVERED; i++) {
 		struct discovered_session *d = &discovered[i];

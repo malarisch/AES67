@@ -135,6 +135,33 @@ config MDNS_SD_SERIAL
 
 endmenu
 
+menu "NMOS (AMWA IS-04)"
+
+config NMOS
+	bool "NMOS IS-04 Node API"
+	default y
+	depends on NETWORKING && HTTP_SERVER
+	help
+	  Serve the AMWA IS-04 v1.3 Node API under /x-nmos/node/ on the
+	  built-in HTTP server: node/device/source/flow/sender/receiver
+	  resources derived from the live AES67 stream tables, plus the
+	  SDP manifests for senders under /x-nmos/manifest/. The IS-04
+	  registration client and peer-to-peer mDNS advertisement build
+	  on top of this.
+
+config NMOS_REGISTRATION
+	bool "NMOS IS-04 registration client"
+	default y
+	depends on NMOS && MDNS_SD
+	help
+	  Discover NMOS Registration APIs via mDNS (_nmos-register._tcp),
+	  register the node's resources and maintain them with 5-second
+	  heartbeats, with failover and exponential backoff per IS-04.
+	  While registered the _nmos-node._tcp advertisement is withdrawn;
+	  without a registry the node falls back to peer-to-peer mode.
+
+endmenu
+
 menu "SD Card Configuration Storage"
 
 config SD_CONFIG

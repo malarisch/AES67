@@ -44,6 +44,9 @@ static struct aes67_foreign_stream foreign_streams[AES67_MAX_FOREIGN_STREAMS];
 static aes67_conn_tx_observer_t tx_observers[MAX_TX_OBSERVERS];
 static int num_tx_observers;
 
+static aes67_conn_rx_observer_t rx_observers[MAX_TX_OBSERVERS];
+static int num_rx_observers;
+
 static K_MUTEX_DEFINE(conn_mutex);
 
 /* ================================================================
@@ -120,6 +123,25 @@ static void notify_tx_observers(uint8_t stream_id)
 {
 	for (int i = 0; i < num_tx_observers; i++) {
 		tx_observers[i](stream_id);
+	}
+}
+
+int aes67_conn_register_rx_observer(aes67_conn_rx_observer_t cb)
+{
+	if (!cb) {
+		return -EINVAL;
+	}
+	if (num_rx_observers >= MAX_TX_OBSERVERS) {
+		return -ENOMEM;
+	}
+	rx_observers[num_rx_observers++] = cb;
+	return 0;
+}
+
+static void notify_rx_observers(uint8_t stream_id)
+{
+	for (int i = 0; i < num_rx_observers; i++) {
+		rx_observers[i](stream_id);
 	}
 }
 
@@ -308,6 +330,8 @@ int aes67_conn_configure_rx_stream(uint8_t stream_id,
 	} else {
 		LOG_INF("RX stream %u deactivated", stream_id);
 	}
+
+	notify_rx_observers(stream_id);
 
 	return 0;
 }

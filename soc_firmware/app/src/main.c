@@ -58,6 +58,9 @@
 #ifdef CONFIG_MDNS_SD
 #include "mdns_sd.h"
 #endif
+#ifdef CONFIG_NMOS
+#include "nmos/nmos.h"
+#endif
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 #include "../drivers/eth_litex/eth_litex.h"
 #include <zephyr/net/ptp.h>  /* ptp_start() — application-managed stack start */
@@ -242,6 +245,10 @@ static void apply_node_ip(const struct in_addr *addr, bool link_local)
 
 	aes67_conn_notify_ip_ready(addr);
 	sap_sdp_notify_ip_ready(addr);
+
+#ifdef CONFIG_NMOS
+	nmos_notify_ip_ready(addr);
+#endif
 
 #ifdef CONFIG_RTSP
 	rtsp_notify_ip_ready(addr);
@@ -1339,6 +1346,16 @@ int main(void)
 	int mdns_ret = mdns_sd_start();
 	if (mdns_ret < 0) {
 		LOG_ERR("Failed to start mDNS/DNS-SD: %d", mdns_ret);
+	}
+#endif
+
+#ifdef CONFIG_NMOS
+	/* ---- Arm NMOS IS-04 version bookkeeping (API is served by the
+	 * HTTP server started above) ---- */
+	int nmos_ret = nmos_start();
+	if (nmos_ret < 0) {
+		LOG_ERR("NMOS did not start (err %d) — node invisible to "
+			"NMOS controllers", nmos_ret);
 	}
 #endif
 
