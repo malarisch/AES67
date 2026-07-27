@@ -15,6 +15,7 @@ db/
 *.eqn
 *.hex
 *.html
+!soc_firmware/app/webui/index.html
 *.jdi
 *.jpg
 # *.mif
@@ -51,6 +52,7 @@ external/
 **/greybox_tmp/
 
 **/node_modules/
+*.tsbuildinfo
 *.stp
 datasheets/AD1940_1941.pdf
 datasheets/RAVENNA_Operating_Principles_-_Draft_1.0_final.pdf

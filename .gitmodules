@@ -7,3 +7,6 @@
 [submodule "verilog-ethernet-mod"]
 	path = verilog-ethernet-mod
 	url = https://github.com/malarisch/verilog-ethernet
+[submodule "soc_firmware/app/webui"]
+	path = soc_firmware/app/webui
+	url = https://github.com/malarisch/aes67-soc-webui
