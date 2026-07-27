@@ -3,10 +3,10 @@
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 USE ieee.numeric_std.all;
-
+USE work.system_cfg_pkg.all;
 ENTITY sysclk_pll_gen IS
 	generic (
-		platform : string := "ALTERA"; -- "ALTERA" or "GOWIN"
+		platform : t_platforms := ALTERA; -- "ALTERA" or "GOWIN"
 		clk_in_speed : natural := 50 -- input clock speed in mhz (for now only 12, 27, 50)
 	);
 	PORT
@@ -79,7 +79,7 @@ end component;
 signal sys_clk_locked : std_logic;
 begin
 -- system clocks
-sysclkgen50: if (platform = "ALTERA" and clk_in_speed = 50) generate
+sysclkgen50: if (platform = ALTERA and clk_in_speed = 50) generate
 sysclks_altpll_50m_in_inst : sysclks_altpll_50m_in PORT MAP (
 		areset	 => not rst_n_i,
 		inclk0	 => clock_i,
@@ -90,7 +90,7 @@ sysclks_altpll_50m_in_inst : sysclks_altpll_50m_in PORT MAP (
 	);
 
 end generate;
-sysclkgen25: if (platform = "ALTERA" and clk_in_speed = 25) generate
+sysclkgen25: if (platform = ALTERA and clk_in_speed = 25) generate
 sysclks_altpll_25m_in_inst : altpll_25m
   port map (
     inclk0 => clock_i,
@@ -101,7 +101,7 @@ sysclks_altpll_25m_in_inst : altpll_25m
 
 
 end generate;
-sysclkgen12: if (platform = "ALTERA" and clk_in_speed = 12) generate
+sysclkgen12: if (platform = ALTERA and clk_in_speed = 12) generate
 sysclks_altpll_12m_in_inst : sysclks_altpll_12m_in PORT MAP (
 		areset	 => not rst_n_i,
 		inclk0	 => clock_i,
@@ -112,7 +112,7 @@ sysclks_altpll_12m_in_inst : sysclks_altpll_12m_in PORT MAP (
 	);
 
 end generate;
-sysclkgen27: if (platform = "GOWIN" and clk_in_speed = 27) generate
+sysclkgen27: if (platform = GOWIN and clk_in_speed = 27) generate
 gowin_pll_27i_125o_inst: gowin_pll_27i_125o
  port map(
 	clkout => sys_clk_125MHz_o,
@@ -123,7 +123,7 @@ gowin_pll_27i_125o_inst: gowin_pll_27i_125o
 end generate;
 
 
-sysclkgen50_gw: if (platform = "GOWIN" and clk_in_speed = 50) generate
+sysclkgen50_gw: if (platform = GOWIN and clk_in_speed = 50) generate
 	gowin_pll_50i_inst: gowin_pll_50i
 	 port map(
 		clkin => clock_i,
@@ -132,7 +132,7 @@ sysclkgen50_gw: if (platform = "GOWIN" and clk_in_speed = 50) generate
 		mdclk => clock_i
 	);
 end generate;
-sysclkgen16_lat : if (platform = "LATTICE" and clk_in_speed = 16) generate
+sysclkgen16_lat : if (platform = LATTICE and clk_in_speed = 16) generate
 	lattice_pll_16m_inst: lattice_pll_16m
 	 port map(
 		CLKI => clock_i,

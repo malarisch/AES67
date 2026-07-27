@@ -5,39 +5,11 @@ use work.miim_types.all;
 
 use work.audioclks_pkg.all;
 use work.wallclock_signals_pkg.all;
+use work.system_cfg_pkg.all;
+
 entity aes67_wb_bridge is
   generic (
-		MII_WIDTH : integer := 2;
-		ETHERNET_TYPE : string := "RMII";
-		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
-		TX_MAX_STREAMS : natural := 8;
-		RX_MAX_STREAMS : natural := 8;
-		RX_CHANNELS		: natural := 16;
-		TX_CHANNELS		: natural := 16; -- must be multiple of two for i2s, multiple of 8 for tdm8
-		RX_BYTE_DEPTH	: natural := 3;
-		TX_BYTE_DEPTH	: natural := 3;
-		RX_SAMPLE_BUFFER_DEPTH : natural := 256;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 64; -- must be power of two (media-clock-derived TX write pointer)
-		  
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
-
-    	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-		
-
-		
-		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
-		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-
-		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
-		AUDIO_TX_TDM_INPUTS : natural := 2;
-
-		USE_EXTERNAL_PLL : BOOLEAN := true;
-		ENABLE_METERING: BOOLEAN := true;
-    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-    PTP_IN_SOFTWARE : BOOLEAN := false;
-    PHY_TYPE : STRING := "UNKNOWN";
-    AUDIO_TDM_CONFIG : t_audio_clock_cfg
+		syscfg : t_global_system_cfg := global_system_cfg_cyc
 
 	);
 	PORT
@@ -52,8 +24,8 @@ entity aes67_wb_bridge is
     -- raw mii/rmii/rgmii interface for eth timestamping
     phy_mii_rx_clk_in : IN STD_LOGIC;
 		phy_mii_tx_clk_in : IN STD_LOGIC;
-		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
-		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 downto 0);
+		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 downto 0);
 		phy_mii_tx_en_i : IN STD_LOGIC;
 		phy_mii_rx_en_i : IN STD_LOGIC;
 		
@@ -95,14 +67,15 @@ entity aes67_wb_bridge is
       aes67_wb_we                               : in std_logic;
       eth_irq_o                           : out std_logic;
 		-- audio outputs
-		tdm8out_o : OUT STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
-		rx_sample_register : OUT STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
+
+		tdm_in :  IN  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
+		tdm_out :  OUT  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0);
 		
 
-		-- audio inputs
-		tdm8in_i : IN STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
-		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0);
 
+    rx_sample_register : OUT STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+    tx_sample_register : IN STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0) := (others => '0');
+		
     dbg_mac_tx_clk_o : out std_logic
 
 	);
@@ -262,10 +235,10 @@ signal pll_counter_o : unsigned(24 downto 0);
 signal wc_counter_o : unsigned(24 downto 0);
 
 signal audio_meter_clear_i : STD_LOGIC;
-signal audio_meter_rx_clip_o : STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
-signal audio_meter_rx_signal_o : STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
-signal audio_meter_tx_clip_o : STD_LOGIC_VECTOR(TX_CHANNELS - 1 downto 0);
-signal audio_meter_tx_signal_o : STD_LOGIC_VECTOR(TX_CHANNELS - 1 downto 0);
+signal audio_meter_rx_clip_o : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+signal audio_meter_rx_signal_o : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+signal audio_meter_tx_clip_o : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0);
+signal audio_meter_tx_signal_o : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0);
 
 signal audio_tx_cfg_wr_en_i : STD_LOGIC;
 signal audio_tx_cfg_wr_data_i : STD_LOGIC_VECTOR(7 downto 0);
@@ -447,30 +420,7 @@ begin
     wallclock_signals.nco_ppb_adj_valid_i <= aes67_ctrl_nco_ppb_adj_valid_reg;
     aes67_top_inst: entity work.aes67_top
      generic map(
-        MII_WIDTH => MII_WIDTH,
-        ETHERNET_TYPE => ETHERNET_TYPE,
-        SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-        MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-        TX_MAX_STREAMS => TX_MAX_STREAMS,
-        RX_MAX_STREAMS => RX_MAX_STREAMS,
-        RX_CHANNELS => RX_CHANNELS,
-        TX_CHANNELS => TX_CHANNELS,
-        RX_BYTE_DEPTH => RX_BYTE_DEPTH,
-        TX_BYTE_DEPTH => TX_BYTE_DEPTH,
-        RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
-        TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
-        MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
-        MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
-        AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
-        AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-        AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
-        AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-        USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
-        ENABLE_METERING => ENABLE_METERING,
-        PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-        PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
-        PHY_TYPE => PHY_TYPE,
-        AUDIO_TDM_CONFIG => AUDIO_TDM_CONFIG
+        syscfg => syscfg
     )
      port map(
         sys_clk_125MHz_i => sys_clk_125MHz_i,
@@ -563,11 +513,11 @@ begin
         audio_rx_cfg_wr_en_i => audio_rx_cfg_wr_en_i,
         audio_rx_cfg_wr_data_i => audio_rx_cfg_wr_data_i,
         audio_rx_cfg_wr_addr_i => audio_rx_cfg_wr_addr_i,
-        tdm8out_o => tdm8out_o,
+        tdm_out => tdm_out,
         rx_sample_register => rx_sample_register,
         rx_stream_underrun_o => rx_stream_underrun,
         rx_mute_channels_o => rx_mute_channels,
-        tdm8in_i => tdm8in_i,
+        tdm_in => tdm_in,
         tx_sample_register => tx_sample_register,
         audiorx_reset_i => audiorx_reset,
         audiotx_reset_i => audiotx_reset,
@@ -578,7 +528,7 @@ begin
     );
     litex_eth_buffer_bridge_inst: entity work.litex_eth_buffer_bridge
      generic map(
-        ADD_RX_TIMESTAMP => PTP_IN_SOFTWARE
+        ADD_RX_TIMESTAMP => syscfg.PTP_IN_SOFTWARE
      )
      port map(
         timestamps_i => timestamps,

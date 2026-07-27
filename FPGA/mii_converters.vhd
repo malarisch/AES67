@@ -1,12 +1,12 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-
+use work.system_cfg_pkg.all;
 entity mii_converters is
   generic (
     MII_WIDTH     : integer := 2;
-    ETHERNET_TYPE : string  := "RMII";
-    PLATFORM      : string  := "ALTERA"
+    MII_TYPE : t_mii_types;
+    PLATFORM      : t_platforms  := ALTERA
   );
   port (
     rst_n_i                 : in std_logic;
@@ -112,7 +112,7 @@ end component;
   
 begin
     phy_mii_enet_resetn <= rst_n_i;
-  rgmiigen : if (ethernet_type = "RGMII") generate
+  rgmiigen : if (MII_TYPE = RGMII) generate
     gmii_tx_en  <= mii_tx_en_i;
     gmii_txd    <= mii_txd_i;
     gmii_tx_err <= mii_tx_err_i;
@@ -128,7 +128,7 @@ begin
     generic map(
       CLOCK_INPUT_STYLE => "BUFG",
       IODDR_STYLE       => "IODDR2",
-      TARGET            => platform,
+      TARGET            => platform_to_string(platform),
       USE_CLK90         => "TRUE"
     )
     port map
@@ -164,7 +164,7 @@ begin
         c1     => enet_clk_90
       );
   end generate;
-  miigen : if (ethernet_type = "MII" and MII_WIDTH = 4) generate
+  miigen : if (MII_TYPE = MII and MII_WIDTH = 4) generate
     mii_tx_clock_o <= phy_mii_enet_tx_clk_i;
     mii_rx_clock_o <= phy_mii_enet_rx_clk;
     mii_rx_dv_o <= phy_mii_enet_rx_dv;
@@ -176,7 +176,7 @@ begin
     phy_clk_tx_o <= phy_mii_enet_tx_clk_i;
     phy_clk_rx_o <= phy_mii_enet_rx_clk;
   end generate;
-  rmiigen : if (ethernet_type = "RMII" and (platform = "ALTERA" or platform = "LATTICE")) generate
+  rmiigen : if (MII_TYPE= RMII and (platform = ALTERA or platform = LATTICE)) generate
 
     -- MAC-side MII interface mapping (identical to the RGMII path, lines above).
     -- These were missing: mii_rx_clock_o/mii_tx_clock_o were never driven, so the

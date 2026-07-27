@@ -2,12 +2,11 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use IEEE.MATH_REAL.ALL;
+use work.system_cfg_pkg.all;
 entity static_ptp_conf is
     generic(
-        -- Selects which DELAY_ASYMMETRY_NS_* value is applied below. Must
-        -- match the top-level ethernet_type ("RMII" = 100Mbit MII/LAN8720A,
-        -- "RGMII" = 1Gbit RGMII).
-        ETHERNET_TYPE : string := "RMII";
+        
+        MII_TYPE : t_mii_types;
 
         -- Board/PHY-specific PTP delayAsymmetry compensation (ns, signed).
         -- Positive = downstream (Master->Slave) path is longer. See
@@ -48,7 +47,7 @@ begin
         servo_unlock_threshold_ns_o  <= (to_unsigned(5000, 32));
         servo_lock_count_threshold_o <= (to_unsigned(24, 8));
         parser_delay_asymmetry_ns_o      <=
-            (to_signed(DELAY_ASYMMETRY_NS_1G,   32)) when ETHERNET_TYPE = "RGMII"
+            (to_signed(DELAY_ASYMMETRY_NS_1G,   32)) when MII_TYPE = RGMII
        else (to_signed(DELAY_ASYMMETRY_NS_100M, 32));
 
 

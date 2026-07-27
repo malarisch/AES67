@@ -9,53 +9,11 @@ USE ieee.numeric_std.all;
 use work.miim_types.all;
 
 use work.audioclks_pkg.all;
+use work.system_cfg_pkg.all;
 
 ENTITY top_cyc1000 IS
 	generic (
-		SOC_TYPE : string := "LITEX_SDRAM"; 
-		platform : string := "ALTERA";
-        MII_WIDTH : integer := 2; -- 2 for rmii, 4 rgmii
-		MII_CLK_NS_PER_TICK : integer := 20; -- 20 for rmii, 40 mii, 8 rgmii/gmii
-		clk_in_speed : natural := 12; -- input clock speed in mhz (for now only 12, 27, 50)
-		ethernet_type	 : string := "RMII"; -- RMII; RGMII
-		USE_EXTERNAL_PLL : boolean := FALSE; -- when disabled it will use the nco-generated clocks on the outputs
-
-		TX_SAMPLE_BUFFER_DEPTH : INTEGER := 64; -- must be power of two (media-clock-derived TX write pointer)
-		RX_SAMPLE_BUFFER_DEPTH : INTEGER := 256;
-		STATIC_PTP_CONF : 		BOOLEAN := true;
-        ENABLE_METERING: BOOLEAN := false;
-
-		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        
-		TX_MAX_STREAMS : natural := 2;
-		RX_MAX_STREAMS : natural := 2;
-		
-		
-		
-		  
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
-
-    	--MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-		
-
-		RX_CHANNELS		: natural := 2;
-        
-		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
-        RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
-		AUDIO_RX_TDM_OUTPUTS : natural := 1;
-		AUDIO_RX_TDM_CHANNELS : natural  := 2;
-
-        TX_CHANNELS		: natural := 2; -- must be multiple of two for i2s, multiple of 8 for tdm8
-        
-		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
-        TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
-		AUDIO_TX_TDM_INPUTS : natural := 1;
-		AUDIO_TX_TDM_CHANNELS : natural  := 2;
-        TDM_BCLK_MULT : INTEGER := 64;
-            TDM_I2S_MODE : BOOLEAN := false;
-    TDM_FSCLK_50DUTY : BOOLEAN := true;
-    PTP_IN_SOFTWARE : BOOLEAN := false
-
+		syscfg : t_global_system_cfg := global_system_cfg_cyc
 
 	);
 	PORT 
@@ -119,17 +77,11 @@ END top_cyc1000;
 
 
 ARCHITECTURE bdf_type OF top_cyc1000 IS
-constant tdm_conf : t_audio_clock_cfg := (
-    mclk_speed => audio_clock_24_57,
-    bclk_speed => audio_clock_03_07,
-    dac_cfg => i2s_lj_dac_config,
-    adc_cfg => i2s_lj_adc_config
-    
-);
-signal tdm_in : STD_LOGIC_VECTOR (AUDIO_TX_TDM_INPUTS - 1 downto 0);
-signal tdm_out : STD_LOGIC_VECTOR (AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
-signal mii_txd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
-signal mii_rxd : STD_LOGIC_VECTOR(MII_WIDTH -1 downto 0);
+
+signal tdm_in : STD_LOGIC_VECTOR (syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
+signal tdm_out : STD_LOGIC_VECTOR (syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0);
+signal mii_txd : STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH -1 downto 0);
+signal mii_rxd : STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH -1 downto 0);
 signal uart0_tx_reg : std_logic;
 signal uart0_rx_reg : std_logic;
 signal uart_ctrl_rx_reg : std_logic;
@@ -143,42 +95,18 @@ begin
     mii_rxd(1) <= D11;
     D13 <= mii_txd(0);
     D14 <= mii_txd(1);
-    uart_uartbone_gen: if SOC_TYPE = "LITEX_UARTBONE" generate
+    uart_uartbone_gen: if syscfg.SOC_TYPE = LITEX_UARTBONE generate
         uart_ctrl_rx_reg <= uart0_rx;
         uart0_tx <= uart_ctrl_tx_reg;
     end generate;
-    uart_soc_gen: if SOC_TYPE /= "LITEX_UARTBONE" generate
+    uart_soc_gen: if syscfg.SOC_TYPE /= LITEX_UARTBONE generate
         uart0_rx_reg <= uart0_rx;
         uart0_tx <= uart0_tx_reg;
 		  PIO_04 <= miso;
     end generate;
 	soc_top_inst : entity work.soc_top
   generic map (
-    clk_in_speed => clk_in_speed,
-    platform => platform,
-    SOC_TYPE => SOC_TYPE,
-    MII_WIDTH => MII_WIDTH,
-    ETHERNET_TYPE => ETHERNET_TYPE,
-    SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-    MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-    MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
-    MIIM_PHY_ADDRESS => "00001", --lan8720a is on 1,
-    RX_MAX_STREAMS => RX_MAX_STREAMS,
-    RX_CHANNELS => RX_CHANNELS,
-    RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
-    AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
-    RX_BYTE_DEPTH => RX_BYTE_DEPTH,
-    AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    TX_MAX_STREAMS => TX_MAX_STREAMS,
-    TX_CHANNELS => TX_CHANNELS,
-    TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
-    AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
-    TX_BYTE_DEPTH => TX_BYTE_DEPTH,
-    AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
-    ENABLE_METERING => ENABLE_METERING,
-    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
-    AUDIO_TDM_CONFIG => tdm_conf
+    syscfg => syscfg
   )
   port map (
     rst_n_i => c10_resetn,
@@ -213,7 +141,7 @@ begin
     --audioclk_512fs_o => AIN7,
     audioclk_mclk_o => D0,
     audioclk_bclk_o => AIN6,
-    audioclk_lrclk_dac_o => AIN4,
+    audioclk_lrclk_adc_o => AIN4,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     sdram_a => sdram_a,

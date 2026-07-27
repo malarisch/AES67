@@ -6,45 +6,11 @@ USE ieee.numeric_std.all;
 use work.miim_types.all;
 
 use work.audioclks_pkg.all;
+use work.system_cfg_pkg.all;
+
 ENTITY soc_top IS
-generic (
-    	clk_in_speed : natural := 50; -- input clock speed in mhz (for now only 12, 27, 50)
-		platform : string := "ALTERA"; -- "ALTERA" or "GOWIN"
-        SOC_TYPE : STRING := "LITEX"; -- LITEX_SDRAM or LITEX_HRAM or LITX_SPIBONE or LITEX_UARTBONE
-		MII_WIDTH : integer := 2;
-		ETHERNET_TYPE : string := "RMII";
-		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
-    	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-		
-
-		RX_MAX_STREAMS : natural := 8;
-        RX_CHANNELS		: natural := 16;
-        RX_SAMPLE_BUFFER_DEPTH : natural := 256;
-		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
-        RX_BYTE_DEPTH	: natural := 3; -- width for parallel interface
-		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-		
-
-
-        TX_MAX_STREAMS : natural := 8;
-        TX_CHANNELS		: natural := 16; -- must be multiple of two for i2s, multiple of 8 for tdm8
-        TX_SAMPLE_BUFFER_DEPTH : natural := 64; -- must be power of two (media-clock-derived TX write pointer)
-		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
-        TX_BYTE_DEPTH	: natural := 3; -- with for parallel interface
-		AUDIO_TX_TDM_INPUTS : natural := 2;
-		
-    AUDIO_TDM_CONFIG : t_audio_clock_cfg;
-		
-    USE_EXTERNAL_PLL : BOOLEAN := false;
-		ENABLE_METERING: BOOLEAN := false;
-    PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-    
-    PTP_IN_SOFTWARE : BOOLEAN := false;
-    PHY_TYPE : STRING := "UNKNOWN"
-
-
+ generic (
+		syscfg : t_global_system_cfg := global_system_cfg_cyc
 
 	);
 	
@@ -58,11 +24,11 @@ generic (
 		phy_mii_enet_rx_clk :  IN  STD_LOGIC  := '0';
 		phy_mii_enet_rx_dv :  IN  STD_LOGIC := '0';
 		phy_mii_enet_resetn :  OUT  STD_LOGIC := '0';
-		phy_mii_enet_rx_d :  IN  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0)  := (others => '0');
+		phy_mii_enet_rx_d :  IN  STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 DOWNTO 0)  := (others => '0');
 		phy_mii_enet_tx_clk :  OUT  STD_LOGIC  := '0';
     phy_mii_enet_tx_clk_i :  IN  STD_LOGIC  := '0';
 		phy_mii_enet_tx_en :  OUT  STD_LOGIC := '0';
-		phy_mii_enet_tx_d :  OUT  STD_LOGIC_VECTOR(MII_WIDTH - 1 DOWNTO 0) := (others => '0');
+		phy_mii_enet_tx_d :  OUT  STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 DOWNTO 0) := (others => '0');
 
 		enet_mdc :  OUT  STD_LOGIC;
 		enet_mdio :  INOUT  STD_LOGIC;
@@ -108,13 +74,13 @@ generic (
     
 		
 
-		tdm_in :  IN  STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0);
-		tdm_out :  OUT  STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
+		tdm_in :  IN  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
+		tdm_out :  OUT  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0);
 		
 
 
-        rx_sample_register : OUT STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
-        tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0) := (others => '0');
+        rx_sample_register : OUT STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+        tx_sample_register : IN STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0) := (others => '0');
 		
 		sdram_a : out std_logic_vector    (13 downto 0) := (others => '0');
     sdram_ba : out std_logic_vector     (1 downto 0) := (others => '0');
@@ -275,54 +241,29 @@ signal audioclocks : t_audio_clocks;
 signal selected_audio_clock : t_audio_clocks_selected;
 begin
 
-  audioclk_mclk_o <= audioclocks.mclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_24_57
-                ELSE audioclocks.clk_256fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_12_28
-                ELSE audioclocks.clk_128fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_06_14
-                ELSE audioclocks.clk_64fs.bclk WHEN AUDIO_TDM_CONFIG.mclk_speed = audio_clock_03_07;
+  audioclk_mclk_o <= audioclocks.mclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_24_57
+                ELSE audioclocks.clk_256fs.bclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_12_28
+                ELSE audioclocks.clk_128fs.bclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_06_14
+                ELSE audioclocks.clk_64fs.bclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_03_07;
                 
-  audioclk_bclk_o <= audioclocks.mclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_24_57
-                ELSE audioclocks.clk_256fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_12_28
-                ELSE audioclocks.clk_128fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_06_14
-                ELSE audioclocks.clk_64fs.bclk WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_03_07;
+  audioclk_bclk_o <= audioclocks.mclk WHEN syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_24_57
+                ELSE audioclocks.clk_256fs.bclk WHEN syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_12_28
+                ELSE audioclocks.clk_128fs.bclk WHEN syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_06_14
+                ELSE audioclocks.clk_64fs.bclk WHEN syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_03_07;
   
-  audioclk_lrclk_dac_o <= audioclocks.fsclk_50 when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = false
-else selected_audio_clock.fsclk_i2s_50_dac when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = false
-  else selected_audio_clock.fsclk_tdm when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = true
-    else selected_audio_clock.fsclk_i2s_tdm when AUDIO_TDM_CONFIG.dac_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.dac_cfg.fs_is_one_bclk_high = true;
-  audioclk_lrclk_adc_o <= audioclocks.fsclk_50 when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = false
-else selected_audio_clock.fsclk_i2s_50 when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = false
-  else selected_audio_clock.fsclk_tdm when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = false and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = true
-    else selected_audio_clock.fsclk_i2s_tdm when AUDIO_TDM_CONFIG.adc_cfg.bits_are_right_shifted_to_fs = true and AUDIO_TDM_CONFIG.adc_cfg.fs_is_one_bclk_high = true;
+  audioclk_lrclk_dac_o <= audioclocks.fsclk_50 when syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = false and syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.fs_is_one_bclk_high = false
+else selected_audio_clock.fsclk_i2s_50_dac when syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = true and syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.fs_is_one_bclk_high = false
+  else selected_audio_clock.fsclk_tdm when syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = false and syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.fs_is_one_bclk_high = true
+    else selected_audio_clock.fsclk_i2s_tdm when syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = true and syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG.fs_is_one_bclk_high = true;
+  audioclk_lrclk_adc_o <= audioclocks.fsclk_50 when syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = false and syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.fs_is_one_bclk_high = false
+else selected_audio_clock.fsclk_i2s_50 when syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = true and syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.fs_is_one_bclk_high = false
+  else selected_audio_clock.fsclk_tdm when syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = false and syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.fs_is_one_bclk_high = true
+    else selected_audio_clock.fsclk_i2s_tdm when syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.bits_are_right_shifted_to_fs = true and syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG.fs_is_one_bclk_high = true;
 
       audioclk_lrclk_ext_o <= audioclocks.fsclk_50;
 wb_bridge_top_inst : entity work.wb_bridge_top
   generic map (
-    clk_in_speed => clk_in_speed,
-    platform => platform,
-    MII_WIDTH => MII_WIDTH,
-    ETHERNET_TYPE => ETHERNET_TYPE,
-    SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-    MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-    MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
-    MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
-    RX_MAX_STREAMS => RX_MAX_STREAMS,
-    RX_CHANNELS => RX_CHANNELS,
-    RX_SAMPLE_BUFFER_DEPTH => RX_SAMPLE_BUFFER_DEPTH,
-    AUDIO_RX_USE_PARALLEL_INTERFACE => AUDIO_RX_USE_PARALLEL_INTERFACE,
-    RX_BYTE_DEPTH => RX_BYTE_DEPTH,
-    AUDIO_RX_TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-    TX_MAX_STREAMS => TX_MAX_STREAMS,
-    TX_CHANNELS => TX_CHANNELS,
-    TX_SAMPLE_BUFFER_DEPTH => TX_SAMPLE_BUFFER_DEPTH,
-    AUDIO_TX_USE_PARALLEL_INTERFACE => AUDIO_TX_USE_PARALLEL_INTERFACE,
-    TX_BYTE_DEPTH => TX_BYTE_DEPTH,
-    AUDIO_TX_TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-    USE_EXTERNAL_PLL => USE_EXTERNAL_PLL,
-    ENABLE_METERING => ENABLE_METERING,
-    PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-    PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
-    PHY_TYPE => PHY_TYPE,
-    AUDIO_TDM_CONFIG => AUDIO_TDM_CONFIG
+    syscfg => syscfg
   )
   port map (
     rst_n_i => rst_n_i,
@@ -363,7 +304,7 @@ wb_bridge_top_inst : entity work.wb_bridge_top
   );
 
 
-litex_soc_gen: if (SOC_TYPE = "LITEX_HRAM") generate
+litex_soc_gen: if (syscfg.SOC_TYPE = LITEX_VEXRISCV_HRAM) generate
     hbus_clk0_p <= hbus_clk;
     hbus_clk0_n <= not hbus_clk;
   litex_soc_cyclone10_inst: litex_soc_cyclone10
@@ -402,7 +343,7 @@ litex_soc_gen: if (SOC_TYPE = "LITEX_HRAM") generate
       spiflash_mosi => spiflash_mosi
   );
    end generate;
-litex_soc_gen_sdram: if (SOC_TYPE = "LITEX_SDRAM") generate
+litex_soc_gen_sdram: if (syscfg.SOC_TYPE = LITEX_VEXRISCV_SDRAM) generate
 litex_soc_cyc1000_inst : litex_soc_cyc1000
   port map (
     aes67_wb_ack => aes67_wb_ack,
@@ -445,7 +386,7 @@ litex_soc_cyc1000_inst : litex_soc_cyc1000
       spiflash_mosi => spiflash_mosi
   );
   end generate;
-litex_soc_gen_spibone: if (SOC_TYPE="LITEX_SPIBONE") generate
+litex_soc_gen_spibone: if (syscfg.SOC_TYPE=LITEX_SPIBONE) generate
 	spibone_irq_o <= eth_buf_irq;
 litex_soc_spibone_inst : litex_soc_spibone
 
@@ -470,7 +411,7 @@ litex_soc_spibone_inst : litex_soc_spibone
 
 
 end generate;
-litex_soc_gen_uartbone : if (SOC_TYPE = "LITEX_UARTBONE") generate
+litex_soc_gen_uartbone : if (syscfg.SOC_TYPE = LITEX_UARTBONE) generate
 litex_soc_uartbone_inst : litex_soc_uartbone
   port map (
     aes67_wb_ack => aes67_wb_ack,

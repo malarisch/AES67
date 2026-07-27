@@ -7,43 +7,11 @@ use work.miim_types.all;
 
 use work.audioclks_pkg.all;
 use work.wallclock_signals_pkg.all;
+use work.system_cfg_pkg.all;
+
 ENTITY aes67_top IS  
 	generic (
-		
-		
-		MII_WIDTH : integer := 2;
-		ETHERNET_TYPE : string := "RMII";
-		SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
-        MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
-		TX_MAX_STREAMS : natural := 8;
-		RX_MAX_STREAMS : natural := 8;
-		RX_CHANNELS		: natural := 16;
-		TX_CHANNELS		: natural := 16; -- must be multiple of two for i2s, multiple of 8 for tdm8
-		RX_BYTE_DEPTH	: natural := 3;
-		TX_BYTE_DEPTH	: natural := 3;
-		RX_SAMPLE_BUFFER_DEPTH : natural := 256;
-		TX_SAMPLE_BUFFER_DEPTH : natural := 64;
-		  
-    	MIIM_CLOCK_DIVIDER : POSITIVE := 50;
-
-    	MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-		PHY_TYPE : STRING := "UNKNOWN";
-		
-
-		
-		AUDIO_RX_USE_PARALLEL_INTERFACE : boolean := false;
-		AUDIO_RX_TDM_OUTPUTS : natural := 2;
-
-		AUDIO_TX_USE_PARALLEL_INTERFACE : boolean := false;
-		AUDIO_TX_TDM_INPUTS : natural := 1;
-
-		USE_EXTERNAL_PLL : BOOLEAN := true;
-		ENABLE_METERING: BOOLEAN := true;
-		STATIC_PTP_CONF: BOOLEAN := true;
-		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 8;
-		PTP_IN_SOFTWARE : BOOLEAN := false;
-		AUDIO_TDM_CONFIG : t_audio_clock_cfg
-
+		syscfg : t_global_system_cfg := global_system_cfg_cyc
 	);
 	PORT
 	(
@@ -55,8 +23,8 @@ ENTITY aes67_top IS
 		
 		phy_mii_rx_clk_in : IN STD_LOGIC;
 		phy_mii_tx_clk_in : IN STD_LOGIC;
-		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
-		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(MII_WIDTH - 1 downto 0);
+		phy_mii_tx_data_in : IN STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 downto 0);
+		phy_mii_rx_data_in : IN STD_LOGIC_VECTOR(syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH - 1 downto 0);
 		phy_mii_tx_en_i : IN STD_LOGIC;
 		phy_mii_rx_en_i : IN STD_LOGIC;
 		
@@ -156,10 +124,10 @@ ENTITY aes67_top IS
 
 		-- audio metering
 		audio_meter_clear_i : IN STD_LOGIC;
-		audio_meter_rx_clip_o : OUT STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
-		audio_meter_rx_signal_o : OUT STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
-		audio_meter_tx_clip_o : OUT STD_LOGIC_VECTOR(TX_CHANNELS - 1 downto 0);
-		audio_meter_tx_signal_o : OUT STD_LOGIC_VECTOR(TX_CHANNELS - 1 downto 0);
+		audio_meter_rx_clip_o : OUT STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+		audio_meter_rx_signal_o : OUT STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+		audio_meter_tx_clip_o : OUT STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0);
+		audio_meter_tx_signal_o : OUT STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0);
 
 		-- stream configuration
 		audio_tx_cfg_wr_en_i : IN STD_LOGIC;
@@ -170,9 +138,14 @@ ENTITY aes67_top IS
 		audio_rx_cfg_wr_data_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		audio_rx_cfg_wr_addr_i : IN STD_LOGIC_VECTOR(7 downto 0);
 
-		-- audio outputs
-		tdm8out_o : OUT STD_LOGIC_VECTOR(AUDIO_RX_TDM_OUTPUTS - 1 downto 0);
-		rx_sample_register : OUT STD_LOGIC_VECTOR((RX_BYTE_DEPTH * 8) * RX_CHANNELS - 1 downto 0);
+		tdm_in :  IN  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
+		tdm_out :  OUT  STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0);
+		
+
+
+    rx_sample_register : OUT STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
+    tx_sample_register : IN STD_LOGIC_VECTOR((syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH * 8) * syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS - 1 downto 0) := (others => '0');
+		
 
 		-- RX underrun-mute diagnostics (fixed width for the status CSR:
 		-- lower 4 streams / lower 8 channels, zero-padded)
@@ -180,9 +153,6 @@ ENTITY aes67_top IS
 		rx_mute_channels_o : OUT STD_LOGIC_VECTOR(7 downto 0);
 		
 
-		-- audio inputs
-		tdm8in_i : IN STD_LOGIC_VECTOR(AUDIO_TX_TDM_INPUTS - 1 downto 0) := (others => '0');
-		tx_sample_register : IN STD_LOGIC_VECTOR((TX_BYTE_DEPTH * 8) * TX_CHANNELS - 1 downto 0) := (others => '0');
 
 		ptp_reset_i : IN STD_LOGIC := '0';
 		audiotx_reset_i : IN STD_LOGIC := '0';
@@ -201,8 +171,8 @@ signal audioclks : t_audio_clocks := AUDIO_CLOCKS_RESET;
 signal selected_audio_clock : t_audio_clocks_selected := AUDIO_CLOCKS_RESET_SELECTED;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
 signal media_tick : STD_LOGIC;
-signal rx_stream_underrun : STD_LOGIC_VECTOR(RX_MAX_STREAMS - 1 downto 0);
-signal rx_mute_channels : STD_LOGIC_VECTOR(RX_CHANNELS - 1 downto 0);
+signal rx_stream_underrun : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.MAX_STREAMS - 1 downto 0);
+signal rx_mute_channels : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS - 1 downto 0);
 signal second_pulse_sys : STD_LOGIC;
 signal mac_linkup : STD_LOGIC;
 -- mac_linkup_o is driven from internal mac_linkup below
@@ -276,9 +246,9 @@ mac_rx_clock_o <= mac_rx_clock;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
-selected_audio_clock <= audioclks.clk_256fs when AUDIO_TDM_CONFIG.bclk_speed = audio_clock_12_28 
-					else audioclks.clk_128fs when AUDIO_TDM_CONFIG.bclk_speed = audio_clock_06_14 else audioclks.clk_64fs
-						WHEN AUDIO_TDM_CONFIG.bclk_speed = audio_clock_03_07;
+selected_audio_clock <= audioclks.clk_256fs when syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_12_28 
+					else audioclks.clk_128fs when syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_06_14 else audioclks.clk_64fs
+						WHEN syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_03_07;
 mclk_switch_extern: if USE_EXTERNAL_PLL = true generate
 --	clk_512fs <= pll_512fs_i;
 --	audioclocks_inst: entity work.audioclock_generator
@@ -309,34 +279,32 @@ mclk_switch_INTERNAL: if USE_EXTERNAL_PLL = false generate
 end generate;
 
 
-no_audio_tx_gen : if (TX_CHANNELS = 0) generate
+no_audio_tx_gen : if (syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS = 0) generate
 eth_tx_en_rtp <= '0';
 eth_tx_req_rtp <= '0';
 eth_tx_data_rtp <= (others => '0');
 
 end generate;
-audiotx_gen: if (TX_CHANNELS /= 0) generate
+audiotx_gen: if (syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS /= 0) generate
 audiotx_inst: entity work.audio_tx_module
-GENERIC MAP(bytes_per_sample => TX_BYTE_DEPTH,
-			global_channel_count => TX_CHANNELS,
-			samples_per_channel_depth => TX_SAMPLE_BUFFER_DEPTH,
-			max_streams => TX_MAX_STREAMS,
-			ENABLE_METERING => ENABLE_METERING,
+GENERIC MAP(bytes_per_sample => syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH,
+			global_channel_count => syscfg.AUDIO_CONFIG.TX_AD_CFG.CHANNELS,
+			samples_per_channel_depth => syscfg.AUDIO_CONFIG.TX_AD_CFG.BUFFER_DEPTH,
+			max_streams => syscfg.AUDIO_CONFIG.TX_AD_CFG.MAX_STREAMS,
+			ENABLE_METERING => syscfg.ENABLE_METERING,
 			-- TDM demux integrated unless the legacy parallel interface is forced.
-			TDM_INPUT => not AUDIO_TX_USE_PARALLEL_INTERFACE,
-			TDM_INPUTS => AUDIO_TX_TDM_INPUTS,
-			TDM_CONFIG => AUDIO_TDM_CONFIG.adc_cfg
+			TDM_INPUT => not syscfg.AUDIO_CONFIG.USE_PARALLEL_INTERFACE,
+			TDM_INPUTS => syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS,
+			TDM_CONFIG => syscfg.AUDIO_CONFIG.TX_AD_CFG.ADDA_CFG
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 ctrl_plane_clk => clk_mcu_i,
 		 rst_n => audiotx_reset_n,
-		 -- In integrated TDM mode the buffer's frame sync must be the TDM fsync
-		 -- (pll_48k_fs_tdm), matching what the external tdm8_in used; the parallel
-		 -- capture path uses the regular pll_48k_fs.
+
 		 audioclocks_i => selected_audio_clock,
 		 fs_halfduty_clk_i => audioclks.fsclk_50,
  
-		 tdm_in_i => tdm8in_i(AUDIO_TX_TDM_INPUTS - 1 downto 0),
+		 tdm_in_i => tdm_in(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0),
 
 		 mac_tx_clock => mac_tx_clock,
 		 mac_tx_busy => mac_tx_busy,
@@ -369,13 +337,13 @@ mac_linkup_o <= mac_linkup;
 
 ptp_inst: entity work.ptp_module
 generic map (
-	MII_WIDTH => MII_WIDTH,
+	MII_WIDTH => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH,
 	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
-	MII_CLK_NS_PER_TICK => MII_CLK_NS_PER_TICK,
-	ETHERNET_TYPE => ETHERNET_TYPE,
-	STATIC_PTP_CONF => STATIC_PTP_CONF,
-	PTP_MOVING_AVERAGE_DEPTH => PTP_MOVING_AVERAGE_DEPTH,
-	PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+	MII_CLK_NS_PER_TICK => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_CLK_NS_PER_TICK,
+	MII_TYPE => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_TYPE,
+	STATIC_PTP_CONF => syscfg.STATIC_PTP_CONFIG,
+	PTP_MOVING_AVERAGE_DEPTH => syscfg.PTP_MOVING_AVERAGE_DEPTH,
+	PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,
@@ -465,7 +433,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 );
 
 
-gen_ptp_metering: if (ENABLE_METERING = true) generate
+gen_ptp_metering: if (syscfg.ENABLE_METERING = true) generate
 servo_mon_filtered_offset_o      <= std_logic_vector(servo_mon_filtered_offset_signed);
 servo_mon_integral_sum_o         <= std_logic_vector(servo_mon_integral_sum_signed);
 servo_mon_pi_proportional_o      <= std_logic_vector(servo_mon_pi_proportional_signed);
@@ -483,16 +451,16 @@ end generate;
 
 
 
-rx_gen: if (RX_CHANNELS /= 0) generate
+rx_gen: if (syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS /= 0) generate
 rx_ringbuffer_inst: entity work.rx_ringbuffer
-GENERIC MAP(audio_buffer_sample_depth => RX_SAMPLE_BUFFER_DEPTH,
-			bytes_per_sample => RX_BYTE_DEPTH,
-			global_channel_count => RX_CHANNELS,
-			max_streams => RX_MAX_STREAMS,
-			ENABLE_METERING => ENABLE_METERING,
-			PARALLEL_OUT => AUDIO_RX_USE_PARALLEL_INTERFACE,
-			TDM_OUTPUTS => AUDIO_RX_TDM_OUTPUTS,
-			TDM_CONFIG => AUDIO_TDM_CONFIG.dac_cfg
+GENERIC MAP(audio_buffer_sample_depth => syscfg.AUDIO_CONFIG.RX_DA_CFG.BUFFER_DEPTH,
+			bytes_per_sample => syscfg.AUDIO_CONFIG.PARALLEL_BYTE_DEPTH,
+			global_channel_count => syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS,
+			max_streams => syscfg.AUDIO_CONFIG.RX_DA_CFG.MAX_STREAMS,
+			ENABLE_METERING => syscfg.ENABLE_METERING,
+			PARALLEL_OUT => syscfg.AUDIO_CONFIG.USE_PARALLEL_INTERFACE,
+			TDM_OUTPUTS => syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS,
+			TDM_CONFIG => syscfg.AUDIO_CONFIG.RX_DA_CFG.ADDA_CFG
 			)
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 reset_n => audiorx_reset_n,
@@ -516,7 +484,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 -- audio
 		 
 		 audio_out => rx_sample_register,
-		 tdm_out => tdm8out_o,
+		 tdm_out => tdm_out,
 
 		 -- metering
 		 metering_clear_i => audio_meter_clear_i,
@@ -530,13 +498,13 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 	rx_stream_underrun_o <= std_logic_vector(resize(unsigned(rx_stream_underrun), 4));
 	rx_mute_channels_o <= std_logic_vector(resize(unsigned(rx_mute_channels), 8));
 end generate;
-no_rx_gen: if rx_channels = 0 generate
+no_rx_gen: if syscfg.AUDIO_CONFIG.RX_DA_CFG.CHANNELS = 0 generate
 	audio_meter_rx_clip_o <= (others => '0');
 	audio_meter_rx_signal_o <= (others => '0');
 	rx_sample_register <= (others => '0');
 	rx_stream_underrun_o <= (others => '0');
 	rx_mute_channels_o <= (others => '0');
-	tdm8out_o <= (others => '0');
+	tdm_out <= (others => '0');
 	rtp_ram_addr <= (others => '0');
 end generate;
 
@@ -551,11 +519,11 @@ end generate;
 
 
 ethernet_top_inst: entity work.ethernet_top
- GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
- MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
- ETHERNET_TYPE => ETHERNET_TYPE,
- PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
- PHY_TYPE => PHY_TYPE)
+ GENERIC MAP(MIIM_CLOCK_DIVIDER => syscfg.PHY_CONFIG.NETWORK_CONFIG.MIIM_CLOCK_DIVIDER,
+ MIIM_PHY_ADDRESS => syscfg.PHY_CONFIG.MIIM_PHY_ADDRESS,
+ MII_TYPE => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_TYPE,
+ PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE,
+ PHY_TYPE => syscfg.PHY_CONFIG.PHY_TYPE)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,

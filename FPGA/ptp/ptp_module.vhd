@@ -4,11 +4,11 @@ USE ieee.numeric_std.all;
 
 use work.audioclks_pkg.all;
 use work.wallclock_signals_pkg.all;
-
+use work.system_cfg_pkg.all;
 ENTITY ptp_module IS 
 	generic (
         MII_WIDTH : integer := 2;
-		ETHERNET_TYPE : string := "RMII";
+		MII_TYPE : t_mii_types;
         SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		STATIC_PTP_CONF : BOOLEAN := true;
@@ -480,7 +480,7 @@ PORT MAP(clk => sys_clk,
 static_ptp_conf_gen: if (STATIC_PTP_CONF) generate
 static_ptp_conf_inst: entity work.static_ptp_conf
  generic map(
-	ETHERNET_TYPE => ETHERNET_TYPE
+	MII_TYPE => MII_TYPE
 )
  port map(
 	servo_kp_gain_o => servo_kp_gain_reg,

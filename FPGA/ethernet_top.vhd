@@ -3,14 +3,14 @@ use ieee.std_logic_1164.all;
 use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 use work.ethernet_types.all;
-
+use work.system_cfg_pkg.all;
 entity ethernet_top is
   generic (
     MIIM_CLOCK_DIVIDER : POSITIVE := 50;
     MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
-    ETHERNET_TYPE : STRING := "RGMII";
+    MII_TYPE : t_mii_types;
     PTP_IN_SOFTWARE: BOOLEAN := false;
-    PHY_TYPE : STRING := "UNKNOWN"
+    PHY_TYPE : t_phy_names := OTHER
   );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
@@ -117,7 +117,7 @@ architecture rtl of ethernet_top is
     SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
     
 begin
-  mac_speed_override <= SPEED_100MBPS WHEN ETHERNET_TYPE = "RMII" OR ETHERNET_TYPE = "MII" else SPEED_UNSPECIFIED;
+  mac_speed_override <= SPEED_100MBPS WHEN MII_TYPE = RMII OR MII_TYPE = MII else SPEED_UNSPECIFIED;
   is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
   is_mcu_pkt_tog_o <= is_mcu_pkt_tog_done when mac_speed = b"01" else is_mcu_pkt_tog_receive;
 
