@@ -331,6 +331,14 @@ static int serialize_rx_streams(char *buf, size_t sz, int pos)
 		pos = json_obj_start(buf, sz, pos, 2);
 		pos = json_uint(buf, sz, pos, "stream_id",
 				streams[i].stream_id, 3);
+		pos = json_str(buf, sz, pos, "name", streams[i].name, 3);
+		pos = json_str(buf, sz, pos, "sender_name",
+			       streams[i].sender_name, 3);
+		if (streams[i].sender_ip.s_addr != 0) {
+			zsock_inet_ntop(AF_INET, &streams[i].sender_ip,
+					ip_str, sizeof(ip_str));
+			pos = json_str(buf, sz, pos, "sender_ip", ip_str, 3);
+		}
 
 		zsock_inet_ntop(AF_INET, &streams[i].dst_ip,
 				ip_str, sizeof(ip_str));
@@ -731,11 +739,37 @@ static int parse_rx_streams(const char *json)
 		uint8_t output_delay = 48;
 		uint8_t samples_per_channel = 48;
 		uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = {0};
+		char stream_name[AES67_STREAM_NAME_MAX] = {0};
+		char sender_name[AES67_STREAM_NAME_MAX] = {0};
+		struct in_addr sender_ip = {0};
 
 		const char *v;
 
 		if ((v = json_find_key(obj, "stream_id")) != NULL) {
 			stream_id = (uint8_t)json_parse_uint(v);
+		}
+		if ((v = json_find_key(obj, "name")) != NULL) {
+			char *name_str = json_parse_str(v);
+
+			if (name_str) {
+				strncpy(stream_name, name_str,
+					sizeof(stream_name) - 1);
+			}
+		}
+		if ((v = json_find_key(obj, "sender_name")) != NULL) {
+			char *name_str = json_parse_str(v);
+
+			if (name_str) {
+				strncpy(sender_name, name_str,
+					sizeof(sender_name) - 1);
+			}
+		}
+		if ((v = json_find_key(obj, "sender_ip")) != NULL) {
+			char *ip_str = json_parse_str(v);
+
+			if (ip_str) {
+				zsock_inet_pton(AF_INET, ip_str, &sender_ip);
+			}
 		}
 		if ((v = json_find_key(obj, "dst_ip")) != NULL) {
 			char *ip_str = json_parse_str(v);
@@ -767,7 +801,10 @@ static int parse_rx_streams(const char *json)
 
 		int ret = aes67_conn_configure_rx_stream(
 			stream_id, &dst_ip, dst_port, ch_map,
-			channel_count, output_delay, samples_per_channel);
+			channel_count, output_delay, samples_per_channel,
+			stream_name[0] ? stream_name : NULL,
+			sender_name[0] ? sender_name : NULL,
+			sender_ip.s_addr ? &sender_ip : NULL);
 		if (ret == 0) {
 			LOG_INF("RX stream %u configured", stream_id);
 			count++;

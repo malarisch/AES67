@@ -249,8 +249,19 @@ int aes67_sdp_parse(const char *sdp, size_t sdp_len,
 			break;
 
 		case 'o':
-			/* Origin: o=- <sess_id> <version> IN IP4 <addr> */
+			/* Origin: o=<username> <sess_id> <version> IN IP4 <addr> */
 			{
+				const char *first_space = memchr(val, ' ', val_len);
+				size_t name_len = first_space ?
+					(size_t)(first_space - val) : val_len;
+
+				if (!(name_len == 1 && val[0] == '-')) {
+					name_len = MIN(name_len,
+						       sizeof(out->origin_name) - 1);
+					memcpy(out->origin_name, val, name_len);
+					out->origin_name[name_len] = '\0';
+				}
+
 				/* Find last token which is IP address */
 				const char *p = val + val_len;
 				while (p > val && *(p - 1) != ' ') {

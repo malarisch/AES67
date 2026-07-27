@@ -59,6 +59,9 @@ struct aes67_tx_stream {
 struct aes67_rx_stream {
 	bool    active;
 	uint8_t stream_id;
+	char    name[AES67_STREAM_NAME_MAX];        /* Remote session name */
+	char    sender_name[AES67_STREAM_NAME_MAX]; /* Human-readable source */
+	struct in_addr sender_ip;
 	struct in_addr dst_ip;
 	uint16_t dst_port;
 	uint8_t  ch_map[AES67_MAX_CH_PER_STREAM]; /* output channel per input ch */
@@ -73,8 +76,8 @@ struct aes67_rx_stream {
  * as separate entries (merged only in the web UI), so every real stream
  * can occupy two slots — a single RAVENNA daemon with a handful of
  * sessions plus a few of our own boards overflowed the previous 8-slot
- * table, and overflowing means discoveries are silently dropped (~64 B
- * per slot, so 32 costs ~2 KB). */
+ * table, and overflowing means discoveries are silently dropped (roughly
+ * 100 B per slot, so 32 costs about 3 KB). */
 #define AES67_MAX_FOREIGN_STREAMS  32
 #define AES67_FOREIGN_NAME_MAX     32
 
@@ -96,6 +99,7 @@ struct aes67_foreign_stream {
 	uint32_t ssrc;               /* from a=ssrc: line, 0 if not present */
 	uint16_t samples_per_packet; /* derived from a=ptime: line, 0 if unknown */
 	char     name[AES67_FOREIGN_NAME_MAX];
+	char     sender_name[AES67_FOREIGN_NAME_MAX];
 	int64_t  last_seen_ms;
 	/* RAVENNA extensions */
 	uint8_t  ptp_domain;         /* from a=clock-domain:PTPv2 <domain> */
@@ -180,6 +184,9 @@ int aes67_conn_configure_tx_stream(uint8_t stream_id,
  * @param channel_count  Number of channels (1..8)
  * @param output_delay        Output delay in samples
  * @param samples_per_channel Samples per channel per packet
+ * @param name           Remote session name (NULL = auto-generate)
+ * @param sender_name    Human-readable source name (NULL = unknown)
+ * @param sender_ip      Source address (NULL = unknown)
  * @return 0 on success, negative errno on error
  */
 int aes67_conn_configure_rx_stream(uint8_t stream_id,
@@ -188,7 +195,10 @@ int aes67_conn_configure_rx_stream(uint8_t stream_id,
 				   const uint8_t *ch_map,
 				   uint8_t channel_count,
 				   uint8_t output_delay,
-				   uint8_t samples_per_channel);
+				   uint8_t samples_per_channel,
+				   const char *name,
+				   const char *sender_name,
+				   const struct in_addr *sender_ip);
 
 /**
  * @brief Get the TX stream table (AES67_MAX_TX_STREAMS entries).

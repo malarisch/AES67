@@ -230,7 +230,10 @@ int aes67_conn_configure_rx_stream(uint8_t stream_id,
 				   const uint8_t *ch_map,
 				   uint8_t channel_count,
 				   uint8_t output_delay,
-				   uint8_t samples_per_channel)
+				   uint8_t samples_per_channel,
+				   const char *name,
+				   const char *sender_name,
+				   const struct in_addr *sender_ip)
 {
 	if (stream_id >= AES67_MAX_RX_STREAMS || !ch_map || !dst_ip ||
 	    channel_count == 0 || channel_count > AES67_MAX_CH_PER_STREAM) {
@@ -259,6 +262,28 @@ int aes67_conn_configure_rx_stream(uint8_t stream_id,
 	rx_streams[stream_id].channel_count = channel_count;
 	rx_streams[stream_id].output_delay = output_delay;
 	rx_streams[stream_id].samples_per_channel = samples_per_channel;
+	if (activate && name && name[0] != '\0') {
+		strncpy(rx_streams[stream_id].name, name,
+			sizeof(rx_streams[stream_id].name) - 1);
+		rx_streams[stream_id].name[
+			sizeof(rx_streams[stream_id].name) - 1] = '\0';
+	} else if (activate) {
+		snprintf(rx_streams[stream_id].name,
+			 sizeof(rx_streams[stream_id].name),
+			 "RX Stream %u", stream_id);
+	} else {
+		rx_streams[stream_id].name[0] = '\0';
+	}
+	if (activate && sender_name && sender_name[0] != '\0') {
+		strncpy(rx_streams[stream_id].sender_name, sender_name,
+			sizeof(rx_streams[stream_id].sender_name) - 1);
+		rx_streams[stream_id].sender_name[
+			sizeof(rx_streams[stream_id].sender_name) - 1] = '\0';
+	} else {
+		rx_streams[stream_id].sender_name[0] = '\0';
+	}
+	rx_streams[stream_id].sender_ip =
+		(activate && sender_ip) ? *sender_ip : (struct in_addr){0};
 	memset(rx_streams[stream_id].ch_map, 0,
 	       sizeof(rx_streams[stream_id].ch_map));
 	for (uint8_t i = 0; i < channel_count; i++) {

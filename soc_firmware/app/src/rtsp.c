@@ -1454,7 +1454,10 @@ int rtsp_client_subscribe(const struct in_addr *server_addr,
 					  ch_map,
 					  channels,
 					  16,  /* output delay */
-					  AES67_DEFAULT_SAMPLES_PER_PKT);
+					  AES67_DEFAULT_SAMPLES_PER_PKT,
+					  stream_name,
+					  NULL,
+					  server_addr);
 	if (ret < 0) {
 		LOG_ERR("RTSP client: Failed to configure RX stream: %d", ret);
 		goto error;

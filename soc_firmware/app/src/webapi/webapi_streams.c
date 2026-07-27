@@ -19,6 +19,58 @@ static void format_ip(char *out, size_t sz, const struct in_addr *addr)
 	zsock_inet_ntop(AF_INET, addr, out, sz);
 }
 
+static void lookup_foreign_metadata(const struct in_addr *dst_ip,
+				    uint16_t dst_port,
+				    char *name,
+				    size_t name_sz,
+				    char *sender_name,
+				    size_t sender_name_sz,
+				    struct in_addr *sender_ip)
+{
+	int count;
+	int64_t name_seen = INT64_MIN;
+	int64_t sender_seen = INT64_MIN;
+	int64_t address_seen = INT64_MIN;
+	const struct aes67_foreign_stream *foreign =
+		aes67_conn_get_foreign_streams(&count);
+
+	ARG_UNUSED(count);
+	name[0] = '\0';
+	sender_name[0] = '\0';
+	*sender_ip = (struct in_addr){0};
+
+	for (int i = 0; i < AES67_MAX_FOREIGN_STREAMS; i++) {
+		if (!foreign[i].valid ||
+		    foreign[i].mcast_addr.s_addr != dst_ip->s_addr ||
+		    foreign[i].port != dst_port) {
+			continue;
+		}
+		if (foreign[i].name[0] != '\0' &&
+		    foreign[i].last_seen_ms > name_seen) {
+			strncpy(name, foreign[i].name, name_sz - 1);
+			name[name_sz - 1] = '\0';
+			name_seen = foreign[i].last_seen_ms;
+		}
+		if (foreign[i].sender_name[0] != '\0' &&
+		    foreign[i].last_seen_ms > sender_seen) {
+			strncpy(sender_name, foreign[i].sender_name,
+				sender_name_sz - 1);
+			sender_name[sender_name_sz - 1] = '\0';
+			sender_seen = foreign[i].last_seen_ms;
+		}
+		if (foreign[i].origin_addr.s_addr != 0 &&
+		    foreign[i].last_seen_ms > address_seen) {
+			*sender_ip = foreign[i].origin_addr;
+			address_seen = foreign[i].last_seen_ms;
+		}
+	}
+}
+
+static bool rx_name_is_fallback(const char *name)
+{
+	return name[0] == '\0' || strncmp(name, "RX Stream ", 10) == 0;
+}
+
 /* ---------------- TX ---------------- */
 
 static int get_tx_streams(struct webapi_request *req)
@@ -146,6 +198,9 @@ static int get_rx_streams(struct webapi_request *req)
 	struct json_out *jo = &req->out;
 	const struct aes67_rx_stream *rxs = aes67_conn_get_rx_streams();
 	char tmp[INET_ADDRSTRLEN];
+	char discovered_name[AES67_STREAM_NAME_MAX];
+	char discovered_sender[AES67_STREAM_NAME_MAX];
+	struct in_addr discovered_sender_ip;
 	/* Per-stream underrun flags from the FPGA status CSR (streams 3..0;
 	 * the FPGA slot index equals the table index). */
 	uint32_t rx_underrun = (fpga_hal_read_status() &
@@ -162,6 +217,29 @@ static int get_rx_streams(struct webapi_request *req)
 		}
 		jo_obj_begin(jo);
 		jo_uint(jo, "stream_id", rxs[i].stream_id);
+		lookup_foreign_metadata(&rxs[i].dst_ip, rxs[i].dst_port,
+					discovered_name,
+					sizeof(discovered_name),
+					discovered_sender,
+					sizeof(discovered_sender),
+					&discovered_sender_ip);
+		jo_str(jo, "name",
+		       rx_name_is_fallback(rxs[i].name) &&
+		       discovered_name[0] != '\0' ?
+		       discovered_name : rxs[i].name);
+		jo_str(jo, "sender_name",
+		       rxs[i].sender_name[0] != '\0' ?
+		       rxs[i].sender_name : discovered_sender);
+		const struct in_addr *sender_ip =
+			rxs[i].sender_ip.s_addr != 0 ?
+			&rxs[i].sender_ip : &discovered_sender_ip;
+
+		if (sender_ip->s_addr != 0) {
+			format_ip(tmp, sizeof(tmp), sender_ip);
+			jo_str(jo, "sender_ip", tmp);
+		} else {
+			jo_str(jo, "sender_ip", "");
+		}
 		format_ip(tmp, sizeof(tmp), &rxs[i].dst_ip);
 		jo_str(jo, "dst_ip", tmp);
 		jo_uint(jo, "dst_port", rxs[i].dst_port);
@@ -192,6 +270,10 @@ static int put_rx_stream(struct webapi_request *req)
 	int32_t output_delay = 0;
 	int32_t samples_per_channel = 48;
 	int32_t dst_port_val = 5004;
+	char stream_name[AES67_STREAM_NAME_MAX] = {0};
+	char sender_name[AES67_STREAM_NAME_MAX] = {0};
+	char sender_ip_str[INET_ADDRSTRLEN] = {0};
+	struct in_addr sender_ip = {0};
 
 	if (req->id < 0 || req->id >= AES67_MAX_RX_STREAMS) {
 		return -EINVAL;
@@ -212,6 +294,13 @@ static int put_rx_stream(struct webapi_request *req)
 	json_find_int(json, len, "channel_count", &channel_count);
 	json_find_int(json, len, "output_delay", &output_delay);
 	json_find_int(json, len, "samples_per_channel", &samples_per_channel);
+	json_find_str(json, len, "name", stream_name, sizeof(stream_name));
+	json_find_str(json, len, "sender_name", sender_name,
+		      sizeof(sender_name));
+	if (json_find_str(json, len, "sender_ip", sender_ip_str,
+			  sizeof(sender_ip_str)) > 0) {
+		(void)zsock_inet_pton(AF_INET, sender_ip_str, &sender_ip);
+	}
 
 	if (channel_count < 1 || channel_count > AES67_MAX_CH_PER_STREAM) {
 		channel_count = 2;
@@ -232,13 +321,45 @@ static int put_rx_stream(struct webapi_request *req)
 		}
 	}
 
+	/* Fill omitted metadata from the current discovery table. This keeps
+	 * non-browser clients useful while making the subscription persistent
+	 * even after the discovery sighting expires. */
+	if (stream_name[0] == '\0' || sender_name[0] == '\0' ||
+	    sender_ip.s_addr == 0) {
+		char discovered_name[AES67_STREAM_NAME_MAX];
+		char discovered_sender[AES67_STREAM_NAME_MAX];
+		struct in_addr discovered_sender_ip;
+
+		lookup_foreign_metadata(&dst_ip, (uint16_t)dst_port_val,
+					discovered_name,
+					sizeof(discovered_name),
+					discovered_sender,
+					sizeof(discovered_sender),
+					&discovered_sender_ip);
+		if (stream_name[0] == '\0' && discovered_name[0] != '\0') {
+			strncpy(stream_name, discovered_name,
+				sizeof(stream_name) - 1);
+		}
+		if (sender_name[0] == '\0' &&
+		    discovered_sender[0] != '\0') {
+			strncpy(sender_name, discovered_sender,
+				sizeof(sender_name) - 1);
+		}
+		if (sender_ip.s_addr == 0) {
+			sender_ip = discovered_sender_ip;
+		}
+	}
+
 	int ret = aes67_conn_configure_rx_stream((uint8_t)req->id,
 					&dst_ip,
 					(uint16_t)dst_port_val,
 					ch_map,
 					(uint8_t)channel_count,
 					(uint8_t)output_delay,
-					(uint8_t)samples_per_channel);
+					(uint8_t)samples_per_channel,
+					stream_name[0] ? stream_name : NULL,
+					sender_name[0] ? sender_name : NULL,
+					sender_ip.s_addr ? &sender_ip : NULL);
 
 	if (ret < 0) {
 		return ret;
@@ -259,7 +380,8 @@ static int delete_rx_stream(struct webapi_request *req)
 	uint8_t zero_map[AES67_MAX_CH_PER_STREAM] = {0};
 
 	int ret = aes67_conn_configure_rx_stream((uint8_t)req->id, &zero_ip,
-						 0, zero_map, 1, 0, 0);
+						 0, zero_map, 1, 0, 0,
+						 NULL, NULL, NULL);
 
 	if (ret < 0) {
 		return ret;
@@ -275,6 +397,9 @@ static int get_discovered(struct webapi_request *req)
 {
 	struct json_out *jo = &req->out;
 	char tmp[INET_ADDRSTRLEN];
+	char discovered_name[AES67_STREAM_NAME_MAX];
+	char discovered_sender[AES67_STREAM_NAME_MAX];
+	struct in_addr discovered_sender_ip;
 	int sap_count = 0;
 	const struct aes67_foreign_stream *foreign =
 		aes67_conn_get_foreign_streams(&sap_count);
@@ -317,8 +442,17 @@ static int get_discovered(struct webapi_request *req)
 			continue;
 		}
 
+		lookup_foreign_metadata(&rep->mcast_addr, rep->port,
+					discovered_name,
+					sizeof(discovered_name),
+					discovered_sender,
+					sizeof(discovered_sender),
+					&discovered_sender_ip);
+
 		jo_obj_begin(jo);
-		jo_str(jo, "name", rep->name);
+		jo_str(jo, "name",
+		       discovered_name[0] ? discovered_name : rep->name);
+		jo_str(jo, "sender_name", discovered_sender);
 		format_ip(tmp, sizeof(tmp), &rep->mcast_addr);
 		jo_str(jo, "mcast_addr", tmp);
 		jo_uint(jo, "port", rep->port);
@@ -331,7 +465,9 @@ static int get_discovered(struct webapi_request *req)
 		} else {
 			jo_raw(jo, "\"ssrc\":\"\",");
 		}
-		format_ip(tmp, sizeof(tmp), &rep->origin_addr);
+		format_ip(tmp, sizeof(tmp),
+			  discovered_sender_ip.s_addr ?
+			  &discovered_sender_ip : &rep->origin_addr);
 		jo_str(jo, "origin_addr", tmp);
 		jo_str(jo, "via",
 		       (via & AES67_VIA_SAP) &&

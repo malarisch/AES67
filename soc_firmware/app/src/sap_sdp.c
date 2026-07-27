@@ -240,6 +240,8 @@ static int parse_sap_sdp(const uint8_t *buf, size_t len,
 	/* Copy parsed fields */
 	out->valid = true;
 	memcpy(out->name, parsed.name, sizeof(out->name));
+	memcpy(out->sender_name, parsed.origin_name,
+	       sizeof(out->sender_name));
 	out->mcast_addr = parsed.connection_addr;
 	out->port = parsed.port;
 	out->channels = parsed.channels;

@@ -1037,6 +1037,50 @@ static void handle_response(const uint8_t *msg, size_t len)
  * DESCRIBE worker: fetch SDP for resolved sessions, report to SAP table
  * ================================================================ */
 
+static void derive_sender_name(char *out, size_t out_sz,
+			       const struct discovered_session *d,
+			       const struct aes67_sdp_parsed *sdp)
+{
+	size_t instance_len = strlen(d->instance);
+	size_t session_len = strlen(sdp->name);
+
+	out[0] = '\0';
+
+	/* RAVENNA session instances conventionally use
+	 * "<device> <session>". Keep the device prefix when it is present. */
+	if (session_len > 0 && instance_len > session_len &&
+	    strcasecmp(d->instance + instance_len - session_len,
+		       sdp->name) == 0) {
+		size_t prefix_len = instance_len - session_len;
+
+		while (prefix_len > 0 &&
+		       isspace((unsigned char)d->instance[prefix_len - 1])) {
+			prefix_len--;
+		}
+		if (prefix_len > 0) {
+			prefix_len = MIN(prefix_len, out_sz - 1);
+			memcpy(out, d->instance, prefix_len);
+			out[prefix_len] = '\0';
+			return;
+		}
+	}
+
+	/* Otherwise the SRV target is the best stable sender label we have. */
+	if (d->srv_target[0] != '\0') {
+		size_t host_len = strcspn(d->srv_target, ".");
+
+		host_len = MIN(host_len, out_sz - 1);
+		memcpy(out, d->srv_target, host_len);
+		out[host_len] = '\0';
+		return;
+	}
+
+	if (sdp->origin_name[0] != '\0') {
+		strncpy(out, sdp->origin_name, out_sz - 1);
+		out[out_sz - 1] = '\0';
+	}
+}
+
 static void report_foreign(const struct discovered_session *d,
 			   const struct aes67_sdp_parsed *sdp)
 {
@@ -1064,6 +1108,7 @@ static void report_foreign(const struct discovered_session *d,
 	} else {
 		strncpy(fs.name, d->instance, sizeof(fs.name) - 1);
 	}
+	derive_sender_name(fs.sender_name, sizeof(fs.sender_name), d, sdp);
 	aes67_conn_report_foreign_stream(&fs);
 }
 

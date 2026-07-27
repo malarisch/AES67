@@ -49,6 +49,7 @@ struct aes67_sdp_params {
 
 struct aes67_sdp_parsed {
 	char           name[AES67_SDP_NAME_MAX];
+	char           origin_name[AES67_SDP_NAME_MAX];
 	struct in_addr origin_addr;
 	struct in_addr connection_addr;
 	uint16_t       port;
