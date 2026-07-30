@@ -486,7 +486,7 @@ static int cmd_jtag(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "CRC_ERROR pin: %s",
 		    fpga_jtag_crc_error() ? "ASSERTED" : "clear");
 	if (bits > 0) {
-		shell_print(sh, "Boundary sample (%d bits, LSB first — bit i "
+		shell_print(sh, "Boundary sample (%d bits, LSB first - bit i "
 			    "= BSC cell i, CRC_ERROR = cell 588):", bits);
 		shell_hexdump(sh, bsc, (bits + 7) / 8);
 	}

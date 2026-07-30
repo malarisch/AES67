@@ -591,14 +591,14 @@ static int fpga_jtag_do_load(fpga_jtag_progress_cb cb, void *ctx)
 			FPGA_JTAG_USERCODE);
 #else
 		/* No USERCODE in the SVF: cannot verify, trust the first pass. */
-		LOG_WRN("No USERCODE in SVF — configured without read-back "
+		LOG_WRN("No USERCODE in SVF - configured without read-back "
 			"verification");
 		return 0;
 #endif
 	}
 
 	LOG_ERR("FPGA JTAG configuration failed after %d attempts (USERCODE "
-		"never matched). Likely TDI/TCK signal integrity — raise "
+		"never matched). Likely TDI/TCK signal integrity - raise "
 		"CONFIG_AES67_FPGA_JTAG_TCK_DELAY_US or improve the wiring.",
 		CONFIG_AES67_FPGA_JTAG_CONFIG_RETRIES);
 	return -EIO;
@@ -640,11 +640,11 @@ static int fpga_jtag_boot_load_locked(fpga_jtag_progress_cb cb, void *ctx)
 		uint32_t uc = fpga_jtag_read_usercode();
 
 		if (uc == FPGA_JTAG_USERCODE) {
-			LOG_INF("FPGA already configured (USERCODE 0x%08X) — "
+			LOG_INF("FPGA already configured (USERCODE 0x%08X) - "
 				"skipping bitstream upload", uc);
 			return 1;
 		}
-		LOG_INF("FPGA not configured (USERCODE 0x%08X) — uploading "
+		LOG_INF("FPGA not configured (USERCODE 0x%08X) - uploading "
 			"bitstream", uc);
 	}
 #endif
@@ -656,11 +656,11 @@ static int fpga_jtag_boot_load_locked(fpga_jtag_progress_cb cb, void *ctx)
 		uint32_t errs = fpga_jtag_bypass_link_test(cfg, nbits);
 
 		if (errs == 0) {
-			LOG_INF("JTAG link test: %u/%u bit errors — clean, wiring "
+			LOG_INF("JTAG link test: %u/%u bit errors - clean, wiring "
 				"can carry the config stream", errs, nbits);
 		} else {
 			LOG_ERR("JTAG link test: %u/%u bit errors (BER ~%u.%02u%%) "
-				"— the wiring corrupts data; JTAG config will not "
+				"- the wiring corrupts data; JTAG config will not "
 				"succeed until this is 0. Raise "
 				"CONFIG_AES67_FPGA_JTAG_TCK_DELAY_US, shorten the "
 				"leads, add a TCK pull-down and a solid GND return.",
@@ -755,7 +755,7 @@ static void fpga_jtag_monitor_fn(void *p1, void *p2, void *p3)
 			    ++crc_clean_ticks >= FPGA_JTAG_MONITOR_CRC_BASELINE_TICKS) {
 				crc_armed = true;
 				LOG_INF("FPGA health: CRC_ERROR clear through the "
-					"baseline window — SEU auto-recovery armed");
+					"baseline window - SEU auto-recovery armed");
 			}
 			continue;
 		}
@@ -766,7 +766,7 @@ static void fpga_jtag_monitor_fn(void *p1, void *p2, void *p3)
 				LOG_ERR("FPGA health: CRC_ERROR already asserted "
 					"during the baseline window. Either this "
 					"JTAG load left residual bit errors in the "
-					"configuration SRAM (marginal wiring — a "
+					"configuration SRAM (marginal wiring - a "
 					"reload cannot fix that) or the pin sample "
 					"is unusable. CRC auto-recovery DISABLED "
 					"for this session; IDCODE/USERCODE "
@@ -785,7 +785,7 @@ static void fpga_jtag_monitor_fn(void *p1, void *p2, void *p3)
 			 * Keep watching instead of reconfiguring blind. */
 			if ((link_down_ticks++ %
 			     FPGA_JTAG_MONITOR_LINK_LOG_TICKS) == 0U) {
-				LOG_WRN("FPGA health: JTAG chain unreadable — "
+				LOG_WRN("FPGA health: JTAG chain unreadable - "
 					"check wiring/power; not reconfiguring");
 			}
 			continue;
@@ -798,12 +798,12 @@ static void fpga_jtag_monitor_fn(void *p1, void *p2, void *p3)
 		 * genuine fault reads identically twice — a single corrupted
 		 * shift on marginal hand-wiring does not. */
 		if (fpga_jtag_health_check() != h) {
-			LOG_WRN("FPGA health: transient \"%s\" reading — ignored",
+			LOG_WRN("FPGA health: transient \"%s\" reading - ignored",
 				fpga_jtag_health_str(h));
 			continue;
 		}
 
-		LOG_ERR("FPGA fault: %s — muting outputs and reloading the "
+		LOG_ERR("FPGA fault: %s - muting outputs and reloading the "
 			"bitstream", fpga_jtag_health_str(h));
 
 		if (fpga_jtag_monitor_event_cb != NULL) {

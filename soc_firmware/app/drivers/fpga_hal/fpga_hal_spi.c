@@ -648,12 +648,12 @@ int fpga_hal_spibone_probe(void)
 	 * scratch register powers up as 0x12345678. */
 	ret = spibone_read(CSR_CTRL_SCRATCH_ADDR, &v);
 	if (ret < 0) {
-		LOG_ERR("spibone probe: ctrl_scratch read failed (err %d) — "
+		LOG_ERR("spibone probe: ctrl_scratch read failed (err %d) - "
 			"bus not responding", ret);
 		ok = false;
 	} else if (v != 0x12345678u) {
 		LOG_ERR("spibone probe: ctrl_scratch = 0x%08X, expected "
-			"0x12345678 — bus/address-decode fault", v);
+			"0x12345678 - bus/address-decode fault", v);
 		ok = false;
 	} else {
 		LOG_INF("spibone probe: ctrl_scratch = 0x12345678 (OK)");
@@ -674,7 +674,7 @@ int fpga_hal_spibone_probe(void)
 			ok = false;
 		} else if (v != patterns[i]) {
 			LOG_ERR("spibone probe: scratch wrote 0x%08X read 0x%08X"
-				" — data-line fault", patterns[i], v);
+				" - data-line fault", patterns[i], v);
 			ok = false;
 		}
 	}
@@ -682,7 +682,7 @@ int fpga_hal_spibone_probe(void)
 	if (ok) {
 		LOG_INF("spibone probe: bus OK (scratch round-trip verified)");
 	} else {
-		LOG_ERR("spibone probe: FAILED — the FPGA is configured but not "
+		LOG_ERR("spibone probe: FAILED - the FPGA is configured but not "
 			"answering on the Wishbone bus. Check the SPI2 wiring "
 			"(SCK/MOSI/MISO/CS), the bus frequency, and that the "
 			"gateware's spibone clock is running.");

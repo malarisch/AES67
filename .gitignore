@@ -50,7 +50,7 @@ db/
 build/
 external/
 **/greybox_tmp/
-
+build*/
 **/node_modules/
 *.tsbuildinfo
 *.stp
@@ -78,3 +78,4 @@ datasheets/
 *__pycache__*
 
 CLAUDE.md
+nmos-results/

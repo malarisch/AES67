@@ -10,6 +10,7 @@ choice FPGA_HAL_BACKEND
 	prompt "FPGA HAL backend"
 	default FPGA_HAL_LITEX if ETH_LITEX
 	default FPGA_HAL_SPI if SPIBONE
+	default FPGA_HAL_MOCK
 
 config FPGA_HAL_LITEX
 	bool "LiteX CSR backend"
@@ -26,7 +27,60 @@ config FPGA_HAL_SPI
 	  on an external MCU (e.g. ESP32-S3) and drives CPU-less FPGA
 	  gateware over SPI.
 
+config FPGA_HAL_MOCK
+	bool "Mock backend (QEMU / CI, no hardware)"
+	help
+	  Emulate the aes67_bridge register map in RAM: sparse CSR
+	  register file, synthetic monotonic TAI wallclock, system_cfg
+	  CSRs pre-populated from the FPGA_HAL_MOCK_* options. Lets the
+	  full control plane (streams, discovery, NMOS, web API, PTP
+	  BMC) run on emulated boards such as qemu_x86 for CI.
+
 endchoice
+
+if FPGA_HAL_MOCK
+
+config FPGA_HAL_MOCK_TX_STREAMS
+	int "Mock gateware: TX stream slots"
+	range 0 8
+	default 8
+
+config FPGA_HAL_MOCK_TX_CHANNELS
+	int "Mock gateware: physical AD input channels"
+	range 0 16
+	default 8
+
+config FPGA_HAL_MOCK_RX_STREAMS
+	int "Mock gateware: RX stream slots"
+	range 0 8
+	default 8
+
+config FPGA_HAL_MOCK_RX_CHANNELS
+	int "Mock gateware: physical DA output channels"
+	range 0 16
+	default 8
+
+config FPGA_HAL_MOCK_GOLDFISH_RTC
+	bool "Wallclock from QEMU's Goldfish RTC (host real time)"
+	default y if BOARD_QEMU_RISCV64
+	help
+	  Serve the mock PTP wallclock from the Goldfish RTC that QEMU's
+	  virt machine provides at a fixed MMIO address (host
+	  CLOCK_REALTIME + 37 s leap-second offset = TAI). Keeps the
+	  emulated node's TAI in sync with the test host, which the
+	  absolute scheduled activations of the IS-05/IS-08 conformance
+	  suites require. Without this the wallclock free-runs from a
+	  fixed 2026 epoch.
+
+config FPGA_HAL_MOCK_GOLDFISH_RTC_BASE
+	hex "Goldfish RTC MMIO base"
+	depends on FPGA_HAL_MOCK_GOLDFISH_RTC
+	default 0x101000
+	help
+	  MMIO base of the Goldfish RTC (0x101000 on qemu -machine virt
+	  for RISC-V).
+
+endif # FPGA_HAL_MOCK
 
 config FPGA_HAL_SHELL
 	bool "FPGA HAL shell commands"

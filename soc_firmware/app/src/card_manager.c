@@ -182,7 +182,7 @@ static int detect_and_init_slot0(void)
 
 	/* Reject bus-float values */
 	if (!board_id_is_known(ident_a.board_id)) {
-		LOG_INF("No card detected (board_id=0x%02x not recognised — "
+		LOG_INF("No card detected (board_id=0x%02x not recognised - "
 			"floating bus?)", ident_a.board_id);
 		return 0;
 	}
@@ -190,7 +190,7 @@ static int detect_and_init_slot0(void)
 	/* Second read — must match first */
 	if (lpc_read_ident(LPC_PRIMARY_ADDR, &ident_b) < 0 ||
 	    ident_b.board_id != ident_a.board_id) {
-		LOG_WRN("Board ID unstable (0x%02x vs 0x%02x) — bus noise, "
+		LOG_WRN("Board ID unstable (0x%02x vs 0x%02x) - bus noise, "
 			"skipping init", ident_a.board_id, ident_b.board_id);
 		return 0;
 	}
@@ -226,7 +226,7 @@ static int detect_and_init_slot0(void)
 		break;
 #endif
 	default:
-		LOG_WRN("Unknown board_id=0x%02x at 0x40 — not initialised",
+		LOG_WRN("Unknown board_id=0x%02x at 0x40 - not initialised",
 			ident_a.board_id);
 		return 0;
 	}

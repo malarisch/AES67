@@ -697,7 +697,7 @@ static void eth_litex_tx_thread(void *p1, void *p2, void *p3)
 				/* Report a null timestamp: the PTP stack
 				 * discards the exchange and keeps the last
 				 * good path delay. */
-				LOG_WRN("TX timestamp stale after %d polls — invalidating exchange",
+				LOG_WRN("TX timestamp stale after %d polls - invalidating exchange",
 					ts_wait);
 				tx_ts.second = 0;
 				tx_ts.nanosecond = 0;

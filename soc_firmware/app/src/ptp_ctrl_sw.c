@@ -218,7 +218,7 @@ void ptp_ctrl_sw_apply_config(void)
 	ptp_clock_state_decision_req();
 	ptp_clock_signal_timeout();
 
-	LOG_INF("PTP(sw): applied config — pri1=%u pri2=%u class=%u acc=0x%02x "
+	LOG_INF("PTP(sw): applied config - pri1=%u pri2=%u class=%u acc=0x%02x "
 		"domain=%u logSync=%d logAnn=%d asym=%dns",
 		p1, p2, cc, acc, domain, log_sync, log_ann, asym_ns);
 }

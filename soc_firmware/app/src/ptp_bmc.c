@@ -152,7 +152,7 @@ static void push_config_to_fpga(void)
 		}
 	}
 
-	LOG_INF("PTP: pushed config — pri1=%u pri2=%u class=%u acc=0x%02x "
+	LOG_INF("PTP: pushed config - pri1=%u pri2=%u class=%u acc=0x%02x "
 		"logSync=%d logAnn=%d asym=%dns",
 		pri1, pri2, cc, acc, log_sync, log_ann, asym_ns);
 }

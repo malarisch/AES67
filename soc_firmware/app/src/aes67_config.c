@@ -208,7 +208,7 @@ int aes67_config_persist(void)
 #endif
 
 	if (ret != 0) {
-		LOG_ERR("Configuration not persisted — no storage backend "
+		LOG_ERR("Configuration not persisted - no storage backend "
 			"accepted it; changes will be lost on reboot");
 	}
 

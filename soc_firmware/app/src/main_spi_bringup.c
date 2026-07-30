@@ -77,7 +77,7 @@ int main(void)
 	LOG_INF("AES67 SPI bring-up (no networking on this board yet)");
 
 	if (!fpga_hal_is_ready()) {
-		LOG_ERR("FPGA HAL not ready — check SPI wiring and zephyr,fpga-spi");
+		LOG_ERR("FPGA HAL not ready - check SPI wiring and zephyr,fpga-spi");
 		return 0;
 	}
 

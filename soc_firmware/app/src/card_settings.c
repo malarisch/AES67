@@ -144,7 +144,7 @@ int card_settings_apply(void)
 	}
 	if (card->type != s.card_type) {
 		LOG_WRN("Stored settings are for a different card type "
-			"(%u != %u) — ignored", s.card_type, card->type);
+			"(%u != %u) - ignored", s.card_type, card->type);
 		return 0;
 	}
 

@@ -1,0 +1,29 @@
+# Twister test definitions for the AES67 control-plane firmware.
+#
+#   west twister -T soc_firmware/app -p qemu_riscv64 --inline-logs
+#
+# The QEMU test boots the full firmware against the FPGA HAL mock
+# (boards/qemu_riscv64.conf) with SLIRP user-mode networking — no TAP,
+# no root — and asserts the boot sequence on the console: connection
+# management, the NMOS node, "System ready" and finally a DHCP lease
+# from QEMU's built-in server. That covers HAL mock, config, network
+# bring-up, PTP BMC start and every service init in one pass.
+common:
+  tags:
+    - aes67
+  harness: console
+tests:
+  aes67.controlplane.qemu_boot:
+    platform_allow:
+      - qemu_riscv64
+    timeout: 60
+    extra_configs:
+      - CONFIG_NET_QEMU_USER=y
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "Connection management started"
+        - "NMOS: IS-04 v1.3 node API"
+        - "System ready"
+        - "DHCP bound: 10.0.2.15"

@@ -197,7 +197,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 					}
 					link_down_handled = false;
 				} else if (g_ip_valid) {
-					LOG_INF("Short link flap — rejoining multicast groups");
+					LOG_INF("Short link flap - rejoining multicast groups");
 					ptp_bmc_notify_link_up();
 					sap_sdp_notify_link_up();
 					aes67_conn_notify_link_up();
@@ -219,7 +219,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 			} else if (!disp_metrics.link_up && !link_prev_up
 				   && !link_down_handled) {
 				if ((k_uptime_get() - link_down_since) > 1000) {
-					LOG_INF("Link down > 1s — will restart DHCP on link-up");
+					LOG_INF("Link down > 1s - will restart DHCP on link-up");
 					link_down_handled = true;
 				}
 			}
@@ -268,7 +268,7 @@ static void fpga_status_poll_thread(void *p1, void *p2, void *p3)
 				static bool outputs_enabled;
 
 				if (disp_metrics.wc_locked && !outputs_enabled) {
-					LOG_INF("Wallclock locked — activating audio outputs");
+					LOG_INF("Wallclock locked - activating audio outputs");
 					card_manager_activate_outputs();
 					outputs_enabled = true;
 				}

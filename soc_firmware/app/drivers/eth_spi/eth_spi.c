@@ -167,7 +167,7 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 		 * the network stack expects a bare frame. */
 		len = (int)(raw_len & 0xFFFF) - 4 - trailer;
 		if (len < 14 || len > ETH_LITEX_MAX_PKT_SIZE) {
-			LOG_WRN("RX invalid len %d (raw %u) — dropping", len, raw_len);
+			LOG_WRN("RX invalid len %d (raw %u) - dropping", len, raw_len);
 			len = 0;
 		} else {
 			/* With a trailer read through the FCS to reach it;
@@ -292,7 +292,7 @@ static void eth_spi_rx_thread(void *p1, void *p2, void *p3)
 			 * the whole node down without a single log line. */
 			if (!eth_spi_link_read()) {
 				LOG_ERR("RX ring still reports data with the link "
-					"down — stale frame stuck in the FPGA ring, "
+					"down - stale frame stuck in the FPGA ring, "
 					"draining stopped until the link returns");
 				break;
 			}
@@ -438,7 +438,7 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 			 * stack treats it as "no timestamp available" and
 			 * discards the exchange, keeping the last good path
 			 * delay. */
-			LOG_WRN("TX timestamp stale after %d polls (latch %u/%u) — invalidating exchange",
+			LOG_WRN("TX timestamp stale after %d polls (latch %u/%u) - invalidating exchange",
 				i, pre_sec & 0xF, pre_nsec & 0x3FFFFFFF);
 			tx_ts.second = 0;
 			tx_ts.nanosecond = 0;
@@ -698,7 +698,7 @@ static int eth_spi_init(const struct device *dev)
 	}
 #else
 	ARG_UNUSED(cfg);
-	LOG_INF("no IRQ GPIO — falling back to %dms polling",
+	LOG_INF("no IRQ GPIO - falling back to %dms polling",
 		CONFIG_ETH_SPI_POLL_INTERVAL_MS);
 #endif
 

@@ -15,7 +15,10 @@
 #include "ptp_ctrl_internal.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 
-static bool ptp_sw_active(void)
+/* Only referenced from the CONFIG_AES67_PTP_SOFTWARE branches below —
+ * builds without the software-PTP stack (e.g. the QEMU/mock target)
+ * would otherwise trip -Werror=unused-function under twister. */
+static __maybe_unused bool ptp_sw_active(void)
 {
 	return IS_ENABLED(CONFIG_AES67_PTP_SOFTWARE) &&
 	       fpga_hal_ptp_in_software();

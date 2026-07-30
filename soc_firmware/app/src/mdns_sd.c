@@ -1376,7 +1376,7 @@ static void handle_response(const uint8_t *msg, size_t len)
 				/* Loud on purpose: constant port "changes"
 				 * mean two sources answer different records
 				 * for this name (see DESCRIBE_MIN_INTERVAL). */
-				LOG_INF("mDNS: session '%s' SRV port %u -> %u — re-DESCRIBE",
+				LOG_INF("mDNS: session '%s' SRV port %u -> %u - re-DESCRIBE",
 					inst, d->port, port);
 				d->described = false;
 			}
@@ -1409,7 +1409,7 @@ static void handle_response(const uint8_t *msg, size_t len)
 					 * different A records for the same
 					 * name — the classic driver of an
 					 * endless re-DESCRIBE loop. */
-					LOG_INF("mDNS: session '%s' host %s -> %s — re-DESCRIBE",
+					LOG_INF("mDNS: session '%s' host %s -> %s - re-DESCRIBE",
 						d->instance, o, n);
 					d->described = false;
 				}

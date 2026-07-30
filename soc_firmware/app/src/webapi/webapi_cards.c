@@ -46,8 +46,9 @@
 #define AES67_SHARED_NRST_AVAILABLE 0
 #endif
 
-/* Settings changed -> capture into the shadow store, save debounced. */
-static void settings_changed(void)
+/* Settings changed -> capture into the shadow store, save debounced.
+ * __maybe_unused: not referenced when no card driver is compiled in. */
+static __maybe_unused void settings_changed(void)
 {
 	if (card_settings_capture() == 0) {
 		card_settings_schedule_save();

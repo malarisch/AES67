@@ -17,7 +17,8 @@
 
 #include "fpga_hal.h"
 
-#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
+#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI) || \
+	defined(CONFIG_FPGA_HAL_MOCK)
 /* Macro layer only: CSR_AES67_CSR_SYSTEM_CFG_* addresses + field offsets
  * from the generated aes67_bridge headers. */
 #include "../eth_litex/eth_litex.h"

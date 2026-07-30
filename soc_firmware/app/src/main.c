@@ -106,7 +106,7 @@ static FUNC_NORETURN void boot_fatal(const char *code, const char *what, int err
 #endif
 
 	while (1) {
-		LOG_ERR("BOOT FAILED [%s]: %s (err %d) — node stopped", code,
+		LOG_ERR("BOOT FAILED [%s]: %s (err %d) - node stopped", code,
 			what, err);
 		k_sleep(K_SECONDS(10));
 	}
@@ -191,7 +191,7 @@ static void ptp_sw_start_once(void)
 
 	ret = ptp_start();
 	if (ret < 0) {
-		boot_fatal("E  PTP", "the software PTP stack did not start — "
+		boot_fatal("E  PTP", "the software PTP stack did not start - "
 			   "the node can neither follow nor be a grandmaster",
 			   ret);
 	}
@@ -222,7 +222,7 @@ static void apply_node_ip(const struct in_addr *addr, bool link_local)
 
 	ret = fpga_write_ip_address(addr);
 	if (ret < 0) {
-		LOG_ERR("FPGA did not take the node IP (err %d) — RTP and "
+		LOG_ERR("FPGA did not take the node IP (err %d) - RTP and "
 			"hardware PTP will use a stale address", ret);
 	}
 
@@ -347,7 +347,7 @@ static bool ll_addr_ensure(struct in_addr *out)
 	}
 
 	if (net_if_ipv4_addr_add(g_iface, &ll, NET_ADDR_MANUAL, 0) == NULL) {
-		LOG_ERR("Could not add the link-local address %u.%u.%u.%u — "
+		LOG_ERR("Could not add the link-local address %u.%u.%u.%u - "
 			"out of IPv4 address slots?",
 			ll.s4_addr[0], ll.s4_addr[1], ll.s4_addr[2],
 			ll.s4_addr[3]);
@@ -390,7 +390,7 @@ static void ll_work_fn(struct k_work *work)
 		return;		/* already on it */
 	}
 
-	LOG_WRN("No DHCP lease — running on the link-local address (the DHCP "
+	LOG_WRN("No DHCP lease - running on the link-local address (the DHCP "
 		"client keeps trying)");
 	apply_node_ip(&ll, true);
 }
@@ -464,7 +464,7 @@ static void on_ipv4_addr_del(const struct in_addr *addr)
 		return;
 	}
 
-	LOG_WRN("DHCP address removed (lease lost or link down) — keeping the "
+	LOG_WRN("DHCP address removed (lease lost or link down) - keeping the "
 		"identity for the %u s DHCP grace period",
 		AES67_DHCP_GRACE_MS / 1000U);
 
@@ -502,7 +502,7 @@ static void fpga_reconfigure(void *user_data)
 
 	if (g_iface) {
 		if (fpga_write_mac_address(g_iface) < 0) {
-			LOG_ERR("FPGA recovery: MAC write failed — the node "
+			LOG_ERR("FPGA recovery: MAC write failed - the node "
 				"will not receive its own traffic");
 		}
 
@@ -514,7 +514,7 @@ static void fpga_reconfigure(void *user_data)
 	/* The bitstream (and with it the static build configuration) may have
 	 * been re-uploaded — refresh the cache before anything consults it. */
 	if (fpga_hal_syscfg_load() < 0) {
-		LOG_ERR("FPGA recovery: system_cfg re-read failed — keeping "
+		LOG_ERR("FPGA recovery: system_cfg re-read failed - keeping "
 			"the previous configuration");
 	}
 
@@ -523,7 +523,7 @@ static void fpga_reconfigure(void *user_data)
 	int rst_ret = fpga_hal_set_resets(FPGA_HAL_RESET_ALL, false);
 
 	if (rst_ret < 0) {
-		LOG_ERR("FPGA recovery: reset domains stayed held (err %d) — "
+		LOG_ERR("FPGA recovery: reset domains stayed held (err %d) - "
 			"the data plane is dead", rst_ret);
 	}
 
@@ -537,7 +537,7 @@ static void fpga_reconfigure(void *user_data)
 /* Unused when PTP runs in software (Zephyr stack), where the FPGA BMC is off. */
 static __maybe_unused void on_bmc_change(enum ptp_bmc_role new_role)
 {
-	LOG_INF("PLL: BMC change (role=%d) — resetting PI controller", new_role);
+	LOG_INF("PLL: BMC change (role=%d) - resetting PI controller", new_role);
 	pll_ctrl_reset();
 
 #ifdef CONFIG_DISPLAY_CTRL
@@ -738,7 +738,7 @@ static int fpga_jtag_bringup(void)
 	}
 
 	if (ret == 1) {
-		LOG_INF("FPGA already configured — bitstream upload skipped");
+		LOG_INF("FPGA already configured - bitstream upload skipped");
 	} else {
 		LOG_INF("FPGA configured over JTAG");
 	}
@@ -790,7 +790,7 @@ static void fpga_jtag_health_event(enum fpga_jtag_event evt,
 		 * Reboot and let the one proven bring-up path rebuild
 		 * everything — the fresh USERCODE makes the boot-time upload
 		 * skip, so this costs a boot, not another 6.5 s upload. */
-		LOG_ERR("FPGA reconfigured after a fault — rebooting for a "
+		LOG_ERR("FPGA reconfigured after a fault - rebooting for a "
 			"clean bring-up");
 		k_msleep(100);
 		sys_reboot(SYS_REBOOT_COLD);
@@ -825,7 +825,7 @@ int main(void)
 
 		if (nrst_ret < 0) {
 			boot_fatal("E NRST",
-				   "shared nRST could not be released — display "
+				   "shared nRST could not be released - display "
 				   "controller and card LPC stay in reset and "
 				   "the outputs cannot be muted", nrst_ret);
 		}
@@ -846,7 +846,7 @@ int main(void)
 		k_msleep(200);
 		if (!device_is_ready(early_i2c)) {
 			boot_fatal("E  I2C",
-				   "card I2C bus (i2c2) not ready — the outputs "
+				   "card I2C bus (i2c2) not ready - the outputs "
 				   "cannot be put into their safe state",
 				   -ENODEV);
 		}
@@ -854,7 +854,7 @@ int main(void)
 		mute_ret = card_manager_early_mute(early_i2c);
 		if (mute_ret < 0) {
 			boot_fatal("E  I2C",
-				   "early mute failed — the card may drive "
+				   "early mute failed - the card may drive "
 				   "garbage into the converters", mute_ret);
 		}
 	}
@@ -869,7 +869,7 @@ int main(void)
 
 		if (nrst_ret < 0) {
 			boot_fatal("E NRST",
-				   "ADDA nRST could not be asserted — the "
+				   "ADDA nRST could not be asserted - the "
 				   "converters are not held in reset while the "
 				   "FPGA is still unconfigured", nrst_ret);
 		}
@@ -910,7 +910,7 @@ int main(void)
 
 		if (!device_is_ready(clkgen)) {
 			boot_fatal("E  CLK",
-				   "Si5351A not ready — no MCLK for the "
+				   "Si5351A not ready - no MCLK for the "
 				   "converters", -ENODEV);
 		}
 
@@ -1003,7 +1003,7 @@ int main(void)
 					      NULL);
 
 	if (mon_ret < 0) {
-		LOG_ERR("FPGA JTAG health monitor did not start (err %d) — a "
+		LOG_ERR("FPGA JTAG health monitor did not start (err %d) - a "
 			"configuration fault will go unnoticed", mon_ret);
 	}
 #endif
@@ -1013,7 +1013,7 @@ int main(void)
 	 * there is nothing left to boot into. */
 	if (jtag_ret < 0) {
 		boot_fatal("FPGAER",
-			   "FPGA JTAG configuration failed — no data plane and "
+			   "FPGA JTAG configuration failed - no data plane and "
 			   "no spibone bus", jtag_ret);
 	}
 #endif
@@ -1025,7 +1025,7 @@ int main(void)
 
 		if (probe_ret < 0) {
 			boot_fatal("E  BUS",
-				   "spibone probe failed — the FPGA is "
+				   "spibone probe failed - the FPGA is "
 				   "configured but does not answer on the "
 				   "Wishbone bus", probe_ret);
 		}
@@ -1050,14 +1050,15 @@ int main(void)
 	 * parsing, the ptp_ctrl dispatch, which PTP service gets started —
 	 * keys off this cache, so it MUST be loaded before the reset domains
 	 * are released and the first frame can arrive. */
-#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI)
+#if defined(CONFIG_FPGA_HAL_LITEX) || defined(CONFIG_FPGA_HAL_SPI) || \
+	defined(CONFIG_FPGA_HAL_MOCK)
 	{
 		int cfg_ret = fpga_hal_syscfg_load();
 
 		if (cfg_ret < 0) {
 			boot_fatal("E  CFG",
 				   "the FPGA system_cfg register could not be "
-				   "read — cannot tell which PTP mode the "
+				   "read - cannot tell which PTP mode the "
 				   "gateware was built for", cfg_ret);
 		}
 	}
@@ -1080,7 +1081,7 @@ int main(void)
 
 		if (!device_is_ready(card_i2c)) {
 			boot_fatal("E  I2C",
-				   "card I2C bus (i2c2) not ready — no card "
+				   "card I2C bus (i2c2) not ready - no card "
 				   "control and no way to mute the outputs",
 				   -ENODEV);
 		}
@@ -1120,7 +1121,7 @@ int main(void)
 		}
 	}
 #else
-	bool config_loaded = false;
+	bool config_loaded __maybe_unused = false;
 #endif
 
 #ifdef CONFIG_FLASH_CONFIG
@@ -1152,7 +1153,7 @@ int main(void)
 	aes67_config_build_hostname(hostname_buf, sizeof(hostname_buf));
 	hn_ret = net_hostname_set(hostname_buf, strlen(hostname_buf));
 	if (hn_ret < 0) {
-		LOG_ERR("Hostname \"%s\" could not be set: %d — DHCP and mDNS "
+		LOG_ERR("Hostname \"%s\" could not be set: %d - DHCP and mDNS "
 			"will advertise the built-in default", hostname_buf,
 			hn_ret);
 	} else {
@@ -1163,7 +1164,7 @@ int main(void)
 	struct net_if *iface = net_if_get_default();
 
 	if (!iface) {
-		boot_fatal("E  NET", "no network interface — the Ethernet "
+		boot_fatal("E  NET", "no network interface - the Ethernet "
 			   "driver did not come up", -ENODEV);
 	}
 
@@ -1213,7 +1214,7 @@ int main(void)
 
 	if (rst_ret < 0) {
 		boot_fatal("E  RST", "the FPGA reset domains could not be "
-			   "released — MAC, PTP and audio stay held", rst_ret);
+			   "released - MAC, PTP and audio stay held", rst_ret);
 	}
 
 	fpga_wait_for_link_up();
@@ -1270,7 +1271,7 @@ int main(void)
 		 * whole 30 s link-local grace period. The actual ptp_start()
 		 * is chained to the first node address in apply_node_ip(). */
 		LOG_INF("PTP: software stack (Zephyr CONFIG_PTP) disciplining "
-			"FPGA wallclock — starting with the first node address");
+			"FPGA wallclock - starting with the first node address");
 		/* A warm FPGA (JTAG upload skipped, firmware rebooted) still
 		 * carries the previous run's rate correction — worst case the
 		 * ±524287 ppb clamp. Start from a neutral frequency now, so the
@@ -1295,7 +1296,7 @@ int main(void)
 		int bmc_ret = ptp_bmc_start(iface);
 
 		if (bmc_ret < 0) {
-			boot_fatal("E  PTP", "the PTP BMC did not start — the "
+			boot_fatal("E  PTP", "the PTP BMC did not start - the "
 				   "node can neither follow nor be a "
 				   "grandmaster", bmc_ret);
 		}
@@ -1305,14 +1306,14 @@ int main(void)
 	int conn_ret = aes67_conn_init(iface);
 
 	if (conn_ret < 0) {
-		boot_fatal("E CONN", "connection management did not start — no "
+		boot_fatal("E CONN", "connection management did not start - no "
 			   "stream setup", conn_ret);
 	}
 
 	int sap_ret = sap_sdp_start(iface);
 
 	if (sap_ret < 0) {
-		boot_fatal("E  SAP", "SAP/SDP did not start — the node would be "
+		boot_fatal("E  SAP", "SAP/SDP did not start - the node would be "
 			   "invisible to other AES67 devices", sap_ret);
 	}
 
@@ -1325,7 +1326,7 @@ int main(void)
 #endif
 	int web_ret = webserver_start();
 	if (web_ret < 0) {
-		LOG_ERR("HTTP server did not start (err %d) — no web UI and no "
+		LOG_ERR("HTTP server did not start (err %d) - no web UI and no "
 			"REST API", web_ret);
 	}
 
@@ -1354,7 +1355,7 @@ int main(void)
 	 * HTTP server started above) ---- */
 	int nmos_ret = nmos_start();
 	if (nmos_ret < 0) {
-		LOG_ERR("NMOS did not start (err %d) — node invisible to "
+		LOG_ERR("NMOS did not start (err %d) - node invisible to "
 			"NMOS controllers", nmos_ret);
 	}
 #endif

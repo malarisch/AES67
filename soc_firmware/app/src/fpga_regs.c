@@ -64,7 +64,7 @@ void fpga_wait_for_link_up(void)
 		 * booted but had none of that — so keep waiting and keep
 		 * saying why. */
 		if (elapsed % 5000 == 0) {
-			LOG_WRN("Still no Ethernet link after %u s — check the "
+			LOG_WRN("Still no Ethernet link after %u s - check the "
 				"cable / link partner", elapsed / 1000);
 		}
 	}

@@ -4,6 +4,18 @@ cmake_minimum_required(VERSION 3.20.0)
 # alongside upstream Zephyr boards.
 list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
+# QEMU boards (CI / FPGA-HAL-mock builds): the qemu-system-* binaries come
+# from the SDK hosttools (install once via
+# toolchains/zephyr-sdk-1.0.1/hosttools/*.sh). Point Zephyr's emulator
+# resolution at them unless the caller already provides a QEMU.
+if(NOT DEFINED ENV{QEMU_BIN_PATH})
+    set(_sdk_qemu_bin
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../external/zephyr/toolchains/zephyr-sdk-1.0.1/sysroots/x86_64-pokysdk-linux/usr/bin")
+    if(EXISTS "${_sdk_qemu_bin}")
+        set(ENV{QEMU_BIN_PATH} "${_sdk_qemu_bin}")
+    endif()
+endif()
+
 # ---------- LiteX per-target CSR dtsi regeneration ----------
 # Each LiteX board variant has a checked-in `litex_vexriscv_<target>.dts`
 # that `#include`s `<target>_csr.dtsi`. We regenerate that dtsi from the
@@ -100,7 +112,7 @@ add_subdirectory(drivers)
 # The legacy bring-up stub is still selectable via CONFIG_APP_SPI_BRINGUP.
 if(CONFIG_APP_SPI_BRINGUP)
     target_sources(app PRIVATE src/main_spi_bringup.c)
-elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI)
+elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
     # HTTP server: register per-service resource linker sections.
     zephyr_linker_sources(SECTIONS sections-rom.ld)
     # ESP32-S3 PSRAM: keep net-stack thread stacks in internal DRAM while the

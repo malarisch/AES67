@@ -1,11 +1,13 @@
 # Backend-neutral: system_cfg read + cache (built for every backend).
 target_sources(app PRIVATE fpga_hal_syscfg.c)
 
-if(CONFIG_FPGA_HAL_SPI)
-  target_sources(app PRIVATE fpga_hal_spi.c)
+if(CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
+  target_sources_ifdef(CONFIG_FPGA_HAL_SPI  app PRIVATE fpga_hal_spi.c)
+  target_sources_ifdef(CONFIG_FPGA_HAL_MOCK app PRIVATE fpga_hal_mock.c)
 
-  # External MCU: no CPU SoC, the register map comes straight from the
-  # aes67_bridge LiteX build (the same absolute addresses every host uses).
+  # No CPU SoC (external MCU / mock): the register map comes straight from
+  # the aes67_bridge LiteX build (the same absolute addresses every host
+  # uses).
   set(LITEX_BRIDGE_INC
       "${CMAKE_CURRENT_SOURCE_DIR}/../../../../litex_soc/build/aes67_bridge/software/include")
   if(NOT EXISTS "${LITEX_BRIDGE_INC}/generated/csr.h")

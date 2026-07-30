@@ -21,6 +21,7 @@
 #include "aes67_sdp_utils.h"
 #include "aes67_config.h"
 #include "ptp_bmc.h"
+#include "ptp_ctrl.h"
 
 LOG_MODULE_REGISTER(sap_sdp, LOG_LEVEL_INF);
 
@@ -64,14 +65,22 @@ static uint32_t announce_interval_s(void)
 }
 
 /* ================================================================
- * ts-refclk clock identity: the *elected* PTP grandmaster (FPGA BMC),
- * like the Linux daemon — not our own MAC-derived identity.  Returns
- * NULL while no grandmaster is known; the SDP builder then omits the
- * a=ts-refclk line entirely.
+ * ts-refclk clock identity: the *elected* PTP grandmaster, or our own
+ * clock identity while we ARE the grandmaster (as GM the stream is
+ * traceable to us).  Returns NULL while neither is the case; the SDP
+ * builder then omits the a=ts-refclk line entirely.
  * ================================================================ */
 static const uint8_t *refclk_clock_id(uint8_t out[8])
 {
-	if (ptp_bmc_get_best_master_id(out) == 0) {
+	struct ptp_ctrl_status st;
+
+	ptp_ctrl_get_status(&st);
+	if (st.gm_valid) {
+		memcpy(out, st.gm_id, 8);
+		return out;
+	}
+	if (st.role == PTP_CTRL_ROLE_LEADER) {
+		memcpy(out, st.clock_id, 8);
 		return out;
 	}
 	return NULL;

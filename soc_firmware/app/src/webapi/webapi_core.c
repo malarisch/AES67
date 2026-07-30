@@ -254,7 +254,7 @@ static int dispatch(enum http_method method, const char *url,
 }
 
 /* ================================================================
- * Dynamic handler for the "/api/*" wildcard resource
+ * Dynamic handler for the /api wildcard resource
  * ================================================================ */
 
 static int api_handler(struct http_client_ctx *client,

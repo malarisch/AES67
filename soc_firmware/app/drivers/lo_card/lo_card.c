@@ -284,7 +284,7 @@ int lo_card_init(const struct device *i2c_dev)
 	lo_data.detected = true;
 	k_mutex_unlock(&lo_data.lock);
 
-	LOG_INF("LO card in safe state (muted, converters in reset) — "
+	LOG_INF("LO card in safe state (muted, converters in reset) - "
 		"waiting for media clock");
 	return 0;
 }
@@ -417,7 +417,7 @@ int lo_card_activate(void)
 		k_sleep(K_MSEC(10));
 	}
 	if (dsp_ret != 0) {
-		LOG_WRN("DSP SER_IN init failed (err=%d) — DSP may not be present", dsp_ret);
+		LOG_WRN("DSP SER_IN init failed (err=%d) - DSP may not be present", dsp_ret);
 		dsp_ok = false;
 	}
 
@@ -456,7 +456,7 @@ int lo_card_activate(void)
 	if (dsp_ok) {
 		LOG_INF("DSP (AD1941) initialized at 0x%02x", LO_DSP_ADDR);
 	} else {
-		LOG_WRN("DSP init failed — card will operate without DSP");
+		LOG_WRN("DSP init failed - card will operate without DSP");
 	}
 
 	lo_data.initialized = true;
