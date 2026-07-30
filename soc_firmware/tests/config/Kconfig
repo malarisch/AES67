@@ -1,0 +1,6 @@
+# Reuse the application's driver Kconfig so the FPGA HAL mock backend
+# (and its FPGA_HAL_MOCK_* stream/channel counts) is configurable here
+# exactly as it is in the firmware build.
+rsource "../../app/drivers/Kconfig"
+
+source "Kconfig.zephyr"

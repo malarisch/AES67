@@ -54,8 +54,7 @@ build*/
 **/node_modules/
 *.tsbuildinfo
 *.stp
-datasheets/AD1940_1941.pdf
-datasheets/RAVENNA_Operating_Principles_-_Draft_1.0_final.pdf
+datasheets/**
 
 # WiFi credentials
 dev_scripts/spi_flash_flasher/wifi_credentials.h
@@ -73,7 +72,6 @@ FPGA/gowin/fpga_project/impl/
 datasheets/
 .run/**
 .west/**
-.github/**
 .vscode/**
 *__pycache__*
 

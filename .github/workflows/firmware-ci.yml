@@ -125,10 +125,13 @@ jobs:
       - name: Generate aes67_bridge CSR headers
         run: python litex_soc/generate.py --target aes67_bridge
 
-      - name: Twister (QEMU boot test)
+      - name: Twister (unit tests + QEMU boot test)
+        # soc_firmware/tests holds the ztest unit suites (parsers,
+        # config/streams, FPGA HAL mock, PTP facade); soc_firmware/app
+        # holds the full-image boot test. Both run on qemu_riscv64.
         run: |
-          west twister -T soc_firmware/app -p qemu_riscv64 \
-            --inline-logs -v -O twister-out
+          west twister -T soc_firmware/tests -T soc_firmware/app \
+            -p qemu_riscv64 --inline-logs -v -O twister-out
 
       - name: Dump twister handler logs on failure
         if: failure()

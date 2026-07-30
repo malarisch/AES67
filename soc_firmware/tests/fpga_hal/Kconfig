@@ -1,0 +1,3 @@
+rsource "../../app/drivers/Kconfig"
+
+source "Kconfig.zephyr"

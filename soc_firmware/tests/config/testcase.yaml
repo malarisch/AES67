@@ -1,0 +1,11 @@
+common:
+  tags:
+    - aes67
+    - unit
+  platform_allow:
+    - qemu_riscv64
+  integration_platforms:
+    - qemu_riscv64
+tests:
+  aes67.unit.config:
+    timeout: 90
