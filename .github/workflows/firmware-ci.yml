@@ -28,7 +28,7 @@ env:
 
 jobs:
   firmware-qemu:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -96,9 +96,16 @@ jobs:
               QEMU_BIN=$(find "$ZSDK_DIR" -name qemu-system-riscv64 -type f 2>/dev/null | head -1)
             fi
           fi
+          # The SDK-built qemu may not run on this host (glibc/library
+          # mismatch) — verify it actually executes before trusting it.
+          if [ -n "$QEMU_BIN" ] && ! "$QEMU_BIN" --version; then
+            echo "SDK qemu is not runnable on this host, falling back"
+            QEMU_BIN=""
+          fi
           if [ -z "$QEMU_BIN" ]; then
             sudo apt-get install -y --no-install-recommends qemu-system-misc
             QEMU_BIN=$(command -v qemu-system-riscv64)
+            "$QEMU_BIN" --version
           fi
           echo "Using QEMU: $QEMU_BIN"
           echo "QEMU_BIN=$QEMU_BIN" >> "$GITHUB_ENV"
@@ -111,6 +118,14 @@ jobs:
         run: |
           west twister -T soc_firmware/app -p qemu_riscv64 \
             --inline-logs -v -O twister-out
+
+      - name: Dump twister handler logs on failure
+        if: failure()
+        run: |
+          find twister-out -name "handler.log" -o -name "qemu.log" | while read -r f; do
+            echo "===== $f ====="
+            cat "$f"
+          done
 
       - name: Upload twister artifacts
         # Skipped under act: no artifact service (ACTIONS_RUNTIME_TOKEN).
