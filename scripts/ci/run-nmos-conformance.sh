@@ -14,6 +14,11 @@
 #   scripts/ci/run-nmos-conformance.sh [suite ...]
 #     default suites: IS-04-01 IS-05-01 IS-05-02 IS-08-01 IS-08-02
 #
+# Each suite writes <suite>.json / <suite>.log. A suite listed in
+# solo_tests() additionally gets one <suite>-<test>.json per test that
+# has to run in its own invocation to be free of the preceding tests'
+# side effects.
+#
 # Environment:
 #   BUILD_DIR       firmware build dir      (default: soc_firmware/app/build_qemu)
 #   NMOS_TESTING    nmos-testing checkout   (default: external/nmos/nmos-testing)
@@ -100,29 +105,59 @@ suite_args() {
         # position, so the node answers a spec-compliant 400 — a
         # restriction IS-08 caps cannot express and the tool does not
         # tolerate. Known device limitation, not a firmware defect.
-        IS-08-01) echo "--host $NODE_IP --port 80 --version v1.0 --selector null --ignore test_02 test_03 test_04" ;;
+        #
+        # test_05 is collateral damage from that: --ignore only masks a
+        # RESULT, the test still runs. test_04 leaves its scheduled
+        # activation armed (it aborts at the assertion, before the
+        # activation is due), and that activation locks every output.
+        # test_05 posts within milliseconds of the abort and gets a
+        # correct 423. It is re-run on its own further down, once the
+        # node reports no pending activation — see solo_tests().
+        IS-08-01) echo "--host $NODE_IP --port 80 --version v1.0 --selector null" ;;
         # Endpoint order per TEST_DEFINITIONS: is-04/node first.
         IS-08-02) echo "--host $NODE_IP $NODE_IP --port 80 80 --version v1.3 v1.0 --selector null null" ;;
         *) return 1 ;;
     esac
 }
 
-OVERALL=0
-for SUITE in "${SUITES[@]}"; do
-    ARGS=$(suite_args "$SUITE") || fail "unknown suite $SUITE"
-    OUT="$RESULTS_DIR/$SUITE.json"
-    echo "== Running $SUITE"
-    # shellcheck disable=SC2086
-    (cd "$NMOS_TESTING" && "$VENV/bin/python3" nmos-test.py suite "$SUITE" \
-        --selection all $ARGS --output "$OUT") \
-        > "$RESULTS_DIR/$SUITE.log" 2>&1
-    RC=$?
-    if [ ! -f "$OUT" ]; then
-        echo "   $SUITE: tool produced no result file (rc=$RC) - see $RESULTS_DIR/$SUITE.log"
-        OVERALL=1
-        continue
-    fi
-    python3 - "$OUT" "$SUITE" <<'EOF' || OVERALL=1
+# Tests whose verdict is masked in the full-suite pass (see the comments
+# in suite_args). Applies to the "all" pass only — a solo re-run has to
+# report its real result.
+suite_ignores() {
+    case "$1" in
+        IS-08-01) echo "test_02 test_03 test_04 test_05" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Tests that must run in their own invocation because a preceding test
+# in the same run leaves node state behind that they cannot tolerate.
+# The tool has no way to express this: --selection takes "all" or a
+# single test name, and --ignore does not stop a test from executing.
+solo_tests() {
+    case "$1" in
+        IS-08-01) echo "test_05" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Precondition for the solo runs: no scheduled activation may be armed,
+# or the very first POST is answered with a (correct) 423. Activations
+# left over from the main pass fire on their own within a few seconds.
+wait_for_idle_activations() {
+    local url="http://$NODE_IP/x-nmos/channelmapping/v1.0/map/activations"
+    local i
+    for i in $(seq 1 20); do
+        [ "$(curl -s -m 5 "$url")" = "{}" ] && return 0
+        sleep 1
+    done
+    echo "   warning: node still reports pending activations after 20 s"
+    return 0
+}
+
+# $1 result json, $2 label -> 0 if no test reported a Fail
+check_result() {
+    python3 - "$1" "$2" <<'EOF'
 import json, sys, collections
 doc = json.load(open(sys.argv[1]))
 
@@ -151,6 +186,45 @@ if fails:
         print(f"     - {name}")
     sys.exit(1)
 EOF
+}
+
+# $1 suite, $2 --selection value, $3 result json, $4 log, $5 label
+run_pass() {
+    local suite="$1" selection="$2" out="$3" log="$4" label="$5" rc
+    local args ignores=""
+    args=$(suite_args "$suite") || fail "unknown suite $suite"
+    if [ "$selection" = "all" ]; then
+        ignores=$(suite_ignores "$suite")
+        if [ -n "$ignores" ]; then
+            ignores="--ignore $ignores"
+        fi
+    fi
+    echo "== Running $label"
+    # shellcheck disable=SC2086
+    (cd "$NMOS_TESTING" && "$VENV/bin/python3" nmos-test.py suite "$suite" \
+        --selection "$selection" $args $ignores --output "$out") > "$log" 2>&1
+    rc=$?
+    if [ ! -f "$out" ]; then
+        echo "   $label: tool produced no result file (rc=$rc) - see $log"
+        return 1
+    fi
+    check_result "$out" "$label"
+}
+
+OVERALL=0
+for SUITE in "${SUITES[@]}"; do
+    run_pass "$SUITE" all \
+             "$RESULTS_DIR/$SUITE.json" \
+             "$RESULTS_DIR/$SUITE.log" \
+             "$SUITE" || OVERALL=1
+
+    for TEST in $(solo_tests "$SUITE"); do
+        wait_for_idle_activations
+        run_pass "$SUITE" "$TEST" \
+                 "$RESULTS_DIR/$SUITE-$TEST.json" \
+                 "$RESULTS_DIR/$SUITE-$TEST.log" \
+                 "$SUITE $TEST (solo)" || OVERALL=1
+    done
 done
 
 exit $OVERALL

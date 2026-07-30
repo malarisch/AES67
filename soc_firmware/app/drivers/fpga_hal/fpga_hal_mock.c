@@ -113,10 +113,23 @@ static void wallclock_now(uint64_t *sec, uint32_t *nsec)
 #ifdef CONFIG_FPGA_HAL_MOCK_GOLDFISH_RTC
 	/* QEMU's virt machine carries a Goldfish RTC at a fixed MMIO
 	 * address (no guest DT node, no Zephyr driver): TIME_LOW latches
-	 * the host CLOCK_REALTIME in ns, TIME_HIGH completes it. Serving
-	 * host time (+ leap seconds) makes the wallclock agree with the
-	 * test host's TAI — absolute scheduled activations (IS-05/IS-08
-	 * conformance tests) depend on that to within 100 ms. */
+	 * the time in ns, TIME_HIGH completes it. Serving that (+ leap
+	 * seconds) puts the wallclock on the test host's TAI, which is
+	 * what absolute scheduled activations (IS-05/IS-08 conformance)
+	 * compare against.
+	 *
+	 * Known offset: the RTC's zero point is captured before the VM
+	 * starts executing, and it then advances on QEMU's virtual clock.
+	 * The guest is therefore behind host wall time by QEMU's own
+	 * start-up time — constant per boot, measured 0.68-0.78 s here
+	 * and larger on a loaded CI runner. `-rtc clock=host' does not
+	 * change it, and nothing inside the guest can observe it, so it
+	 * cannot be corrected here. Consequence: absolute activations
+	 * apply about a second late (IS-05 test_29/test_30 warn about
+	 * exactly this), and anything that must not race a scheduled
+	 * activation needs its own margin — see scripts/ci/
+	 * run-nmos-conformance.sh. Relative activations are unaffected:
+	 * they only use this clock against itself. */
 	uint32_t lo = sys_read32(CONFIG_FPGA_HAL_MOCK_GOLDFISH_RTC_BASE);
 	uint32_t hi = sys_read32(CONFIG_FPGA_HAL_MOCK_GOLDFISH_RTC_BASE + 4);
 	uint64_t ns = ((uint64_t)hi << 32) | lo;
