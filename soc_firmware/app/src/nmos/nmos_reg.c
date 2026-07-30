@@ -266,7 +266,7 @@ static int full_register(const struct mdns_nmos_registry *r)
 	}
 	status = post_body(r, len);
 	if (status == 200) {
-		LOG_INF("NMOS: stale registration found — re-registering");
+		LOG_INF("NMOS: stale registration found - re-registering");
 		(void)delete_resource(r, "nodes", NMOS_RES_NODE, 0);
 		len = wrap_body("node", nmos_build_self, NULL, 0);
 		status = post_body(r, len);
@@ -410,7 +410,7 @@ static void reg_thread_fn(void *a, void *b, void *c)
 			}
 			if (i == n) {
 				nmos_set_registered(false);
-				LOG_WRN("NMOS: all %d registries failed — "
+				LOG_WRN("NMOS: all %d registries failed - "
 					"backoff %u s", n, backoff_s);
 				k_msleep(backoff_s * 1000);
 				backoff_s = MIN(backoff_s * 2, BACKOFF_MAX_S);
@@ -439,17 +439,17 @@ static void reg_thread_fn(void *a, void *b, void *c)
 		if (status == 200) {
 			if (sync_changes(&active) < 0 &&
 			    full_register(&active) < 0) {
-				LOG_WRN("NMOS: resource push failed — "
+				LOG_WRN("NMOS: resource push failed - "
 					"dropping registration");
 				registered = false;
 			}
 		} else if (status == 404) {
-			LOG_INF("NMOS: garbage-collected — re-registering");
+			LOG_INF("NMOS: garbage-collected - re-registering");
 			if (full_register(&active) < 0) {
 				registered = false;
 			}
 		} else {
-			LOG_WRN("NMOS: heartbeat failed (%d) — failing over",
+			LOG_WRN("NMOS: heartbeat failed (%d) - failing over",
 				status);
 			registered = false;
 		}

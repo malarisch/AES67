@@ -666,7 +666,7 @@ static void put_in_caps(struct json_out *jo, int in)
 
 static void put_out_caps(struct json_out *jo, int out)
 {
-	char id[8];
+	char id[16];
 
 	jo_obj_begin(jo);
 	jo_key(jo, "routable_inputs");
@@ -699,7 +699,7 @@ static void put_sourceid(struct json_out *jo, int out)
 
 void nmos_is08_build_list(struct json_out *jo, bool inputs)
 {
-	char id[8];
+	char id[16];
 
 	jo_arr_begin(jo);
 	k_mutex_lock(&is08_lock, K_FOREVER);
@@ -770,7 +770,7 @@ bool nmos_is08_build_child(struct json_out *jo, bool input,
 
 void nmos_is08_build_io(struct json_out *jo)
 {
-	char id[8];
+	char id[16];
 
 	k_mutex_lock(&is08_lock, K_FOREVER);
 	jo_obj_begin(jo);
@@ -824,7 +824,7 @@ void nmos_is08_build_io(struct json_out *jo)
 /* One {"input":...,"channel_index":...} map cell. Lock held. */
 static void put_map_cell(struct json_out *jo, int out, int ch)
 {
-	char id[8];
+	char id[16];
 
 	jo_obj_begin(jo);
 	if (out == OUT_AOUT) {
@@ -846,7 +846,7 @@ static void put_map_cell(struct json_out *jo, int out, int ch)
 /* Lock held. */
 static void put_out_map(struct json_out *jo, int out)
 {
-	char id[8];
+	char id[16];
 	int n = out_channels(out);
 
 	out_id(out, id, sizeof(id));
@@ -918,7 +918,7 @@ void nmos_is08_build_active(struct json_out *jo, const char *output_or_null)
 static void put_act_body(struct json_out *jo, const struct is08_act *a)
 {
 	char buf[NMOS_TAI_STR_MAX];
-	char id[8];
+	char id[16];
 
 	jo_obj_begin(jo);
 	jo_key(jo, "activation");
@@ -959,7 +959,7 @@ static void put_act_body(struct json_out *jo, const struct is08_act *a)
 				jo_raw(jo, "\"input\":null,"
 					   "\"channel_index\":null,");
 			} else {
-				char iid[8];
+				char iid[16];
 
 				in_id(e->in, iid, sizeof(iid));
 				jo_str(jo, "input", iid);
@@ -1044,8 +1044,10 @@ static int parse_action(const struct nj_node *pool, const struct nj_node *act,
 		return -EINVAL;
 	}
 
-	for (int oi = 0; oi < nj_count(pool, act); oi++) {
-		const struct nj_node *omap = nj_item(pool, act, oi);
+	/* Object members: walk the child list directly (nj_item is
+	 * array-only). */
+	for (int oi = act->first_child; oi >= 0; oi = pool[oi].next) {
+		const struct nj_node *omap = &pool[oi];
 		char oid[12];
 
 		if (omap->key == NULL || omap->key_len >= sizeof(oid)) {
@@ -1066,8 +1068,9 @@ static int parse_action(const struct nj_node *pool, const struct nj_node *act,
 			return -EINVAL;
 		}
 
-		for (int ci = 0; ci < nj_count(pool, omap); ci++) {
-			const struct nj_node *cell = nj_item(pool, omap, ci);
+		for (int ci = omap->first_child; ci >= 0;
+		     ci = pool[ci].next) {
+			const struct nj_node *cell = &pool[ci];
 			char chs[8];
 
 			if (cell->key == NULL ||
@@ -1284,7 +1287,7 @@ int nmos_is08_post_activation(struct json_out *jo,
 		/* immediate: requested_time null, mode immediate */
 		{
 			char buf[NMOS_TAI_STR_MAX];
-			char oid[8];
+			char oid[16];
 
 			jo_obj_begin(jo);
 			jo_key(jo, "activation");
@@ -1321,7 +1324,7 @@ int nmos_is08_post_activation(struct json_out *jo,
 						jo_raw(jo, "\"input\":null,"
 						       "\"channel_index\":null,");
 					} else {
-						char iid[8];
+						char iid[16];
 
 						in_id(entries[i].in, iid,
 						      sizeof(iid));

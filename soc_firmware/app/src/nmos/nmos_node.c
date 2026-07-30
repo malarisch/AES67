@@ -860,7 +860,12 @@ int nmos_build_manifest(char *buf, size_t sz, int idx)
 		.port = port,
 		.payload_type = pt,
 		.ssrc = tx.ssrc,
-		.clock_id = st.gm_valid ? st.gm_id : NULL,
+		/* ts-refclk: the elected grandmaster — or our own clock
+		 * identity while we ARE the grandmaster (IS-05-02 test_17
+		 * expects the SDP to reference the IS-04 clock). */
+		.clock_id = st.gm_valid ? st.gm_id
+			    : (st.role == PTP_CTRL_ROLE_LEADER ? st.clock_id
+							       : NULL),
 		.stream_name = tx.name,
 		.ptp_domain = domain,
 		.sync_time = 0,

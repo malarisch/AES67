@@ -717,6 +717,8 @@ static void nmos_dispatch(enum http_method method, const char *url,
 					&errmsg);
 
 				if (st != 200 && st != 202) {
+					LOG_WRN("IS-08 activation rejected "
+						"(%d): %s", st, errmsg);
 					error_rsp(rsp, (uint16_t)st, errmsg);
 					return;
 				}
