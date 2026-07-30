@@ -135,7 +135,7 @@ config MDNS_SD_SERIAL
 
 endmenu
 
-menu "NMOS (AMWA IS-04)"
+menu "NMOS (AMWA IS-04 / IS-05)"
 
 config NMOS
 	bool "NMOS IS-04 Node API"
@@ -159,6 +159,18 @@ config NMOS_REGISTRATION
 	  heartbeats, with failover and exponential backoff per IS-04.
 	  While registered the _nmos-node._tcp advertisement is withdrawn;
 	  without a registry the node falls back to peer-to-peer mode.
+
+config NMOS_IS05
+	bool "NMOS IS-05 Connection API"
+	default y
+	depends on NMOS
+	help
+	  Serve the AMWA IS-05 v1.1 Connection API under
+	  /x-nmos/connection/: staged/active transport parameters,
+	  immediate and scheduled activations, receiver SDP transport
+	  files and the bulk interface. Activations are applied to the
+	  FPGA stream tables through aes67_conn; the IS-04 resources
+	  mirror the resulting subscription state.
 
 endmenu
 

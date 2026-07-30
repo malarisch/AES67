@@ -8,7 +8,7 @@ use work.audioclks_pkg.all;
 use work.system_cfg_pkg.all;
 ENTITY cyc2top IS
 	generic (
-		syscfg: t_global_system_cfg := global_system_cfg_lo
+		syscfg: t_global_system_cfg := global_system_cfg_mi
 	);
 	PORT 
 	(
@@ -79,7 +79,7 @@ begin
 	tdm_in_reg <= tdm_in(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
 	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	tdm_out <= tdm_out_reg;
+	tdm_out(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0) <= tdm_out_reg;
 	mclk <= mclk_reg;
 	 phy_rstn_o <= '1';
 	 bclk_adc <= not bclk;

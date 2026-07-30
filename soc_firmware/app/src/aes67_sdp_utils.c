@@ -124,12 +124,6 @@ int aes67_sdp_build(char *buf, size_t buf_size,
 	if (n < 0) return -ENOMEM;
 	pos += n;
 
-	/* c= (connection data) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "c=IN IP4 %s/32\r\n", conn_str);
-	if (n < 0) return -ENOMEM;
-	pos += n;
-
 	/* t= (timing) */
 	n = snprintf(buf + pos, buf_size - pos, "t=0 0\r\n");
 	if (n < 0) return -ENOMEM;
@@ -149,6 +143,25 @@ int aes67_sdp_build(char *buf, size_t buf_size,
 		     params->port, params->payload_type);
 	if (n < 0) return -ENOMEM;
 	pos += n;
+
+	/* c= (connection data). Media-level rather than session-level:
+	 * RFC 4566 allows either, but NMOS controllers (and the
+	 * nmos-testing SDP checks) look for it inside the media section. */
+	n = snprintf(buf + pos, buf_size - pos,
+		     "c=IN IP4 %s/32\r\n", conn_str);
+	if (n < 0) return -ENOMEM;
+	pos += n;
+
+	/* a=source-filter (RFC 4570): ST 2110-10 requires multicast
+	 * sessions to declare the expected source address (SSM/IGMPv3). */
+	if ((sys_be32_to_cpu(params->connection_addr.s_addr) >> 28) == 0xe &&
+	    params->origin_addr.s_addr != 0) {
+		n = snprintf(buf + pos, buf_size - pos,
+			     "a=source-filter: incl IN IP4 %s %s\r\n",
+			     conn_str, origin_str);
+		if (n < 0) return -ENOMEM;
+		pos += n;
+	}
 
 	/* a=rtpmap */
 	n = snprintf(buf + pos, buf_size - pos,

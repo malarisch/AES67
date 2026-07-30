@@ -27,13 +27,25 @@
 
 #include "nmos.h"
 #include "nmos_priv.h"
+#ifdef CONFIG_NMOS_IS05
+#include "nmos_json.h"
+#endif
 
 LOG_MODULE_REGISTER(nmos_api, LOG_LEVEL_INF);
 
 /* Own response buffer: full resource lists (8 senders/receivers) exceed
  * the REST API's shared 4 KB buffer. */
 #define NMOS_BUF_SIZE 8192
-static char nmos_buf[NMOS_BUF_SIZE];
+static NMOS_BIG_BSS char nmos_buf[NMOS_BUF_SIZE];
+
+#ifdef CONFIG_NMOS_IS05
+/* Request-body accumulator (PATCH /staged, POST /bulk) plus the node
+ * pool for the JSON DOM. Sized for a staged SDP transport file. */
+#define NMOS_BODY_SIZE 4096
+static NMOS_BIG_BSS char nmos_body[NMOS_BODY_SIZE];
+static size_t nmos_body_len;
+static NMOS_BIG_BSS struct nj_node nmos_nodes[192];
+#endif
 
 /* ================================================================
  * Collections
@@ -140,6 +152,8 @@ static const struct http_header json_hdrs[] = {
 static const struct http_header sdp_hdrs[] = {
 	{.name = "Content-Type", .value = "application/sdp"},
 	{.name = "Access-Control-Allow-Origin", .value = "*"},
+	/* Transport files change on every activation. */
+	{.name = "Cache-Control", .value = "no-cache"},
 };
 
 static void finish_rsp(struct http_response_ctx *rsp, uint16_t status,
@@ -183,15 +197,145 @@ static void listing_rsp(struct http_response_ctx *rsp,
 	finish_rsp(rsp, HTTP_200_OK, jo_finish(&jo), false);
 }
 
+#ifdef CONFIG_NMOS_IS05
+
+/* ================================================================
+ * IS-05 Connection API (/x-nmos/connection/...)
+ * ================================================================ */
+
+static int is05_find(bool sender, const char *uuid)
+{
+	return coll_find_uuid(sender ? COLL_SENDERS : COLL_RECEIVERS, uuid);
+}
+
+static void is05_uuid_listing(struct http_response_ctx *rsp, bool sender)
+{
+	struct json_out jo;
+	char uuid[NMOS_UUID_STR_LEN];
+	int max = sender ? nmos_tx_count() : nmos_rx_count();
+
+	jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+	jo_arr_begin(&jo);
+	for (int i = 0; i < max; i++) {
+		nmos_uuid(sender ? NMOS_RES_SENDER : NMOS_RES_RECEIVER, i,
+			  uuid);
+		/* Trailing slash is load-bearing: clients strip the last
+		 * character to recover the id. */
+		jo_fmt(&jo, "\"%s/\",", uuid);
+	}
+	jo_arr_end(&jo);
+	finish_rsp(rsp, HTTP_200_OK, jo_finish(&jo), false);
+}
+
+static void is05_patch(struct http_response_ctx *rsp, bool sender, int idx,
+		       const char *body, size_t blen)
+{
+	const char *errmsg;
+	struct is05_act_echo echo;
+	int root = nj_parse(body, blen, nmos_nodes, ARRAY_SIZE(nmos_nodes));
+
+	if (root < 0) {
+		error_rsp(rsp, HTTP_400_BAD_REQUEST,
+			  "request body is not valid JSON");
+		return;
+	}
+
+	int st = nmos_is05_stage(sender, idx, nmos_nodes, &nmos_nodes[root],
+				 &echo, &errmsg);
+
+	if (st != 200 && st != 202) {
+		error_rsp(rsp, (uint16_t)st, errmsg);
+		return;
+	}
+
+	struct json_out jo;
+
+	jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+	nmos_is05_build_staged(&jo, sender, idx, &echo);
+	if (jo.overflow) {
+		error_rsp(rsp, HTTP_500_INTERNAL_SERVER_ERROR,
+			  "response too large");
+		return;
+	}
+	finish_rsp(rsp, st == 202 ? HTTP_202_ACCEPTED : HTTP_200_OK,
+		   jo_finish(&jo), false);
+}
+
+static void is05_bulk(struct http_response_ctx *rsp, bool sender,
+		      const char *body, size_t blen)
+{
+	int root = nj_parse(body, blen, nmos_nodes, ARRAY_SIZE(nmos_nodes));
+
+	if (root < 0 || nmos_nodes[root].type != NJ_ARR) {
+		error_rsp(rsp, HTTP_400_BAD_REQUEST,
+			  "request body must be a JSON array");
+		return;
+	}
+
+	/* The outer structure must validate as a whole (400); errors in
+	 * the per-entry params are reported per entry with a 200. */
+	for (int i = nmos_nodes[root].first_child; i >= 0;
+	     i = nmos_nodes[i].next) {
+		const struct nj_node *id = nj_get(nmos_nodes, &nmos_nodes[i],
+						  "id");
+
+		if (nmos_nodes[i].type != NJ_OBJ || id == NULL ||
+		    id->type != NJ_STR) {
+			error_rsp(rsp, HTTP_400_BAD_REQUEST,
+				  "every entry requires an id");
+			return;
+		}
+	}
+
+	struct json_out jo;
+
+	jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+	jo_arr_begin(&jo);
+	for (int i = nmos_nodes[root].first_child; i >= 0;
+	     i = nmos_nodes[i].next) {
+		const struct nj_node *item = &nmos_nodes[i];
+		const struct nj_node *id = nj_get(nmos_nodes, item, "id");
+		const struct nj_node *params = nj_get(nmos_nodes, item,
+						      "params");
+		char uuid[NMOS_UUID_STR_LEN];
+		int code;
+
+		if (nj_strcpy(id, uuid, sizeof(uuid)) < 0) {
+			uuid[0] = '\0';
+		}
+
+		int idx = uuid[0] != '\0' ? is05_find(sender, uuid) : -1;
+
+		if (idx < 0) {
+			code = 404;
+		} else {
+			struct is05_act_echo echo;
+			const char *msg;
+
+			code = nmos_is05_stage(sender, idx, nmos_nodes,
+					       params, &echo, &msg);
+		}
+		jo_obj_begin(&jo);
+		jo_str(&jo, "id", uuid);
+		jo_int(&jo, "code", code);
+		jo_obj_end(&jo);
+	}
+	jo_arr_end(&jo);
+	finish_rsp(rsp, HTTP_200_OK, jo_finish(&jo), false);
+}
+
+#endif /* CONFIG_NMOS_IS05 */
+
 /* ================================================================
  * Dispatch
  * ================================================================ */
 
 static void nmos_dispatch(enum http_method method, const char *url,
-			  struct http_response_ctx *rsp)
+			  struct http_response_ctx *rsp,
+			  const char *body, size_t body_len)
 {
 	char path[160];
-	char *seg[7];
+	char *seg[8];
 	int nseg = 0;
 	struct json_out jo;
 	enum nmos_coll coll;
@@ -224,6 +368,9 @@ static void nmos_dispatch(enum http_method method, const char *url,
 		p = slash + 1;
 	}
 
+	ARG_UNUSED(body);
+	ARG_UNUSED(body_len);
+
 	if (nseg < 1 || nseg >= (int)ARRAY_SIZE(seg) ||
 	    strcmp(seg[0], "x-nmos") != 0) {
 		error_rsp(rsp, HTTP_404_NOT_FOUND, "no such resource");
@@ -232,7 +379,12 @@ static void nmos_dispatch(enum http_method method, const char *url,
 
 	/* ---- /x-nmos ---- */
 	if (nseg == 1) {
-		static const char *const apis[] = {"manifest/", "node/"};
+		static const char *const apis[] = {
+#ifdef CONFIG_NMOS_IS05
+			"connection/",
+#endif
+			"manifest/", "node/",
+		};
 
 		if (!is_get) {
 			goto method_not_allowed;
@@ -240,6 +392,160 @@ static void nmos_dispatch(enum http_method method, const char *url,
 		listing_rsp(rsp, apis, ARRAY_SIZE(apis));
 		return;
 	}
+
+#ifdef CONFIG_NMOS_IS05
+	/* ---- /x-nmos/connection ---- */
+	if (strcmp(seg[1], "connection") == 0) {
+		if (nseg == 2) {
+			static const char *const vers[] = {
+				NMOS_IS05_VERSION "/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, vers, ARRAY_SIZE(vers));
+			return;
+		}
+		if (strcmp(seg[2], NMOS_IS05_VERSION) != 0) {
+			goto not_found;
+		}
+		if (nseg == 3) {
+			static const char *const modes[] = {"bulk/", "single/"};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, modes, ARRAY_SIZE(modes));
+			return;
+		}
+
+		bool bulk = strcmp(seg[3], "bulk") == 0;
+
+		if (!bulk && strcmp(seg[3], "single") != 0) {
+			goto not_found;
+		}
+		if (nseg == 4) {
+			static const char *const kinds[] = {
+				"senders/", "receivers/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, kinds, ARRAY_SIZE(kinds));
+			return;
+		}
+
+		bool sender = strcmp(seg[4], "senders") == 0;
+
+		if (!sender && strcmp(seg[4], "receivers") != 0) {
+			goto not_found;
+		}
+
+		if (bulk) {
+			/* GET answers an explicit 405 with error body. */
+			if (nseg != 5) {
+				goto not_found;
+			}
+			if (method == HTTP_POST) {
+				is05_bulk(rsp, sender, body, body_len);
+				return;
+			}
+			goto method_not_allowed;
+		}
+
+		if (nseg == 5) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			is05_uuid_listing(rsp, sender);
+			return;
+		}
+
+		int cidx = is05_find(sender, seg[5]);
+
+		if (cidx < 0) {
+			goto not_found;
+		}
+		if (nseg == 6) {
+			static const char *const snd_eps[] = {
+				"constraints/", "staged/", "active/",
+				"transportfile/", "transporttype/",
+			};
+			static const char *const rcv_eps[] = {
+				"constraints/", "staged/", "active/",
+				"transporttype/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			if (sender) {
+				listing_rsp(rsp, snd_eps, ARRAY_SIZE(snd_eps));
+			} else {
+				listing_rsp(rsp, rcv_eps, ARRAY_SIZE(rcv_eps));
+			}
+			return;
+		}
+
+		/* nseg == 7: the per-resource endpoints */
+		if (strcmp(seg[6], "staged") == 0) {
+			if (method == HTTP_PATCH) {
+				is05_patch(rsp, sender, cidx, body, body_len);
+				return;
+			}
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is05_build_staged(&jo, sender, cidx, NULL);
+			goto finish_json;
+		}
+		if (strcmp(seg[6], "active") == 0) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is05_build_active(&jo, sender, cidx);
+			goto finish_json;
+		}
+		if (strcmp(seg[6], "constraints") == 0) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is05_build_constraints(&jo, sender, cidx);
+			goto finish_json;
+		}
+		if (strcmp(seg[6], "transporttype") == 0) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+
+			int len = snprintf(nmos_buf, sizeof(nmos_buf),
+					   "\"urn:x-nmos:transport:rtp\"");
+
+			finish_rsp(rsp, HTTP_200_OK, (size_t)len, false);
+			return;
+		}
+		if (sender && strcmp(seg[6], "transportfile") == 0) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+
+			int len = nmos_build_manifest(nmos_buf,
+						      sizeof(nmos_buf), cidx);
+
+			if (len < 0) {
+				goto not_found;
+			}
+			finish_rsp(rsp, HTTP_200_OK, (size_t)len, true);
+			return;
+		}
+		goto not_found;
+	}
+#endif /* CONFIG_NMOS_IS05 */
 
 	/* ---- /x-nmos/manifest/{senderId} ---- */
 	if (strcmp(seg[1], "manifest") == 0) {
@@ -396,12 +702,15 @@ static int nmos_handler(struct http_client_ctx *client,
 
 	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
 	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
+#ifdef CONFIG_NMOS_IS05
+		nmos_body_len = 0;
+#endif
 		return 0;
 	}
 
 	if (method == HTTP_OPTIONS) {
 		/* CORS preflight. Allow-Methods must cover every method the
-		 * spec declares for the path (only /target has PUT). */
+		 * spec declares for the path. */
 		static const struct http_header get_hdrs[] = {
 			{.name = "Access-Control-Allow-Origin", .value = "*"},
 			{.name = "Access-Control-Allow-Methods",
@@ -416,29 +725,64 @@ static int nmos_handler(struct http_client_ctx *client,
 			{.name = "Access-Control-Allow-Headers",
 			 .value = "Content-Type"},
 		};
+		static const struct http_header patch_hdrs[] = {
+			{.name = "Access-Control-Allow-Origin", .value = "*"},
+			{.name = "Access-Control-Allow-Methods",
+			 .value = "GET, HEAD, PATCH, OPTIONS"},
+			{.name = "Access-Control-Allow-Headers",
+			 .value = "Content-Type"},
+		};
+		static const struct http_header post_hdrs[] = {
+			{.name = "Access-Control-Allow-Origin", .value = "*"},
+			{.name = "Access-Control-Allow-Methods",
+			 .value = "POST, OPTIONS"},
+			{.name = "Access-Control-Allow-Headers",
+			 .value = "Content-Type"},
+		};
 		size_t plen = strcspn(url, "?");
 
 		while (plen > 1 && url[plen - 1] == '/') {
 			plen--;
 		}
 
-		bool is_target = plen >= 7 &&
-				 strncmp(url + plen - 7, "/target", 7) == 0;
+		const struct http_header *hdrs = get_hdrs;
+		size_t nhdrs = ARRAY_SIZE(get_hdrs);
+
+		if (plen >= 7 && strncmp(url + plen - 7, "/target", 7) == 0) {
+			hdrs = put_hdrs;
+			nhdrs = ARRAY_SIZE(put_hdrs);
+		} else if (plen >= 7 &&
+			   strncmp(url + plen - 7, "/staged", 7) == 0) {
+			hdrs = patch_hdrs;
+			nhdrs = ARRAY_SIZE(patch_hdrs);
+		} else if (strstr(url, "/bulk/") != NULL) {
+			hdrs = post_hdrs;
+			nhdrs = ARRAY_SIZE(post_hdrs);
+		}
 
 		response_ctx->status = HTTP_200_OK;
 		response_ctx->body = (const uint8_t *)"";
 		response_ctx->body_len = 0;
 		response_ctx->final_chunk = true;
-		response_ctx->headers = is_target ? put_hdrs : get_hdrs;
-		response_ctx->header_count =
-			is_target ? ARRAY_SIZE(put_hdrs) : ARRAY_SIZE(get_hdrs);
+		response_ctx->headers = hdrs;
+		response_ctx->header_count = nhdrs;
 		return 0;
 	}
 
-	/* Request bodies (the /target PUT) are consumed but not parsed —
-	 * the endpoint answers 501 regardless of payload. */
 	bool has_body = method == HTTP_POST || method == HTTP_PUT ||
 			method == HTTP_PATCH || method == HTTP_DELETE;
+
+#ifdef CONFIG_NMOS_IS05
+	/* Accumulate PATCH/POST bodies for the Connection API; an
+	 * overlong body simply fails JSON parsing later (400). */
+	if (has_body && request_ctx->data_len > 0) {
+		size_t space = sizeof(nmos_body) - nmos_body_len;
+		size_t copy = MIN(request_ctx->data_len, space);
+
+		memcpy(nmos_body + nmos_body_len, request_ctx->data, copy);
+		nmos_body_len += copy;
+	}
+#endif
 
 	if (has_body && status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		response_ctx->final_chunk = false;
@@ -447,7 +791,12 @@ static int nmos_handler(struct http_client_ctx *client,
 
 	ARG_UNUSED(request_ctx);
 
-	nmos_dispatch(method, url, response_ctx);
+#ifdef CONFIG_NMOS_IS05
+	nmos_dispatch(method, url, response_ctx, nmos_body, nmos_body_len);
+	nmos_body_len = 0;
+#else
+	nmos_dispatch(method, url, response_ctx, NULL, 0);
+#endif
 	return 0;
 }
 

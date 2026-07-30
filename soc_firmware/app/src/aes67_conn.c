@@ -30,7 +30,7 @@ LOG_MODULE_REGISTER(aes67_conn, LOG_LEVEL_INF);
 #define FOREIGN_TIMEOUT_MS       (3 * 30 * 1000)
 #define FOREIGN_EXPIRE_PERIOD    K_SECONDS(10)
 
-#define MAX_TX_OBSERVERS 4
+#define MAX_TX_OBSERVERS 6
 
 /* ---- State ---- */
 static struct net_if *conn_iface;
@@ -266,9 +266,21 @@ int aes67_conn_configure_rx_stream(uint8_t stream_id,
 	 * FPGA, which stops matching packets for this stream. */
 	bool activate = (dst_ip->s_addr != 0);
 
+	/* The gateware register wants the playout delay offset by two
+	 * packet lengths: hw = delay + 2*spp. Everything user-facing
+	 * (webapi, shell, NMOS, persistence) keeps the raw value. */
+	uint16_t hw_delay = (uint16_t)output_delay +
+			    2u * (uint16_t)samples_per_channel;
+	if (hw_delay > UINT8_MAX) {
+		LOG_WRN("RX stream %u: playout delay %u+2*%u clamped to 255",
+			stream_id, output_delay, samples_per_channel);
+		hw_delay = UINT8_MAX;
+	}
+
 	int ret = fpga_hal_write_rx_stream_config(stream_id, dst_ip,
 						  dst_port, ch_map,
-						  channel_count, output_delay,
+						  channel_count,
+						  (uint8_t)hw_delay,
 						  samples_per_channel);
 	if (ret < 0) {
 		LOG_ERR("Failed to write RX stream %u to FPGA: %d",

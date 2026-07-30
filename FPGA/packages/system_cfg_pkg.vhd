@@ -92,12 +92,26 @@ package system_cfg_pkg is
 
 
     constant disable_audio_path : t_audio_cfg := (
-        MAX_STREAMS => 1,
-        BUFFER_DEPTH => 4,
+        MAX_STREAMS => 0,
+        BUFFER_DEPTH => 0,
         CHANNELS => 0,
         TDM_PINS => 4,
         ADDA_CFG => i2s_dac_config
     
+    );
+    constant two_i2s_outputs : t_audio_cfg := (
+        MAX_STREAMS => 2,
+        BUFFER_DEPTH => 256,
+        CHANNELS => 2,
+        TDM_PINS => 1,
+        ADDA_CFG => i2s_dac_config
+    );
+    constant two_i2s_inputs : t_audio_cfg := (
+        MAX_STREAMS => 2,
+        BUFFER_DEPTH => 64,
+        CHANNELS => 2,
+        TDM_PINS => 1,
+        ADDA_CFG => i2s_adc_config
     );
     constant four_i2s_outputs : t_audio_cfg := (
         MAX_STREAMS => 8,
@@ -108,10 +122,10 @@ package system_cfg_pkg is
     );
     constant four_i2s_inputs : t_audio_cfg := (
         MAX_STREAMS => 4,
-        BUFFER_DEPTH => 256,
+        BUFFER_DEPTH => 64,
         CHANNELS => 8,
         TDM_PINS => 4,
-        ADDA_CFG => i2s_dac_config
+        ADDA_CFG => i2s_adc_config
     );
     constant single_lj_output : t_audio_cfg := (
         MAX_STREAMS => 2,
@@ -135,7 +149,7 @@ package system_cfg_pkg is
         USE_PARALLEL_INTERFACE => false,
         PARALLEL_BYTE_DEPTH => 3,
         RX_DA_CFG => disable_audio_path,
-        TX_AD_CFG => four_i2s_inputs
+        TX_AD_CFG => two_i2s_inputs
     );
     constant audio_config_cyc : t_global_audio_cfg := (
         MCLK_SPEED => audio_clock_24_57,

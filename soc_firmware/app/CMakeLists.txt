@@ -219,6 +219,10 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI)
       src/nmos/nmos_api.c
     )
     target_sources_ifdef(CONFIG_NMOS_REGISTRATION app PRIVATE src/nmos/nmos_reg.c)
+    target_sources_ifdef(CONFIG_NMOS_IS05 app PRIVATE
+      src/nmos/nmos_is05.c
+      src/nmos/nmos_json.c
+    )
     target_sources_ifdef(CONFIG_SD_CONFIG         app PRIVATE src/sd_config.c)
     target_sources_ifdef(CONFIG_FLASH_CONFIG      app PRIVATE src/flash_config.c)
 

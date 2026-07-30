@@ -28,6 +28,16 @@ extern "C" {
 #define NMOS_IFACE_NAME   "eth0"
 
 #define NMOS_UUID_STR_LEN 37 /* 36 chars + NUL */
+/* "<hostname>/<kind>/a<idx>" resource labels */
+#define NMOS_LABEL_MAX    64
+
+/* Large NMOS buffers/stores go to PSRAM on the ESP32 (dram0 is tight);
+ * everywhere else this is a no-op. */
+#if defined(CONFIG_ESP_SPIRAM)
+#define NMOS_BIG_BSS __attribute__((section(".ext_ram.bss")))
+#else
+#define NMOS_BIG_BSS
+#endif
 
 /* Resource kinds; the (kind, index) pair determines the deterministic
  * per-device UUID, so the values must never be reordered. */
@@ -61,6 +71,11 @@ void nmos_ip_str(char *buf, size_t sz);
 int nmos_tx_count(void);
 int nmos_rx_count(void);
 
+/* Snapshot of a TX slot; inactive slots yield the persistent
+ * default-configured placeholder. Returns true if the slot is active. */
+struct aes67_tx_stream;
+bool nmos_tx_snapshot(int idx, struct aes67_tx_stream *out);
+
 /* JSON resource builders (each emits one complete {...} object).
  * The per-index builders return false when the slot does not currently
  * exist as a resource (inactive TX slot); nothing is written then. */
@@ -88,6 +103,54 @@ void nmos_set_registry_present(bool present);
 #ifdef CONFIG_NMOS_REGISTRATION
 void nmos_reg_start(void);
 #endif
+
+/* ================================================================
+ * IS-05 Connection API (nmos_is05.c)
+ * ================================================================ */
+
+#ifdef CONFIG_NMOS_IS05
+
+#define NMOS_IS05_VERSION  "v1.1"
+#define NMOS_TAI_STR_MAX   28
+
+struct nj_node;
+
+/* Activation echo for the PATCH response: unlike a subsequent GET
+ * /staged, the response to an immediate activation still reports the
+ * mode and the actual activation time. */
+struct is05_act_echo {
+	uint8_t mode;              /* enum act_mode (0 = none) */
+	bool has_req;
+	char req_str[NMOS_TAI_STR_MAX];
+	bool has_time;
+	struct nmos_tai when;
+};
+
+void nmos_is05_init(void);
+
+/* Stage a PATCH body (or one bulk item); performs/schedules any
+ * requested activation. Returns the HTTP status (200/202/400/423/500);
+ * on failure *errmsg carries the error text. */
+int nmos_is05_stage(bool sender, int idx, const struct nj_node *pool,
+		    const struct nj_node *req, struct is05_act_echo *echo,
+		    const char **errmsg);
+
+/* echo == NULL renders the plain GET /staged view. */
+void nmos_is05_build_staged(struct json_out *jo, bool sender, int idx,
+			    const struct is05_act_echo *echo);
+void nmos_is05_build_active(struct json_out *jo, bool sender, int idx);
+void nmos_is05_build_constraints(struct json_out *jo, bool sender, int idx);
+
+/* IS-04 subscription state: fills the active peer id (empty = null,
+ * masked while disabled) and master_enable; returns true if an id is
+ * set. */
+bool nmos_is05_sub(bool sender, int idx, char id_out[NMOS_UUID_STR_LEN],
+		   bool *active);
+
+/* True while a scheduled activation is pending on the resource. */
+bool nmos_is05_locked(bool sender, int idx);
+
+#endif /* CONFIG_NMOS_IS05 */
 
 #ifdef __cplusplus
 }

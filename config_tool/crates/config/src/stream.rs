@@ -25,7 +25,7 @@
 //!   4..5   destination UDP port (big-endian)
 //!   6..13  output channel map (up to 8)
 //!   14     channel count
-//!   15     output delay (samples)
+//!   15     output delay (samples; register value = delay + 2*spp)
 //!   16     samples per channel per packet
 //! ```
 //!
@@ -157,7 +157,11 @@ impl RxStream {
             buf[6 + i] = ch;
         }
         buf[14] = channels;
-        buf[15] = self.output_delay;
+        // The gateware register wants the playout delay offset by two
+        // packet lengths; the struct field stays in user units.
+        buf[15] = (u16::from(self.output_delay)
+            + 2 * u16::from(self.samples_per_channel))
+        .min(u16::from(u8::MAX)) as u8;
         buf[16] = self.samples_per_channel;
         Ok(buf)
     }
@@ -278,7 +282,7 @@ mod tests {
         assert_eq!(&b[4..6], &[0x13, 0x8c]); // 5004 big-endian
         assert_eq!(&b[6..9], &[0, 1, 2]);
         assert_eq!(b[14], 3);
-        assert_eq!(b[15], 16);
+        assert_eq!(b[15], 16 + 2 * 48); // register value = delay + 2*spp
         assert_eq!(b[16], 48);
     }
 

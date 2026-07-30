@@ -20,6 +20,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/net/hostname.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -192,18 +193,28 @@ void nmos_ip_str(char *buf, size_t sz)
  * system_cfg CSRs expose what the bitstream was built with. Before the
  * syscfg cache is loaded it reads all-zero — fall back to the firmware
  * table size (which also bounds a bogus CSR value). */
+/* Stream-slot counts from the gateware build configuration. A loaded
+ * syscfg is authoritative — 0 is a real answer (e.g. an output-only
+ * device has no senders); the all-slots fallback only covers the
+ * window before the first successful syscfg load. */
 int nmos_tx_count(void)
 {
 	uint8_t n = fpga_hal_syscfg()->tx_max_streams;
 
-	return (n == 0 || n > AES67_MAX_TX_STREAMS) ? AES67_MAX_TX_STREAMS : n;
+	if (!fpga_hal_syscfg_valid()) {
+		return AES67_MAX_TX_STREAMS;
+	}
+	return (n > AES67_MAX_TX_STREAMS) ? AES67_MAX_TX_STREAMS : n;
 }
 
 int nmos_rx_count(void)
 {
 	uint8_t n = fpga_hal_syscfg()->rx_max_streams;
 
-	return (n == 0 || n > AES67_MAX_RX_STREAMS) ? AES67_MAX_RX_STREAMS : n;
+	if (!fpga_hal_syscfg_valid()) {
+		return AES67_MAX_RX_STREAMS;
+	}
+	return (n > AES67_MAX_RX_STREAMS) ? AES67_MAX_RX_STREAMS : n;
 }
 
 static void copy_device_label(char *buf, size_t sz)
@@ -214,9 +225,19 @@ static void copy_device_label(char *buf, size_t sz)
 	aes67_config_unlock();
 }
 
+/* "<hostname>/<kind>/a<idx>" — same labelling scheme as the nmos-cpp
+ * reference node, so resources from different nodes stay
+ * distinguishable in a shared registry. */
+static void res_label(char *buf, size_t sz, const char *kind, int idx)
+{
+	snprintf(buf, sz, "%s/%s/a%d", net_hostname_get(), kind, idx);
+}
+
 /* Snapshot a TX slot. Inactive slots yield a default-configured
- * placeholder so the Source/Flow/Sender triple exists persistently. */
-static bool tx_snapshot(int idx, struct aes67_tx_stream *out)
+ * placeholder so the Source/Flow/Sender triple exists persistently.
+ * Exported: the IS-05 activation path reuses the same placeholder
+ * semantics when enabling a previously unconfigured slot. */
+bool nmos_tx_snapshot(int idx, struct aes67_tx_stream *out)
 {
 	if (aes67_conn_copy_tx_stream(idx, out)) {
 		return true;
@@ -307,6 +328,7 @@ void nmos_build_self(struct json_out *jo)
 
 	jo_obj_begin(jo);
 	put_core(jo, uuid, &node_ver, label, "AES67 audio node");
+	jo_str(jo, "hostname", net_hostname_get());
 
 	/* href is the API root (scheme://host:port/) — controllers and the
 	 * nmos-testing tool compare it against api.endpoints entries. */
@@ -372,12 +394,26 @@ void nmos_build_device(struct json_out *jo)
 {
 	char uuid[NMOS_UUID_STR_LEN];
 	char label[AES67_DEVICE_NAME_MAX];
+	char desc[96];
+	const struct fpga_hal_system_cfg *cfg = fpga_hal_syscfg();
 
 	nmos_uuid(NMOS_RES_DEVICE, 0, uuid);
 	copy_device_label(label, sizeof(label));
 
+	/* Surface the gateware build configuration (syscfg generic read at
+	 * boot): TX/AD = inputs, RX/DA = outputs. */
+	if (fpga_hal_syscfg_valid()) {
+		snprintf(desc, sizeof(desc),
+			 "AES67 audio device, %u in / %u out, "
+			 "buffers %u/%u samples",
+			 cfg->tx_channels, cfg->rx_channels,
+			 cfg->tx_buffer_depth, cfg->rx_buffer_depth);
+	} else {
+		snprintf(desc, sizeof(desc), "AES67 audio device");
+	}
+
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &device_ver, label, "AES67 audio device");
+	put_core(jo, uuid, &device_ver, label, desc);
 	jo_str(jo, "type", "urn:x-nmos:device:generic");
 	put_uuid_str(jo, "node_id", NMOS_RES_NODE, 0);
 
@@ -399,9 +435,25 @@ void nmos_build_device(struct json_out *jo)
 	}
 	jo_arr_end(jo);
 
-	/* IS-05 Connection API goes here once implemented. */
 	jo_key(jo, "controls");
 	jo_arr_begin(jo);
+#ifdef CONFIG_NMOS_IS05
+	{
+		char ip[INET_ADDRSTRLEN];
+		char href[96];
+
+		nmos_ip_str(ip, sizeof(ip));
+		snprintf(href, sizeof(href),
+			 "http://%s:%u/x-nmos/connection/" NMOS_IS05_VERSION "/",
+			 ip, NMOS_HTTP_PORT);
+		jo_obj_begin(jo);
+		jo_str(jo, "href", href);
+		jo_str(jo, "type",
+		       "urn:x-nmos:control:sr-ctrl/" NMOS_IS05_VERSION);
+		jo_bool(jo, "authorization", false);
+		jo_obj_end(jo);
+	}
+#endif
 	jo_arr_end(jo);
 
 	jo_obj_end(jo);
@@ -414,14 +466,16 @@ void nmos_build_device(struct json_out *jo)
 bool nmos_build_source(struct json_out *jo, int idx)
 {
 	char uuid[NMOS_UUID_STR_LEN];
+	char label[NMOS_LABEL_MAX];
 	char buf[24];
 	struct aes67_tx_stream tx;
 
-	(void)tx_snapshot(idx, &tx);
+	(void)nmos_tx_snapshot(idx, &tx);
 	nmos_uuid(NMOS_RES_SOURCE, idx, uuid);
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &tx_vers[idx], tx.name, "AES67 TX stream source");
+	res_label(label, sizeof(label), "source", idx);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
 	put_empty_obj(jo, "caps");
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_key(jo, "parents");
@@ -447,11 +501,12 @@ bool nmos_build_source(struct json_out *jo, int idx)
 bool nmos_build_flow(struct json_out *jo, int idx)
 {
 	char uuid[NMOS_UUID_STR_LEN];
+	char label[NMOS_LABEL_MAX];
 	struct aes67_tx_stream tx;
 	uint32_t rate;
 	uint8_t depth;
 
-	(void)tx_snapshot(idx, &tx);
+	(void)nmos_tx_snapshot(idx, &tx);
 
 	aes67_config_lock();
 	rate = aes67_config_get()->default_sample_rate;
@@ -461,7 +516,8 @@ bool nmos_build_flow(struct json_out *jo, int idx)
 	nmos_uuid(NMOS_RES_FLOW, idx, uuid);
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &tx_vers[idx], tx.name, "AES67 TX stream flow");
+	res_label(label, sizeof(label), "flow", idx);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
 	put_uuid_str(jo, "source_id", NMOS_RES_SOURCE, idx);
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_key(jo, "parents");
@@ -482,15 +538,17 @@ bool nmos_build_sender(struct json_out *jo, int idx)
 {
 	char uuid[NMOS_UUID_STR_LEN];
 	char ip[INET_ADDRSTRLEN];
+	char label[NMOS_LABEL_MAX];
 	char buf[96];
 	struct aes67_tx_stream tx;
-	bool active = tx_snapshot(idx, &tx);
+	bool active = nmos_tx_snapshot(idx, &tx);
 
 	nmos_uuid(NMOS_RES_SENDER, idx, uuid);
 	nmos_ip_str(ip, sizeof(ip));
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &tx_vers[idx], tx.name, "AES67 RTP sender");
+	res_label(label, sizeof(label), "sender", idx);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
 	put_uuid_str(jo, "flow_id", NMOS_RES_FLOW, idx);
 	jo_str(jo, "transport", "urn:x-nmos:transport:rtp.mcast");
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
@@ -502,8 +560,23 @@ bool nmos_build_sender(struct json_out *jo, int idx)
 	jo_arr_end(jo);
 	jo_key(jo, "subscription");
 	jo_obj_begin(jo);
+#ifdef CONFIG_NMOS_IS05
+	{
+		char rid[NMOS_UUID_STR_LEN];
+		bool enabled;
+
+		ARG_UNUSED(active);
+		if (nmos_is05_sub(true, idx, rid, &enabled)) {
+			jo_str(jo, "receiver_id", rid);
+		} else {
+			put_null(jo, "receiver_id");
+		}
+		jo_bool(jo, "active", enabled);
+	}
+#else
 	put_null(jo, "receiver_id");
 	jo_bool(jo, "active", active);
+#endif
 	jo_obj_end(jo);
 	jo_obj_end(jo);
 	return true;
@@ -516,20 +589,22 @@ bool nmos_build_sender(struct json_out *jo, int idx)
 bool nmos_build_receiver(struct json_out *jo, int idx)
 {
 	char uuid[NMOS_UUID_STR_LEN];
-	char label[AES67_STREAM_NAME_MAX];
+	char label[NMOS_LABEL_MAX];
 	const struct aes67_rx_stream *rx = &aes67_conn_get_rx_streams()[idx];
 	bool active = rx->active;
 
 	nmos_uuid(NMOS_RES_RECEIVER, idx, uuid);
-	if (active && rx->name[0] != '\0') {
-		strncpy(label, rx->name, sizeof(label) - 1);
-		label[sizeof(label) - 1] = '\0';
-	} else {
-		snprintf(label, sizeof(label), "RX Stream %d", idx);
-	}
+
+	/* The label stays slot-bound; the name of the subscribed stream
+	 * (rx->name follows the sender's SDP session name) only goes into
+	 * the description, so the receiver does not appear to be renamed
+	 * after the sender in a registry. */
+	res_label(label, sizeof(label), "receiver", idx);
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &rx_vers[idx], label, "AES67 RTP receiver");
+	put_core(jo, uuid, &rx_vers[idx], label,
+		 (active && rx->name[0] != '\0') ? rx->name
+						 : "AES67 RTP receiver");
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_str(jo, "transport", "urn:x-nmos:transport:rtp");
 	jo_key(jo, "interface_bindings");
@@ -546,8 +621,23 @@ bool nmos_build_receiver(struct json_out *jo, int idx)
 	jo_obj_end(jo);
 	jo_key(jo, "subscription");
 	jo_obj_begin(jo);
+#ifdef CONFIG_NMOS_IS05
+	{
+		char sid[NMOS_UUID_STR_LEN];
+		bool enabled;
+
+		ARG_UNUSED(active);
+		if (nmos_is05_sub(false, idx, sid, &enabled)) {
+			jo_str(jo, "sender_id", sid);
+		} else {
+			put_null(jo, "sender_id");
+		}
+		jo_bool(jo, "active", enabled);
+	}
+#else
 	put_null(jo, "sender_id");
 	jo_bool(jo, "active", active);
+#endif
 	jo_obj_end(jo);
 	jo_obj_end(jo);
 	return true;
@@ -699,6 +789,10 @@ int nmos_start(void)
 	if (ret < 0) {
 		return ret;
 	}
+
+#ifdef CONFIG_NMOS_IS05
+	nmos_is05_init();
+#endif
 
 #ifdef CONFIG_NMOS_REGISTRATION
 	nmos_reg_start();
