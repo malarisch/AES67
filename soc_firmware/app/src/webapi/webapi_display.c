@@ -114,113 +114,182 @@ static uint8_t ascii_to_vcc_web(char c)
 }
 
 /* Body: {"display":0, "left":"A", "right":"3"} */
+struct segment_req {
+	int32_t display;
+	char    left[4];
+	char    right[4];
+};
+
+enum { SEG_F_DISPLAY, SEG_F_LEFT, SEG_F_RIGHT };
+
+static const struct json_obj_descr segment_descr[] = {
+	[SEG_F_DISPLAY] = JSON_OBJ_DESCR_PRIM(struct segment_req, display,
+					      JSON_TOK_NUMBER),
+	[SEG_F_LEFT] = JSON_OBJ_DESCR_PRIM(struct segment_req, left,
+					   JSON_TOK_STRING_BUF),
+	[SEG_F_RIGHT] = JSON_OBJ_DESCR_PRIM(struct segment_req, right,
+					    JSON_TOK_STRING_BUF),
+};
+
 static int post_segment(struct webapi_request *req)
 {
-	int32_t disp = 0;
-	char left_str[4] = {0}, right_str[4] = {0};
+	struct segment_req r = { .display = 0, .left = {0}, .right = {0} };
+	int64_t present;
 
 	if (!display_ctrl_ready()) {
 		return -ENODEV;
 	}
 
-	if (!json_find_int(req->body, req->body_len, "display", &disp)) {
+	present = webapi_parse_body(req, segment_descr,
+				    ARRAY_SIZE(segment_descr), &r);
+	if (present < 0 || !WEBAPI_HAS(present, SEG_F_DISPLAY)) {
 		return -EINVAL;
 	}
-	if (disp < 0 || disp >= DC_NUM_DISPLAYS) {
+	if (r.display < 0 || r.display >= DC_NUM_DISPLAYS) {
 		return -EINVAL;
 	}
-
-	json_find_str(req->body, req->body_len, "left",
-		      left_str, sizeof(left_str));
-	json_find_str(req->body, req->body_len, "right",
-		      right_str, sizeof(right_str));
 
 	/* Convert single characters to VCC codes */
 	uint8_t lc = VCC_SPACE, rc = VCC_SPACE;
 
-	if (left_str[0]) {
-		lc = ascii_to_vcc_web(left_str[0]);
+	if (r.left[0]) {
+		lc = ascii_to_vcc_web(r.left[0]);
 	}
-	if (right_str[0]) {
-		rc = ascii_to_vcc_web(right_str[0]);
+	if (r.right[0]) {
+		rc = ascii_to_vcc_web(r.right[0]);
 	}
 
-	return display_ctrl_set_segment(disp, lc, rc);
+	return display_ctrl_set_segment(r.display, lc, rc);
 }
 
 /* Body: {"text":"Ab Cd"} — up to 6 chars, spread across 3 displays */
+struct text_req {
+	char text[8];
+};
+
+enum { TEXT_F_TEXT };
+
+static const struct json_obj_descr text_descr[] = {
+	[TEXT_F_TEXT] = JSON_OBJ_DESCR_PRIM(struct text_req, text,
+					    JSON_TOK_STRING_BUF),
+};
+
 static int post_text(struct webapi_request *req)
 {
-	char text[8] = {0};
+	struct text_req r = { .text = {0} };
+	int64_t present;
 
 	if (!display_ctrl_ready()) {
 		return -ENODEV;
 	}
 
-	if (json_find_str(req->body, req->body_len, "text",
-			  text, sizeof(text)) <= 0) {
+	present = webapi_parse_body(req, text_descr, ARRAY_SIZE(text_descr),
+				    &r);
+	if (present < 0 || !WEBAPI_HAS(present, TEXT_F_TEXT) ||
+	    r.text[0] == '\0') {
 		return -EINVAL;
 	}
 
-	return display_ctrl_show_status(text);
+	return display_ctrl_show_status(r.text);
 }
 
 /* Body: {"led":0, "state":3}   (state: 0=off,1=blink1,2=blink2,3=on) */
+struct sysled_req {
+	int32_t led;
+	int32_t state;
+};
+
+enum { SYSLED_F_LED, SYSLED_F_STATE };
+
+static const struct json_obj_descr sysled_descr[] = {
+	[SYSLED_F_LED] = JSON_OBJ_DESCR_PRIM(struct sysled_req, led,
+					     JSON_TOK_NUMBER),
+	[SYSLED_F_STATE] = JSON_OBJ_DESCR_PRIM(struct sysled_req, state,
+					       JSON_TOK_NUMBER),
+};
+
 static int post_sysled(struct webapi_request *req)
 {
-	int32_t led = -1, state = -1;
+	struct sysled_req r = { .led = -1, .state = -1 };
+	int64_t present;
 
 	if (!display_ctrl_ready()) {
 		return -ENODEV;
 	}
 
-	if (!json_find_int(req->body, req->body_len, "led", &led) ||
-	    !json_find_int(req->body, req->body_len, "state", &state)) {
+	present = webapi_parse_body(req, sysled_descr,
+				    ARRAY_SIZE(sysled_descr), &r);
+	if (present < 0 || !WEBAPI_HAS(present, SYSLED_F_LED) ||
+	    !WEBAPI_HAS(present, SYSLED_F_STATE)) {
 		return -EINVAL;
 	}
-	if (led < 0 || led >= DC_SYSLED_LAST || state < 0 || state > 4) {
+	if (r.led < 0 || r.led >= DC_SYSLED_LAST || r.state < 0 ||
+	    r.state > 4) {
 		return -EINVAL;
 	}
 
-	return display_ctrl_set_sys_led(led, state);
+	return display_ctrl_set_sys_led(r.led, r.state);
 }
 
 /* Body: {"channel":0, "type":0, "on":true}
  *   type: 0=mute, 1=signal, 2=clip, 3=phantom
  * OR set all at once:
  * Body: {"type":0, "pattern":255}  — bitmask of channels */
+struct chnled_req {
+	int32_t channel;
+	int32_t type;
+	int32_t pattern;
+	bool    on;
+};
+
+enum { CHN_F_CHANNEL, CHN_F_TYPE, CHN_F_PATTERN, CHN_F_ON };
+
+static const struct json_obj_descr chnled_descr[] = {
+	[CHN_F_CHANNEL] = JSON_OBJ_DESCR_PRIM(struct chnled_req, channel,
+					      JSON_TOK_NUMBER),
+	[CHN_F_TYPE] = JSON_OBJ_DESCR_PRIM(struct chnled_req, type,
+					   JSON_TOK_NUMBER),
+	[CHN_F_PATTERN] = JSON_OBJ_DESCR_PRIM(struct chnled_req, pattern,
+					      JSON_TOK_NUMBER),
+	[CHN_F_ON] = JSON_OBJ_DESCR_PRIM(struct chnled_req, on,
+					 JSON_TOK_TRUE),
+};
+
 static int post_chnled(struct webapi_request *req)
 {
-	int32_t channel = -1, type = -1, pattern = -1;
-	bool on = false;
+	struct chnled_req r = {
+		.channel = -1, .type = -1, .pattern = -1, .on = false,
+	};
+	int64_t present;
 
 	if (!display_ctrl_ready()) {
 		return -ENODEV;
 	}
 
-	if (!json_find_int(req->body, req->body_len, "type", &type)) {
+	present = webapi_parse_body(req, chnled_descr,
+				    ARRAY_SIZE(chnled_descr), &r);
+	if (present < 0 || !WEBAPI_HAS(present, CHN_F_TYPE)) {
 		return -EINVAL;
 	}
-	if (type < 0 || type >= DC_CHNLED_LAST) {
+	if (r.type < 0 || r.type >= DC_CHNLED_LAST) {
 		return -EINVAL;
 	}
 
 	/* Bulk mode: set entire pattern */
-	if (json_find_int(req->body, req->body_len, "pattern", &pattern)) {
-		return display_ctrl_set_channel_leds_by_type(type,
-							     (uint32_t)pattern);
+	if (WEBAPI_HAS(present, CHN_F_PATTERN)) {
+		return display_ctrl_set_channel_leds_by_type(
+			r.type, (uint32_t)r.pattern);
 	}
 
 	/* Single channel mode */
-	if (!json_find_int(req->body, req->body_len, "channel", &channel)) {
+	if (!WEBAPI_HAS(present, CHN_F_CHANNEL)) {
 		return -EINVAL;
 	}
-	if (channel < 0 || channel >= DC_MAX_CHANNELS) {
+	if (r.channel < 0 || r.channel >= DC_MAX_CHANNELS) {
 		return -EINVAL;
 	}
-	json_find_bool(req->body, req->body_len, "on", &on);
 
-	return display_ctrl_set_channel_led(channel, type, on);
+	return display_ctrl_set_channel_led(r.channel, r.type, r.on);
 }
 
 static int post_test(struct webapi_request *req)

@@ -17,6 +17,7 @@
 #include "../card_manager.h"
 #include "../card_settings.h"
 
+
 #ifdef CONFIG_MI_CARD
 #include "../../drivers/mi_card/mi_card.h"
 #endif
@@ -29,6 +30,78 @@
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../../drivers/display_ctrl/display_ctrl.h"
 #endif
+
+/* ================================================================
+ * Request bodies
+ *
+ * The card endpoints share two body shapes. Presence matters here: a
+ * setter must only be called for a key the request actually carried,
+ * otherwise a PATCH of one field would silently reprogram the others —
+ * hence the parser's bitmap rather than pre-filled defaults.
+ * ================================================================ */
+
+#if defined(CONFIG_MI_CARD) || defined(CONFIG_LO_CARD) || defined(CONFIG_IO_CARD)
+
+struct card_flags_req {
+	bool hpf;
+	bool f96khz;
+	bool output_enable;
+};
+
+enum { CF_HPF, CF_F96KHZ, CF_OUTPUT_ENABLE };
+
+static const struct json_obj_descr card_flags_descr[] = {
+	[CF_HPF] = JSON_OBJ_DESCR_PRIM(struct card_flags_req, hpf,
+				       JSON_TOK_TRUE),
+	[CF_F96KHZ] = JSON_OBJ_DESCR_PRIM(struct card_flags_req, f96khz,
+					  JSON_TOK_TRUE),
+	[CF_OUTPUT_ENABLE] = JSON_OBJ_DESCR_PRIM(struct card_flags_req,
+						 output_enable, JSON_TOK_TRUE),
+};
+
+struct card_chan_req {
+	int32_t gain;
+	int32_t clip;
+	bool    phantom;
+	bool    muted;
+};
+
+enum { CC_GAIN, CC_CLIP, CC_PHANTOM, CC_MUTED };
+
+static const struct json_obj_descr card_chan_descr[] = {
+	[CC_GAIN] = JSON_OBJ_DESCR_PRIM(struct card_chan_req, gain,
+					JSON_TOK_NUMBER),
+	[CC_CLIP] = JSON_OBJ_DESCR_PRIM(struct card_chan_req, clip,
+					JSON_TOK_NUMBER),
+	[CC_PHANTOM] = JSON_OBJ_DESCR_PRIM(struct card_chan_req, phantom,
+					   JSON_TOK_TRUE),
+	[CC_MUTED] = JSON_OBJ_DESCR_PRIM(struct card_chan_req, muted,
+					 JSON_TOK_TRUE),
+};
+
+/* Both return a negative errno on a malformed body; an empty body is a
+ * no-op patch, not an error. */
+static int64_t parse_flags(struct webapi_request *req,
+			   struct card_flags_req *out)
+{
+	if (req->body_len == 0) {
+		return 0;
+	}
+	return webapi_parse_body(req, card_flags_descr,
+				 ARRAY_SIZE(card_flags_descr), out);
+}
+
+static int64_t parse_chan(struct webapi_request *req,
+			  struct card_chan_req *out)
+{
+	if (req->body_len == 0) {
+		return 0;
+	}
+	return webapi_parse_body(req, card_chan_descr,
+				 ARRAY_SIZE(card_chan_descr), out);
+}
+
+#endif /* any card */
 
 /*
  * Hardware reset of the analog cards goes through the single nRST line
@@ -161,17 +234,21 @@ static int get_mi(struct webapi_request *req)
 
 static int patch_mi(struct webapi_request *req)
 {
-	bool bval;
+	struct card_flags_req f = { 0 };
+	int64_t present = parse_flags(req, &f);
 	int ret;
 
-	if (json_find_bool(req->body, req->body_len, "hpf", &bval)) {
-		ret = mi_card_set_hpf(bval);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CF_HPF)) {
+		ret = mi_card_set_hpf(f.hpf);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "f96khz", &bval)) {
-		ret = mi_card_set_96khz(bval);
+	if (WEBAPI_HAS(present, CF_F96KHZ)) {
+		ret = mi_card_set_96khz(f.f96khz);
 		if (ret < 0) {
 			return ret;
 		}
@@ -184,28 +261,32 @@ static int patch_mi(struct webapi_request *req)
 
 static int patch_mi_channel(struct webapi_request *req)
 {
-	int32_t val;
-	bool bval;
+	struct card_chan_req c = { 0 };
+	int64_t present;
 	int ret;
 
 	if (req->id < 0 || req->id >= MI_NUM_CHANNELS) {
 		return -EINVAL;
 	}
 
-	if (json_find_int(req->body, req->body_len, "gain", &val)) {
-		ret = mi_card_set_gain((uint8_t)req->id, (int8_t)val);
+	present = parse_chan(req, &c);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CC_GAIN)) {
+		ret = mi_card_set_gain((uint8_t)req->id, (int8_t)c.gain);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "phantom", &bval)) {
-		ret = mi_card_set_phantom((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_PHANTOM)) {
+		ret = mi_card_set_phantom((uint8_t)req->id, c.phantom);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "muted", &bval)) {
-		ret = mi_card_set_mute((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_MUTED)) {
+		ret = mi_card_set_mute((uint8_t)req->id, c.muted);
 		if (ret < 0) {
 			return ret;
 		}
@@ -288,17 +369,21 @@ static int get_lo(struct webapi_request *req)
 
 static int patch_lo(struct webapi_request *req)
 {
-	bool bval;
+	struct card_flags_req f = { 0 };
+	int64_t present = parse_flags(req, &f);
 	int ret;
 
-	if (json_find_bool(req->body, req->body_len, "f96khz", &bval)) {
-		ret = lo_card_set_96khz(bval);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CF_F96KHZ)) {
+		ret = lo_card_set_96khz(f.f96khz);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "output_enable", &bval)) {
-		ret = lo_card_enable_outputs(bval);
+	if (WEBAPI_HAS(present, CF_OUTPUT_ENABLE)) {
+		ret = lo_card_enable_outputs(f.output_enable);
 		if (ret < 0) {
 			return ret;
 		}
@@ -311,22 +396,26 @@ static int patch_lo(struct webapi_request *req)
 
 static int patch_lo_channel(struct webapi_request *req)
 {
-	int32_t val;
-	bool bval;
+	struct card_chan_req c = { 0 };
+	int64_t present;
 	int ret;
 
 	if (req->id < 0 || req->id >= LO_NUM_CHANNELS) {
 		return -EINVAL;
 	}
 
-	if (json_find_int(req->body, req->body_len, "clip", &val)) {
-		ret = lo_card_set_clip((uint8_t)req->id, (int8_t)val);
+	present = parse_chan(req, &c);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CC_CLIP)) {
+		ret = lo_card_set_clip((uint8_t)req->id, (int8_t)c.clip);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "muted", &bval)) {
-		ret = lo_card_set_mute((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_MUTED)) {
+		ret = lo_card_set_mute((uint8_t)req->id, c.muted);
 		if (ret < 0) {
 			return ret;
 		}
@@ -434,21 +523,26 @@ static int get_io(struct webapi_request *req)
 
 static int patch_io(struct webapi_request *req)
 {
-	bool bval;
+	struct card_flags_req f = { 0 };
+	int64_t present;
 	int ret;
 
 	if (!io_card_ready()) {
 		return -ENODEV;
 	}
 
-	if (json_find_bool(req->body, req->body_len, "output_enable", &bval)) {
-		ret = io_card_enable_outputs(bval);
+	present = parse_flags(req, &f);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CF_OUTPUT_ENABLE)) {
+		ret = io_card_enable_outputs(f.output_enable);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "f96khz", &bval)) {
-		ret = io_card_set_96khz(bval);
+	if (WEBAPI_HAS(present, CF_F96KHZ)) {
+		ret = io_card_set_96khz(f.f96khz);
 		if (ret < 0) {
 			return ret;
 		}
@@ -461,8 +555,8 @@ static int patch_io(struct webapi_request *req)
 
 static int patch_io_input(struct webapi_request *req)
 {
-	int32_t val;
-	bool bval;
+	struct card_chan_req c = { 0 };
+	int64_t present;
 	int ret;
 
 	if (!io_card_ready()) {
@@ -472,20 +566,24 @@ static int patch_io_input(struct webapi_request *req)
 		return -EINVAL;
 	}
 
-	if (json_find_int(req->body, req->body_len, "gain", &val)) {
-		ret = io_card_set_in_gain((uint8_t)req->id, (int8_t)val);
+	present = parse_chan(req, &c);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CC_GAIN)) {
+		ret = io_card_set_in_gain((uint8_t)req->id, (int8_t)c.gain);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "phantom", &bval)) {
-		ret = io_card_set_in_phantom((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_PHANTOM)) {
+		ret = io_card_set_in_phantom((uint8_t)req->id, c.phantom);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "muted", &bval)) {
-		ret = io_card_set_in_mute((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_MUTED)) {
+		ret = io_card_set_in_mute((uint8_t)req->id, c.muted);
 		if (ret < 0) {
 			return ret;
 		}
@@ -498,8 +596,8 @@ static int patch_io_input(struct webapi_request *req)
 
 static int patch_io_output(struct webapi_request *req)
 {
-	int32_t val;
-	bool bval;
+	struct card_chan_req c = { 0 };
+	int64_t present;
 	int ret;
 
 	if (!io_card_ready()) {
@@ -509,14 +607,18 @@ static int patch_io_output(struct webapi_request *req)
 		return -EINVAL;
 	}
 
-	if (json_find_int(req->body, req->body_len, "clip", &val)) {
-		ret = io_card_set_out_clip((uint8_t)req->id, (int8_t)val);
+	present = parse_chan(req, &c);
+	if (present < 0) {
+		return -EINVAL;
+	}
+	if (WEBAPI_HAS(present, CC_CLIP)) {
+		ret = io_card_set_out_clip((uint8_t)req->id, (int8_t)c.clip);
 		if (ret < 0) {
 			return ret;
 		}
 	}
-	if (json_find_bool(req->body, req->body_len, "muted", &bval)) {
-		ret = io_card_set_out_mute((uint8_t)req->id, bval);
+	if (WEBAPI_HAS(present, CC_MUTED)) {
+		ret = io_card_set_out_mute((uint8_t)req->id, c.muted);
 		if (ret < 0) {
 			return ret;
 		}

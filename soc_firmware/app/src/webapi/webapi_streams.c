@@ -109,46 +109,73 @@ static int get_tx_streams(struct webapi_request *req)
 	return 0;
 }
 
+/* PUT /api/streams/tx/{id} body. dst_ip is required — its presence is
+ * checked through the parser's bitmap; everything else falls back to the
+ * defaults pre-set before parsing. */
+struct tx_stream_req {
+	char     dst_ip[INET_ADDRSTRLEN];
+	char     name[AES67_STREAM_NAME_MAX];
+	int32_t  channel_count;
+	int32_t  samples_per_pkt;
+	uint8_t  ch_ids[AES67_MAX_CH_PER_STREAM];
+	size_t   ch_ids_len;
+};
+
+enum { TX_F_DST_IP = 0 };
+
+static const struct json_obj_descr tx_stream_descr[] = {
+	[TX_F_DST_IP] = JSON_OBJ_DESCR_PRIM(struct tx_stream_req, dst_ip,
+					    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct tx_stream_req, name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct tx_stream_req, channel_count,
+			    JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct tx_stream_req, samples_per_pkt,
+			    JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_ARRAY(struct tx_stream_req, ch_ids,
+			     AES67_MAX_CH_PER_STREAM, ch_ids_len,
+			     JSON_TOK_UINT),
+};
+
 static int put_tx_stream(struct webapi_request *req)
 {
-	const char *json = req->body;
-	size_t len = req->body_len;
-	int32_t channel_count = 0;
-	int32_t samples_per_pkt = 48;
-	char dst_ip_str[INET_ADDRSTRLEN] = {0};
-	char stream_name[AES67_STREAM_NAME_MAX] = {0};
+	struct tx_stream_req r = {
+		.channel_count = 0,
+		.samples_per_pkt = 48,
+	};
+	int64_t present;
 
 	if (req->id < 0 || req->id >= AES67_MAX_TX_STREAMS) {
 		return -EINVAL;
 	}
 
-	if (json_find_str(json, len, "dst_ip", dst_ip_str,
-			  sizeof(dst_ip_str)) <= 0) {
+	r.dst_ip[0] = '\0';
+	r.name[0] = '\0';
+	r.ch_ids_len = 0;
+
+	present = webapi_parse_body(req, tx_stream_descr,
+				    ARRAY_SIZE(tx_stream_descr), &r);
+	if (present < 0 || !WEBAPI_HAS(present, TX_F_DST_IP)) {
 		return -EINVAL;
 	}
-
-	/* Optional stream name */
-	json_find_str(json, len, "name", stream_name, sizeof(stream_name));
 
 	struct in_addr dst;
 
-	if (zsock_inet_pton(AF_INET, dst_ip_str, &dst) != 1) {
+	if (zsock_inet_pton(AF_INET, r.dst_ip, &dst) != 1) {
 		return -EINVAL;
 	}
 
-	json_find_int(json, len, "channel_count", &channel_count);
-	json_find_int(json, len, "samples_per_pkt", &samples_per_pkt);
+	int32_t channel_count = r.channel_count;
 
 	if (channel_count < 1 || channel_count > AES67_MAX_CH_PER_STREAM) {
 		channel_count = 2;
 	}
 
 	uint8_t ch_ids[AES67_MAX_CH_PER_STREAM] = {0};
-	int n = json_find_u8_array(json, len, "ch_ids", ch_ids,
-				   MIN(channel_count,
-				       AES67_MAX_CH_PER_STREAM));
 
-	if (n == 0) {
+	for (size_t i = 0; i < r.ch_ids_len && i < (size_t)channel_count; i++) {
+		ch_ids[i] = r.ch_ids[i];
+	}
+	if (r.ch_ids_len == 0) {
 		/* Default: sequential channel IDs */
 		for (int i = 0; i < channel_count; i++) {
 			ch_ids[i] = (uint8_t)i;
@@ -157,10 +184,10 @@ static int put_tx_stream(struct webapi_request *req)
 
 	int ret = aes67_conn_configure_tx_stream((uint8_t)req->id, &dst,
 					(uint8_t)channel_count,
-					(uint8_t)samples_per_pkt,
+					(uint8_t)r.samples_per_pkt,
 					ch_ids, (uint8_t)channel_count,
 					0,
-					stream_name[0] ? stream_name : NULL);
+					r.name[0] ? r.name : NULL);
 
 	if (ret < 0) {
 		return ret;
@@ -262,45 +289,84 @@ static int get_rx_streams(struct webapi_request *req)
 	return 0;
 }
 
+/* PUT /api/streams/rx/{id} body — same shape as the TX one, plus the
+ * sender metadata the discovery table can fill in. */
+struct rx_stream_req {
+	char     dst_ip[INET_ADDRSTRLEN];
+	char     name[AES67_STREAM_NAME_MAX];
+	char     sender_name[AES67_STREAM_NAME_MAX];
+	char     sender_ip[INET_ADDRSTRLEN];
+	int32_t  dst_port;
+	int32_t  channel_count;
+	int32_t  output_delay;
+	int32_t  samples_per_channel;
+	uint8_t  ch_map[AES67_MAX_CH_PER_STREAM];
+	size_t   ch_map_len;
+};
+
+enum { RX_F_DST_IP = 0 };
+
+static const struct json_obj_descr rx_stream_descr[] = {
+	[RX_F_DST_IP] = JSON_OBJ_DESCR_PRIM(struct rx_stream_req, dst_ip,
+					    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, sender_name,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, sender_ip,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, dst_port, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, channel_count,
+			    JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, output_delay,
+			    JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct rx_stream_req, samples_per_channel,
+			    JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_ARRAY(struct rx_stream_req, ch_map,
+			     AES67_MAX_CH_PER_STREAM, ch_map_len,
+			     JSON_TOK_UINT),
+};
+
 static int put_rx_stream(struct webapi_request *req)
 {
-	const char *json = req->body;
-	size_t len = req->body_len;
-	int32_t channel_count = 0;
-	int32_t output_delay = 0;
-	int32_t samples_per_channel = 48;
-	int32_t dst_port_val = 5004;
-	char stream_name[AES67_STREAM_NAME_MAX] = {0};
-	char sender_name[AES67_STREAM_NAME_MAX] = {0};
-	char sender_ip_str[INET_ADDRSTRLEN] = {0};
+	struct rx_stream_req r = {
+		.dst_port = 5004,
+		.channel_count = 0,
+		.output_delay = 0,
+		.samples_per_channel = 48,
+	};
 	struct in_addr sender_ip = {0};
+	struct in_addr dst_ip = {0};
+	int64_t present;
 
 	if (req->id < 0 || req->id >= AES67_MAX_RX_STREAMS) {
 		return -EINVAL;
 	}
 
+	r.dst_ip[0] = '\0';
+	r.name[0] = '\0';
+	r.sender_name[0] = '\0';
+	r.sender_ip[0] = '\0';
+	r.ch_map_len = 0;
+
+	present = webapi_parse_body(req, rx_stream_descr,
+				    ARRAY_SIZE(rx_stream_descr), &r);
 	/* Destination IP address / multicast group (required) */
-	char ip_str[INET_ADDRSTRLEN] = {0};
-	struct in_addr dst_ip = {0};
-
-	if (json_find_str(json, len, "dst_ip", ip_str, sizeof(ip_str)) <= 0) {
+	if (present < 0 || !WEBAPI_HAS(present, RX_F_DST_IP)) {
 		return -EINVAL;
 	}
-	if (zsock_inet_pton(AF_INET, ip_str, &dst_ip) != 1) {
+	if (zsock_inet_pton(AF_INET, r.dst_ip, &dst_ip) != 1) {
 		return -EINVAL;
 	}
-
-	json_find_int(json, len, "dst_port", &dst_port_val);
-	json_find_int(json, len, "channel_count", &channel_count);
-	json_find_int(json, len, "output_delay", &output_delay);
-	json_find_int(json, len, "samples_per_channel", &samples_per_channel);
-	json_find_str(json, len, "name", stream_name, sizeof(stream_name));
-	json_find_str(json, len, "sender_name", sender_name,
-		      sizeof(sender_name));
-	if (json_find_str(json, len, "sender_ip", sender_ip_str,
-			  sizeof(sender_ip_str)) > 0) {
-		(void)zsock_inet_pton(AF_INET, sender_ip_str, &sender_ip);
+	if (r.sender_ip[0] != '\0') {
+		(void)zsock_inet_pton(AF_INET, r.sender_ip, &sender_ip);
 	}
+
+	int32_t dst_port_val = r.dst_port;
+	int32_t channel_count = r.channel_count;
+	int32_t output_delay = r.output_delay;
+	int32_t samples_per_channel = r.samples_per_channel;
+	char *stream_name = r.name;
+	char *sender_name = r.sender_name;
 
 	if (channel_count < 1 || channel_count > AES67_MAX_CH_PER_STREAM) {
 		channel_count = 2;
@@ -310,11 +376,11 @@ static int put_rx_stream(struct webapi_request *req)
 	}
 
 	uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = {0};
-	int n = json_find_u8_array(json, len, "ch_map", ch_map,
-				   MIN(channel_count,
-				       AES67_MAX_CH_PER_STREAM));
 
-	if (n == 0) {
+	for (size_t i = 0; i < r.ch_map_len && i < (size_t)channel_count; i++) {
+		ch_map[i] = r.ch_map[i];
+	}
+	if (r.ch_map_len == 0) {
 		/* Default: identity mapping */
 		for (int i = 0; i < channel_count; i++) {
 			ch_map[i] = (uint8_t)i;
@@ -338,12 +404,14 @@ static int put_rx_stream(struct webapi_request *req)
 					&discovered_sender_ip);
 		if (stream_name[0] == '\0' && discovered_name[0] != '\0') {
 			strncpy(stream_name, discovered_name,
-				sizeof(stream_name) - 1);
+				sizeof(r.name) - 1);
+			stream_name[sizeof(r.name) - 1] = '\0';
 		}
 		if (sender_name[0] == '\0' &&
 		    discovered_sender[0] != '\0') {
 			strncpy(sender_name, discovered_sender,
-				sizeof(sender_name) - 1);
+				sizeof(r.sender_name) - 1);
+			sender_name[sizeof(r.sender_name) - 1] = '\0';
 		}
 		if (sender_ip.s_addr == 0) {
 			sender_ip = discovered_sender_ip;

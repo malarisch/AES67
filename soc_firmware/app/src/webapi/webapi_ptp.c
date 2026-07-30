@@ -143,53 +143,49 @@ static int get_tuning(struct webapi_request *req)
 	return 0;
 }
 
+/* The servo tuning struct is described in place — its field names are
+ * the wire names. delay_asymmetry_ns is deliberately absent: it comes
+ * from the persisted device config via ptp_ctrl, not from this endpoint,
+ * and read-modify-write keeps whatever is programmed. */
+static const struct json_obj_descr tuning_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, kp_gain,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, ki_gain,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, gain_shift,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, gain_shift_locked,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, ki_extra_shift,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, filter_shift,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, warmup_samples,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, lock_threshold_ns,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, unlock_threshold_ns,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, lock_count_threshold,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning, min_filter_enable,
+			    JSON_TOK_TRUE),
+	JSON_OBJ_DESCR_PRIM(struct fpga_hal_ptp_tuning,
+			    min_filter_active_depth, JSON_TOK_UINT),
+};
+
 static int patch_tuning(struct webapi_request *req)
 {
-	const char *json = req->body;
-	size_t len = req->body_len;
 	struct fpga_hal_ptp_tuning t;
-	int32_t val;
-	bool bval;
 	int ret;
 
-	/* Read current state, then patch only fields present in the request */
+	/* Read current state, then patch only the fields the request
+	 * carries — absent keys are simply not written. */
 	fpga_hal_read_ptp_tuning(&t);
 
-	if (json_find_int(json, len, "kp_gain", &val)) {
-		t.kp_gain = (int8_t)val;
-	}
-	if (json_find_int(json, len, "ki_gain", &val)) {
-		t.ki_gain = (int8_t)val;
-	}
-	if (json_find_int(json, len, "gain_shift", &val)) {
-		t.gain_shift = (uint8_t)val;
-	}
-	if (json_find_int(json, len, "gain_shift_locked", &val)) {
-		t.gain_shift_locked = (uint8_t)val;
-	}
-	if (json_find_int(json, len, "ki_extra_shift", &val)) {
-		t.ki_extra_shift = (uint8_t)val;
-	}
-	if (json_find_int(json, len, "filter_shift", &val)) {
-		t.filter_shift = (uint8_t)val;
-	}
-	if (json_find_int(json, len, "warmup_samples", &val)) {
-		t.warmup_samples = (uint8_t)val;
-	}
-	if (json_find_int(json, len, "lock_threshold_ns", &val)) {
-		t.lock_threshold_ns = (uint32_t)val;
-	}
-	if (json_find_int(json, len, "unlock_threshold_ns", &val)) {
-		t.unlock_threshold_ns = (uint32_t)val;
-	}
-	if (json_find_int(json, len, "lock_count_threshold", &val)) {
-		t.lock_count_threshold = (uint8_t)val;
-	}
-	if (json_find_bool(json, len, "min_filter_enable", &bval)) {
-		t.min_filter_enable = bval;
-	}
-	if (json_find_int(json, len, "min_filter_active_depth", &val)) {
-		t.min_filter_active_depth = (uint8_t)val;
+	if (webapi_parse_body(req, tuning_descr, ARRAY_SIZE(tuning_descr),
+			      &t) < 0) {
+		return -EINVAL;
 	}
 
 	ret = fpga_hal_write_ptp_tuning(&t);
@@ -203,13 +199,27 @@ static int patch_tuning(struct webapi_request *req)
 
 /* ---------------- /api/ptp/reset ---------------- */
 
+struct reset_req {
+	bool held;
+};
+
+enum { RESET_F_HELD = 0 };
+
+static const struct json_obj_descr reset_descr[] = {
+	[RESET_F_HELD] = JSON_OBJ_DESCR_PRIM(struct reset_req, held,
+					     JSON_TOK_TRUE),
+};
+
 static int post_reset(struct webapi_request *req)
 {
-	bool held;
+	struct reset_req r = { .held = false };
+	int64_t present = webapi_parse_body(req, reset_descr,
+					    ARRAY_SIZE(reset_descr), &r);
 
-	/* Optional "held" key: if absent, do a quick pulse (assert + release). */
-	if (json_find_bool(req->body, req->body_len, "held", &held)) {
-		return fpga_hal_set_ptp_reset(held);
+	/* Optional "held" key: if absent (or no body at all), do a quick
+	 * pulse (assert + release). */
+	if (present > 0 && WEBAPI_HAS(present, RESET_F_HELD)) {
+		return fpga_hal_set_ptp_reset(r.held);
 	}
 
 	int ret = fpga_hal_set_ptp_reset(true);

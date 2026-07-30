@@ -57,99 +57,160 @@ static int get_config(struct webapi_request *req)
 	return 0;
 }
 
+/* PATCH /api/config body. The keys are exactly the device-config field
+ * names; anything the request omits keeps its current value because the
+ * struct is pre-filled from the live configuration before parsing. */
+struct config_patch {
+	char     device_name[AES67_DEVICE_NAME_MAX];
+	char     default_mcast_addr[16];
+	uint16_t default_port;
+	uint8_t  default_channels;
+	uint8_t  default_bit_depth;
+	uint32_t default_sample_rate;
+	uint16_t default_samples_per_pkt;
+	uint8_t  default_payload_type;
+	uint8_t  ptp_domain;
+	uint8_t  ptp_priority1;
+	uint8_t  ptp_priority2;
+	uint8_t  ptp_clock_class;
+	uint8_t  ptp_clock_accuracy;
+	int8_t   ptp_log_sync_interval;
+	int8_t   ptp_log_announce_interval;
+	int32_t  pi_kp_num;
+	int32_t  pi_kp_den;
+	int32_t  pi_ki_num;
+	int32_t  pi_ki_den;
+	int32_t  pi_imax;
+	int32_t  pi_outlier_ppb;
+	uint32_t pi_warmup_cycles;
+	uint32_t sap_announce_interval_s;
+	bool     sap_announce_enabled;
+};
+
+enum { CFG_F_SAP_ENABLED = 23 };
+
+static const struct json_obj_descr config_patch_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct config_patch, device_name,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_mcast_addr,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_port, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_channels,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_bit_depth,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_sample_rate,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_samples_per_pkt,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, default_payload_type,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_domain, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_priority1, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_priority2, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_clock_class,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_clock_accuracy,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_log_sync_interval,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, ptp_log_announce_interval,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_kp_num, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_kp_den, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_ki_num, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_ki_den, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_imax, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_outlier_ppb,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, pi_warmup_cycles,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, sap_announce_interval_s,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct config_patch, sap_announce_enabled,
+			    JSON_TOK_TRUE),
+};
+
+BUILD_ASSERT(ARRAY_SIZE(config_patch_descr) == CFG_F_SAP_ENABLED + 1,
+	     "CFG_F_SAP_ENABLED must index the last descriptor");
+
 static int patch_config(struct webapi_request *req)
 {
-	const char *json = req->body;
-	size_t len = req->body_len;
-	char str_tmp[AES67_DEVICE_NAME_MAX];
-	int32_t i_tmp;
-	bool b_tmp;
-	bool sap_enable_changed = false;
-	bool sap_enable_val = false;
+	struct config_patch p;
+	bool sap_enable_changed;
+	bool sap_enable_val;
+	int64_t present;
 
 	aes67_config_lock();
 	struct aes67_device_config *cfg = aes67_config_get();
 
-	if (json_find_str(json, len, "device_name",
-			  str_tmp, sizeof(str_tmp)) > 0) {
-		strncpy(cfg->device_name, str_tmp,
-			AES67_DEVICE_NAME_MAX - 1);
+	strncpy(p.device_name, cfg->device_name, sizeof(p.device_name) - 1);
+	p.device_name[sizeof(p.device_name) - 1] = '\0';
+	strncpy(p.default_mcast_addr, cfg->default_mcast_addr,
+		sizeof(p.default_mcast_addr) - 1);
+	p.default_mcast_addr[sizeof(p.default_mcast_addr) - 1] = '\0';
+	p.default_port            = cfg->default_port;
+	p.default_channels        = cfg->default_channels;
+	p.default_bit_depth       = cfg->default_bit_depth;
+	p.default_sample_rate     = cfg->default_sample_rate;
+	p.default_samples_per_pkt = cfg->default_samples_per_pkt;
+	p.default_payload_type    = cfg->default_payload_type;
+	p.ptp_domain              = cfg->ptp_domain;
+	p.ptp_priority1           = cfg->ptp_priority1;
+	p.ptp_priority2           = cfg->ptp_priority2;
+	p.ptp_clock_class         = cfg->ptp_clock_class;
+	p.ptp_clock_accuracy      = cfg->ptp_clock_accuracy;
+	p.ptp_log_sync_interval   = cfg->ptp_log_sync_interval;
+	p.ptp_log_announce_interval = cfg->ptp_log_announce_interval;
+	p.pi_kp_num               = cfg->pi_kp_num;
+	p.pi_kp_den               = cfg->pi_kp_den;
+	p.pi_ki_num               = cfg->pi_ki_num;
+	p.pi_ki_den               = cfg->pi_ki_den;
+	p.pi_imax                 = cfg->pi_imax;
+	p.pi_outlier_ppb          = cfg->pi_outlier_ppb;
+	p.pi_warmup_cycles        = cfg->pi_warmup_cycles;
+	p.sap_announce_interval_s = cfg->sap_announce_interval_s;
+	p.sap_announce_enabled    = cfg->sap_announce_enabled;
+
+	present = webapi_parse_body(req, config_patch_descr,
+				    ARRAY_SIZE(config_patch_descr), &p);
+	if (present < 0) {
+		aes67_config_unlock();
+		return -EINVAL;
 	}
 
-	if (json_find_str(json, len, "default_mcast_addr",
-			  str_tmp, sizeof(str_tmp)) > 0) {
-		strncpy(cfg->default_mcast_addr, str_tmp,
-			sizeof(cfg->default_mcast_addr) - 1);
-	}
+	strncpy(cfg->device_name, p.device_name, AES67_DEVICE_NAME_MAX - 1);
+	cfg->device_name[AES67_DEVICE_NAME_MAX - 1] = '\0';
+	strncpy(cfg->default_mcast_addr, p.default_mcast_addr,
+		sizeof(cfg->default_mcast_addr) - 1);
+	cfg->default_mcast_addr[sizeof(cfg->default_mcast_addr) - 1] = '\0';
+	cfg->default_port            = p.default_port;
+	cfg->default_channels        = p.default_channels;
+	cfg->default_bit_depth       = p.default_bit_depth;
+	cfg->default_sample_rate     = p.default_sample_rate;
+	cfg->default_samples_per_pkt = p.default_samples_per_pkt;
+	cfg->default_payload_type    = p.default_payload_type;
+	cfg->ptp_domain              = p.ptp_domain;
+	cfg->ptp_priority1           = p.ptp_priority1;
+	cfg->ptp_priority2           = p.ptp_priority2;
+	cfg->ptp_clock_class         = p.ptp_clock_class;
+	cfg->ptp_clock_accuracy      = p.ptp_clock_accuracy;
+	cfg->ptp_log_sync_interval   = p.ptp_log_sync_interval;
+	cfg->ptp_log_announce_interval = p.ptp_log_announce_interval;
+	cfg->pi_kp_num               = p.pi_kp_num;
+	cfg->pi_kp_den               = p.pi_kp_den;
+	cfg->pi_ki_num               = p.pi_ki_num;
+	cfg->pi_ki_den               = p.pi_ki_den;
+	cfg->pi_imax                 = p.pi_imax;
+	cfg->pi_outlier_ppb          = p.pi_outlier_ppb;
+	cfg->pi_warmup_cycles        = p.pi_warmup_cycles;
+	cfg->sap_announce_interval_s = p.sap_announce_interval_s;
+	cfg->sap_announce_enabled    = p.sap_announce_enabled;
 
-	if (json_find_int(json, len, "default_port", &i_tmp)) {
-		cfg->default_port = (uint16_t)i_tmp;
-	}
-	if (json_find_int(json, len, "default_channels", &i_tmp)) {
-		cfg->default_channels = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "default_bit_depth", &i_tmp)) {
-		cfg->default_bit_depth = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "default_sample_rate", &i_tmp)) {
-		cfg->default_sample_rate = (uint32_t)i_tmp;
-	}
-	if (json_find_int(json, len, "default_samples_per_pkt", &i_tmp)) {
-		cfg->default_samples_per_pkt = (uint16_t)i_tmp;
-	}
-	if (json_find_int(json, len, "default_payload_type", &i_tmp)) {
-		cfg->default_payload_type = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_domain", &i_tmp)) {
-		cfg->ptp_domain = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_priority1", &i_tmp)) {
-		cfg->ptp_priority1 = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_priority2", &i_tmp)) {
-		cfg->ptp_priority2 = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_clock_class", &i_tmp)) {
-		cfg->ptp_clock_class = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_clock_accuracy", &i_tmp)) {
-		cfg->ptp_clock_accuracy = (uint8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_log_sync_interval", &i_tmp)) {
-		cfg->ptp_log_sync_interval = (int8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "ptp_log_announce_interval", &i_tmp)) {
-		cfg->ptp_log_announce_interval = (int8_t)i_tmp;
-	}
-	if (json_find_int(json, len, "pi_kp_num", &i_tmp)) {
-		cfg->pi_kp_num = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_kp_den", &i_tmp)) {
-		cfg->pi_kp_den = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_ki_num", &i_tmp)) {
-		cfg->pi_ki_num = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_ki_den", &i_tmp)) {
-		cfg->pi_ki_den = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_imax", &i_tmp)) {
-		cfg->pi_imax = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_outlier_ppb", &i_tmp)) {
-		cfg->pi_outlier_ppb = i_tmp;
-	}
-	if (json_find_int(json, len, "pi_warmup_cycles", &i_tmp)) {
-		cfg->pi_warmup_cycles = (uint32_t)i_tmp;
-	}
-	if (json_find_int(json, len, "sap_announce_interval_s", &i_tmp)) {
-		cfg->sap_announce_interval_s = (uint32_t)i_tmp;
-	}
-	if (json_find_bool(json, len, "sap_announce_enabled", &b_tmp)) {
-		cfg->sap_announce_enabled = b_tmp;
-		sap_enable_changed = true;
-		sap_enable_val = b_tmp;
-	}
+	/* The announcer only needs poking when the flag actually appeared
+	 * in the request. */
+	sap_enable_changed = WEBAPI_HAS(present, CFG_F_SAP_ENABLED);
+	sap_enable_val = p.sap_announce_enabled;
 
 	aes67_config_unlock();
 

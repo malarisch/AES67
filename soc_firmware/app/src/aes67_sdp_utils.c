@@ -93,127 +93,103 @@ int aes67_sdp_build(char *buf, size_t buf_size,
 		stream_name = "AES67 Stream";
 	}
 
-	int pos = 0;
-	int n;
+	size_t pos = 0;
+
+	/* snprintf() reports the length it WOULD have written, so a single
+	 * truncated line already pushes pos past buf_size. Appending after
+	 * that would compute `buf_size - pos` as a size_t underflow and
+	 * write beyond the buffer — bail out on the first overflow instead
+	 * and let the caller see -ENOMEM. */
+#define SDP_APPEND(...)                                                     \
+	do {                                                                \
+		int _n;                                                     \
+		if (pos >= buf_size) {                                      \
+			return -ENOMEM;                                     \
+		}                                                           \
+		_n = snprintf(buf + pos, buf_size - pos, __VA_ARGS__);      \
+		if (_n < 0) {                                               \
+			return -ENOMEM;                                     \
+		}                                                           \
+		pos += (size_t)_n;                                          \
+	} while (0)
 
 	/* === Session-level description === */
 
 	/* v= (protocol version) */
-	n = snprintf(buf + pos, buf_size - pos, "v=0\r\n");
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("v=0\r\n");
 
 	/* o= (origin) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "o=- %u %u IN IP4 %s\r\n",
-		     session_id, params->stream_id, origin_str);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("o=- %u %u IN IP4 %s\r\n",
+		   session_id, params->stream_id, origin_str);
 
 	/* s= (session name) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "s=%s\r\n",
-		     stream_name);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("s=%s\r\n", stream_name);
 
 	/* i= (session info) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "i=%uch %ubit %uHz\r\n",
-		     params->channel_count, params->bit_depth, params->sample_rate);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("i=%uch %ubit %uHz\r\n",
+		   params->channel_count, params->bit_depth,
+		   params->sample_rate);
 
 	/* t= (timing) */
-	n = snprintf(buf + pos, buf_size - pos, "t=0 0\r\n");
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("t=0 0\r\n");
 
 	/* a=clock-domain (RAVENNA REQUIRED - session-level sync source) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "a=clock-domain:PTPv2 %u\r\n", params->ptp_domain);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("a=clock-domain:PTPv2 %u\r\n", params->ptp_domain);
 
 	/* === Media-level description === */
 
 	/* m= (media) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "m=audio %u RTP/AVP %u\r\n",
-		     params->port, params->payload_type);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("m=audio %u RTP/AVP %u\r\n",
+		   params->port, params->payload_type);
 
 	/* c= (connection data). Media-level rather than session-level:
 	 * RFC 4566 allows either, but NMOS controllers (and the
 	 * nmos-testing SDP checks) look for it inside the media section. */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "c=IN IP4 %s/32\r\n", conn_str);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("c=IN IP4 %s/32\r\n", conn_str);
 
 	/* a=source-filter (RFC 4570): ST 2110-10 requires multicast
 	 * sessions to declare the expected source address (SSM/IGMPv3). */
 	if ((sys_be32_to_cpu(params->connection_addr.s_addr) >> 28) == 0xe &&
 	    params->origin_addr.s_addr != 0) {
-		n = snprintf(buf + pos, buf_size - pos,
-			     "a=source-filter: incl IN IP4 %s %s\r\n",
-			     conn_str, origin_str);
-		if (n < 0) return -ENOMEM;
-		pos += n;
+		SDP_APPEND("a=source-filter: incl IN IP4 %s %s\r\n",
+			   conn_str, origin_str);
 	}
 
 	/* a=rtpmap */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "a=rtpmap:%u L%u/%u/%u\r\n",
-		     params->payload_type, params->bit_depth,
-		     params->sample_rate, params->channel_count);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("a=rtpmap:%u L%u/%u/%u\r\n",
+		   params->payload_type, params->bit_depth,
+		   params->sample_rate, params->channel_count);
 
 	/* a=ptime */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "a=ptime:%u.%03u\r\n",
-		     ptime_us / 1000, ptime_us % 1000);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("a=ptime:%u.%03u\r\n", ptime_us / 1000, ptime_us % 1000);
 
 	/* a=sync-time (RAVENNA - stream-level timestamp association) */
-	n = snprintf(buf + pos, buf_size - pos,
-		     "a=sync-time:%u\r\n", params->sync_time);
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("a=sync-time:%u\r\n", params->sync_time);
 
 	/* a=ts-refclk (AES67 reference clock): the elected PTP grandmaster
 	 * incl. domain.  Omitted while no grandmaster is known (clock_id ==
 	 * NULL) — a zero placeholder would claim traceability to a clock
 	 * that does not exist.  Matches the Linux daemon's behaviour. */
 	if (params->clock_id) {
-		n = snprintf(buf + pos, buf_size - pos,
-			     "a=ts-refclk:ptp=IEEE1588-2008:%s:%u\r\n",
-			     clock_id_str, params->ptp_domain);
-		if (n < 0) return -ENOMEM;
-		pos += n;
+		SDP_APPEND("a=ts-refclk:ptp=IEEE1588-2008:%s:%u\r\n",
+			   clock_id_str, params->ptp_domain);
 	}
 
 	/* a=mediaclk */
-	n = snprintf(buf + pos, buf_size - pos, "a=mediaclk:direct=0\r\n");
-	if (n < 0) return -ENOMEM;
-	pos += n;
+	SDP_APPEND("a=mediaclk:direct=0\r\n");
 
 	/* a=ssrc (optional) */
 	if (params->ssrc != 0) {
-		n = snprintf(buf + pos, buf_size - pos,
-			     "a=ssrc:%u cname:aes67@%s\r\n",
-			     params->ssrc, origin_str);
-		if (n < 0) return -ENOMEM;
-		pos += n;
+		SDP_APPEND("a=ssrc:%u cname:aes67@%s\r\n",
+			   params->ssrc, origin_str);
 	}
 
-	if ((size_t)pos >= buf_size) {
+#undef SDP_APPEND
+
+	if (pos >= buf_size) {
 		return -ENOMEM;
 	}
-	return pos;
+	return (int)pos;
 }
 
 /* ================================================================
@@ -376,7 +352,11 @@ int aes67_sdp_parse(const char *sdp, size_t sdp_len,
 				p = aes67_parse_uint(p, p_end, &ptime_ms);
 				if (p < p_end && *p == '.') {
 					p++;
-					uint32_t scale = 100000U;
+					/* ptime is in milliseconds, so the first
+					 * fractional digit is worth 100 us.
+					 * Digits past microsecond resolution
+					 * are dropped (scale reaches 0). */
+					uint32_t scale = 100U;
 					while (p < p_end && *p >= '0' && *p <= '9' && scale > 0) {
 						ptime_frac_us += (uint32_t)(*p - '0') * scale;
 						scale /= 10;

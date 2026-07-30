@@ -299,11 +299,15 @@ static int api_handler(struct http_client_ctx *client,
 			method == HTTP_PATCH || method == HTTP_DELETE;
 
 	if (has_body && request_ctx->data_len > 0) {
-		size_t space = BODY_BUF_SIZE - body_len;
+		/* Keep one byte for the terminator: the JSON parser
+		 * NUL-terminates tokens in place while decoding them, and a
+		 * token may sit at the very end of the body. */
+		size_t space = BODY_BUF_SIZE - 1 - body_len;
 		size_t copy = MIN(request_ctx->data_len, space);
 
 		memcpy(body_buf + body_len, request_ctx->data, copy);
 		body_len += copy;
+		body_buf[body_len] = '\0';
 	}
 
 	if (has_body && status != HTTP_SERVER_REQUEST_DATA_FINAL) {

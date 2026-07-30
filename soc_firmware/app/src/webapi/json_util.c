@@ -1,36 +1,20 @@
 /*
- * JSON output writer + minimal body parser for the REST API.
- * No heap, no library: writes into a caller-provided buffer, extracts
- * scalar values by key from flat request bodies.
+ * JSON output writer + request-body entry point for the REST API.
+ *
+ * The writer streams into a caller-provided buffer without a heap: the
+ * REST and NMOS documents are assembled at runtime (variable numbers of
+ * streams, cards and resources), which a descriptor-driven encoder
+ * cannot express. Reading goes the other way — request bodies have a
+ * fixed shape per endpoint, so they are decoded by Zephyr's JSON
+ * library through webapi_parse_body().
  */
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "webapi_priv.h"
-
-/* memmem is a GNU extension not available in picolibc / Zephyr */
-static const void *local_memmem(const void *haystack, size_t haystacklen,
-				const void *needle, size_t needlelen)
-{
-	const uint8_t *h = haystack;
-	const uint8_t *n = needle;
-
-	if (needlelen == 0) {
-		return haystack;
-	}
-	if (haystacklen < needlelen) {
-		return NULL;
-	}
-	for (size_t i = 0; i <= haystacklen - needlelen; i++) {
-		if (h[i] == n[0] && memcmp(&h[i], n, needlelen) == 0) {
-			return &h[i];
-		}
-	}
-	return NULL;
-}
 
 /* ================================================================
  * Writer
@@ -186,123 +170,20 @@ size_t jo_finish(struct json_out *jo)
 }
 
 /* ================================================================
- * Parser
+ * Request body parsing
+ *
+ * One entry point for every resource: Zephyr's JSON library decodes the
+ * body into the caller's struct according to its descriptor table, and
+ * reports which keys were actually present.
  * ================================================================ */
 
-static const char *find_value(const char *json, size_t json_len,
-			      const char *key, const char *suffix)
+int64_t webapi_parse_body(struct webapi_request *req,
+			  const struct json_obj_descr *descr, size_t descr_len,
+			  void *val)
 {
-	char needle[64];
-	int nlen = snprintf(needle, sizeof(needle), "\"%s\":%s", key, suffix);
-
-	if (nlen <= 0 || (size_t)nlen >= sizeof(needle)) {
-		return NULL;
+	if (req->body == NULL || req->body_len == 0) {
+		return -EINVAL;
 	}
 
-	const char *start = local_memmem(json, json_len, needle, nlen);
-
-	return start != NULL ? start + nlen : NULL;
-}
-
-int json_find_str(const char *json, size_t json_len, const char *key,
-		  char *out, size_t out_sz)
-{
-	const char *start = find_value(json, json_len, key, "\"");
-
-	if (start == NULL || out_sz == 0) {
-		return 0;
-	}
-
-	const char *end = memchr(start, '"', json_len - (start - json));
-
-	if (end == NULL) {
-		return 0;
-	}
-
-	size_t vlen = end - start;
-
-	if (vlen >= out_sz) {
-		vlen = out_sz - 1;
-	}
-	memcpy(out, start, vlen);
-	out[vlen] = '\0';
-	return (int)vlen;
-}
-
-bool json_find_int(const char *json, size_t json_len, const char *key,
-		   int32_t *out)
-{
-	const char *start = find_value(json, json_len, key, "");
-
-	if (start == NULL) {
-		return false;
-	}
-
-	while (start < json + json_len && *start == ' ') {
-		start++;
-	}
-
-	char *endptr;
-	long val = strtol(start, &endptr, 10);
-
-	if (endptr == start) {
-		return false;
-	}
-	*out = (int32_t)val;
-	return true;
-}
-
-bool json_find_bool(const char *json, size_t json_len, const char *key,
-		    bool *out)
-{
-	const char *start = find_value(json, json_len, key, "");
-
-	if (start == NULL) {
-		return false;
-	}
-
-	while (start < json + json_len && *start == ' ') {
-		start++;
-	}
-
-	if (start + 4 <= json + json_len && memcmp(start, "true", 4) == 0) {
-		*out = true;
-		return true;
-	}
-	if (start + 5 <= json + json_len && memcmp(start, "false", 5) == 0) {
-		*out = false;
-		return true;
-	}
-	return false;
-}
-
-int json_find_u8_array(const char *json, size_t json_len, const char *key,
-		       uint8_t *out, int max)
-{
-	const char *p = find_value(json, json_len, key, "[");
-	const char *end = json + json_len;
-	int count = 0;
-
-	if (p == NULL) {
-		return 0;
-	}
-
-	while (count < max && p < end && *p != ']') {
-		while (p < end && (*p == ' ' || *p == ',')) {
-			p++;
-		}
-		if (p >= end || *p == ']') {
-			break;
-		}
-
-		char *endptr;
-		long val = strtol(p, &endptr, 10);
-
-		if (endptr == p) {
-			break;
-		}
-		out[count++] = (uint8_t)val;
-		p = endptr;
-	}
-	return count;
+	return json_obj_parse(req->body, req->body_len, descr, descr_len, val);
 }

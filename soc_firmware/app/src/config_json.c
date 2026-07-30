@@ -1,12 +1,27 @@
 /*
  * Shared JSON serialization / parsing for device configuration.
- * Extracted from sd_config.c so both SD card and SPI flash storage
- * can share the same format.
+ * Used by both sd_config (SD card) and flash_config (SPI flash), so the
+ * two storage backends share one on-disk format.
+ *
+ * Built on Zephyr's descriptor-driven JSON library
+ * (<zephyr/data/json.h>): the document is described once as a struct +
+ * descriptor table, and the library does the lexing, escaping, bounds
+ * checking and encoding. The DTO below deliberately mirrors the JSON
+ * document rather than the runtime structures — it decouples the wire
+ * format from the internal types, gives the string fields headroom over
+ * their runtime counterparts (an over-long value in a hand-edited file
+ * is truncated on apply instead of failing the whole load) and keeps
+ * every key name in one place.
+ *
+ * Absent keys are simply not written by the parser, so the DTO is
+ * pre-filled from the current state before parsing: a partial document
+ * updates what it mentions and leaves everything else alone.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/data/json.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,165 +34,229 @@
 
 LOG_MODULE_REGISTER(config_json, LOG_LEVEL_INF);
 
+/* Headroom over the runtime field sizes: Zephyr's string decoder rejects
+ * a value that does not fit its destination, and failing the entire load
+ * over one long name would be a far worse outcome than truncating it. */
+#define CFG_NAME_MAX 64
+#define CFG_ADDR_MAX 24
+#define CFG_TYPE_MAX 8
+
 /* ================================================================
- * Simple JSON serialization helpers
+ * Document model
  * ================================================================ */
 
-static int json_start(char *buf, size_t sz)
-{
-	return snprintf(buf, sz, "{\n");
-}
+/* Layout rules for a struct used as an OBJ_ARRAY element: Zephyr derives
+ * the element stride from the LAST descriptor (its offset plus its size,
+ * rounded to the struct's alignment) and assumes an array field is
+ * directly followed by its size_t length. Both are asserted below, so a
+ * future field addition fails the build instead of silently shifting
+ * every array element. The reserved bytes only exist to 8-align the
+ * trailing channel array. */
+struct cfg_tx_dto {
+	char     name[CFG_NAME_MAX];
+	char     dst_ip[CFG_ADDR_MAX];
+	uint32_t ssrc;
+	uint8_t  stream_id;
+	uint8_t  channel_count;
+	uint8_t  samples_per_packet;
+	uint8_t  reserved;
+	uint8_t  ch_ids[AES67_MAX_CH_PER_STREAM];
+	size_t   ch_ids_len;
+};
 
-static int json_end(char *buf, size_t sz, int pos)
-{
-	if (pos > 2 && buf[pos - 2] == ',') {
-		pos -= 2;
-		buf[pos++] = '\n';
-	}
-	pos += snprintf(buf + pos, sz - pos, "}\n");
-	return pos;
-}
+struct cfg_rx_dto {
+	char     name[CFG_NAME_MAX];
+	char     sender_name[CFG_NAME_MAX];
+	char     sender_ip[CFG_ADDR_MAX];
+	char     dst_ip[CFG_ADDR_MAX];
+	uint16_t dst_port;
+	uint8_t  stream_id;
+	uint8_t  channel_count;
+	uint8_t  output_delay;
+	uint8_t  samples_per_channel;
+	uint8_t  reserved[2];
+	uint8_t  ch_map[AES67_MAX_CH_PER_STREAM];
+	size_t   ch_map_len;
+};
 
-static int json_str(char *buf, size_t sz, int pos, const char *key,
-		    const char *val, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "\"%s\": \"%s\",\n", key, val);
-	return pos;
-}
+/* The length field must directly follow its array... */
+BUILD_ASSERT(offsetof(struct cfg_tx_dto, ch_ids_len) ==
+	     offsetof(struct cfg_tx_dto, ch_ids) + AES67_MAX_CH_PER_STREAM,
+	     "ch_ids_len must directly follow ch_ids");
+BUILD_ASSERT(offsetof(struct cfg_rx_dto, ch_map_len) ==
+	     offsetof(struct cfg_rx_dto, ch_map) + AES67_MAX_CH_PER_STREAM,
+	     "ch_map_len must directly follow ch_map");
+/* ...and the last descriptor must cover the last member, or the derived
+ * element stride disagrees with sizeof() and the array walks off. */
+BUILD_ASSERT(sizeof(struct cfg_tx_dto) ==
+	     ROUND_UP(offsetof(struct cfg_tx_dto, ch_ids_len) + sizeof(size_t),
+		      __alignof__(struct cfg_tx_dto)),
+	     "ch_ids/ch_ids_len must be the last members of cfg_tx_dto");
+BUILD_ASSERT(sizeof(struct cfg_rx_dto) ==
+	     ROUND_UP(offsetof(struct cfg_rx_dto, ch_map_len) + sizeof(size_t),
+		      __alignof__(struct cfg_rx_dto)),
+	     "ch_map/ch_map_len must be the last members of cfg_rx_dto");
 
-static int json_int(char *buf, size_t sz, int pos, const char *key,
-		    int32_t val, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "\"%s\": %d,\n", key, val);
-	return pos;
-}
+struct cfg_doc {
+	/* -- Device identification -- */
+	char     vendor[CFG_NAME_MAX];
+	char     product[CFG_NAME_MAX];
+	char     serial[CFG_NAME_MAX];
+	char     device_name[CFG_NAME_MAX];
 
-static int json_uint(char *buf, size_t sz, int pos, const char *key,
-		     uint32_t val, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "\"%s\": %u,\n", key, val);
-	return pos;
-}
+	/* -- AES67 audio defaults -- */
+	char     default_mcast_addr[CFG_ADDR_MAX];
+	uint16_t default_port;
+	uint8_t  default_channels;
+	uint8_t  default_bit_depth;
+	uint32_t default_sample_rate;
+	uint16_t default_samples_per_pkt;
+	uint8_t  default_payload_type;
 
-static int json_bool(char *buf, size_t sz, int pos, const char *key,
-		     bool val, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "\"%s\": %s,\n",
-			key, val ? "true" : "false");
-	return pos;
-}
+	/* -- PTP -- */
+	uint8_t  ptp_domain;
+	uint8_t  ptp_priority1;
+	uint8_t  ptp_priority2;
+	uint8_t  ptp_clock_class;
+	uint8_t  ptp_clock_accuracy;
+	int8_t   ptp_log_sync_interval;
+	int8_t   ptp_log_announce_interval;
+	int32_t  ptp_delay_asymmetry_ns;
 
-static int json_array_start(char *buf, size_t sz, int pos,
-			    const char *key, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "\"%s\": [\n", key);
-	return pos;
-}
+	/* -- PLL / PI controller -- */
+	int32_t  pi_kp_num;
+	int32_t  pi_kp_den;
+	int32_t  pi_ki_num;
+	int32_t  pi_ki_den;
+	int32_t  pi_imax;
+	int32_t  pi_outlier_ppb;
+	uint32_t pi_warmup_cycles;
 
-static int json_array_end(char *buf, size_t sz, int pos, int indent)
-{
-	if (pos > 2 && buf[pos - 2] == ',') {
-		pos -= 2;
-		buf[pos++] = '\n';
-	}
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "],\n");
-	return pos;
-}
+	/* -- SAP -- */
+	uint32_t sap_announce_interval_s;
+	bool     sap_announce_enabled;
 
-static int json_obj_start(char *buf, size_t sz, int pos, int indent)
-{
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "{\n");
-	return pos;
-}
+	/* -- Analog card settings (0/1 for the boolean rows, so one
+	 *    element type covers every array) -- */
+	char     card_type[CFG_TYPE_MAX];
+	int8_t   card_in_gain[CARD_SETTINGS_MAX_IN];
+	size_t   card_in_gain_len;
+	uint8_t  card_in_48v[CARD_SETTINGS_MAX_IN];
+	size_t   card_in_48v_len;
+	uint8_t  card_in_mute[CARD_SETTINGS_MAX_IN];
+	size_t   card_in_mute_len;
+	int8_t   card_out_gain[CARD_SETTINGS_MAX_OUT];
+	size_t   card_out_gain_len;
+	uint8_t  card_out_mute[CARD_SETTINGS_MAX_OUT];
+	size_t   card_out_mute_len;
 
-static int json_obj_end(char *buf, size_t sz, int pos, int indent)
-{
-	if (pos > 2 && buf[pos - 2] == ',') {
-		pos -= 2;
-		buf[pos++] = '\n';
-	}
-	for (int i = 0; i < indent; i++) {
-		pos += snprintf(buf + pos, sz - pos, "  ");
-	}
-	pos += snprintf(buf + pos, sz - pos, "},\n");
-	return pos;
-}
+	/* -- Stream tables -- */
+	struct cfg_tx_dto tx_streams[AES67_MAX_TX_STREAMS];
+	size_t   tx_streams_len;
+	struct cfg_rx_dto rx_streams[AES67_MAX_RX_STREAMS];
+	size_t   rx_streams_len;
+};
+
+static const struct json_obj_descr tx_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, stream_id, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, dst_ip, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, channel_count, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, samples_per_packet,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_tx_dto, ssrc, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_tx_dto, ch_ids,
+			     AES67_MAX_CH_PER_STREAM, ch_ids_len,
+			     JSON_TOK_UINT),
+};
+
+static const struct json_obj_descr rx_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, stream_id, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, sender_name,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, sender_ip, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, dst_ip, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, dst_port, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, channel_count, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, output_delay, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_rx_dto, samples_per_channel,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_rx_dto, ch_map,
+			     AES67_MAX_CH_PER_STREAM, ch_map_len,
+			     JSON_TOK_UINT),
+};
+
+static const struct json_obj_descr doc_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, vendor, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, product, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, serial, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, device_name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_mcast_addr,
+			    JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_port, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_channels, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_bit_depth, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_sample_rate,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_samples_per_pkt,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, default_payload_type,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_domain, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_priority1, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_priority2, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_clock_class, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_clock_accuracy, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_log_sync_interval,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_log_announce_interval,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, ptp_delay_asymmetry_ns,
+			    JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_kp_num, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_kp_den, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_ki_num, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_ki_den, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_imax, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_outlier_ppb, JSON_TOK_INT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, pi_warmup_cycles, JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, sap_announce_interval_s,
+			    JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, sap_announce_enabled,
+			    JSON_TOK_TRUE),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, card_type, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_in_gain,
+			     CARD_SETTINGS_MAX_IN, card_in_gain_len,
+			     JSON_TOK_INT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_in_48v,
+			     CARD_SETTINGS_MAX_IN, card_in_48v_len,
+			     JSON_TOK_UINT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_in_mute,
+			     CARD_SETTINGS_MAX_IN, card_in_mute_len,
+			     JSON_TOK_UINT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_out_gain,
+			     CARD_SETTINGS_MAX_OUT, card_out_gain_len,
+			     JSON_TOK_INT),
+	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_out_mute,
+			     CARD_SETTINGS_MAX_OUT, card_out_mute_len,
+			     JSON_TOK_UINT),
+	JSON_OBJ_DESCR_OBJ_ARRAY(struct cfg_doc, tx_streams,
+				 AES67_MAX_TX_STREAMS, tx_streams_len,
+				 tx_descr, ARRAY_SIZE(tx_descr)),
+	JSON_OBJ_DESCR_OBJ_ARRAY(struct cfg_doc, rx_streams,
+				 AES67_MAX_RX_STREAMS, rx_streams_len,
+				 rx_descr, ARRAY_SIZE(rx_descr)),
+};
+
+/* ~3 KB — too much for the calling thread's stack (config saves run from
+ * the shell, the web API and a work queue). Serialization and parsing
+ * never overlap, so one instance under a mutex is enough. */
+static struct cfg_doc doc;
+static K_MUTEX_DEFINE(doc_mutex);
 
 /* ================================================================
- * Serialize device configuration to JSON
- * ================================================================ */
-static int serialize_device_config(char *buf, size_t sz, int pos)
-{
-	struct aes67_device_config *cfg = aes67_config_get();
-
-	aes67_config_lock();
-
-	pos = json_str(buf, sz, pos, "vendor", cfg->vendor, 1);
-	pos = json_str(buf, sz, pos, "product", cfg->product, 1);
-	pos = json_str(buf, sz, pos, "serial", cfg->serial, 1);
-	pos = json_str(buf, sz, pos, "device_name", cfg->device_name, 1);
-	pos = json_str(buf, sz, pos, "default_mcast_addr",
-		       cfg->default_mcast_addr, 1);
-	pos = json_uint(buf, sz, pos, "default_port", cfg->default_port, 1);
-	pos = json_uint(buf, sz, pos, "default_channels",
-			cfg->default_channels, 1);
-	pos = json_uint(buf, sz, pos, "default_bit_depth",
-			cfg->default_bit_depth, 1);
-	pos = json_uint(buf, sz, pos, "default_sample_rate",
-			cfg->default_sample_rate, 1);
-	pos = json_uint(buf, sz, pos, "default_samples_per_pkt",
-			cfg->default_samples_per_pkt, 1);
-	pos = json_uint(buf, sz, pos, "default_payload_type",
-			cfg->default_payload_type, 1);
-	pos = json_uint(buf, sz, pos, "ptp_domain", cfg->ptp_domain, 1);
-	pos = json_uint(buf, sz, pos, "ptp_priority1", cfg->ptp_priority1, 1);
-	pos = json_uint(buf, sz, pos, "ptp_priority2", cfg->ptp_priority2, 1);
-	pos = json_int(buf, sz, pos, "ptp_log_sync_interval",
-		       cfg->ptp_log_sync_interval, 1);
-	pos = json_int(buf, sz, pos, "ptp_log_announce_interval",
-		       cfg->ptp_log_announce_interval, 1);
-	pos = json_int(buf, sz, pos, "ptp_delay_asymmetry_ns",
-		       cfg->ptp_delay_asymmetry_ns, 1);
-	pos = json_int(buf, sz, pos, "pi_kp_num", cfg->pi_kp_num, 1);
-	pos = json_int(buf, sz, pos, "pi_kp_den", cfg->pi_kp_den, 1);
-	pos = json_int(buf, sz, pos, "pi_ki_num", cfg->pi_ki_num, 1);
-	pos = json_int(buf, sz, pos, "pi_ki_den", cfg->pi_ki_den, 1);
-	pos = json_int(buf, sz, pos, "pi_imax", cfg->pi_imax, 1);
-	pos = json_int(buf, sz, pos, "pi_outlier_ppb", cfg->pi_outlier_ppb, 1);
-	pos = json_uint(buf, sz, pos, "pi_warmup_cycles",
-			cfg->pi_warmup_cycles, 1);
-	pos = json_uint(buf, sz, pos, "sap_announce_interval_s",
-			cfg->sap_announce_interval_s, 1);
-	pos = json_bool(buf, sz, pos, "sap_announce_enabled",
-			cfg->sap_announce_enabled, 1);
-
-	aes67_config_unlock();
-	return pos;
-}
-
-/* ================================================================
- * Serialize analog-card settings (gain / 48V / mute)
+ * Card type <-> string
  * ================================================================ */
 
 static const char *card_type_to_str(uint8_t type)
@@ -207,32 +286,54 @@ static uint8_t card_type_from_str(const char *s)
 	return CARD_TYPE_NONE;
 }
 
-/* "key": [v0,v1,...],\n — bools are written as 0/1 so one parser fits */
-static int json_i8_array(char *buf, size_t sz, int pos, const char *key,
-			 const int8_t *vals, int n)
+/* ================================================================
+ * Runtime state -> document
+ * ================================================================ */
+
+static void collect_device_config(struct cfg_doc *d)
 {
-	pos += snprintf(buf + pos, sz - pos, "  \"%s\": [", key);
-	for (int i = 0; i < n; i++) {
-		pos += snprintf(buf + pos, sz - pos, "%s%d",
-				i ? "," : "", vals[i]);
-	}
-	pos += snprintf(buf + pos, sz - pos, "],\n");
-	return pos;
+	const struct aes67_device_config *cfg = aes67_config_get();
+
+	aes67_config_lock();
+
+	strncpy(d->vendor, cfg->vendor, sizeof(d->vendor) - 1);
+	strncpy(d->product, cfg->product, sizeof(d->product) - 1);
+	strncpy(d->serial, cfg->serial, sizeof(d->serial) - 1);
+	strncpy(d->device_name, cfg->device_name, sizeof(d->device_name) - 1);
+	strncpy(d->default_mcast_addr, cfg->default_mcast_addr,
+		sizeof(d->default_mcast_addr) - 1);
+
+	d->default_port             = cfg->default_port;
+	d->default_channels         = cfg->default_channels;
+	d->default_bit_depth        = cfg->default_bit_depth;
+	d->default_sample_rate      = cfg->default_sample_rate;
+	d->default_samples_per_pkt  = cfg->default_samples_per_pkt;
+	d->default_payload_type     = cfg->default_payload_type;
+
+	d->ptp_domain                = cfg->ptp_domain;
+	d->ptp_priority1             = cfg->ptp_priority1;
+	d->ptp_priority2             = cfg->ptp_priority2;
+	d->ptp_clock_class           = cfg->ptp_clock_class;
+	d->ptp_clock_accuracy        = cfg->ptp_clock_accuracy;
+	d->ptp_log_sync_interval     = cfg->ptp_log_sync_interval;
+	d->ptp_log_announce_interval = cfg->ptp_log_announce_interval;
+	d->ptp_delay_asymmetry_ns    = cfg->ptp_delay_asymmetry_ns;
+
+	d->pi_kp_num       = cfg->pi_kp_num;
+	d->pi_kp_den       = cfg->pi_kp_den;
+	d->pi_ki_num       = cfg->pi_ki_num;
+	d->pi_ki_den       = cfg->pi_ki_den;
+	d->pi_imax         = cfg->pi_imax;
+	d->pi_outlier_ppb  = cfg->pi_outlier_ppb;
+	d->pi_warmup_cycles = cfg->pi_warmup_cycles;
+
+	d->sap_announce_interval_s = cfg->sap_announce_interval_s;
+	d->sap_announce_enabled    = cfg->sap_announce_enabled;
+
+	aes67_config_unlock();
 }
 
-static int json_bool01_array(char *buf, size_t sz, int pos, const char *key,
-			     const bool *vals, int n)
-{
-	pos += snprintf(buf + pos, sz - pos, "  \"%s\": [", key);
-	for (int i = 0; i < n; i++) {
-		pos += snprintf(buf + pos, sz - pos, "%s%d",
-				i ? "," : "", vals[i] ? 1 : 0);
-	}
-	pos += snprintf(buf + pos, sz - pos, "],\n");
-	return pos;
-}
-
-static int serialize_card_settings(char *buf, size_t sz, int pos)
+static void collect_card_settings(struct cfg_doc *d)
 {
 	/* Refresh the shadow store from the live card if it is ready; a
 	 * not-yet-activated card (LO before PTP lock) keeps the values
@@ -244,634 +345,153 @@ static int serialize_card_settings(char *buf, size_t sz, int pos)
 	const struct card_settings *cs = card_settings_get();
 
 	if (cs->valid && cs->card_type != CARD_TYPE_NONE) {
-		pos = json_str(buf, sz, pos, "card_type",
-			       card_type_to_str(cs->card_type), 1);
-		if (cs->num_in > 0) {
-			pos = json_i8_array(buf, sz, pos, "card_in_gain",
-					    cs->in_gain, cs->num_in);
-			pos = json_bool01_array(buf, sz, pos, "card_in_48v",
-						cs->in_phantom, cs->num_in);
-			pos = json_bool01_array(buf, sz, pos, "card_in_mute",
-						cs->in_mute, cs->num_in);
+		strncpy(d->card_type, card_type_to_str(cs->card_type),
+			sizeof(d->card_type) - 1);
+
+		d->card_in_gain_len = MIN(cs->num_in, CARD_SETTINGS_MAX_IN);
+		d->card_in_48v_len  = d->card_in_gain_len;
+		d->card_in_mute_len = d->card_in_gain_len;
+		for (size_t i = 0; i < d->card_in_gain_len; i++) {
+			d->card_in_gain[i] = cs->in_gain[i];
+			d->card_in_48v[i]  = cs->in_phantom[i] ? 1 : 0;
+			d->card_in_mute[i] = cs->in_mute[i] ? 1 : 0;
 		}
-		if (cs->num_out > 0) {
-			pos = json_i8_array(buf, sz, pos, "card_out_gain",
-					    cs->out_gain, cs->num_out);
-			pos = json_bool01_array(buf, sz, pos, "card_out_mute",
-						cs->out_mute, cs->num_out);
+
+		d->card_out_gain_len = MIN(cs->num_out, CARD_SETTINGS_MAX_OUT);
+		d->card_out_mute_len = d->card_out_gain_len;
+		for (size_t i = 0; i < d->card_out_gain_len; i++) {
+			d->card_out_gain[i] = cs->out_gain[i];
+			d->card_out_mute[i] = cs->out_mute[i] ? 1 : 0;
 		}
 	}
 
 	card_settings_unlock();
-	return pos;
 }
 
-/* ================================================================
- * Serialize TX streams to JSON
- * ================================================================ */
-static int serialize_tx_streams(char *buf, size_t sz, int pos)
+static void collect_streams(struct cfg_doc *d)
 {
-	const struct aes67_tx_stream *streams = aes67_conn_get_tx_streams();
-	char ip_str[INET_ADDRSTRLEN];
-
-	pos = json_array_start(buf, sz, pos, "tx_streams", 1);
+	const struct aes67_tx_stream *tx = aes67_conn_get_tx_streams();
+	const struct aes67_rx_stream *rx = aes67_conn_get_rx_streams();
 
 	for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
-		if (!streams[i].active) {
+		if (!tx[i].active) {
 			continue;
 		}
 
-		pos = json_obj_start(buf, sz, pos, 2);
-		pos = json_uint(buf, sz, pos, "stream_id",
-				streams[i].stream_id, 3);
-		pos = json_str(buf, sz, pos, "name", streams[i].name, 3);
+		struct cfg_tx_dto *e = &d->tx_streams[d->tx_streams_len++];
 
-		zsock_inet_ntop(AF_INET, &streams[i].dst_ip,
-				ip_str, sizeof(ip_str));
-		pos = json_str(buf, sz, pos, "dst_ip", ip_str, 3);
-		pos = json_uint(buf, sz, pos, "channel_count",
-				streams[i].channel_count, 3);
-		pos = json_uint(buf, sz, pos, "samples_per_packet",
-				streams[i].samples_per_packet, 3);
-		pos = json_uint(buf, sz, pos, "ssrc", streams[i].ssrc, 3);
-
-		pos = json_array_start(buf, sz, pos, "ch_ids", 3);
-		for (int j = 0; j < streams[i].channel_count &&
-				j < AES67_MAX_CH_PER_STREAM; j++) {
-			for (int k = 0; k < 4; k++) {
-				pos += snprintf(buf + pos, sz - pos, "  ");
-			}
-			pos += snprintf(buf + pos, sz - pos, "%u,\n",
-					streams[i].ch_ids[j]);
+		e->stream_id = tx[i].stream_id;
+		strncpy(e->name, tx[i].name, sizeof(e->name) - 1);
+		zsock_inet_ntop(AF_INET, &tx[i].dst_ip, e->dst_ip,
+				sizeof(e->dst_ip));
+		e->channel_count      = tx[i].channel_count;
+		e->samples_per_packet = tx[i].samples_per_packet;
+		e->ssrc               = tx[i].ssrc;
+		e->ch_ids_len = MIN(tx[i].channel_count,
+				    AES67_MAX_CH_PER_STREAM);
+		for (size_t j = 0; j < e->ch_ids_len; j++) {
+			e->ch_ids[j] = tx[i].ch_ids[j];
 		}
-		pos = json_array_end(buf, sz, pos, 3);
-
-		pos = json_obj_end(buf, sz, pos, 2);
 	}
-
-	pos = json_array_end(buf, sz, pos, 1);
-	return pos;
-}
-
-/* ================================================================
- * Serialize RX streams to JSON
- * ================================================================ */
-static int serialize_rx_streams(char *buf, size_t sz, int pos)
-{
-	const struct aes67_rx_stream *streams = aes67_conn_get_rx_streams();
-	char ip_str[INET_ADDRSTRLEN];
-
-	pos = json_array_start(buf, sz, pos, "rx_streams", 1);
 
 	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
-		if (!streams[i].active) {
+		if (!rx[i].active) {
 			continue;
 		}
 
-		pos = json_obj_start(buf, sz, pos, 2);
-		pos = json_uint(buf, sz, pos, "stream_id",
-				streams[i].stream_id, 3);
-		pos = json_str(buf, sz, pos, "name", streams[i].name, 3);
-		pos = json_str(buf, sz, pos, "sender_name",
-			       streams[i].sender_name, 3);
-		if (streams[i].sender_ip.s_addr != 0) {
-			zsock_inet_ntop(AF_INET, &streams[i].sender_ip,
-					ip_str, sizeof(ip_str));
-			pos = json_str(buf, sz, pos, "sender_ip", ip_str, 3);
+		struct cfg_rx_dto *e = &d->rx_streams[d->rx_streams_len++];
+
+		e->stream_id = rx[i].stream_id;
+		strncpy(e->name, rx[i].name, sizeof(e->name) - 1);
+		strncpy(e->sender_name, rx[i].sender_name,
+			sizeof(e->sender_name) - 1);
+		zsock_inet_ntop(AF_INET, &rx[i].sender_ip, e->sender_ip,
+				sizeof(e->sender_ip));
+		zsock_inet_ntop(AF_INET, &rx[i].dst_ip, e->dst_ip,
+				sizeof(e->dst_ip));
+		e->dst_port            = rx[i].dst_port;
+		e->channel_count       = rx[i].channel_count;
+		e->output_delay        = rx[i].output_delay;
+		e->samples_per_channel = rx[i].samples_per_channel;
+		e->ch_map_len = MIN(rx[i].channel_count,
+				    AES67_MAX_CH_PER_STREAM);
+		for (size_t j = 0; j < e->ch_map_len; j++) {
+			e->ch_map[j] = rx[i].ch_map[j];
 		}
-
-		zsock_inet_ntop(AF_INET, &streams[i].dst_ip,
-				ip_str, sizeof(ip_str));
-		pos = json_str(buf, sz, pos, "dst_ip", ip_str, 3);
-		pos = json_uint(buf, sz, pos, "dst_port",
-				streams[i].dst_port, 3);
-		pos = json_uint(buf, sz, pos, "channel_count",
-				streams[i].channel_count, 3);
-		pos = json_uint(buf, sz, pos, "output_delay",
-				streams[i].output_delay, 3);
-		pos = json_uint(buf, sz, pos, "samples_per_channel",
-				streams[i].samples_per_channel, 3);
-
-		pos = json_array_start(buf, sz, pos, "ch_map", 3);
-		for (int j = 0; j < streams[i].channel_count &&
-				j < AES67_MAX_CH_PER_STREAM; j++) {
-			for (int k = 0; k < 4; k++) {
-				pos += snprintf(buf + pos, sz - pos, "  ");
-			}
-			pos += snprintf(buf + pos, sz - pos, "%u,\n",
-					streams[i].ch_map[j]);
-		}
-		pos = json_array_end(buf, sz, pos, 3);
-
-		pos = json_obj_end(buf, sz, pos, 2);
 	}
+}
 
-	pos = json_array_end(buf, sz, pos, 1);
-	return pos;
+/* Defaults for stream members a hand-written document may leave out.
+ * The array parser decodes into the element structs in place without
+ * clearing them first, so pre-set values survive for absent keys. */
+static void prefill_stream_defaults(struct cfg_doc *d)
+{
+	for (int i = 0; i < AES67_MAX_TX_STREAMS; i++) {
+		d->tx_streams[i].samples_per_packet = 48;
+	}
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		d->rx_streams[i].dst_port            = 5004;
+		d->rx_streams[i].output_delay        = 48;
+		d->rx_streams[i].samples_per_channel = 48;
+	}
 }
 
 /* ================================================================
- * Simple JSON parser helpers
+ * Document -> runtime state
  * ================================================================ */
 
-static const char *skip_ws(const char *p)
-{
-	while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
-		p++;
-	}
-	return p;
-}
-
-static const char *json_find_key(const char *json, const char *key)
-{
-	char pattern[64];
-	snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-
-	const char *p = strstr(json, pattern);
-	if (!p) {
-		return NULL;
-	}
-	p += strlen(pattern);
-	p = skip_ws(p);
-	if (*p != ':') {
-		return NULL;
-	}
-	p++;
-	return skip_ws(p);
-}
-
-static char *json_parse_str(const char *p)
-{
-	static char str_buf[128];
-	if (!p || *p != '"') {
-		return NULL;
-	}
-	p++;
-	int i = 0;
-	while (*p && *p != '"' && i < (int)sizeof(str_buf) - 1) {
-		str_buf[i++] = *p++;
-	}
-	str_buf[i] = '\0';
-	return str_buf;
-}
-
-static int32_t json_parse_int(const char *p)
-{
-	if (!p) {
-		return 0;
-	}
-	return (int32_t)strtol(p, NULL, 10);
-}
-
-static uint32_t json_parse_uint(const char *p)
-{
-	if (!p) {
-		return 0;
-	}
-	return (uint32_t)strtoul(p, NULL, 10);
-}
-
-static bool json_parse_bool(const char *p)
-{
-	if (!p) {
-		return false;
-	}
-	return (strncmp(p, "true", 4) == 0);
-}
-
-static const char *json_find_array(const char *json, const char *key)
-{
-	const char *p = json_find_key(json, key);
-	if (!p || *p != '[') {
-		return NULL;
-	}
-	return p;
-}
-
-static const char *json_next_obj(const char *p)
-{
-	if (!p) {
-		return NULL;
-	}
-	p = skip_ws(p);
-	if (*p == '[') {
-		p++;
-	}
-	if (*p == ',') {
-		p++;
-	}
-	p = skip_ws(p);
-	if (*p != '{') {
-		return NULL;
-	}
-	return p;
-}
-
-static const char *json_obj_end_ptr(const char *p)
-{
-	if (!p || *p != '{') {
-		return NULL;
-	}
-	int depth = 1;
-	p++;
-	while (*p && depth > 0) {
-		if (*p == '{') {
-			depth++;
-		} else if (*p == '}') {
-			depth--;
-		}
-		p++;
-	}
-	return p;
-}
-
-/* ================================================================
- * Parse and apply device configuration
- * ================================================================ */
-static int parse_device_config(const char *json)
+static void apply_device_config(const struct cfg_doc *d)
 {
 	struct aes67_device_config *cfg = aes67_config_get();
-	const char *v;
-	char *s;
 
 	aes67_config_lock();
 
-	if ((v = json_find_key(json, "vendor")) != NULL) {
-		s = json_parse_str(v);
-		if (s) {
-			strncpy(cfg->vendor, s, AES67_VENDOR_MAX - 1);
-		}
-	}
-	if ((v = json_find_key(json, "product")) != NULL) {
-		s = json_parse_str(v);
-		if (s) {
-			strncpy(cfg->product, s, AES67_PRODUCT_MAX - 1);
-		}
-	}
-	if ((v = json_find_key(json, "serial")) != NULL) {
-		s = json_parse_str(v);
-		if (s) {
-			strncpy(cfg->serial, s, AES67_SERIAL_MAX - 1);
-		}
-	}
-	if ((v = json_find_key(json, "device_name")) != NULL) {
-		s = json_parse_str(v);
-		if (s) {
-			strncpy(cfg->device_name, s,
-				AES67_DEVICE_NAME_MAX - 1);
-		}
-	}
+	strncpy(cfg->vendor, d->vendor, AES67_VENDOR_MAX - 1);
+	cfg->vendor[AES67_VENDOR_MAX - 1] = '\0';
+	strncpy(cfg->product, d->product, AES67_PRODUCT_MAX - 1);
+	cfg->product[AES67_PRODUCT_MAX - 1] = '\0';
+	strncpy(cfg->serial, d->serial, AES67_SERIAL_MAX - 1);
+	cfg->serial[AES67_SERIAL_MAX - 1] = '\0';
+	strncpy(cfg->device_name, d->device_name, AES67_DEVICE_NAME_MAX - 1);
+	cfg->device_name[AES67_DEVICE_NAME_MAX - 1] = '\0';
+	strncpy(cfg->default_mcast_addr, d->default_mcast_addr,
+		sizeof(cfg->default_mcast_addr) - 1);
+	cfg->default_mcast_addr[sizeof(cfg->default_mcast_addr) - 1] = '\0';
 
-	if ((v = json_find_key(json, "default_mcast_addr")) != NULL) {
-		s = json_parse_str(v);
-		if (s) {
-			strncpy(cfg->default_mcast_addr, s,
-				sizeof(cfg->default_mcast_addr) - 1);
-		}
-	}
+	cfg->default_port            = d->default_port;
+	cfg->default_channels        = d->default_channels;
+	cfg->default_bit_depth       = d->default_bit_depth;
+	cfg->default_sample_rate     = d->default_sample_rate;
+	cfg->default_samples_per_pkt = d->default_samples_per_pkt;
+	cfg->default_payload_type    = d->default_payload_type;
 
-	if ((v = json_find_key(json, "default_port")) != NULL) {
-		cfg->default_port = (uint16_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "default_channels")) != NULL) {
-		cfg->default_channels = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "default_bit_depth")) != NULL) {
-		cfg->default_bit_depth = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "default_sample_rate")) != NULL) {
-		cfg->default_sample_rate = json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "default_samples_per_pkt")) != NULL) {
-		cfg->default_samples_per_pkt = (uint16_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "default_payload_type")) != NULL) {
-		cfg->default_payload_type = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "ptp_domain")) != NULL) {
-		cfg->ptp_domain = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "ptp_priority1")) != NULL) {
-		cfg->ptp_priority1 = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "ptp_priority2")) != NULL) {
-		cfg->ptp_priority2 = (uint8_t)json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "ptp_log_sync_interval")) != NULL) {
-		cfg->ptp_log_sync_interval = (int8_t)json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "ptp_log_announce_interval")) != NULL) {
-		cfg->ptp_log_announce_interval = (int8_t)json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "ptp_delay_asymmetry_ns")) != NULL) {
-		cfg->ptp_delay_asymmetry_ns = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_kp_num")) != NULL) {
-		cfg->pi_kp_num = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_kp_den")) != NULL) {
-		cfg->pi_kp_den = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_ki_num")) != NULL) {
-		cfg->pi_ki_num = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_ki_den")) != NULL) {
-		cfg->pi_ki_den = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_imax")) != NULL) {
-		cfg->pi_imax = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_outlier_ppb")) != NULL) {
-		cfg->pi_outlier_ppb = json_parse_int(v);
-	}
-	if ((v = json_find_key(json, "pi_warmup_cycles")) != NULL) {
-		cfg->pi_warmup_cycles = json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "sap_announce_interval_s")) != NULL) {
-		cfg->sap_announce_interval_s = json_parse_uint(v);
-	}
-	if ((v = json_find_key(json, "sap_announce_enabled")) != NULL) {
-		cfg->sap_announce_enabled = json_parse_bool(v);
-	}
+	cfg->ptp_domain                = d->ptp_domain;
+	cfg->ptp_priority1             = d->ptp_priority1;
+	cfg->ptp_priority2             = d->ptp_priority2;
+	cfg->ptp_clock_class           = d->ptp_clock_class;
+	cfg->ptp_clock_accuracy        = d->ptp_clock_accuracy;
+	cfg->ptp_log_sync_interval     = d->ptp_log_sync_interval;
+	cfg->ptp_log_announce_interval = d->ptp_log_announce_interval;
+	cfg->ptp_delay_asymmetry_ns    = d->ptp_delay_asymmetry_ns;
+
+	cfg->pi_kp_num        = d->pi_kp_num;
+	cfg->pi_kp_den        = d->pi_kp_den;
+	cfg->pi_ki_num        = d->pi_ki_num;
+	cfg->pi_ki_den        = d->pi_ki_den;
+	cfg->pi_imax          = d->pi_imax;
+	cfg->pi_outlier_ppb   = d->pi_outlier_ppb;
+	cfg->pi_warmup_cycles = d->pi_warmup_cycles;
+
+	cfg->sap_announce_interval_s = d->sap_announce_interval_s;
+	cfg->sap_announce_enabled    = d->sap_announce_enabled;
 
 	aes67_config_unlock();
 	LOG_INF("Device configuration loaded");
-	return 0;
 }
 
-/* ================================================================
- * Parse integer array (for channel IDs/map)
- * ================================================================ */
-static int parse_int_array(const char *arr, uint8_t *out, int max_count)
+static void apply_card_settings(const struct cfg_doc *d)
 {
-	if (!arr || *arr != '[') {
-		return 0;
-	}
-	arr++;
-	int count = 0;
-	while (*arr && count < max_count) {
-		arr = skip_ws(arr);
-		if (*arr == ']') {
-			break;
-		}
-		if (*arr >= '0' && *arr <= '9') {
-			out[count++] = (uint8_t)strtoul(arr, NULL, 10);
-			while (*arr && *arr != ',' && *arr != ']') {
-				arr++;
-			}
-		}
-		if (*arr == ',') {
-			arr++;
-		}
-	}
-	return count;
-}
-
-/* ================================================================
- * Parse and configure TX streams
- * ================================================================ */
-static int parse_tx_streams(const char *json)
-{
-	const char *arr = json_find_array(json, "tx_streams");
-	if (!arr) {
-		LOG_DBG("No tx_streams found in config");
-		return 0;
-	}
-
-	const char *obj = arr;
-	int count = 0;
-
-	while ((obj = json_next_obj(obj)) != NULL) {
-		const char *obj_end = json_obj_end_ptr(obj);
-		if (!obj_end) {
-			break;
-		}
-
-		uint8_t stream_id = 0;
-		struct in_addr dst_ip = {0};
-		uint8_t channel_count = 0;
-		uint8_t samples_per_packet = 48;
-		uint32_t ssrc = 0;
-		uint8_t ch_ids[AES67_MAX_CH_PER_STREAM] = {0};
-		char stream_name[AES67_STREAM_NAME_MAX] = {0};
-
-		const char *v;
-
-		if ((v = json_find_key(obj, "stream_id")) != NULL) {
-			stream_id = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "name")) != NULL) {
-			char *name_str = json_parse_str(v);
-			if (name_str) {
-				strncpy(stream_name, name_str,
-					AES67_STREAM_NAME_MAX - 1);
-			}
-		}
-		if ((v = json_find_key(obj, "dst_ip")) != NULL) {
-			char *ip_str = json_parse_str(v);
-			if (ip_str) {
-				zsock_inet_pton(AF_INET, ip_str, &dst_ip);
-			}
-		}
-		if ((v = json_find_key(obj, "channel_count")) != NULL) {
-			channel_count = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "samples_per_packet")) != NULL) {
-			samples_per_packet = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "ssrc")) != NULL) {
-			ssrc = json_parse_uint(v);
-		}
-
-		const char *ch_arr = json_find_array(obj, "ch_ids");
-		int num_ch = parse_int_array(ch_arr, ch_ids,
-					     AES67_MAX_CH_PER_STREAM);
-		if (num_ch == 0) {
-			for (int j = 0; j < channel_count; j++) {
-				ch_ids[j] = j;
-			}
-			num_ch = channel_count;
-		}
-
-		int ret = aes67_conn_configure_tx_stream(
-			stream_id, &dst_ip, channel_count,
-			samples_per_packet, ch_ids, num_ch, ssrc,
-			stream_name[0] ? stream_name : NULL);
-		if (ret == 0) {
-			LOG_INF("TX stream %u configured", stream_id);
-			count++;
-		} else {
-			LOG_ERR("Failed to configure TX stream %u: %d",
-				stream_id, ret);
-		}
-
-		obj = obj_end;
-	}
-
-	LOG_INF("Loaded %d TX streams from config", count);
-	return count;
-}
-
-/* ================================================================
- * Parse and configure RX streams
- * ================================================================ */
-static int parse_rx_streams(const char *json)
-{
-	const char *arr = json_find_array(json, "rx_streams");
-	if (!arr) {
-		LOG_DBG("No rx_streams found in config");
-		return 0;
-	}
-
-	const char *obj = arr;
-	int count = 0;
-
-	while ((obj = json_next_obj(obj)) != NULL) {
-		const char *obj_end = json_obj_end_ptr(obj);
-		if (!obj_end) {
-			break;
-		}
-
-		uint8_t stream_id = 0;
-		struct in_addr dst_ip = {0};
-		uint16_t dst_port = 5004;
-		uint8_t channel_count = 0;
-		uint8_t output_delay = 48;
-		uint8_t samples_per_channel = 48;
-		uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = {0};
-		char stream_name[AES67_STREAM_NAME_MAX] = {0};
-		char sender_name[AES67_STREAM_NAME_MAX] = {0};
-		struct in_addr sender_ip = {0};
-
-		const char *v;
-
-		if ((v = json_find_key(obj, "stream_id")) != NULL) {
-			stream_id = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "name")) != NULL) {
-			char *name_str = json_parse_str(v);
-
-			if (name_str) {
-				strncpy(stream_name, name_str,
-					sizeof(stream_name) - 1);
-			}
-		}
-		if ((v = json_find_key(obj, "sender_name")) != NULL) {
-			char *name_str = json_parse_str(v);
-
-			if (name_str) {
-				strncpy(sender_name, name_str,
-					sizeof(sender_name) - 1);
-			}
-		}
-		if ((v = json_find_key(obj, "sender_ip")) != NULL) {
-			char *ip_str = json_parse_str(v);
-
-			if (ip_str) {
-				zsock_inet_pton(AF_INET, ip_str, &sender_ip);
-			}
-		}
-		if ((v = json_find_key(obj, "dst_ip")) != NULL) {
-			char *ip_str = json_parse_str(v);
-			if (ip_str) {
-				zsock_inet_pton(AF_INET, ip_str, &dst_ip);
-			}
-		}
-		if ((v = json_find_key(obj, "dst_port")) != NULL) {
-			dst_port = (uint16_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "channel_count")) != NULL) {
-			channel_count = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "output_delay")) != NULL) {
-			output_delay = (uint8_t)json_parse_uint(v);
-		}
-		if ((v = json_find_key(obj, "samples_per_channel")) != NULL) {
-			samples_per_channel = (uint8_t)json_parse_uint(v);
-		}
-
-		const char *ch_arr = json_find_array(obj, "ch_map");
-		int num_ch = parse_int_array(ch_arr, ch_map,
-					     AES67_MAX_CH_PER_STREAM);
-		if (num_ch == 0) {
-			for (int j = 0; j < channel_count; j++) {
-				ch_map[j] = j;
-			}
-		}
-
-		int ret = aes67_conn_configure_rx_stream(
-			stream_id, &dst_ip, dst_port, ch_map,
-			channel_count, output_delay, samples_per_channel,
-			stream_name[0] ? stream_name : NULL,
-			sender_name[0] ? sender_name : NULL,
-			sender_ip.s_addr ? &sender_ip : NULL);
-		if (ret == 0) {
-			LOG_INF("RX stream %u configured", stream_id);
-			count++;
-		} else {
-			LOG_ERR("Failed to configure RX stream %u: %d",
-				stream_id, ret);
-		}
-
-		obj = obj_end;
-	}
-
-	LOG_INF("Loaded %d RX streams from config", count);
-	return count;
-}
-
-/* ================================================================
- * Parse analog-card settings into the shadow store
- * ================================================================ */
-
-/* Parse "key": [n0,n1,...] of up to @max ints into @out (i8) / @out_b
- * (bool from 0/1); returns the number of parsed elements or 0. */
-static int parse_num_array(const char *json, const char *key,
-			   int8_t *out, bool *out_b, int max)
-{
-	const char *p = json_find_array(json, key);
-	int n = 0;
-
-	if (!p) {
-		return 0;
-	}
-	p++;	/* past '[' */
-
-	while (n < max) {
-		p = skip_ws(p);
-		if (*p == ']' || *p == '\0') {
-			break;
-		}
-		char *end;
-		long v = strtol(p, &end, 10);
-
-		if (end == p) {
-			break;
-		}
-		if (out) {
-			out[n] = (int8_t)v;
-		}
-		if (out_b) {
-			out_b[n] = (v != 0);
-		}
-		n++;
-		p = skip_ws(end);
-		if (*p == ',') {
-			p++;
-		}
-	}
-	return n;
-}
-
-static void parse_card_settings(const char *json)
-{
-	const char *v = json_find_key(json, "card_type");
-
-	if (!v) {
-		return;
-	}
-
-	uint8_t type = card_type_from_str(json_parse_str(v));
+	uint8_t type = card_type_from_str(d->card_type);
 
 	if (type == CARD_TYPE_NONE) {
 		return;
@@ -883,18 +503,24 @@ static void parse_card_settings(const char *json)
 
 	memset(cs, 0, sizeof(*cs));
 	cs->card_type = type;
-	cs->num_in = parse_num_array(json, "card_in_gain",
-				     cs->in_gain, NULL,
-				     CARD_SETTINGS_MAX_IN);
-	parse_num_array(json, "card_in_48v", NULL, cs->in_phantom,
-			CARD_SETTINGS_MAX_IN);
-	parse_num_array(json, "card_in_mute", NULL, cs->in_mute,
-			CARD_SETTINGS_MAX_IN);
-	cs->num_out = parse_num_array(json, "card_out_gain",
-				      cs->out_gain, NULL,
-				      CARD_SETTINGS_MAX_OUT);
-	parse_num_array(json, "card_out_mute", NULL, cs->out_mute,
-			CARD_SETTINGS_MAX_OUT);
+	cs->num_in  = (uint8_t)d->card_in_gain_len;
+	cs->num_out = (uint8_t)d->card_out_gain_len;
+
+	for (size_t i = 0; i < d->card_in_gain_len; i++) {
+		cs->in_gain[i] = d->card_in_gain[i];
+	}
+	for (size_t i = 0; i < d->card_in_48v_len; i++) {
+		cs->in_phantom[i] = d->card_in_48v[i] != 0;
+	}
+	for (size_t i = 0; i < d->card_in_mute_len; i++) {
+		cs->in_mute[i] = d->card_in_mute[i] != 0;
+	}
+	for (size_t i = 0; i < d->card_out_gain_len; i++) {
+		cs->out_gain[i] = d->card_out_gain[i];
+	}
+	for (size_t i = 0; i < d->card_out_mute_len; i++) {
+		cs->out_mute[i] = d->card_out_mute[i] != 0;
+	}
 	cs->valid = true;
 
 	card_settings_unlock();
@@ -903,30 +529,147 @@ static void parse_card_settings(const char *json)
 		card_type_to_str(type), cs->num_in, cs->num_out);
 }
 
+static void apply_streams(const struct cfg_doc *d)
+{
+	int count = 0;
+
+	for (size_t i = 0; i < d->tx_streams_len; i++) {
+		const struct cfg_tx_dto *e = &d->tx_streams[i];
+		struct in_addr dst = { 0 };
+		uint8_t ch_ids[AES67_MAX_CH_PER_STREAM] = { 0 };
+		uint8_t num_ch = (uint8_t)e->ch_ids_len;
+
+		zsock_inet_pton(AF_INET, e->dst_ip, &dst);
+		for (size_t j = 0; j < e->ch_ids_len; j++) {
+			ch_ids[j] = e->ch_ids[j];
+		}
+		if (num_ch == 0) {
+			/* No explicit map: identity, one entry per channel. */
+			num_ch = MIN(e->channel_count,
+				     AES67_MAX_CH_PER_STREAM);
+			for (uint8_t j = 0; j < num_ch; j++) {
+				ch_ids[j] = j;
+			}
+		}
+
+		int ret = aes67_conn_configure_tx_stream(
+			e->stream_id, &dst, e->channel_count,
+			e->samples_per_packet, ch_ids, num_ch, e->ssrc,
+			e->name[0] ? e->name : NULL);
+
+		if (ret == 0) {
+			count++;
+		} else {
+			LOG_ERR("Failed to configure TX stream %u: %d",
+				e->stream_id, ret);
+		}
+	}
+	LOG_INF("Loaded %d TX streams from config", count);
+
+	count = 0;
+	for (size_t i = 0; i < d->rx_streams_len; i++) {
+		const struct cfg_rx_dto *e = &d->rx_streams[i];
+		struct in_addr dst = { 0 };
+		struct in_addr sender = { 0 };
+		uint8_t ch_map[AES67_MAX_CH_PER_STREAM] = { 0 };
+
+		zsock_inet_pton(AF_INET, e->dst_ip, &dst);
+		if (e->sender_ip[0] != '\0') {
+			zsock_inet_pton(AF_INET, e->sender_ip, &sender);
+		}
+		for (size_t j = 0; j < e->ch_map_len; j++) {
+			ch_map[j] = e->ch_map[j];
+		}
+		if (e->ch_map_len == 0) {
+			for (uint8_t j = 0; j < e->channel_count &&
+					    j < AES67_MAX_CH_PER_STREAM; j++) {
+				ch_map[j] = j;
+			}
+		}
+
+		int ret = aes67_conn_configure_rx_stream(
+			e->stream_id, &dst, e->dst_port, ch_map,
+			e->channel_count, e->output_delay,
+			e->samples_per_channel,
+			e->name[0] ? e->name : NULL,
+			e->sender_name[0] ? e->sender_name : NULL,
+			sender.s_addr ? &sender : NULL);
+
+		if (ret == 0) {
+			count++;
+		} else {
+			LOG_ERR("Failed to configure RX stream %u: %d",
+				e->stream_id, ret);
+		}
+	}
+	LOG_INF("Loaded %d RX streams from config", count);
+}
+
 /* ================================================================
  * Public API
  * ================================================================ */
 
 int config_json_serialize(char *buf, size_t sz)
 {
-	int pos = 0;
+	int ret;
 
-	pos = json_start(buf, sz);
-	pos = serialize_device_config(buf, sz, pos);
-	pos = serialize_card_settings(buf, sz, pos);
-	pos = serialize_tx_streams(buf, sz, pos);
-	pos = serialize_rx_streams(buf, sz, pos);
-	pos = json_end(buf, sz, pos);
+	if (buf == NULL || sz == 0) {
+		return -EINVAL;
+	}
 
-	return pos;
+	k_mutex_lock(&doc_mutex, K_FOREVER);
+
+	memset(&doc, 0, sizeof(doc));
+	collect_device_config(&doc);
+	collect_card_settings(&doc);
+	collect_streams(&doc);
+
+	ret = json_obj_encode_buf(doc_descr, ARRAY_SIZE(doc_descr), &doc,
+				  buf, sz);
+
+	k_mutex_unlock(&doc_mutex);
+
+	if (ret < 0) {
+		/* Almost always -ENOMEM: the caller's buffer is too small. */
+		buf[0] = '\0';
+		return ret;
+	}
+	return (int)strlen(buf);
 }
 
-int config_json_parse_and_apply(const char *json)
+int config_json_parse_and_apply(char *json)
 {
-	parse_device_config(json);
-	parse_card_settings(json);
-	parse_tx_streams(json);
-	parse_rx_streams(json);
+	int64_t ret;
+
+	if (json == NULL) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&doc_mutex, K_FOREVER);
+
+	/* Pre-fill from the current state: the parser only writes the keys
+	 * the document actually carries, so anything absent keeps its
+	 * current value instead of reverting to zero. Stream tables and
+	 * card settings start empty — an absent array means "leave the
+	 * tables alone", not "clear them". */
+	memset(&doc, 0, sizeof(doc));
+	collect_device_config(&doc);
+	prefill_stream_defaults(&doc);
+
+	ret = json_obj_parse(json, strlen(json), doc_descr,
+			     ARRAY_SIZE(doc_descr), &doc);
+	if (ret < 0) {
+		k_mutex_unlock(&doc_mutex);
+		LOG_ERR("Config JSON is malformed (%d) - keeping current "
+			"configuration", (int)ret);
+		return (int)ret;
+	}
+
+	apply_device_config(&doc);
+	apply_card_settings(&doc);
+	apply_streams(&doc);
+
+	k_mutex_unlock(&doc_mutex);
 
 	/* Push the card section into the drivers — a no-op if the card
 	 * isn't detected/ready yet; card_manager re-applies on detect and

@@ -12,6 +12,8 @@
 
 #include <zephyr/net/http/server.h>
 #include <zephyr/net/http/method.h>
+#include <zephyr/data/json.h>
+#include <zephyr/sys/util.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -54,26 +56,14 @@ void jo_bool(struct json_out *jo, const char *key, bool val);
 size_t jo_finish(struct json_out *jo);
 
 /* ================================================================
- * Minimal JSON body parser ("key": <value> extraction)
- * ================================================================ */
-
-int json_find_str(const char *json, size_t json_len, const char *key,
-		  char *out, size_t out_sz);
-bool json_find_int(const char *json, size_t json_len, const char *key,
-		   int32_t *out);
-bool json_find_bool(const char *json, size_t json_len, const char *key,
-		    bool *out);
-/* "key":[1,2,...] -> out[]; returns number of elements parsed (0 if absent) */
-int json_find_u8_array(const char *json, size_t json_len, const char *key,
-		       uint8_t *out, int max);
-
-/* ================================================================
  * Routing
  * ================================================================ */
 
 struct webapi_request {
-	/* Request body (POST/PUT/PATCH/DELETE), fully accumulated. */
-	const char *body;
+	/* Request body (POST/PUT/PATCH/DELETE), fully accumulated and
+	 * NUL-terminated. Writable: Zephyr's JSON parser terminates
+	 * tokens in place while decoding them. */
+	char *body;
 	size_t body_len;
 	/* Value of the "{id}" path segment, -1 if the route has none. */
 	int id;
@@ -97,6 +87,31 @@ struct webapi_route {
 };
 
 #define WEBAPI_ROUTE(_m, _p, _h) { .method = (_m), .path = (_p), .handler = (_h) }
+
+/* ================================================================
+ * Request body parsing
+ *
+ * Bodies are described as a struct plus a json_obj_descr table and
+ * decoded by Zephyr's JSON library. Pre-fill the struct with the
+ * current values before calling: the parser only writes the keys the
+ * body actually carries, so anything omitted keeps its current value —
+ * which is exactly PATCH semantics, with no per-field presence check.
+ *
+ * Where presence itself is the decision (a required field, or "absent
+ * means do something else"), use the returned bitmap: bit i is set when
+ * descr[i] was present. Index it through an enum declared alongside the
+ * descriptor table so the two cannot drift apart.
+ * ================================================================ */
+
+/** Returns the bitmap of decoded fields, or a negative errno if the
+ *  body is missing or not valid JSON. */
+int64_t webapi_parse_body(struct webapi_request *req,
+			  const struct json_obj_descr *descr, size_t descr_len,
+			  void *val);
+
+/** True if field @p idx_ (an index into the descriptor table) was
+ *  present in the body. */
+#define WEBAPI_HAS(bitmap_, idx_) (((bitmap_) & BIT64(idx_)) != 0)
 
 /* Route tables exported by the resource modules. Terminated by count. */
 struct webapi_module {
