@@ -172,6 +172,18 @@ config NMOS_IS05
 	  FPGA stream tables through aes67_conn; the IS-04 resources
 	  mirror the resulting subscription state.
 
+config NMOS_IS08
+	bool "NMOS IS-08 Audio Channel Mapping API"
+	default y
+	depends on NMOS
+	help
+	  Serve the AMWA IS-08 v1.0 Channel Mapping API under
+	  /x-nmos/channelmapping/: physical AD inputs to the TX stream
+	  senders and RX stream receivers to the physical DA outputs.
+	  Map activations rewrite the FPGA ch_ids/ch_map tables through
+	  aes67_conn; the device control urn:x-nmos:control:cm-ctrl is
+	  advertised in the IS-04 device.
+
 endmenu
 
 menu "SD Card Configuration Storage"

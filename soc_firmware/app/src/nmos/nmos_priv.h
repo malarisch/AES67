@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "../webapi/webapi_priv.h"
+#include "../aes67_conn.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -108,12 +109,13 @@ void nmos_reg_start(void);
  * IS-05 Connection API (nmos_is05.c)
  * ================================================================ */
 
-#ifdef CONFIG_NMOS_IS05
-
-#define NMOS_IS05_VERSION  "v1.1"
 #define NMOS_TAI_STR_MAX   28
 
 struct nj_node;
+
+#ifdef CONFIG_NMOS_IS05
+
+#define NMOS_IS05_VERSION  "v1.1"
 
 /* Activation echo for the PATCH response: unlike a subsequent GET
  * /staged, the response to an immediate activation still reports the
@@ -151,6 +153,57 @@ bool nmos_is05_sub(bool sender, int idx, char id_out[NMOS_UUID_STR_LEN],
 bool nmos_is05_locked(bool sender, int idx);
 
 #endif /* CONFIG_NMOS_IS05 */
+
+/* TAI helpers ("<sec>:<nsec>", nsec zero-padded on output). */
+void nmos_tai_str(char *buf, size_t sz, const struct nmos_tai *t);
+bool nmos_tai_parse(const char *s, struct nmos_tai *out);
+
+/* Bump the Device version + registration counter (IS-08 map changes). */
+void nmos_device_touch(void);
+
+/* ================================================================
+ * IS-08 Channel Mapping API (nmos_is08.c)
+ * ================================================================ */
+
+#ifdef CONFIG_NMOS_IS08
+
+#define NMOS_IS08_VERSION  "v1.0"
+
+void nmos_is08_init(void);
+
+/* GET builders. The *_child builders return false for an unknown id
+ * (caller answers 404). kind: 0=properties 1=parent/sourceid
+ * 2=channels 3=caps. */
+void nmos_is08_build_io(struct json_out *jo);
+void nmos_is08_build_list(struct json_out *jo, bool inputs);
+bool nmos_is08_build_child(struct json_out *jo, bool input,
+			   const char *id, int kind);
+bool nmos_is08_known_id(bool input, const char *id);
+void nmos_is08_build_active(struct json_out *jo, const char *output_or_null);
+void nmos_is08_build_activations(struct json_out *jo);
+bool nmos_is08_build_activation(struct json_out *jo, const char *act_id);
+bool nmos_is08_delete_activation(const char *act_id);
+
+/* POST /map/activations. Returns the HTTP status (200/202/400/423/500);
+ * on success the response body (keyed by the new activation id) has
+ * been written to jo, on failure *errmsg carries the error text. */
+int nmos_is08_post_activation(struct json_out *jo,
+			      const struct nj_node *pool,
+			      const struct nj_node *req,
+			      const char **errmsg);
+
+/* IS-05 integration: desired TX ch_ids for a slot (always filled), and
+ * the desired RX ch_map for an explicit IS-05 activation — un-mutes the
+ * slot and adopts an identity block when no routing is stored yet. */
+void nmos_is08_tx_chids(int idx, uint8_t ch_ids[AES67_MAX_CH_PER_STREAM]);
+bool nmos_is08_rx_chmap(int idx, uint8_t channels,
+			uint8_t ch_map[AES67_MAX_CH_PER_STREAM]);
+
+/* True while IS-08 itself is writing aes67_conn (observers of other
+ * modules should not treat that as an external state change). */
+bool nmos_is08_applying(void);
+
+#endif /* CONFIG_NMOS_IS08 */
 
 #ifdef __cplusplus
 }

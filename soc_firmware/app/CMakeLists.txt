@@ -219,10 +219,11 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI)
       src/nmos/nmos_api.c
     )
     target_sources_ifdef(CONFIG_NMOS_REGISTRATION app PRIVATE src/nmos/nmos_reg.c)
-    target_sources_ifdef(CONFIG_NMOS_IS05 app PRIVATE
-      src/nmos/nmos_is05.c
-      src/nmos/nmos_json.c
-    )
+    target_sources_ifdef(CONFIG_NMOS_IS05 app PRIVATE src/nmos/nmos_is05.c)
+    target_sources_ifdef(CONFIG_NMOS_IS08 app PRIVATE src/nmos/nmos_is08.c)
+    if(CONFIG_NMOS_IS05 OR CONFIG_NMOS_IS08)
+      target_sources(app PRIVATE src/nmos/nmos_json.c)
+    endif()
     target_sources_ifdef(CONFIG_SD_CONFIG         app PRIVATE src/sd_config.c)
     target_sources_ifdef(CONFIG_FLASH_CONFIG      app PRIVATE src/flash_config.c)
 

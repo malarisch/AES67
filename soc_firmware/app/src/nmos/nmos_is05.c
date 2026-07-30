@@ -319,13 +319,26 @@ static void refresh_rx_from_conn(int idx)
  * own apply path the lock is already held by this thread and `applying`
  * suppresses the refresh; external configuration (web UI, shell, SAP)
  * waits for the lock and mirrors the new device state. */
+/* IS-08 map writes (ch_ids/ch_map rewrites, mute/unmute of fully
+ * unrouted streams) are routing-domain only — they must not be mirrored
+ * into the IS-05 transport state, or an IS-08 mute would flip the
+ * subscription to inactive. */
+static bool is08_writing(void)
+{
+#ifdef CONFIG_NMOS_IS08
+	return nmos_is08_applying();
+#else
+	return false;
+#endif
+}
+
 static void tx_observer(uint8_t stream_id)
 {
 	if (stream_id >= AES67_MAX_TX_STREAMS) {
 		return;
 	}
 	k_mutex_lock(&is05_lock, K_FOREVER);
-	if (!applying) {
+	if (!applying && !is08_writing()) {
 		refresh_tx_from_conn(stream_id);
 	}
 	k_mutex_unlock(&is05_lock);
@@ -337,7 +350,7 @@ static void rx_observer(uint8_t stream_id)
 		return;
 	}
 	k_mutex_lock(&is05_lock, K_FOREVER);
-	if (!applying) {
+	if (!applying && !is08_writing()) {
 		refresh_rx_from_conn(stream_id);
 	}
 	k_mutex_unlock(&is05_lock);
@@ -418,6 +431,7 @@ static int apply_sender(int idx)
 		}
 
 		uint16_t spp = tx.samples_per_packet;
+		uint8_t ch_ids[AES67_MAX_CH_PER_STREAM];
 
 		if (spp == 0) {
 			aes67_config_lock();
@@ -427,10 +441,17 @@ static int apply_sender(int idx)
 				spp = AES67_DEFAULT_SAMPLES_PER_PKT;
 			}
 		}
+#ifdef CONFIG_NMOS_IS08
+		/* Channel routing is IS-08 domain: use the stored map
+		 * (mirrors the slot's ch_ids while it is active). */
+		nmos_is08_tx_chids(idx, ch_ids);
+#else
+		memcpy(ch_ids, tx.ch_ids, sizeof(ch_ids));
+#endif
 		ret = aes67_conn_configure_tx_stream((uint8_t)idx, &dst,
 						     tx.channel_count,
 						     (uint8_t)spp,
-						     tx.ch_ids,
+						     ch_ids,
 						     tx.channel_count,
 						     was_active ? tx.ssrc : 0,
 						     tx.name);
@@ -500,9 +521,15 @@ static int apply_receiver(int idx)
 		if (spc == 0 || spc > 255) {
 			spc = AES67_DEFAULT_SAMPLES_PER_PKT;
 		}
+#ifdef CONFIG_NMOS_IS08
+		/* Channel routing is IS-08 domain: an explicit activation
+		 * un-mutes the slot and reuses (or adopts) the stored map. */
+		(void)nmos_is08_rx_chmap(idx, channels, ch_map);
+#else
 		for (uint8_t i = 0; i < AES67_MAX_CH_PER_STREAM; i++) {
 			ch_map[i] = i;
 		}
+#endif
 
 		ret = aes67_conn_configure_rx_stream((uint8_t)idx, &dst,
 						     rp.dst_port, ch_map,

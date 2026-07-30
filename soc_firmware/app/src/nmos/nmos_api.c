@@ -27,24 +27,28 @@
 
 #include "nmos.h"
 #include "nmos_priv.h"
-#ifdef CONFIG_NMOS_IS05
+
+#if defined(CONFIG_NMOS_IS05) || defined(CONFIG_NMOS_IS08)
+#define NMOS_HAVE_BODY 1
 #include "nmos_json.h"
 #endif
 
 LOG_MODULE_REGISTER(nmos_api, LOG_LEVEL_INF);
 
-/* Own response buffer: full resource lists (8 senders/receivers) exceed
- * the REST API's shared 4 KB buffer. */
-#define NMOS_BUF_SIZE 8192
+/* Own response buffer: full resource lists (8 senders/receivers incl.
+ * BCP-004 caps) and the IS-08 /io view exceed the REST API's shared
+ * 4 KB buffer. */
+#define NMOS_BUF_SIZE 16384
 static NMOS_BIG_BSS char nmos_buf[NMOS_BUF_SIZE];
 
-#ifdef CONFIG_NMOS_IS05
-/* Request-body accumulator (PATCH /staged, POST /bulk) plus the node
- * pool for the JSON DOM. Sized for a staged SDP transport file. */
+#ifdef NMOS_HAVE_BODY
+/* Request-body accumulator (PATCH /staged, POST /bulk, POST
+ * /map/activations) plus the node pool for the JSON DOM. Sized for a
+ * staged SDP transport file. */
 #define NMOS_BODY_SIZE 4096
 static NMOS_BIG_BSS char nmos_body[NMOS_BODY_SIZE];
 static size_t nmos_body_len;
-static NMOS_BIG_BSS struct nj_node nmos_nodes[192];
+static NMOS_BIG_BSS struct nj_node nmos_nodes[256];
 #endif
 
 /* ================================================================
@@ -380,6 +384,9 @@ static void nmos_dispatch(enum http_method method, const char *url,
 	/* ---- /x-nmos ---- */
 	if (nseg == 1) {
 		static const char *const apis[] = {
+#ifdef CONFIG_NMOS_IS08
+			"channelmapping/",
+#endif
 #ifdef CONFIG_NMOS_IS05
 			"connection/",
 #endif
@@ -547,6 +554,212 @@ static void nmos_dispatch(enum http_method method, const char *url,
 	}
 #endif /* CONFIG_NMOS_IS05 */
 
+#ifdef CONFIG_NMOS_IS08
+	/* ---- /x-nmos/channelmapping ---- */
+	if (strcmp(seg[1], "channelmapping") == 0) {
+		if (nseg == 2) {
+			static const char *const vers[] = {
+				NMOS_IS08_VERSION "/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, vers, ARRAY_SIZE(vers));
+			return;
+		}
+		if (strcmp(seg[2], NMOS_IS08_VERSION) != 0) {
+			goto not_found;
+		}
+		if (nseg == 3) {
+			static const char *const base[] = {
+				"inputs/", "outputs/", "map/", "io/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, base, ARRAY_SIZE(base));
+			return;
+		}
+
+		if (strcmp(seg[3], "io") == 0) {
+			if (nseg != 4) {
+				goto not_found;
+			}
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is08_build_io(&jo);
+			goto finish_json;
+		}
+
+		bool inputs = strcmp(seg[3], "inputs") == 0;
+
+		if (inputs || strcmp(seg[3], "outputs") == 0) {
+			if (nseg == 4) {
+				if (!is_get) {
+					goto method_not_allowed;
+				}
+				jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+				nmos_is08_build_list(&jo, inputs);
+				goto finish_json;
+			}
+			if (!nmos_is08_known_id(inputs, seg[4])) {
+				goto not_found;
+			}
+			if (nseg == 5) {
+				static const char *const in_eps[] = {
+					"properties/", "parent/",
+					"channels/", "caps/",
+				};
+				static const char *const out_eps[] = {
+					"properties/", "sourceid/",
+					"channels/", "caps/",
+				};
+
+				if (!is_get) {
+					goto method_not_allowed;
+				}
+				if (inputs) {
+					listing_rsp(rsp, in_eps,
+						    ARRAY_SIZE(in_eps));
+				} else {
+					listing_rsp(rsp, out_eps,
+						    ARRAY_SIZE(out_eps));
+				}
+				return;
+			}
+			if (nseg != 6) {
+				goto not_found;
+			}
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+
+			int kind;
+
+			if (strcmp(seg[5], "properties") == 0) {
+				kind = 0;
+			} else if (inputs &&
+				   strcmp(seg[5], "parent") == 0) {
+				kind = 1;
+			} else if (!inputs &&
+				   strcmp(seg[5], "sourceid") == 0) {
+				kind = 1;
+			} else if (strcmp(seg[5], "channels") == 0) {
+				kind = 2;
+			} else if (strcmp(seg[5], "caps") == 0) {
+				kind = 3;
+			} else {
+				goto not_found;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			if (!nmos_is08_build_child(&jo, inputs, seg[4],
+						   kind)) {
+				goto not_found;
+			}
+			goto finish_json;
+		}
+
+		if (strcmp(seg[3], "map") != 0) {
+			goto not_found;
+		}
+		if (nseg == 4) {
+			static const char *const map_eps[] = {
+				"activations/", "active/",
+			};
+
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			listing_rsp(rsp, map_eps, ARRAY_SIZE(map_eps));
+			return;
+		}
+		if (strcmp(seg[4], "active") == 0) {
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			if (nseg == 6 &&
+			    !nmos_is08_known_id(false, seg[5])) {
+				goto not_found;
+			}
+			if (nseg > 6) {
+				goto not_found;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is08_build_active(&jo, nseg == 6 ? seg[5]
+							      : NULL);
+			goto finish_json;
+		}
+		if (strcmp(seg[4], "activations") != 0) {
+			goto not_found;
+		}
+		if (nseg == 5) {
+			if (method == HTTP_POST) {
+				const char *errmsg = "invalid request";
+				int root = nj_parse(body, body_len,
+						    nmos_nodes,
+						    ARRAY_SIZE(nmos_nodes));
+
+				if (root < 0 ||
+				    nmos_nodes[root].type != NJ_OBJ) {
+					error_rsp(rsp, HTTP_400_BAD_REQUEST,
+						  "request body is not a "
+						  "JSON object");
+					return;
+				}
+				jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+
+				int st = nmos_is08_post_activation(
+					&jo, nmos_nodes, &nmos_nodes[root],
+					&errmsg);
+
+				if (st != 200 && st != 202) {
+					error_rsp(rsp, (uint16_t)st, errmsg);
+					return;
+				}
+				if (jo.overflow) {
+					error_rsp(rsp,
+						  HTTP_500_INTERNAL_SERVER_ERROR,
+						  "response too large");
+					return;
+				}
+				finish_rsp(rsp,
+					   st == 202 ? HTTP_202_ACCEPTED
+						     : HTTP_200_OK,
+					   jo_finish(&jo), false);
+				return;
+			}
+			if (!is_get) {
+				goto method_not_allowed;
+			}
+			jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+			nmos_is08_build_activations(&jo);
+			goto finish_json;
+		}
+		if (nseg != 6) {
+			goto not_found;
+		}
+		if (method == HTTP_DELETE) {
+			if (!nmos_is08_delete_activation(seg[5])) {
+				goto not_found;
+			}
+			finish_rsp(rsp, HTTP_204_NO_CONTENT, 0, false);
+			return;
+		}
+		if (!is_get) {
+			goto method_not_allowed;
+		}
+		jo_init(&jo, nmos_buf, sizeof(nmos_buf));
+		if (!nmos_is08_build_activation(&jo, seg[5])) {
+			goto not_found;
+		}
+		goto finish_json;
+	}
+#endif /* CONFIG_NMOS_IS08 */
+
 	/* ---- /x-nmos/manifest/{senderId} ---- */
 	if (strcmp(seg[1], "manifest") == 0) {
 		if (nseg != 3) {
@@ -702,7 +915,7 @@ static int nmos_handler(struct http_client_ctx *client,
 
 	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
 	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
-#ifdef CONFIG_NMOS_IS05
+#ifdef NMOS_HAVE_BODY
 		nmos_body_len = 0;
 #endif
 		return 0;
@@ -739,6 +952,20 @@ static int nmos_handler(struct http_client_ctx *client,
 			{.name = "Access-Control-Allow-Headers",
 			 .value = "Content-Type"},
 		};
+		static const struct http_header getpost_hdrs[] = {
+			{.name = "Access-Control-Allow-Origin", .value = "*"},
+			{.name = "Access-Control-Allow-Methods",
+			 .value = "GET, HEAD, POST, OPTIONS"},
+			{.name = "Access-Control-Allow-Headers",
+			 .value = "Content-Type"},
+		};
+		static const struct http_header getdel_hdrs[] = {
+			{.name = "Access-Control-Allow-Origin", .value = "*"},
+			{.name = "Access-Control-Allow-Methods",
+			 .value = "GET, HEAD, DELETE, OPTIONS"},
+			{.name = "Access-Control-Allow-Headers",
+			 .value = "Content-Type"},
+		};
 		size_t plen = strcspn(url, "?");
 
 		while (plen > 1 && url[plen - 1] == '/') {
@@ -758,6 +985,16 @@ static int nmos_handler(struct http_client_ctx *client,
 		} else if (strstr(url, "/bulk/") != NULL) {
 			hdrs = post_hdrs;
 			nhdrs = ARRAY_SIZE(post_hdrs);
+		} else if (strstr(url, "/channelmapping/") != NULL &&
+			   plen >= 12 &&
+			   strncmp(url + plen - 12, "/activations", 12) == 0) {
+			/* IS-08 POST /map/activations */
+			hdrs = getpost_hdrs;
+			nhdrs = ARRAY_SIZE(getpost_hdrs);
+		} else if (strstr(url, "/activations/") != NULL) {
+			/* IS-08 /map/activations/{activationId} */
+			hdrs = getdel_hdrs;
+			nhdrs = ARRAY_SIZE(getdel_hdrs);
 		}
 
 		response_ctx->status = HTTP_200_OK;
@@ -772,9 +1009,10 @@ static int nmos_handler(struct http_client_ctx *client,
 	bool has_body = method == HTTP_POST || method == HTTP_PUT ||
 			method == HTTP_PATCH || method == HTTP_DELETE;
 
-#ifdef CONFIG_NMOS_IS05
-	/* Accumulate PATCH/POST bodies for the Connection API; an
-	 * overlong body simply fails JSON parsing later (400). */
+#ifdef NMOS_HAVE_BODY
+	/* Accumulate PATCH/POST bodies for the Connection / Channel
+	 * Mapping APIs; an overlong body simply fails JSON parsing
+	 * later (400). */
 	if (has_body && request_ctx->data_len > 0) {
 		size_t space = sizeof(nmos_body) - nmos_body_len;
 		size_t copy = MIN(request_ctx->data_len, space);
@@ -791,7 +1029,7 @@ static int nmos_handler(struct http_client_ctx *client,
 
 	ARG_UNUSED(request_ctx);
 
-#ifdef CONFIG_NMOS_IS05
+#ifdef NMOS_HAVE_BODY
 	nmos_dispatch(method, url, response_ctx, nmos_body, nmos_body_len);
 	nmos_body_len = 0;
 #else

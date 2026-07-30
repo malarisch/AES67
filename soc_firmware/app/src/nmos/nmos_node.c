@@ -23,6 +23,7 @@
 #include <zephyr/net/hostname.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "nmos.h"
@@ -262,18 +263,73 @@ bool nmos_tx_snapshot(int idx, struct aes67_tx_stream *out)
 	return false;
 }
 
+/* Tag style per resource: BCP-002-02 requires asset distinguishing
+ * information (manufacturer/product/instance-id) on Node and Device,
+ * plus at least one function tag on the Device. Sub-resources keep
+ * empty tags. */
+enum nmos_tag_style {
+	NMOS_TAGS_EMPTY,
+	NMOS_TAGS_NODE,
+	NMOS_TAGS_DEVICE,
+};
+
+static void put_tag(struct json_out *jo, const char *urn, const char *value)
+{
+	jo_key(jo, urn);
+	jo_arr_begin(jo);
+	jo_fmt(jo, "\"%s\",", value);
+	jo_arr_end(jo);
+}
+
+static void put_tags(struct json_out *jo, enum nmos_tag_style style)
+{
+	jo_key(jo, "tags");
+	jo_obj_begin(jo);
+	if (style != NMOS_TAGS_EMPTY) {
+		char vendor[AES67_VENDOR_MAX];
+		char product[AES67_PRODUCT_MAX];
+		char serial[AES67_SERIAL_MAX];
+
+		aes67_config_lock();
+		strncpy(vendor, aes67_config_get()->vendor, sizeof(vendor));
+		strncpy(product, aes67_config_get()->product, sizeof(product));
+		strncpy(serial, aes67_config_get()->serial, sizeof(serial));
+		aes67_config_unlock();
+		vendor[sizeof(vendor) - 1] = '\0';
+		product[sizeof(product) - 1] = '\0';
+		serial[sizeof(serial) - 1] = '\0';
+
+		put_tag(jo, "urn:x-nmos:tag:asset:manufacturer/v1.0", vendor);
+		put_tag(jo, "urn:x-nmos:tag:asset:product/v1.0", product);
+		put_tag(jo, "urn:x-nmos:tag:asset:instance-id/v1.0", serial);
+	}
+	if (style == NMOS_TAGS_DEVICE) {
+		jo_key(jo, "urn:x-nmos:tag:asset:function/v1.0");
+		jo_arr_begin(jo);
+		if (nmos_tx_count() > 0) {
+			jo_raw(jo, "\"Encoder\",");
+		}
+		if (nmos_rx_count() > 0) {
+			jo_raw(jo, "\"Decoder\",");
+		}
+		if (nmos_tx_count() == 0 && nmos_rx_count() == 0) {
+			jo_raw(jo, "\"Audio\",");
+		}
+		jo_arr_end(jo);
+	}
+	jo_obj_end(jo);
+}
+
 /* id/version/label/description/tags — required on every resource. */
 static void put_core(struct json_out *jo, const char *id,
 		     const struct nmos_tai *ver, const char *label,
-		     const char *desc)
+		     const char *desc, enum nmos_tag_style tags)
 {
 	jo_str(jo, "id", id);
 	put_version(jo, ver);
 	jo_str(jo, "label", label);
 	jo_str(jo, "description", desc);
-	jo_key(jo, "tags");
-	jo_obj_begin(jo);
-	jo_obj_end(jo);
+	put_tags(jo, tags);
 }
 
 static void put_empty_obj(struct json_out *jo, const char *key)
@@ -310,6 +366,102 @@ static void fmt_eui(char *buf, size_t sz, const uint8_t *id, int len)
 }
 
 /* ================================================================
+ * BCP-004-01 / BCP-004-02 capabilities
+ *
+ * One constraint set describing the PCM envelope the gateware can
+ * produce/consume. caps.version is stamped once at boot BEFORE the
+ * resource versions (BCP-004 requires caps.version <= resource version
+ * at all times, and it must NOT move on IS-05 activations — IS-05-02
+ * checks both).
+ * ================================================================ */
+
+static struct nmos_tai caps_ver;
+
+static void put_enum_u32(struct json_out *jo, const char *urn,
+			 const uint32_t *vals, int n)
+{
+	jo_key(jo, urn);
+	jo_obj_begin(jo);
+	jo_key(jo, "enum");
+	jo_arr_begin(jo);
+	for (int i = 0; i < n; i++) {
+		jo_fmt(jo, "%u,", vals[i]);
+	}
+	jo_arr_end(jo);
+	jo_obj_end(jo);
+}
+
+/* Emits "constraint_sets" and "version" into an open caps object. */
+static void put_constraint_sets(struct json_out *jo, int max_ch)
+{
+	static const uint32_t depths[] = {24, 16};
+	uint32_t rate;
+
+	aes67_config_lock();
+	rate = aes67_config_get()->default_sample_rate;
+	aes67_config_unlock();
+	if (rate == 0) {
+		rate = AES67_DEFAULT_SAMPLE_RATE;
+	}
+
+	jo_key(jo, "constraint_sets");
+	jo_arr_begin(jo);
+	jo_obj_begin(jo);
+
+	jo_fmt(jo, "\"urn:x-nmos:cap:meta:label\":\"%u Hz PCM\",", rate);
+
+	jo_key(jo, "urn:x-nmos:cap:format:channel_count");
+	jo_obj_begin(jo);
+	jo_uint(jo, "minimum", 1);
+	jo_uint(jo, "maximum", (uint32_t)max_ch);
+	jo_obj_end(jo);
+
+	jo_key(jo, "urn:x-nmos:cap:format:sample_rate");
+	jo_obj_begin(jo);
+	jo_key(jo, "enum");
+	jo_arr_begin(jo);
+	jo_obj_begin(jo);
+	jo_uint(jo, "numerator", rate);
+	jo_uint(jo, "denominator", 1);
+	jo_obj_end(jo);
+	jo_arr_end(jo);
+	jo_obj_end(jo);
+
+	put_enum_u32(jo, "urn:x-nmos:cap:format:sample_depth",
+		     depths, ARRAY_SIZE(depths));
+
+	/* 1 ms packet time only: the verified operating point of the
+	 * FPGA RX/TX path. Widen once other spp values are validated. */
+	jo_key(jo, "urn:x-nmos:cap:transport:packet_time");
+	jo_obj_begin(jo);
+	jo_key(jo, "enum");
+	jo_arr_begin(jo);
+	jo_raw(jo, "1,");
+	jo_arr_end(jo);
+	jo_obj_end(jo);
+
+	jo_obj_end(jo);
+	jo_arr_end(jo);
+
+	jo_fmt(jo, "\"version\":\"%llu:%u\",",
+	       (unsigned long long)caps_ver.sec, caps_ver.nsec);
+}
+
+/* Stream channel limit: capped by the packet format (8 per AES67) and,
+ * on the RX side, by the number of physical DA channels every stream
+ * channel must land on (the ring has no discard sink). */
+static int nmos_rx_max_ch(void)
+{
+	uint8_t n = fpga_hal_syscfg()->rx_channels;
+
+	if (!fpga_hal_syscfg_valid() || n == 0 ||
+	    n > AES67_MAX_CH_PER_STREAM) {
+		return AES67_MAX_CH_PER_STREAM;
+	}
+	return n;
+}
+
+/* ================================================================
  * Node (/self)
  * ================================================================ */
 
@@ -327,7 +479,8 @@ void nmos_build_self(struct json_out *jo)
 	copy_device_label(label, sizeof(label));
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &node_ver, label, "AES67 audio node");
+	put_core(jo, uuid, &node_ver, label, "AES67 audio node",
+		 NMOS_TAGS_NODE);
 	jo_str(jo, "hostname", net_hostname_get());
 
 	/* href is the API root (scheme://host:port/) — controllers and the
@@ -413,7 +566,7 @@ void nmos_build_device(struct json_out *jo)
 	}
 
 	jo_obj_begin(jo);
-	put_core(jo, uuid, &device_ver, label, desc);
+	put_core(jo, uuid, &device_ver, label, desc, NMOS_TAGS_DEVICE);
 	jo_str(jo, "type", "urn:x-nmos:device:generic");
 	put_uuid_str(jo, "node_id", NMOS_RES_NODE, 0);
 
@@ -454,6 +607,24 @@ void nmos_build_device(struct json_out *jo)
 		jo_obj_end(jo);
 	}
 #endif
+#ifdef CONFIG_NMOS_IS08
+	{
+		char ip[INET_ADDRSTRLEN];
+		char href[96];
+
+		nmos_ip_str(ip, sizeof(ip));
+		snprintf(href, sizeof(href),
+			 "http://%s:%u/x-nmos/channelmapping/"
+			 NMOS_IS08_VERSION "/",
+			 ip, NMOS_HTTP_PORT);
+		jo_obj_begin(jo);
+		jo_str(jo, "href", href);
+		jo_str(jo, "type",
+		       "urn:x-nmos:control:cm-ctrl/" NMOS_IS08_VERSION);
+		jo_bool(jo, "authorization", false);
+		jo_obj_end(jo);
+	}
+#endif
 	jo_arr_end(jo);
 
 	jo_obj_end(jo);
@@ -475,7 +646,7 @@ bool nmos_build_source(struct json_out *jo, int idx)
 
 	jo_obj_begin(jo);
 	res_label(label, sizeof(label), "source", idx);
-	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name, NMOS_TAGS_EMPTY);
 	put_empty_obj(jo, "caps");
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_key(jo, "parents");
@@ -517,7 +688,7 @@ bool nmos_build_flow(struct json_out *jo, int idx)
 
 	jo_obj_begin(jo);
 	res_label(label, sizeof(label), "flow", idx);
-	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name, NMOS_TAGS_EMPTY);
 	put_uuid_str(jo, "source_id", NMOS_RES_SOURCE, idx);
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_key(jo, "parents");
@@ -548,12 +719,17 @@ bool nmos_build_sender(struct json_out *jo, int idx)
 
 	jo_obj_begin(jo);
 	res_label(label, sizeof(label), "sender", idx);
-	put_core(jo, uuid, &tx_vers[idx], label, tx.name);
+	put_core(jo, uuid, &tx_vers[idx], label, tx.name, NMOS_TAGS_EMPTY);
 	put_uuid_str(jo, "flow_id", NMOS_RES_FLOW, idx);
 	jo_str(jo, "transport", "urn:x-nmos:transport:rtp.mcast");
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	snprintf(buf, sizeof(buf), "http://%s/x-nmos/manifest/%s", ip, uuid);
 	jo_str(jo, "manifest_href", buf);
+	/* BCP-004-02 sender capabilities (IS-04 v1.3 senders have caps). */
+	jo_key(jo, "caps");
+	jo_obj_begin(jo);
+	put_constraint_sets(jo, AES67_MAX_CH_PER_STREAM);
+	jo_obj_end(jo);
 	jo_key(jo, "interface_bindings");
 	jo_arr_begin(jo);
 	jo_raw(jo, "\"" NMOS_IFACE_NAME "\",");
@@ -604,7 +780,8 @@ bool nmos_build_receiver(struct json_out *jo, int idx)
 	jo_obj_begin(jo);
 	put_core(jo, uuid, &rx_vers[idx], label,
 		 (active && rx->name[0] != '\0') ? rx->name
-						 : "AES67 RTP receiver");
+						 : "AES67 RTP receiver",
+		 NMOS_TAGS_EMPTY);
 	put_uuid_str(jo, "device_id", NMOS_RES_DEVICE, 0);
 	jo_str(jo, "transport", "urn:x-nmos:transport:rtp");
 	jo_key(jo, "interface_bindings");
@@ -618,6 +795,7 @@ bool nmos_build_receiver(struct json_out *jo, int idx)
 	jo_arr_begin(jo);
 	jo_raw(jo, "\"audio/L24\",\"audio/L16\",");
 	jo_arr_end(jo);
+	put_constraint_sets(jo, nmos_rx_max_ch());
 	jo_obj_end(jo);
 	jo_key(jo, "subscription");
 	jo_obj_begin(jo);
@@ -743,6 +921,39 @@ void nmos_get_mdns_info(struct nmos_mdns_info *out)
 	*out = mdns_info;
 }
 
+/* IS-08: the Device version SHOULD move when the channel map changes
+ * (IS-08-02 test_01 requires it). */
+void nmos_device_touch(void)
+{
+	nmos_tai_now(&device_ver);
+	mdns_info.ver_dvc++;
+}
+
+void nmos_tai_str(char *buf, size_t sz, const struct nmos_tai *t)
+{
+	snprintf(buf, sz, "%llu:%09u", (unsigned long long)t->sec, t->nsec);
+}
+
+bool nmos_tai_parse(const char *s, struct nmos_tai *out)
+{
+	char *end;
+	unsigned long long sec = strtoull(s, &end, 10);
+
+	if (end == s || *end != ':') {
+		return false;
+	}
+
+	const char *ns_start = end + 1;
+	unsigned long nsec = strtoul(ns_start, &end, 10);
+
+	if (end == ns_start || *end != '\0' || nsec >= 1000000000UL) {
+		return false;
+	}
+	out->sec = sec;
+	out->nsec = (uint32_t)nsec;
+	return true;
+}
+
 bool nmos_have_ip(void)
 {
 	return nmos_ip_valid;
@@ -779,6 +990,8 @@ int nmos_start(void)
 {
 	int ret;
 
+	/* caps.version strictly before the resource versions. */
+	nmos_tai_now(&caps_ver);
 	touch_all();
 
 	ret = aes67_conn_register_tx_observer(nmos_tx_observer);
@@ -792,6 +1005,10 @@ int nmos_start(void)
 
 #ifdef CONFIG_NMOS_IS05
 	nmos_is05_init();
+#endif
+
+#ifdef CONFIG_NMOS_IS08
+	nmos_is08_init();
 #endif
 
 #ifdef CONFIG_NMOS_REGISTRATION

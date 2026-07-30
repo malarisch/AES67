@@ -30,7 +30,7 @@ LOG_MODULE_REGISTER(aes67_conn, LOG_LEVEL_INF);
 #define FOREIGN_TIMEOUT_MS       (3 * 30 * 1000)
 #define FOREIGN_EXPIRE_PERIOD    K_SECONDS(10)
 
-#define MAX_TX_OBSERVERS 6
+#define MAX_TX_OBSERVERS 8
 
 /* ---- State ---- */
 static struct net_if *conn_iface;
