@@ -14,3 +14,14 @@ manifest:
       clone-depth: 1
       import:
         path-prefix: external
+        # Only the modules our boards actually link — everything else in
+        # Zephyr's manifest (vendor HALs, LoRa, crypto, ...) is dead
+        # weight for this project and would be re-cloned on every CI run.
+        # Extend when a new board/feature needs its module:
+        #   picolibc      libc linked into every image
+        #   fatfs         SD-card FAT (LiteX boards)
+        #   hal_espressif ESP32-S3 external-MCU build
+        name-allowlist:
+          - picolibc
+          - fatfs
+          - hal_espressif
