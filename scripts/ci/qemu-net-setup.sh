@@ -26,6 +26,17 @@ if [ "${1:-up}" = "down" ]; then
     exit 0
 fi
 
+# Creating and configuring a TAP device needs CAP_NET_ADMIN. Containers
+# (act, plain docker) usually lack it, and the failure mode further down
+# is a bare "Operation not permitted" from ip(8) — say so up front.
+ip link del "${IFACE}-probe" 2>/dev/null || true
+if ! ip tuntap add "${IFACE}-probe" mode tap 2>/dev/null; then
+    echo "error: cannot create TAP devices (CAP_NET_ADMIN missing?)." >&2
+    echo "       In a container, add: --cap-add=NET_ADMIN --device=/dev/net/tun" >&2
+    exit 1
+fi
+ip link del "${IFACE}-probe"
+
 if ! ip link show "$IFACE" >/dev/null 2>&1; then
     ip tuntap add "$IFACE" mode tap user "$TAP_USER"
 fi

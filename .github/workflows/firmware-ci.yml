@@ -28,7 +28,7 @@ env:
 
 jobs:
   firmware-qemu:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -133,28 +133,57 @@ jobs:
           west twister -T soc_firmware/tests -T soc_firmware/app \
             -p qemu_riscv64 --inline-logs -v -O twister-out
 
-      - name: Dump twister handler logs on failure
+      - name: Dump twister logs on failure
         if: failure()
         run: |
-          find twister-out -name "handler.log" -o -name "qemu.log" | while read -r f; do
-            echo "===== $f ====="
+          # Twister keeps the emulator's own output in qemu.stdout /
+          # qemu.stderr inside each build directory — NOT in handler.log,
+          # which only carries the guest's serial console. A "unexpected
+          # eof" verdict means the `ninja run` target died before the
+          # harness saw its end marker, and the reason is in qemu.stderr.
+          for f in $(find twister-out \( -name "handler.log" \
+                                      -o -name "qemu.stdout" \
+                                      -o -name "qemu.stderr" \
+                                      -o -name "device.log" \) -size +0); do
+            echo "::group::$f"
             cat "$f"
+            echo "::endgroup::"
           done
 
-      - name: QEMU smoke test on failure
-        # Re-runs the twister-built image by hand so QEMU's own stderr
-        # (bad option, missing lib, wrong binary) lands in the job log —
-        # twister swallows it.
+          # Per-configuration verdicts, so the failing scenario is named
+          # even when the console stayed empty.
+          if [ -f twister-out/twister.json ]; then
+            echo "===== scenario status ====="
+            jq -r '.testsuites[] | "\(.status)\t\(.name)\t\(.reason // "")"' \
+               twister-out/twister.json || true
+          fi
+
+      - name: Re-run a failed configuration by hand
+        # Runs the exact `ninja run` target twister invoked, with its
+        # output on stdout instead of in a file nobody reads. Catches the
+        # cases twister reports only as "unexpected eof": a re-configure
+        # error, a missing emulator binary, rejected machine arguments.
         if: failure()
         run: |
+          echo "QEMU_BIN=$QEMU_BIN"
           "$QEMU_BIN" --version || true
-          ELF=$(find twister-out -name zephyr.elf | head -1)
-          echo "ELF: $ELF"
-          timeout 15 "$QEMU_BIN" -machine virt -bios none -m 256 \
-            -cpu rv64i,i=on,m=on,a=on,f=on,d=on,c=on,zicsr=on,zifencei=on,zicntr=on,pmp=on,u=on \
-            -global virtio-mmio.force-legacy=false -nographic \
-            -netdev user,id=n1 -device virtio-net-device,netdev=n1,bus=virtio-mmio-bus.0 \
-            -kernel "$ELF" 2>&1 | head -40 || true
+
+          DIR=$(jq -r '[.testsuites[] | select(.status != "passed")][0].name // empty' \
+                   twister-out/twister.json 2>/dev/null)
+          echo "first failing scenario: ${DIR:-<unknown>}"
+
+          # Map the scenario back to its build directory; fall back to any
+          # build directory that has a zephyr.elf.
+          BUILD=$(find twister-out -name build.ninja -printf '%h\n' | head -1)
+          if [ -n "$DIR" ]; then
+            CAND=$(find twister-out -type d -name "$(basename "$DIR")" | head -1)
+            [ -n "$CAND" ] && BUILD="$CAND"
+          fi
+          echo "build dir: $BUILD"
+
+          # `run` needs a reader on the fifo or QEMU blocks; give it one.
+          mkfifo "$BUILD/qemu-fifo.in" "$BUILD/qemu-fifo.out" 2>/dev/null || true
+          timeout 30 ninja -C "$BUILD" run < /dev/null 2>&1 | tail -60 || true
 
       - name: Upload twister artifacts
         # Skipped under act: no artifact service (ACTIONS_RUNTIME_TOKEN).
@@ -162,25 +191,52 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: twister-out
-          path: twister-out/**/handler.log
+          path: |
+            twister-out/twister.json
+            twister-out/twister.log
+            twister-out/**/handler.log
+            twister-out/**/qemu.stdout
+            twister-out/**/qemu.stderr
+            twister-out/**/build.log
           if-no-files-found: ignore
 
       - name: Build QEMU image (TAP networking)
         run: west build -b qemu_riscv64 -d soc_firmware/app/build_qemu soc_firmware/app
 
+      # ---- NMOS conformance: needs a host TAP device ----
+      # Creating "zeth" requires NET_ADMIN, which act's container does not
+      # have by default ("Failed to send flush request: Operation not
+      # permitted"). The steps below are therefore skipped under act; to
+      # run them locally anyway, give the container the capability:
+      #
+      #   act --container-options "--cap-add=NET_ADMIN --device=/dev/net/tun"
+      #
+      # Everything up to and including twister runs under act unchanged.
       - name: TAP interface for QEMU
+        if: ${{ !env.ACT }}
         run: sudo scripts/ci/qemu-net-setup.sh
 
       - name: Fetch nmos-testing
+        if: ${{ !env.ACT }}
         run: git clone --depth 1 https://github.com/AMWA-TV/nmos-testing "$RUNNER_TEMP/nmos-testing"
 
       - name: NMOS conformance (IS-04 / IS-05 / IS-08)
+        if: ${{ !env.ACT }}
         run: |
           NMOS_TESTING="$RUNNER_TEMP/nmos-testing" \
           BUILD_DIR="$PWD/soc_firmware/app/build_qemu" \
           RESULTS_DIR="$PWD/nmos-results" \
           QEMU="$QEMU_BIN" \
           scripts/ci/run-nmos-conformance.sh
+
+      - name: Note skipped steps (act)
+        # So a green local run is not mistaken for full coverage.
+        if: ${{ env.ACT }}
+        run: |
+          echo "Skipped under act: TAP setup + NMOS conformance (no NET_ADMIN)."
+          echo "Built and ran: twister unit suites + QEMU boot test."
+          echo "To include NMOS locally, re-run act with:"
+          echo "  --container-options \"--cap-add=NET_ADMIN --device=/dev/net/tun\""
 
       - name: Upload NMOS results
         # Skipped under act: no artifact service (ACTIONS_RUNTIME_TOKEN).

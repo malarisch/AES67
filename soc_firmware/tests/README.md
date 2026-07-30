@@ -65,6 +65,25 @@ are assembled at runtime with a variable number of resources, which a
 descriptor-based encoder cannot express. `nmos_json.c` likewise keeps
 its own DOM — see its header comment.
 
+## QEMU networking
+
+A suite that sets `CONFIG_NETWORKING=y` **must** also set
+`CONFIG_NET_QEMU_USER=y`. The `NET_QEMU_NETWORKING` choice has no "none"
+option, and on `qemu_riscv64` neither SLIP nor PPP is available, so it
+falls through to `NET_QEMU_ETHERNET` — which launches QEMU with
+`-netdev tap,...,ifname=zeth` and a hard dependency on a host TAP
+interface. Any machine without `zeth` (every CI runner: the workflow
+only creates it later, for the NMOS step) makes QEMU exit within
+milliseconds, and twister reports the run as `unexpected eof` with no
+further explanation. `NET_QEMU_USER` selects QEMU's built-in SLIRP NAT
+instead, which needs nothing from the host.
+
+Two traps make this easy to miss: a developer machine that has run the
+QEMU image by hand has a leftover `zeth` and passes, and the reason QEMU
+died is written to `qemu.stderr` in the build directory, which is *not*
+`handler.log` (that one only carries the guest's serial console). The CI
+workflow dumps both on failure.
+
 ## Notes for new suites
 
 * Add a directory with `CMakeLists.txt`, `prj.conf`, `testcase.yaml` and
