@@ -88,12 +88,23 @@ jobs:
           # Locate the SDK's qemu-system-riscv64; the minimal tarball may
           # ship hosttools only as an installer (or not at all) — run the
           # installer if present, fall back to the distro package.
-          QEMU_BIN=$(find "$ZSDK_DIR" -name qemu-system-riscv64 -type f 2>/dev/null | head -1)
+          # The hosttools carry TWO qemu builds (usr/bin and the Xilinx
+          # variant under usr/xilinx/bin) — only usr/bin supports the
+          # generic virt machine, so never pick by blind find order.
+          find_qemu() {
+            for p in "$ZSDK_DIR"/sysroots/*/usr/bin/qemu-system-riscv64 \
+                     "$ZSDK_DIR"/hosttools/sysroots/*/usr/bin/qemu-system-riscv64; do
+              if [ -x "$p" ]; then echo "$p"; return; fi
+            done
+            find "$ZSDK_DIR" -name qemu-system-riscv64 -type f \
+                 -not -path "*xilinx*" 2>/dev/null | head -1
+          }
+          QEMU_BIN=$(find_qemu)
           if [ -z "$QEMU_BIN" ]; then
             HT=$(find "$ZSDK_DIR" -name "*hosttools*standalone*.sh" 2>/dev/null | head -1)
             if [ -n "$HT" ]; then
               sh "$HT" -y -d "$ZSDK_DIR"
-              QEMU_BIN=$(find "$ZSDK_DIR" -name qemu-system-riscv64 -type f 2>/dev/null | head -1)
+              QEMU_BIN=$(find_qemu)
             fi
           fi
           # The SDK-built qemu may not run on this host (glibc/library
@@ -126,6 +137,21 @@ jobs:
             echo "===== $f ====="
             cat "$f"
           done
+
+      - name: QEMU smoke test on failure
+        # Re-runs the twister-built image by hand so QEMU's own stderr
+        # (bad option, missing lib, wrong binary) lands in the job log —
+        # twister swallows it.
+        if: failure()
+        run: |
+          "$QEMU_BIN" --version || true
+          ELF=$(find twister-out -name zephyr.elf | head -1)
+          echo "ELF: $ELF"
+          timeout 15 "$QEMU_BIN" -machine virt -bios none -m 256 \
+            -cpu rv64i,i=on,m=on,a=on,f=on,d=on,c=on,zicsr=on,zifencei=on,zicntr=on,pmp=on,u=on \
+            -global virtio-mmio.force-legacy=false -nographic \
+            -netdev user,id=n1 -device virtio-net-device,netdev=n1,bus=virtio-mmio-bus.0 \
+            -kernel "$ELF" 2>&1 | head -40 || true
 
       - name: Upload twister artifacts
         # Skipped under act: no artifact service (ACTIONS_RUNTIME_TOKEN).
