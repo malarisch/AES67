@@ -58,6 +58,9 @@
 #define AES67_BURST_BUF        2048u
 #define AES67_BURST_WR_CHUNK   256u   /* 7 + 4*256 + 8  = 1039 B */
 #define AES67_BURST_RD_CHUNK   240u   /* 7 + 7*240 + 16 = 1703 B */
+/* Packed eth_buf layout (4 payload bytes per word), chunk in words: */
+#define AES67_PACKED_WR_CHUNK  384u   /* 7 + 4*384 + 8  = 1551 B (frame = 380 words) */
+#define AES67_PACKED_RD_CHUNK  288u   /* 7 + 7*288 + 16 = 2039 B */
 
 /* --- Driver private state ------------------------------------------------- */
 struct aes67_priv {
@@ -94,6 +97,11 @@ struct aes67_priv {
 	bool                  hwts_tx_on;
 	bool                  hwts_rx_on;
 
+	/* eth_buf word packing, probed from the bytes_per_word CSR: true on
+	 * packed gateware (4 payload bytes per word, little-endian lanes),
+	 * false on legacy bitstreams (1 byte per word). */
+	bool                  buf_packed;
+
 	/* Control char device (/dev/aes67ctl). */
 	struct miscdevice     ctl_dev;
 };
@@ -113,6 +121,15 @@ int  aes67_wb_write_burst_locked(struct aes67_priv *p, u32 addr,
 				 const u8 *bytes, unsigned int n);
 int  aes67_wb_read_burst_locked(struct aes67_priv *p, u32 addr,
 				u8 *bytes, unsigned int n);
+
+/* Packed-layout variants (eth_buf with 4 payload bytes per word, little-
+ * endian lanes). `n` is a byte count; a final partial word is zero-padded
+ * on write and its surplus lanes are discarded on read (never writing more
+ * than `n` bytes to the caller's buffer). */
+int  aes67_wb_write_burst_packed_locked(struct aes67_priv *p, u32 addr,
+					const u8 *bytes, unsigned int n);
+int  aes67_wb_read_burst_packed_locked(struct aes67_priv *p, u32 addr,
+				       u8 *bytes, unsigned int n);
 
 int  aes67_ctl_register(struct aes67_priv *p);
 void aes67_ctl_unregister(struct aes67_priv *p);

@@ -104,7 +104,12 @@ static void aes67_tx_one(struct aes67_priv *p, struct sk_buff *skb)
 	mutex_lock(&p->bus_lock);
 	aes67_wait_tx_done_locked(p);
 	/* Stream the whole frame in one burst instead of a write per byte. */
-	ret = aes67_wb_write_burst_locked(p, tx_base, skb->data, skb->len);
+	if (p->buf_packed)
+		ret = aes67_wb_write_burst_packed_locked(p, tx_base, skb->data,
+							 skb->len);
+	else
+		ret = aes67_wb_write_burst_locked(p, tx_base, skb->data,
+						  skb->len);
 	if (!ret)
 		ret = aes67_wb_write_locked(p, AES67_REG_ETH_BUF_TX_LEN, skb->len);
 	if (!ret)
@@ -180,6 +185,7 @@ static bool aes67_rx_one(struct aes67_priv *p)
 	u32 raw_len;
 	unsigned int total, payload;
 	u8 cap_sec = 0;
+	bool trailer_ok = true;
 	u32 cap_nsec = 0;
 	int ret;
 
@@ -199,7 +205,11 @@ static bool aes67_rx_one(struct aes67_priv *p)
 	}
 
 	/* Pull the whole frame in one burst instead of a read per byte. */
-	ret = aes67_wb_read_burst_locked(p, rx_base, p->rx_buf, total);
+	if (p->buf_packed)
+		ret = aes67_wb_read_burst_packed_locked(p, rx_base, p->rx_buf,
+							total);
+	else
+		ret = aes67_wb_read_burst_locked(p, rx_base, p->rx_buf, total);
 	if (ret) {
 		ndev->stats.rx_errors++;
 		goto release;
@@ -208,6 +218,14 @@ static bool aes67_rx_one(struct aes67_priv *p)
 	if (trailer) {
 		const u8 *t = &p->rx_buf[total - trailer];
 
+		/* Integrity gate: the gateware writes the seconds byte as
+		 * 0x0S and zeros nsec bits [31:30]; a violation means the
+		 * trailer bytes were corrupted on the bus. */
+		if ((t[0] & 0xf0) || (t[4] & 0xc0)) {
+			net_warn_ratelimited("%s: RX trailer corrupt (%02x .. %02x), dropping ts\n",
+					     ndev->name, t[0], t[4]);
+			trailer_ok = false;
+		}
 		cap_sec  = t[0] & 0xf;
 		cap_nsec = ((u32)t[1]) | ((u32)t[2] << 8) |
 			   ((u32)t[3] << 16) | ((u32)t[4] << 24);
@@ -231,7 +249,7 @@ release:
 	}
 	skb_put_data(skb, p->rx_buf, payload);
 
-	if (rx_ts && p->hwts_rx_on) {
+	if (rx_ts && trailer_ok && p->hwts_rx_on) {
 		u64 ns;
 
 		if (!aes67_ts_reconstruct(p, cap_sec, cap_nsec, &ns))
@@ -496,6 +514,18 @@ static int aes67_probe(struct spi_device *spi)
 		eth_hw_addr_set(ndev, mac);
 	} else {
 		eth_hw_addr_random(ndev);
+	}
+
+	/* eth_buf word packing: only the exact value 4 selects the packed
+	 * layout — on legacy gateware this address is not a CSR and reads
+	 * as junk (usually 0). */
+	{
+		u32 bpw = 0;
+
+		p->buf_packed = !aes67_wb_read(p, AES67_REG_ETH_BUF_BYTES_PER_WORD,
+					       &bpw) && bpw == 4;
+		dev_info(&spi->dev, "eth_buf packing: %u byte(s)/word\n",
+			 p->buf_packed ? 4 : 1);
 	}
 
 	ret = aes67_phc_register(p);

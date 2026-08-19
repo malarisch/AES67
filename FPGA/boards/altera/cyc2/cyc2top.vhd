@@ -8,7 +8,7 @@ use work.audioclks_pkg.all;
 use work.system_cfg_pkg.all;
 ENTITY cyc2top IS
 	generic (
-		syscfg: t_global_system_cfg := global_system_cfg_mi
+		syscfg: t_global_system_cfg := global_system_cfg_lo
 	);
 	PORT 
 	(

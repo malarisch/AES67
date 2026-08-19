@@ -14,11 +14,19 @@ use crate::ConfigError;
 pub struct Device<T: Transport> {
     transport: T,
     map: CsrMap,
+    /// Cached `eth_buf` packing probe (see `ethbuf::Device::eth_buf_packed`):
+    /// `None` until first queried, then whether the gateware packs 4 payload
+    /// bytes per 32-bit buffer word. Constant per bitstream.
+    pub(crate) eth_buf_packed: Option<bool>,
 }
 
 impl<T: Transport> Device<T> {
     pub fn new(transport: T, map: CsrMap) -> Self {
-        Self { transport, map }
+        Self {
+            transport,
+            map,
+            eth_buf_packed: None,
+        }
     }
 
     /// Borrow the CSR map (e.g. to enumerate registers for `dump`).

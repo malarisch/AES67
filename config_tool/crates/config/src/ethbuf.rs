@@ -5,11 +5,17 @@
 //! the on-target firmware (`drivers/eth_litex/eth_litex.c`):
 //!
 //! * **RX** (FPGA → host): when `rx_ready` is set, read `rx_len` (which includes
-//!   the 4-byte FCS), burst-read `rx_len-4` bytes (one byte per 32-bit word from
-//!   the RX region), pulse `rx_ack` (1 then 0) to release the buffer, and clear
-//!   the `ev_pending` RX-ready event (which de-asserts the IRQ line).
+//!   the 4-byte FCS), burst-read `rx_len-4` bytes from the RX region, pulse
+//!   `rx_ack` (1 then 0) to release the buffer, and clear the `ev_pending`
+//!   RX-ready event (which de-asserts the IRQ line).
 //! * **TX** (host → FPGA): burst-write the frame bytes to the TX region
 //!   (region base + 0x2000) and set `tx_len`; the MAC appends the FCS.
+//!
+//! The buffer word packing depends on the loaded gateware, probed once via the
+//! `eth_buf_bytes_per_word` CSR: packed builds carry 4 payload bytes per
+//! 32-bit word (little-endian lanes, frame byte 4i+k in word i bits
+//! [8k+7:8k]); legacy builds carry 1 byte per word (low byte), and do not
+//! have the CSR at all.
 //!
 //! Register/region names come from the CSR map, so nothing is hard-coded.
 
@@ -27,6 +33,7 @@ const REG_RX_ACK: &str = "eth_buf_rx_ack";
 const REG_TX_LEN: &str = "eth_buf_tx_len";
 const REG_EV_ENABLE: &str = "eth_buf_ev_enable";
 const REG_EV_PENDING: &str = "eth_buf_ev_pending";
+const REG_BYTES_PER_WORD: &str = "eth_buf_bytes_per_word";
 
 // The transmit trigger and completion live in the AES67 control/status CSRs, not
 // in eth_buf: writing tx_len only stages the frame — the MAC transmits when
@@ -70,6 +77,20 @@ pub trait EthBufBridge {
 }
 
 impl<T: Transport> Device<T> {
+    /// Does the loaded gateware pack 4 payload bytes per buffer word?
+    /// Probed once (a legacy bitstream has no `eth_buf_bytes_per_word` CSR,
+    /// and a stale bitstream under a new map reads junk there — only the
+    /// exact value 4 selects the packed layout), then cached.
+    fn eth_buf_packed(&mut self) -> Result<bool, ConfigError> {
+        if let Some(packed) = self.eth_buf_packed {
+            return Ok(packed);
+        }
+        let packed = self.map().get(REG_BYTES_PER_WORD).is_some()
+            && self.read(REG_BYTES_PER_WORD)? == 4;
+        self.eth_buf_packed = Some(packed);
+        Ok(packed)
+    }
+
     /// `(rx_base, tx_base)` byte addresses from the CSR map's `eth_buf` region.
     fn eth_region(&self) -> Result<(u32, u32), ConfigError> {
         let (base, _size) = self.map().region(REGION).ok_or_else(|| {
@@ -126,8 +147,22 @@ impl<T: Transport> EthBufBridge for Device<T> {
 
         let frame = if (MIN_FRAME..=MAX_FRAME).contains(&pkt_len) {
             let (rx_base, _) = self.eth_region()?;
-            let words = self.read_words(rx_base, pkt_len)?;
-            Some(words.iter().map(|w| *w as u8).collect())
+            let bytes = if self.eth_buf_packed()? {
+                // 4 bytes per word, little-endian lanes; the surplus lanes
+                // of the final word are cut off by truncate().
+                let words = self.read_words(rx_base, pkt_len.div_ceil(4))?;
+                let mut bytes: Vec<u8> = words
+                    .iter()
+                    .flat_map(|w| w.to_le_bytes())
+                    .collect();
+                bytes.truncate(pkt_len);
+                bytes
+            } else {
+                // Legacy layout: one payload byte in each word's low byte.
+                let words = self.read_words(rx_base, pkt_len)?;
+                words.iter().map(|w| *w as u8).collect()
+            };
+            Some(bytes)
         } else {
             None // invalid length: drop, but still release the buffer below
         };
@@ -151,7 +186,21 @@ impl<T: Transport> EthBufBridge for Device<T> {
             self.eth_wait_tx_done()?;
         }
         let (_, tx_base) = self.eth_region()?;
-        let words: Vec<u32> = frame.iter().map(|&b| b as u32).collect();
+        let words: Vec<u32> = if self.eth_buf_packed()? {
+            // 4 bytes per word, little-endian lanes; zero-pad the final
+            // partial word (tx_len bounds the frame, the pad is never sent).
+            frame
+                .chunks(4)
+                .map(|c| {
+                    let mut lanes = [0u8; 4];
+                    lanes[..c.len()].copy_from_slice(c);
+                    u32::from_le_bytes(lanes)
+                })
+                .collect()
+        } else {
+            // Legacy layout: one payload byte per word.
+            frame.iter().map(|&b| b as u32).collect()
+        };
         self.write_words(tx_base, &words)?;
         self.write(REG_TX_LEN, frame.len() as u64)?;
         // The real trigger: pulse eth_tx_request.
@@ -231,6 +280,69 @@ memory_region,eth_buf,0x90000000,16384,io
         assert_eq!(dev.eth_rx_take_one().unwrap(), None);
         let pend = dev.map().get("eth_buf_ev_pending").unwrap().addr;
         assert_eq!(dev.peek(pend).unwrap(), EV_RX_READY as u32);
+    }
+
+    /// Same map, but for packed gateware (4 bytes per word) — advertised by
+    /// the eth_buf_bytes_per_word CSR, which legacy maps do not have.
+    fn map_packed() -> CsrMap {
+        CsrMap::from_csv(
+            "\
+csr_register,eth_buf_rx_len,0x9001100c,1,ro
+csr_register,eth_buf_rx_ready,0x90011010,1,ro
+csr_register,eth_buf_rx_ack,0x90011014,1,rw
+csr_register,eth_buf_tx_len,0x90011018,1,rw
+csr_register,eth_buf_ev_enable,0x90011008,1,rw
+csr_register,eth_buf_ev_pending,0x90011004,1,rw
+csr_register,eth_buf_bytes_per_word,0x9001101c,1,ro
+csr_register,aes67_csr_ctrl,0x90010018,1,rw
+csr_register,aes67_csr_status,0x9001000c,1,ro
+memory_region,eth_buf,0x90000000,16384,io
+",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rx_take_packed_unpacks_le_lanes() {
+        let mut dev = Device::new(MockBus::default(), map_packed());
+        seed(&mut dev, "eth_buf_bytes_per_word", 4);
+        // 14-byte frame + 4-byte FCS = rx_len 18 → ceil(14/4) = 4 words.
+        let frame: Vec<u8> = (0..14).collect();
+        for (i, c) in frame.chunks(4).enumerate() {
+            let mut lanes = [0u8; 4];
+            lanes[..c.len()].copy_from_slice(c);
+            dev.poke(0x9000_0000 + 4 * i as u32, u32::from_le_bytes(lanes))
+                .unwrap();
+        }
+        seed(&mut dev, "eth_buf_rx_ready", 1);
+        seed(&mut dev, "eth_buf_rx_len", 18);
+
+        assert_eq!(dev.eth_rx_take_one().unwrap(), Some(frame));
+    }
+
+    #[test]
+    fn tx_packed_packs_le_lanes_and_pads() {
+        let mut dev = Device::new(MockBus::default(), map_packed());
+        seed(&mut dev, "eth_buf_bytes_per_word", 4);
+        let frame: Vec<u8> = vec![0x11, 0x22, 0x33, 0x44, 0x55];
+        dev.eth_tx(&frame, false).unwrap();
+        assert_eq!(dev.peek(0x9000_2000).unwrap(), 0x4433_2211);
+        assert_eq!(dev.peek(0x9000_2004).unwrap(), 0x0000_0055);
+        let tx_len = dev.map().get("eth_buf_tx_len").unwrap().addr;
+        assert_eq!(dev.peek(tx_len).unwrap(), 5);
+    }
+
+    #[test]
+    fn stale_bitstream_value_falls_back_to_legacy() {
+        // Map advertises the CSR (new csr.csv) but the device answers junk
+        // there (old bitstream): must use the legacy one-byte-per-word path.
+        let mut dev = Device::new(MockBus::default(), map_packed());
+        seed(&mut dev, "eth_buf_bytes_per_word", 0);
+        let frame: Vec<u8> = vec![0xaa, 0xbb];
+        // 14-byte minimum doesn't apply to TX; write and check legacy layout.
+        dev.eth_tx(&frame, false).unwrap();
+        assert_eq!(dev.peek(0x9000_2000).unwrap(), 0xaa);
+        assert_eq!(dev.peek(0x9000_2004).unwrap(), 0xbb);
     }
 
     #[test]

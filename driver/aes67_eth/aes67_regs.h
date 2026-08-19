@@ -74,6 +74,7 @@
 #define AES67_REG_ETH_BUF_RX_READY                         0x90011010u
 #define AES67_REG_ETH_BUF_RX_ACK                           0x90011014u
 #define AES67_REG_ETH_BUF_TX_LEN                           0x90011018u
+#define AES67_REG_ETH_BUF_BYTES_PER_WORD                   0x9001101cu
 
 /* Memory regions (byte base addresses). */
 #define AES67_MEM_ETH_BUF                                  0x90000000u
