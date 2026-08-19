@@ -4,6 +4,8 @@ use IEEE.NUMERIC_STD.all;
 use work.miim_types.all;
 use work.ethernet_types.all;
 use work.system_cfg_pkg.all;
+
+use work.wallclock_signals_pkg.all;
 entity ethernet_top is
   generic (
     MIIM_CLOCK_DIVIDER : POSITIVE := 50;
@@ -32,7 +34,6 @@ entity ethernet_top is
 
     eth_ram_data_sys_rtp_o : OUT STD_LOGIC_VECTOR(7 downto 0);
     eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
-
 
     -- TX Signals to Logic
     eth_tx_en_mcu_i : IN STD_LOGIC;
@@ -85,7 +86,8 @@ entity ethernet_top is
     mii_txd_o : OUT std_logic_vector(7 downto 0);
 
     enet_mdio : INOUT std_logic;
-    enet_mdc : OUT std_logic
+    enet_mdc : OUT std_logic;
+    rx_timestamp_i : in t_eth_timestamp
 
   );
 end ethernet_top;
@@ -142,7 +144,8 @@ begin
       rx_byte_count    => received_packet_length_o,
       is_mcu_pkt_tog_o => is_mcu_pkt_tog_receive,
       is_ptp_frame_o => is_ptp_frame_o,
-      is_rtp_pkt_tog_o => is_rtp_pkt_tog_receive);
+      is_rtp_pkt_tog_o => is_rtp_pkt_tog_receive,
+      rx_timestamp_i => rx_timestamp_i);
 
 
 b2v_eth_buf : entity work.eth_ram

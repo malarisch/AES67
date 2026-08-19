@@ -10,17 +10,24 @@
 -- # RX: ethernet_packet_parser asserts parse_mcu_packet when a non-RTP
 -- #     frame is ready in eth_ram.  This module copies the frame from
 -- #     eth_ram into the LiteX RX buffer, then asserts rx_valid + rx_len.
+-- #
+-- #     ethernet_receive latches the RX timestamp per frame and appends
+-- #     it as a 5-byte trailer behind the frame data in eth_ram, so the
+-- #     frame and its timestamp travel together (no shared-register race
+-- #     during bursts).  pkt_len_i therefore already includes those 5
+-- #     bytes.
 -- ####################################################################
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
 
-use work.wallclock_signals_pkg.all;
-
 entity litex_eth_buffer_bridge is
   generic (
 
+    -- true (SW PTP): the RX-timestamp trailer in eth_ram is handed to the SoC
+    -- as part of the frame.  false (HW PTP): the trailer is stripped during
+    -- FILL and the SoC sees the bare frame.
     ADD_RX_TIMESTAMP : boolean := false;
     -- RX ring buffer size in bytes. MUST be a power of two and >= 2048 so the
     -- byte pointers wrap naturally and any single entry (max frame + header +
@@ -40,7 +47,6 @@ entity litex_eth_buffer_bridge is
     buf_rx_len_o    : out std_logic_vector(10 downto 0);
     buf_rx_valid_o  : out std_logic;
     buf_rx_ack_i    : in  std_logic;
-    timestamps_i : in t_eth_timestamps;
     -- TX buffer: this module reads packet data
 
     buf_tx_addr_o   : out std_logic_vector(10 downto 0);
@@ -78,7 +84,7 @@ entity litex_eth_buffer_bridge is
     mac_rx_clock_i      : in  std_logic;
     mac_rx_reset_i      : in  std_logic;
     parse_mcu_packet_tog_i  : in  std_logic;  -- toggles when packet ready
-    pkt_len_i           : in  std_logic_vector(10 downto 0);  -- frame length from ethernet_receive
+    pkt_len_i           : in  std_logic_vector(10 downto 0);  -- frame length from ethernet_receive (incl. 5-byte timestamp trailer)
     eth_ram_data_i      : in  std_logic_vector(7 downto 0);  -- read data from eth_ram read port
     eth_ram_addr_o      : out std_logic_vector(10 downto 0);  -- read address to eth_ram
 
@@ -115,11 +121,12 @@ architecture rtl of litex_eth_buffer_bridge is
   --   DRAIN : ring buffer -> LiteX single buffer  (runs as the SoC acks)
   --
   -- Ring layout, entries packed back-to-back and wrapping at RX_RING_SIZE:
-  --   [len_hi][len_lo][packet byte 0 ... packet last byte][rx-timestamp trailer]
-  -- 'len' is the MCU-visible length (packet + 5-byte trailer when
-  -- ADD_RX_TIMESTAMP) i.e. exactly the byte count handed to the SoC in
-  -- buf_rx_len; the trailer therefore lives inside that length.
-  type t_fill_sm is (FILL_IDLE, FILL_HDR_LO, FILL_COPY, FILL_TS_SEC, FILL_TS_NS, FILL_COMMIT);
+  --   [len_hi][len_lo][packet byte 0 ... packet last byte]
+  -- 'len' is the MCU-visible length, i.e. exactly the byte count handed to
+  -- the SoC in buf_rx_len.  The 5-byte rx-timestamp trailer appended by
+  -- ethernet_receive is part of the packet bytes when ADD_RX_TIMESTAMP and
+  -- stripped during FILL otherwise.
+  type t_fill_sm is (FILL_IDLE, FILL_HDR_LO, FILL_COPY, FILL_COMMIT);
   signal sm_fill : t_fill_sm := FILL_IDLE;
   type t_drain_sm is (DR_IDLE, DR_LEN_HI, DR_LEN_LO, DR_PRIME, DR_COPY, DR_SET_VALID, DR_WAIT_ACK);
   signal sm_drain : t_drain_sm := DR_IDLE;
@@ -139,7 +146,7 @@ architecture rtl of litex_eth_buffer_bridge is
   signal ring_count : integer range 0 to RX_RING_SIZE := 0;                  -- committed bytes
 
   -- FILL working state, latched at frame detection so a newer frame can't tear it.
-  signal fill_pkt_len : unsigned(10 downto 0) := (others => '0'); -- raw packet bytes
+  signal fill_pkt_len : unsigned(10 downto 0) := (others => '0'); -- bytes copied from eth_ram (= MCU-visible length)
   signal fill_total   : unsigned(15 downto 0) := (others => '0'); -- value stored in len hdr
   signal fill_entry   : integer range 0 to RX_RING_SIZE := 0;     -- LEN_HDR_LEN + fill_total
   signal rx_copy_addr : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- entry write offset
@@ -151,7 +158,12 @@ architecture rtl of litex_eth_buffer_bridge is
   signal rx_overflow_reg_1cdc : std_ulogic := '0';
   signal rx_overflow_reg_2cdc : std_ulogic := '0';
 
-  signal parse_mcu_d : std_ulogic := '0';  -- delayed for rising-edge detection
+  signal parse_mcu_d : std_ulogic := '0';  -- delayed for edge detection
+  -- A parser toggle can arrive while FILL is still copying the previous frame
+  -- (back-to-back burst: FILL takes about as long as the frame itself), so the
+  -- edge is latched here together with its length instead of being dropped.
+  signal fill_pending : std_ulogic := '0';
+  signal pend_len     : unsigned(10 downto 0) := (others => '0');
 
   -- CDC for buf_rx_ack (SoC sys_clk → mac_rx_clock)
   signal rx_ack_meta : std_ulogic := '0';
@@ -164,14 +176,9 @@ architecture rtl of litex_eth_buffer_bridge is
   signal buf_rx_addr   : unsigned(10 downto 0);
   signal buf_rx_len    : unsigned(10 downto 0);
   signal tx_zsof : STD_LOGIC := '0';
-  signal ts_write_index : integer range 0 to 3;
 
-  -- RX hardware-timestamp trailer (only when ADD_RX_TIMESTAMP).
+  -- RX hardware-timestamp trailer appended by ethernet_receive in eth_ram.
   constant TS_TRAILER_LEN : natural := 5;  -- 1 byte seconds + 4 bytes nanoseconds
-  -- Latched at frame detection so the 5-cycle trailer write can't be torn by a
-  -- newer frame's timestamp arriving mid-write.
-  signal rx_ts_sec_latch : unsigned(3 downto 0)  := (others => '0');
-  signal rx_ts_ns_latch  : unsigned(29 downto 0) := (others => '0');
 
   -- DRAIN working state.
   signal drain_addr   : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- data byte offset
@@ -311,6 +318,7 @@ begin
     variable v_pkt        : unsigned(10 downto 0);
     variable v_total      : unsigned(15 downto 0);
     variable v_entry      : integer range 0 to RX_RING_SIZE;
+    variable v_pending    : std_ulogic;  -- fill_pending with same-cycle consume-then-set
   begin
     if mac_rx_reset_i = '1' then
       rx_ack_meta      <= '0';
@@ -337,13 +345,13 @@ begin
       fill_pkt_len     <= (others => '0');
       fill_total       <= (others => '0');
       fill_entry       <= 0;
+      fill_pending     <= '0';
+      pend_len         <= (others => '0');
     elsif rising_edge(mac_rx_clock_i) then
       v_commit_len := 0;
       v_pop_len    := 0;
+      v_pending    := fill_pending;
       buf_rx_we_o  <= '0';
-
-      -- Edge detection for parse_mcu_packet toggle
-      parse_mcu_d <= parse_mcu_packet_tog_i;
 
       -- CDC: sync buf_rx_ack into this domain
       rx_ack_meta   <= buf_rx_ack_i;
@@ -362,13 +370,17 @@ begin
       -- ============================================================
       case sm_fill is
         when FILL_IDLE =>
-          if parse_mcu_packet_tog_i /= parse_mcu_d then
-            v_pkt := unsigned(pkt_len_i);
+          if v_pending = '1' then
+            v_pending := '0';
+            -- pend_len includes the 5-byte rx-timestamp trailer that
+            -- ethernet_receive appended behind the frame in eth_ram; strip it
+            -- here unless the SoC is supposed to see it.
             if ADD_RX_TIMESTAMP then
-              v_total := resize(v_pkt, 16) + to_unsigned(TS_TRAILER_LEN, 16);
+              v_pkt := pend_len;
             else
-              v_total := resize(v_pkt, 16);
+              v_pkt := pend_len - to_unsigned(TS_TRAILER_LEN, 11);
             end if;
+            v_total := resize(v_pkt, 16);
             v_entry := LEN_HDR_LEN + to_integer(v_total);
 
             if (RX_RING_SIZE - ring_count) < v_entry then
@@ -377,10 +389,7 @@ begin
               fill_pkt_len <= v_pkt;
               fill_total   <= v_total;
               fill_entry   <= v_entry;
-              -- Capture this frame's RX timestamp now (the TSU updates it only
-              -- at the next frame's SOF, so it is stable for the trailer write).
-              rx_ts_sec_latch <= timestamps_i.rx.seconds;
-              rx_ts_ns_latch  <= timestamps_i.rx.nanoseconds;
+              
               -- Length header MSB; start the eth_ram read for data byte 0.
               ring_ram(to_integer(wr_ptr)) <= std_logic_vector(v_total(15 downto 8));
               eth_ram_addr <= (others => '0');
@@ -402,47 +411,34 @@ begin
           -- entry offset (rx_copy_addr + 1) = 2-byte header + (rx_copy_addr - 1).
           ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= eth_ram_data_i;
           if rx_copy_addr >= fill_pkt_len then
-            if ADD_RX_TIMESTAMP then
-              sm_fill <= FILL_TS_SEC;
-            else
-              sm_fill <= FILL_COMMIT;
-            end if;
+            sm_fill <= FILL_COMMIT;
           end if;
           eth_ram_addr <= resize(rx_copy_addr + 1, eth_ram_addr'length);
           rx_copy_addr <= rx_copy_addr + 1;
 
-        -- Trailer byte 0: seconds[3:0] in the low nibble.
-        when FILL_TS_SEC =>
-          ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <=
-            "0000" & std_logic_vector(rx_ts_sec_latch);
-          rx_copy_addr   <= rx_copy_addr + 1;
-          ts_write_index <= 0;
-          sm_fill        <= FILL_TS_NS;
-
-        -- Trailer bytes 1..4: nanoseconds[29:0], little-endian (top byte's high
-        -- 2 bits zero), one byte per cycle.
-        when FILL_TS_NS =>
-          case ts_write_index is
-            when 0      => ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= std_logic_vector(rx_ts_ns_latch(7 downto 0));
-            when 1      => ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= std_logic_vector(rx_ts_ns_latch(15 downto 8));
-            when 2      => ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= std_logic_vector(rx_ts_ns_latch(23 downto 16));
-            when others => ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= "00" & std_logic_vector(rx_ts_ns_latch(29 downto 24));
-          end case;
-          rx_copy_addr <= rx_copy_addr + 1;
-          if ts_write_index = 3 then
-            ts_write_index <= 0;
-            sm_fill        <= FILL_COMMIT;
-          else
-            ts_write_index <= ts_write_index + 1;
-          end if;
-
         when FILL_COMMIT =>
           -- Publish the entry: advance the write pointer and grow the occupancy
-          -- by the whole entry (header + data + trailer) in one step.
+          -- by the whole entry (header + data) in one step.
           wr_ptr       <= wr_ptr + to_unsigned(fill_entry, RING_ADDR_W);
           v_commit_len := fill_entry;
           sm_fill      <= FILL_IDLE;
       end case;
+
+      -- Parser-toggle edge detection, AFTER the FILL fsm so a pending frame
+      -- consumed by FILL_IDLE this cycle frees the slot for a new edge.
+      -- The toggle fires after ethernet_receive finished the frame (incl.
+      -- trailer), so pkt_len_i is stable until the next frame's toggle;
+      -- latching it here keeps it valid while FILL is still busy.
+      parse_mcu_d <= parse_mcu_packet_tog_i;
+      if parse_mcu_packet_tog_i /= parse_mcu_d then
+        if v_pending = '1' then
+          rx_overflow_reg <= '1';   -- FILL already two frames behind: drop
+        else
+          v_pending := '1';
+          pend_len  <= unsigned(pkt_len_i);
+        end if;
+      end if;
+      fill_pending <= v_pending;
 
       -- ============================================================
       -- DRAIN: feed the head ring entry into the LiteX single buffer, one frame

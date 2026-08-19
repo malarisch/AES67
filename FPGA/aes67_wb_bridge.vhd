@@ -531,14 +531,13 @@ begin
         mac_resetn_i => mac_resetn,
         wallclock_signals => wallclock_signals,
         timestamps => timestamps
-        
+
     );
     litex_eth_buffer_bridge_inst: entity work.litex_eth_buffer_bridge
      generic map(
         ADD_RX_TIMESTAMP => syscfg.PTP_IN_SOFTWARE
      )
      port map(
-        timestamps_i => timestamps,
         buf_rx_data_o => mcu_buf_rx_data,
         buf_rx_addr_o => mcu_buf_rx_addr,
         buf_rx_we_o => mcu_buf_rx_we,

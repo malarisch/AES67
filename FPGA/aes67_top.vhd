@@ -54,7 +54,7 @@ ENTITY aes67_top IS
 		eth_tx_data_mcu_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		eth_tx_allow_req_mcu_i : IN STD_LOGIC;
 		eth_tx_allow_mcu_o : OUT STD_LOGIC;
-		
+
 		mac_tx_busy_o : OUT STD_LOGIC;
 		mac_tx_byte_sent_o : OUT STD_LOGIC;
 		mac_speed_o : OUT STD_LOGIC_VECTOR(1 downto 0);
@@ -167,6 +167,7 @@ END aes67_top;
 
 ARCHITECTURE rtl OF aes67_top IS 
 
+signal timestamps_reg : t_eth_timestamps;
 signal audioclks : t_audio_clocks := AUDIO_CLOCKS_RESET;
 signal selected_audio_clock : t_audio_clocks_selected := AUDIO_CLOCKS_RESET_SELECTED;
 signal media_clock : STD_LOGIC_VECTOR(31 downto 0);
@@ -228,7 +229,7 @@ signal servo_mon_sample_count_unsigned        : unsigned(15 downto 0);
 
 
 BEGIN
-
+timestamps <= timestamps_reg;
 audioclocks_o <= audioclks;
 selected_audio_clock_o <= selected_audio_clock;
 mii_txd_o <= mii_txd_o_reg;
@@ -393,7 +394,7 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 
 		 audioclocks_o => audioclks,
 		 wallclock_signals_io => wallclock_signals,
-		 timestamps_o => timestamps,
+		 timestamps_o => timestamps_reg,
 		 second_pulse_sys => second_pulse_sys,
 		 media_clock => media_clock,
 		 media_tick => media_tick,
@@ -574,7 +575,8 @@ ethernet_top_inst: entity work.ethernet_top
 	mii_tx_en_o => mii_tx_en_o,
 	mii_txd_o => mii_txd_o_reg,
 	enet_mdio => enet_mdio,
-	enet_mdc => enet_mdc
+	enet_mdc => enet_mdc,
+	rx_timestamp_i => timestamps_reg.rx
 );
 
 
