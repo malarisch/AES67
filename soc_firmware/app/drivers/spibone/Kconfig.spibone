@@ -31,4 +31,15 @@ config SPIBONE_BURST
 	  per 32-bit word. Disable only when the loaded FPGA gateware
 	  predates burst support (every burst would otherwise time out).
 
+config SPIBONE_STATS
+	bool "Bus utilization statistics (`spibus` shell command)"
+	default y if SHELL
+	help
+	  Account bus-mutex wait/hold time and SPI wire time per
+	  transaction (two k_cycle_get_32() reads per lock/transfer).
+	  The `spibus` shell command prints utilization, contention and
+	  throughput as deltas since its previous invocation — the
+	  CPU-bound-vs-SPI-bound measurement for the multicore
+	  evaluation.
+
 endif # SPIBONE

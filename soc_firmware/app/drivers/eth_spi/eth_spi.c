@@ -8,7 +8,9 @@
  * FPGA's litex_eth_buffer_bridge exposes dual-port RX/TX packet buffers plus
  * an EventManager, all reachable through the aes67_bridge register map:
  *
- *   ETH_BUF_RX_MEM / ETH_BUF_TX_MEM   packet buffers, 1 byte per 32-bit word
+ *   ETH_BUF_RX_MEM / ETH_BUF_TX_MEM   packet buffers; 4 bytes per 32-bit
+ *                                     word on packed gateware, 1 byte on
+ *                                     legacy builds (eth_litex_buf_packed())
  *   eth_buf_rx_ready / rx_len / rx_ack  RX handshake
  *   eth_buf_tx_len + ctrl.eth_tx_request  TX handshake
  *   eth_buf_ev_*                      RX-ready event → FPGA `mcu_irq_o` pin
@@ -176,8 +178,13 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 					? (size_t)len + 4 + trailer
 					: (size_t)len;
 
-			ret = spibone_read_burst_locked(ETH_BUF_RX_MEM,
-							data->rx_buf, rd_len);
+			if (eth_litex_buf_packed()) {
+				ret = spibone_read_burst_packed_locked(
+					ETH_BUF_RX_MEM, data->rx_buf, rd_len);
+			} else {
+				ret = spibone_read_burst_locked(
+					ETH_BUF_RX_MEM, data->rx_buf, rd_len);
+			}
 			if (ret < 0) {
 				LOG_WRN("RX burst read failed: %d (len=%d)", ret, len);
 				len = 0;
@@ -206,8 +213,17 @@ static bool eth_spi_rx_one(struct eth_spi_data *data)
 				   ((uint32_t)tr[3] << 16) |
 				   ((uint32_t)tr[4] << 24);
 
-		aes67_ptp_reconstruct(tr[0], ts_nsec, &rx_ts);
-		rx_have_ts = true;
+		/* Integrity gate: the gateware writes the seconds byte as
+		 * 0x0S and zeros ns bits [31:30]. A violation means the
+		 * trailer bytes were corrupted on the way over the bus —
+		 * drop the timestamp rather than feed the servo garbage. */
+		if ((tr[0] & 0xF0) != 0 || (tr[4] & 0xC0) != 0) {
+			LOG_WRN("RX trailer corrupt (%02x %02x %02x %02x %02x) - dropping ts",
+				tr[0], tr[1], tr[2], tr[3], tr[4]);
+		} else {
+			aes67_ptp_reconstruct(tr[0], ts_nsec, &rx_ts);
+			rx_have_ts = true;
+		}
 	}
 #endif
 
@@ -366,7 +382,13 @@ static int eth_spi_tx_frame(struct eth_spi_data *data, struct net_pkt *pkt,
 #endif
 
 	/* Stream the whole frame in one burst, then latch its length. */
-	ret = spibone_write_burst_locked(ETH_BUF_TX_MEM, data->tx_buf, len);
+	if (eth_litex_buf_packed()) {
+		ret = spibone_write_burst_packed_locked(ETH_BUF_TX_MEM,
+							data->tx_buf, len);
+	} else {
+		ret = spibone_write_burst_locked(ETH_BUF_TX_MEM,
+						 data->tx_buf, len);
+	}
 	if (ret == 0) {
 		ret = spibone_write_locked(CSR_ETH_BUF_TX_LEN_ADDR, len);
 	}

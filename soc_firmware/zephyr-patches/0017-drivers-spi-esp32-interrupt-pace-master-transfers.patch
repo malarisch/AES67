@@ -1,0 +1,236 @@
+From dd38efec93df92812f1ba59b66d2e871860ca9c0 Mon Sep 17 00:00:00 2001
+From: Mala <mala@macker.lol>
+Date: Wed, 19 Aug 2026 14:48:04 +0200
+Subject: [PATCH] drivers: spi: esp32: interrupt-pace master transfers
+
+CONFIG_SPI_ESP32_INTERRUPT did not make master transfers interrupt
+driven: transceive() forced the interrupt status, so the ISR executed
+the entire transfer -- including the per-chunk
+
+    while (!spi_hal_usr_is_done(hal)) { /* nop */ }
+
+busy-wait -- in interrupt context. The calling thread never slept, the
+CPU burned the full wire time spinning (measured ~40 % of one ESP32-S3
+core at 10 MHz under load), and every chunk blocked all threads and
+lower-priority interrupts for its whole wire duration (1.4 ms for a
+1.7 kB chunk at 10 MHz).
+
+Split spi_esp32_transfer() into transfer_start() (prepare + arm the
+chunk) and transfer_finish() (fetch result, advance the context), with
+the in-flight chunk state stashed in the driver data. In interrupt
+mode, transceive() arms the first chunk and sleeps in
+spi_context_wait_for_completion(); the trans_done ISR finishes the
+chunk and either arms the next one or completes the context. A
+completion timeout quiesces the peripheral and releases the PM lock the
+ISR would have dropped. The polling path is unchanged (start + spin +
+finish), as is target mode.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ drivers/spi/spi_esp32_spim.c | 125 ++++++++++++++++++++++++++++++-----
+ drivers/spi/spi_esp32_spim.h |   8 +++
+ 2 files changed, 116 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/spi/spi_esp32_spim.c b/drivers/spi/spi_esp32_spim.c
+index 1889eacb7b..cfd12887a3 100644
+--- a/drivers/spi/spi_esp32_spim.c
++++ b/drivers/spi/spi_esp32_spim.c
+@@ -201,7 +201,13 @@ static void spi_esp32_dma_tx_start(const struct device *dev, uint8_t *buf, size_
+ }
+ #endif /* SOC_GDMA_SUPPORTED */
+ 
+-static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
++/* Prepare and kick one hardware-sized chunk of the current spi_context.
++ * The chunk finishes either by polling (spi_esp32_transfer()) or in the
++ * trans_done ISR (CONFIG_SPI_ESP32_INTERRUPT); spi_esp32_transfer_finish()
++ * collects the result. Chunk geometry and DMA bounce buffers are stashed
++ * in the device data so the two halves can run in different contexts.
++ */
++static int IRAM_ATTR spi_esp32_transfer_start(const struct device *dev)
+ {
+ 	struct spi_esp32_data *data = dev->data;
+ 	const struct spi_esp32_config *cfg = dev->config;
+@@ -386,13 +392,33 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 					 hal_trans->rcv_buffer != NULL);
+ 	}
+ 
++	/* Publish the chunk state before the hardware can raise trans_done:
++	 * with CONFIG_SPI_ESP32_INTERRUPT the ISR consumes it.
++	 */
++	data->tx_temp = tx_temp;
++	data->rx_temp = rx_temp;
++	data->chunk_bytes = transfer_len_bytes;
++	data->chunk_frames = transfer_len_frames;
++
+ 	/* send data */
+ 	spi_hal_user_start(hal);
+ 	spi_context_update_tx(&data->ctx, data->dfs, transfer_len_frames);
+ 
+-	while (!spi_hal_usr_is_done(hal)) {
+-		/* nop */
+-	}
++	return 0;
++
++free:
++	k_free(tx_temp);
++	k_free(rx_temp);
++
++	return err;
++}
++
++static int IRAM_ATTR spi_esp32_transfer_finish(const struct device *dev)
++{
++	struct spi_esp32_data *data = dev->data;
++	const struct spi_esp32_config *cfg = dev->config;
++	spi_hal_context_t *hal = &data->hal;
++	spi_hal_trans_config_t *hal_trans = &data->trans_config;
+ 
+ #if defined(SOC_GDMA_SUPPORTED)
+ 	if (cfg->dma_enabled) {
+@@ -402,7 +428,7 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 			 * data the DMA just wrote to memory. No-op when CACHE_MANAGEMENT
+ 			 * is disabled.
+ 			 */
+-			sys_cache_data_invd_range(hal_trans->rcv_buffer, transfer_len_bytes);
++			sys_cache_data_invd_range(hal_trans->rcv_buffer, data->chunk_bytes);
+ 		}
+ 		if (hal_trans->send_buffer) {
+ 			dma_stop(cfg->dma_dev, cfg->dma_tx_ch);
+@@ -415,17 +441,34 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 		spi_hal_fetch_result(hal);
+ 	}
+ 
+-	if (rx_temp) {
+-		memcpy(&ctx->rx_buf[0], rx_temp, transfer_len_bytes);
++	if (data->rx_temp) {
++		memcpy(&data->ctx.rx_buf[0], data->rx_temp, data->chunk_bytes);
+ 	}
+ 
+-	spi_context_update_rx(&data->ctx, data->dfs, transfer_len_frames);
++	spi_context_update_rx(&data->ctx, data->dfs, data->chunk_frames);
+ 
+-free:
+-	k_free(tx_temp);
+-	k_free(rx_temp);
++	k_free(data->tx_temp);
++	k_free(data->rx_temp);
++	data->tx_temp = NULL;
++	data->rx_temp = NULL;
+ 
+-	return err;
++	return 0;
++}
++
++static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
++{
++	struct spi_esp32_data *data = dev->data;
++	int err = spi_esp32_transfer_start(dev);
++
++	if (err) {
++		return err;
++	}
++
++	while (!spi_hal_usr_is_done(&data->hal)) {
++		/* nop */
++	}
++
++	return spi_esp32_transfer_finish(dev);
+ }
+ 
+ #ifdef CONFIG_ESP32_SPI_TARGET
+@@ -563,11 +606,27 @@ static void IRAM_ATTR spi_esp32_isr(void *arg)
+ 	}
+ #endif /* CONFIG_ESP32_SPI_TARGET */
+ 
+-	do {
+-		spi_esp32_transfer(dev);
+-	} while (spi_esp32_transfer_ongoing(data));
++	/* One trans_done per chunk: collect the finished chunk, then either
++	 * arm the next one and leave (the next interrupt continues the
++	 * transfer) or complete the context and wake the initiating thread.
++	 */
++	spi_esp32_transfer_finish(dev);
+ 
+-	spi_esp32_complete(dev, data, cfg->spi, 0);
++	if (spi_esp32_transfer_ongoing(data)) {
++		/* Clear before arming so the new chunk's completion can't
++		 * be lost.
++		 */
++		spi_ll_clear_int_stat(cfg->spi);
++
++		int err = spi_esp32_transfer_start(dev);
++
++		if (err == 0) {
++			return;
++		}
++		spi_esp32_complete(dev, data, cfg->spi, err);
++	} else {
++		spi_esp32_complete(dev, data, cfg->spi, 0);
++	}
+ 
+ #if CONFIG_PM
+ 	spi_esp32_pm_policy_state_lock_put(dev);
+@@ -972,8 +1031,40 @@ static int transceive(const struct device *dev,
+ 	spi_context_cs_control(&data->ctx, true);
+ 
+ #ifdef CONFIG_SPI_ESP32_INTERRUPT
++	/* Interrupt-paced: arm the first chunk and sleep until the ISR has
++	 * walked all chunks and completed the context. The stale trans_done
++	 * status is cleared before the chunk starts; enabling the interrupt
++	 * afterwards is race-free because the status bit latches while
++	 * masked.
++	 */
++	spi_ll_disable_int(cfg->spi);
++	spi_ll_clear_int_stat(cfg->spi);
++
++	ret = spi_esp32_transfer_start(dev);
++	if (ret) {
++		spi_context_cs_control(&data->ctx, false);
++		goto done;
++	}
++
+ 	spi_ll_enable_int(cfg->spi);
+-	spi_ll_set_int_stat(cfg->spi);
++
++	ret = spi_context_wait_for_completion(&data->ctx);
++	if (ret == -ETIMEDOUT) {
++		/* Wedged transfer: quiesce the peripheral and drop the PM
++		 * reference the ISR would normally release. A completion
++		 * racing this cleanup may have signalled the context;
++		 * reset the semaphore so the next transfer can't consume
++		 * the stale count.
++		 */
++		spi_ll_disable_int(cfg->spi);
++		spi_ll_clear_int_stat(cfg->spi);
++		spi_context_cs_control(&data->ctx, false);
++		k_sem_reset(&data->ctx.sync);
++#if CONFIG_PM
++		spi_esp32_pm_policy_state_lock_put(dev);
++#endif
++	}
++
+ 	spi_context_release(&data->ctx, ret);
+ 	return ret;
+ #else
+diff --git a/drivers/spi/spi_esp32_spim.h b/drivers/spi/spi_esp32_spim.h
+index d55f26078f..75f15bc754 100644
+--- a/drivers/spi/spi_esp32_spim.h
++++ b/drivers/spi/spi_esp32_spim.h
+@@ -86,6 +86,14 @@ struct spi_esp32_data {
+ #endif
+ 	uint8_t dfs;
+ 	uint32_t clock_source_hz;
++	/* In-flight chunk state shared between spi_esp32_transfer_start()
++	 * and spi_esp32_transfer_finish(), which run in different contexts
++	 * (thread vs trans_done ISR) with CONFIG_SPI_ESP32_INTERRUPT.
++	 */
++	size_t chunk_bytes;
++	size_t chunk_frames;
++	uint8_t *tx_temp;
++	uint8_t *rx_temp;
+ #if CONFIG_PM
+ 	bool pm_policy_state_on;
+ #endif
+-- 
+2.53.0
+

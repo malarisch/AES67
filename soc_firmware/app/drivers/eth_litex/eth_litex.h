@@ -29,9 +29,14 @@ extern "C" {
  * Derived addresses from LiteX-generated headers
  * ======================================================================== */
 
-/* Packet buffer memory regions (from generated/mem.h: ETH_BUF_BASE)
- * Each byte occupies one 32-bit word, so byte N is at word address N.
- * TX region starts at word address 0x800 (bit 11), i.e. byte address 0x2000. */
+/* Packet buffer memory regions (from generated/mem.h: ETH_BUF_BASE).
+ * TX region starts at word address 0x800 (bit 11), i.e. byte address 0x2000.
+ * Word packing depends on the loaded bitstream, reported through the
+ * eth_buf bytes_per_word CSR and cached by the FPGA HAL
+ * (eth_litex_buf_packed() below):
+ *   - packed gateware: 4 payload bytes per 32-bit word, little-endian
+ *     lanes (frame byte 4i+k in word i bits [8k+7:8k])
+ *   - legacy gateware: 1 payload byte per word (low byte) */
 #define ETH_BUF_RX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x0000UL) /* RX: byte 0..1517 */
 #define ETH_BUF_TX_MEM   ((uintptr_t)ETH_BUF_BASE + 0x2000UL) /* TX: byte 0..1517 */
 
@@ -84,10 +89,17 @@ extern "C" {
 /* From the FPGA HAL's system_cfg cache (fpga_hal.h) — declared here instead
  * of pulling the whole HAL header into every driver translation unit. */
 extern bool fpga_hal_ptp_in_software(void);
+extern uint8_t fpga_hal_eth_buf_bytes_per_word(void);
 
 static inline uint16_t eth_litex_rx_trailer_len(void)
 {
 	return fpga_hal_ptp_in_software() ? ETH_LITEX_RX_TRAILER_MAX : 0;
+}
+
+/** True when the loaded bitstream packs 4 payload bytes per eth_buf word. */
+static inline bool eth_litex_buf_packed(void)
+{
+	return fpga_hal_eth_buf_bytes_per_word() == 4;
 }
 
 /* TX-timestamp latch poll budget: latch-change detection after tx_request

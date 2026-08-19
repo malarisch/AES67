@@ -22,7 +22,13 @@
  *   [0x02][addr BE][count BE16][data0 BE32]..  auto-incrementing burst write
  *   [0x03][addr BE][count BE16]                burst read, per word a 0x01
  *                                              sync byte + BE32 value
- * One byte of payload per 32-bit word (eth_buf / stream-cfg packing).
+ * `count` is a word count; the payload packing per word depends on the
+ * target region:
+ *   - stream-cfg RAMs (and legacy eth_buf gateware): one payload byte in
+ *     the low byte of each word — the *_burst() helpers.
+ *   - eth_buf on packed gateware (eth_buf_bytes_per_word CSR reads 4):
+ *     four payload bytes per word, little-endian lanes (frame byte 4i+k
+ *     in word i bits [8k+7:8k]) — the *_burst_packed_locked() helpers.
  */
 
 #ifndef SPIBONE_H_
@@ -40,6 +46,32 @@ extern "C" {
  * @brief Get the spibone bus device pointer (NULL if not ready).
  */
 const struct device *spibone_get_dev(void);
+
+/**
+ * @brief Bus utilization counters (CONFIG_SPIBONE_STATS).
+ *
+ * Times are in k_cycle_get_32() cycles (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC).
+ * All counters accumulate since boot; consumers diff two snapshots for
+ * windowed rates. Exception: @p lock_wait_max_cyc is reset by every
+ * spibone_stats_get() call, so it is the maximum within the sample window.
+ */
+struct spibone_stats {
+	uint64_t lock_wait_cyc;     /* time threads spent blocked on the bus mutex */
+	uint64_t lock_hold_cyc;     /* time the bus mutex was held */
+	uint64_t xfer_cyc;          /* time inside SPI transfers (wire busy) */
+	uint64_t xfer_bytes;        /* bytes clocked per transfer (full duplex counted once) */
+	uint32_t xfer_count;        /* SPI transfers */
+	uint32_t xfer_errors;       /* transfers that returned an error */
+	uint32_t lock_count;        /* bus_lock() calls (incl. recursive re-locks) */
+	uint32_t lock_contended;    /* bus_lock() calls that had to wait */
+	uint32_t lock_wait_max_cyc; /* longest single wait since the last _get() */
+};
+
+/**
+ * @brief Snapshot the utilization counters (and reset the windowed max).
+ * All-zero when CONFIG_SPIBONE_STATS is disabled.
+ */
+void spibone_stats_get(struct spibone_stats *out);
 
 /**
  * @brief Take / release the bus lock.
@@ -77,6 +109,24 @@ int spibone_read_burst_locked(uint32_t addr, uint8_t *bytes, size_t n);
 
 int spibone_write_burst(uint32_t addr, const uint8_t *bytes, size_t n);
 int spibone_read_burst(uint32_t addr, uint8_t *bytes, size_t n);
+
+/**
+ * @brief Packed burst write: store @p n payload bytes as ceil(n/4)
+ * consecutive 32-bit words starting at byte address @p addr, four bytes per
+ * word in little-endian lanes (packed eth_buf layout). A final partial word
+ * is zero-padded on the wire. Falls back to single-word writes without
+ * CONFIG_SPIBONE_BURST.
+ */
+int spibone_write_burst_packed_locked(uint32_t addr, const uint8_t *bytes,
+				      size_t n);
+
+/**
+ * @brief Packed burst read: fetch @p n payload bytes from ceil(n/4)
+ * consecutive 32-bit words starting at byte address @p addr (four bytes per
+ * word, little-endian lanes). Never writes more than @p n bytes to @p bytes;
+ * surplus lanes of the final word are discarded.
+ */
+int spibone_read_burst_packed_locked(uint32_t addr, uint8_t *bytes, size_t n);
 
 #ifdef __cplusplus
 }

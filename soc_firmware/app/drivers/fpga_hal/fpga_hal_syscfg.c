@@ -63,6 +63,21 @@ int fpga_hal_read_system_cfg(struct fpga_hal_system_cfg *cfg)
 	cfg->tx_channels     = SYSCFG_FIELD(TX, CHANNELS, tx);
 	cfg->tx_buffer_depth = SYSCFG_FIELD(TX, BUFFER_DEPTH, tx);
 
+	/* eth_buf word packing. Only the exact value 4 selects the packed
+	 * layout: on a legacy bitstream this address is not a CSR and reads
+	 * as junk (usually 0), which must fall back to byte packing. */
+	cfg->eth_buf_bytes_per_word = 1;
+#ifdef CSR_ETH_BUF_BYTES_PER_WORD_ADDR
+	{
+		uint32_t bpw;
+
+		if (fpga_hal_csr_read(CSR_ETH_BUF_BYTES_PER_WORD_ADDR,
+				      &bpw) == 0 && bpw == 4) {
+			cfg->eth_buf_bytes_per_word = 4;
+		}
+	}
+#endif
+
 	return 0;
 }
 
@@ -90,12 +105,14 @@ int fpga_hal_syscfg_load(void)
 	syscfg_loaded = true;
 
 	LOG_INF("FPGA build config: PTP=%s%s metering=%s "
-		"RX %u streams/%u ch/depth %u, TX %u streams/%u ch/depth %u",
+		"RX %u streams/%u ch/depth %u, TX %u streams/%u ch/depth %u, "
+		"eth_buf %u B/word",
 		cfg.ptp_in_software ? "software" : "hardware",
 		cfg.static_ptp_config ? " (static servo cfg)" : "",
 		cfg.metering ? "on" : "off",
 		cfg.rx_max_streams, cfg.rx_channels, cfg.rx_buffer_depth,
-		cfg.tx_max_streams, cfg.tx_channels, cfg.tx_buffer_depth);
+		cfg.tx_max_streams, cfg.tx_channels, cfg.tx_buffer_depth,
+		cfg.eth_buf_bytes_per_word);
 	return 0;
 }
 
@@ -112,4 +129,11 @@ bool fpga_hal_syscfg_valid(void)
 bool fpga_hal_ptp_in_software(void)
 {
 	return syscfg_cache.ptp_in_software;
+}
+
+uint8_t fpga_hal_eth_buf_bytes_per_word(void)
+{
+	/* Before the first load (and on legacy gateware) the cache holds 0:
+	 * treat anything but the packed layout as legacy byte packing. */
+	return syscfg_cache.eth_buf_bytes_per_word == 4 ? 4 : 1;
 }

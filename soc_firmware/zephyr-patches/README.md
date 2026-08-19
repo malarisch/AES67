@@ -142,6 +142,17 @@ After a fresh clone / `west update`, re-apply with:
   otherwise no PTP thread/sockets/traffic exist and the FPGA's hardware
   PTP engine owns the wire — candidate for upstream submission.
 
+- 0017 spi_esp32: make CONFIG_SPI_ESP32_INTERRUPT actually interrupt-paced.
+  Upstream (incl. current main) forces the interrupt in transceive() and
+  runs the WHOLE transfer — including the per-chunk usr_is_done busy-wait —
+  inside the ISR: the thread never sleeps, the full wire time is burned
+  spinning in interrupt context (~40 % of the core at 10 MHz spibone load)
+  and each chunk blocks everything for its wire duration. Split
+  transfer into start/finish halves; the trans_done ISR finishes one chunk
+  and arms the next, the caller sleeps in spi_context_wait_for_completion
+  (timeout path quiesces + releases the PM lock). Polling mode and target
+  mode unchanged — candidate for upstream submission.
+
 Dropped since the v4.2.0 era (now upstream): uptime-based message aging
 (3ccd07b2), servo epoch reset after clock step, configurable PI servo gains
 (9803584), ingress-timestamp validity guards. (The phase-jump step came back

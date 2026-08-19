@@ -301,7 +301,7 @@ static int ptp_aes67_rate_adjust(const struct device *dev, double ratio)
 		static uint32_t cnt;
 
 		if ((++cnt % 8U) == 0) {
-			LOG_WRN("PPB applied %lld", (long long)ppb);
+			LOG_INF("PPB applied %lld", (long long)ppb);
 		}
 	}
 

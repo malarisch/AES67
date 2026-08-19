@@ -44,8 +44,9 @@ struct eth_litex_data {
 	struct k_sem rx_sem;           /* Signaled by ISR on RX packet */
 	bool link_up;                  /* Cached link state for edge detection */
 
-	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + ETH_LITEX_RX_TRAILER_MAX];
-	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE];
+	/* Word-aligned: the packed eth_buf copy loops move 32-bit words. */
+	uint8_t rx_buf[ETH_LITEX_MAX_PKT_SIZE + ETH_LITEX_RX_TRAILER_MAX] __aligned(4);
+	uint8_t tx_buf[ETH_LITEX_MAX_PKT_SIZE] __aligned(4);
 
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
 	K_KERNEL_STACK_MEMBER(tx_stack, CONFIG_ETH_LITEX_RX_STACK_SIZE);
@@ -465,23 +466,34 @@ int eth_litex_set_ptp_reset(const struct device *dev, bool held_in_reset)
 
 /* ---- Packet buffer access ----
  *
- * The EthPacketBuffer is Wishbone-mapped with 1 byte per 32-bit word
- * (only the lower 8 bits are valid per word address).
- * RX buffer: word addresses 0x000..0x5ED (byte offsets 0..1517)
- * TX buffer: word addresses 0x800..0xDED (byte offsets 0..1517)
+ * The EthPacketBuffer word packing depends on the loaded bitstream
+ * (eth_litex_buf_packed(), from the eth_buf bytes_per_word CSR):
  *
- * From the CPU, each byte is at a 4-byte-aligned address.
+ *   packed:  4 payload bytes per 32-bit word, little-endian lanes.
+ *            RX words 0x000..0x17B, TX words 0x800..0x97B.
+ *   legacy:  1 payload byte per word (lower 8 bits valid).
+ *            RX words 0x000..0x5ED, TX words 0x800..0xDED.
  */
 
 static inline void eth_buf_write_byte(uint16_t offset, uint8_t val)
 {
-	volatile uint32_t *p = (volatile uint32_t *)(ETH_BUF_TX_MEM + ((uint32_t)offset << 2));
-	*p = val;
+	if (eth_litex_buf_packed()) {
+		/* Byte store: the Wishbone sel lane hits exactly this byte. */
+		*(volatile uint8_t *)(ETH_BUF_TX_MEM + offset) = val;
+	} else {
+		volatile uint32_t *p = (volatile uint32_t *)
+			(ETH_BUF_TX_MEM + ((uint32_t)offset << 2));
+		*p = val;
+	}
 }
 
 static inline uint8_t eth_buf_read_byte(uint16_t offset)
 {
-	volatile uint32_t *p = (volatile uint32_t *)(ETH_BUF_RX_MEM + ((uint32_t)offset << 2));
+	if (eth_litex_buf_packed()) {
+		return *(volatile uint8_t *)(ETH_BUF_RX_MEM + offset);
+	}
+	volatile uint32_t *p = (volatile uint32_t *)
+		(ETH_BUF_RX_MEM + ((uint32_t)offset << 2));
 	return (uint8_t)(*p & 0xFF);
 }
 
@@ -503,7 +515,40 @@ static void eth_buf_read_packet(uint8_t *dst, uint16_t len)
 
 	uintptr_t src_base = ETH_BUF_RX_MEM;
 
-	/* a0 = dst pointer, a1 = src (Wishbone word addr), a2 = remaining */
+	if (eth_litex_buf_packed()) {
+		/* Packed layout: one 32-bit word moves 4 frame bytes (both
+		 * sides little-endian, dst is 4-byte aligned). */
+		uint16_t words = len >> 2;
+		uint16_t tail = len & 3;
+		uint32_t *dst32 = (uint32_t *)dst;
+
+		if (words) {
+			__asm__ volatile(
+				"1:\n"
+				"    lw   t0, 0(%[src])\n"
+				"    sw   t0, 0(%[dst])\n"
+				"    addi %[dst], %[dst], 4\n"
+				"    addi %[src], %[src], 4\n"
+				"    addi %[rem], %[rem], -1\n"
+				"    bnez %[rem], 1b\n"
+				: [dst] "+r"(dst32), [src] "+r"(src_base),
+				  [rem] "+r"(words)
+				:
+				: "t0", "memory"
+			);
+		}
+		if (tail) {
+			uint32_t w = *(volatile uint32_t *)src_base;
+			uint8_t *d = (uint8_t *)dst32;
+
+			for (uint16_t k = 0; k < tail; k++) {
+				d[k] = (uint8_t)(w >> (8 * k));
+			}
+		}
+		return;
+	}
+
+	/* Legacy layout: one word per byte (low byte valid). */
 	__asm__ volatile(
 		"1:\n"
 		"    lw   t0, 0(%[src])\n"      /* read 32-bit word from RX buffer */
@@ -524,6 +569,41 @@ static void eth_buf_write_packet(const uint8_t *src, uint16_t len)
 
 	uintptr_t dst_base = ETH_BUF_TX_MEM;
 
+	if (eth_litex_buf_packed()) {
+		uint16_t words = len >> 2;
+		uint16_t tail = len & 3;
+		const uint32_t *src32 = (const uint32_t *)src;
+
+		if (words) {
+			__asm__ volatile(
+				"1:\n"
+				"    lw   t0, 0(%[src])\n"
+				"    sw   t0, 0(%[dst])\n"
+				"    addi %[src], %[src], 4\n"
+				"    addi %[dst], %[dst], 4\n"
+				"    addi %[rem], %[rem], -1\n"
+				"    bnez %[rem], 1b\n"
+				: [src] "+r"(src32), [dst] "+r"(dst_base),
+				  [rem] "+r"(words)
+				:
+				: "t0", "memory"
+			);
+		}
+		if (tail) {
+			/* Zero-padded final word; tx_len bounds the frame. */
+			const uint8_t *s = (const uint8_t *)src32;
+			uint32_t w = 0;
+
+			for (uint16_t k = 0; k < tail; k++) {
+				w |= (uint32_t)s[k] << (8 * k);
+			}
+			*(volatile uint32_t *)dst_base = w;
+		}
+		__asm__ volatile("fence" ::: "memory");
+		return;
+	}
+
+	/* Legacy layout: one word per byte. */
 	__asm__ volatile(
 		"1:\n"
 		"    lbu  t0, 0(%[src])\n"       /* load byte from src */
@@ -791,9 +871,19 @@ static void eth_litex_rx_thread(void *p1, void *p2, void *p3)
 					((uint32_t)data->rx_buf[t + 3] << 16) |
 					((uint32_t)data->rx_buf[t + 4] << 24);
 
-				aes67_ptp_reconstruct(data->rx_buf[t], ts_nsec,
-						      &rx_ts);
-				rx_have_ts = true;
+				/* Integrity gate: seconds byte is 0x0S and
+				 * ns bits [31:30] are zero by construction —
+				 * anything else is a corrupted trailer read. */
+				if ((data->rx_buf[t] & 0xF0) != 0 ||
+				    (data->rx_buf[t + 4] & 0xC0) != 0) {
+					LOG_WRN("RX trailer corrupt (%02x .. %02x) - dropping ts",
+						data->rx_buf[t],
+						data->rx_buf[t + 4]);
+				} else {
+					aes67_ptp_reconstruct(data->rx_buf[t],
+							      ts_nsec, &rx_ts);
+					rx_have_ts = true;
+				}
 			}
 #endif
 			/* Drop the trailer (if any), then the 4-byte FCS. */

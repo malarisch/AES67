@@ -16,13 +16,20 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
     RX and TX packet buffers (1518 bytes each) with CSR-accessible length/control
     and an IRQ for RX packet received.
 
-    The FPGA side writes the RX buffer and reads the TX buffer via dedicated signals.
-    The CPU side reads the RX buffer and writes the TX buffer via a Wishbone slave.
+    The FPGA side writes the RX buffer and reads the TX buffer via dedicated
+    byte-wide signals (MAC clocks bytes). The CPU side reads the RX buffer and
+    writes the TX buffer via a Wishbone slave.
 
-    Wishbone address map (word-addressed, 1 byte per 32-bit word):
-      - 0x000..0x5ED: RX buffer (1518 bytes, read-only from CPU)
-      - 0x800..0xDED: TX buffer (1518 bytes, write-only from CPU)
+    Wishbone address map (word-addressed, 4 payload bytes per 32-bit word,
+    little-endian lanes: frame byte 4i+k sits in word i bits [8k+7:8k]):
+      - word 0x000..0x17B: RX buffer (1518 bytes, read-only from CPU)
+      - word 0x800..0x97B: TX buffer (1518 bytes, write-only from CPU)
     Byte addresses (CPU view): RX at +0x0000, TX at +0x2000.
+
+    The read-only ``bytes_per_word`` CSR reports the packing (4). Gateware
+    generations before the packed layout carried one payload byte per word
+    and did not have this CSR — hosts resolve it by name from csr.csv and
+    fall back to byte packing when it is absent.
     """
     def __init__(self):
         # -- External FPGA-side signals --
@@ -48,6 +55,9 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         self.rx_ready  = CSRStatus(1,  description="RX packet ready to read")
         self.rx_ack    = CSRStorage(1,  description="Write 1 to acknowledge RX packet")
         self.tx_len    = CSRStorage(16, description="TX packet length (bytes)")
+        self.bytes_per_word = CSRStatus(8, reset=4,
+            description="Payload bytes per 32-bit buffer word (absent on "
+                        "legacy 1-byte-per-word gateware)")
 
         # -- Internal memories (true dual-port, independent clocks) --
         #
@@ -58,35 +68,58 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         #
         # Cyclone 10LP block RAMs natively support dual-clock operation.
 
-        # RX buffer: MAC writes (port A, mac_rx domain), CPU reads (port B, sys domain)
-        rx_mem = Memory(8, 1518, name="eth_rx_buf")
-        self.specials += rx_mem
-        rx_wr_port = rx_mem.get_port(write_capable=True, clock_domain="mac_rx")
-        self.specials += rx_wr_port
-        rx_rd_port = rx_mem.get_port(has_re=True, clock_domain="sys")
-        self.specials += rx_rd_port
+        # 4 payload bytes per 32-bit word, little-endian lanes. Implemented as
+        # four independent byte-wide lane memories instead of one 32-bit RAM
+        # with byte enables: each lane is the same plain simple-dual-port,
+        # dual-clock template as the old byte-wide buffer, so Quartus BRAM
+        # inference stays trivially safe. 1518 bytes -> 380 words per lane.
+        buf_words = (1518 + 3) // 4
 
-        # TX buffer: CPU writes (port A, sys domain), MAC reads (port B, mac_tx domain)
-        tx_mem = Memory(8, 1518, name="eth_tx_buf")
-        self.specials += tx_mem
-        tx_wr_port = tx_mem.get_port(write_capable=True, clock_domain="sys")
-        self.specials += tx_wr_port
-        tx_rd_port = tx_mem.get_port(has_re=True, clock_domain="mac_tx")
-        self.specials += tx_rd_port
+        # RX buffer: MAC writes (mac_rx domain), CPU reads (sys domain)
+        rx_wr_ports = []
+        rx_rd_ports = []
+        for k in range(4):
+            mem = Memory(8, buf_words, name=f"eth_rx_buf{k}")
+            self.specials += mem
+            wr = mem.get_port(write_capable=True, clock_domain="mac_rx")
+            rd = mem.get_port(has_re=True, clock_domain="sys")
+            self.specials += wr, rd
+            rx_wr_ports.append(wr)
+            rx_rd_ports.append(rd)
+
+        # TX buffer: CPU writes (sys domain), MAC reads (mac_tx domain)
+        tx_wr_ports = []
+        tx_rd_ports = []
+        for k in range(4):
+            mem = Memory(8, buf_words, name=f"eth_tx_buf{k}")
+            self.specials += mem
+            wr = mem.get_port(write_capable=True, clock_domain="sys")
+            rd = mem.get_port(has_re=True, clock_domain="mac_tx")
+            self.specials += wr, rd
+            tx_wr_ports.append(wr)
+            tx_rd_ports.append(rd)
 
         # -- FPGA-side wiring (directly on MAC clock domains) --
-        # RX: MAC writes (mac_rx clock)
-        self.comb += [
-            rx_wr_port.adr.eq(self.i_rx_addr),
-            rx_wr_port.dat_w.eq(self.i_rx_data),
-            rx_wr_port.we.eq(self.i_rx_we),
-        ]
-        # TX: MAC reads (mac_tx clock)
-        self.comb += [
-            tx_rd_port.adr.eq(self.i_tx_addr),
-            tx_rd_port.re.eq(1),
-            self.o_tx_data.eq(tx_rd_port.dat_r),
-        ]
+        # RX: MAC writes one byte per cycle; the low byte-address bits select
+        # the lane, the rest the word.
+        for k in range(4):
+            self.comb += [
+                rx_wr_ports[k].adr.eq(self.i_rx_addr[2:]),
+                rx_wr_ports[k].dat_w.eq(self.i_rx_data),
+                rx_wr_ports[k].we.eq(self.i_rx_we & (self.i_rx_addr[:2] == k)),
+            ]
+        # TX: MAC reads one byte per cycle. Lane reads keep the old port's
+        # 1-cycle latency, so the lane select is the byte address delayed by
+        # one mac_tx cycle.
+        tx_lane = Signal(2)
+        self.sync.mac_tx += tx_lane.eq(self.i_tx_addr[:2])
+        for k in range(4):
+            self.comb += [
+                tx_rd_ports[k].adr.eq(self.i_tx_addr[2:]),
+                tx_rd_ports[k].re.eq(1),
+            ]
+        self.comb += self.o_tx_data.eq(
+            Array([p.dat_r for p in tx_rd_ports])[tx_lane])
 
         # -- Wishbone slave interface (CPU side, sys clock domain) --
         # Need 12-bit address to cover 0x000..0x5ED (RX) and 0x800..0xDED (TX)
@@ -98,23 +131,27 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         cpu_addr = Signal(11)
         self.comb += cpu_addr.eq(wb.adr[:11])
 
-        # CPU reads RX buffer (sys domain port)
-        self.comb += [
-            rx_rd_port.adr.eq(cpu_addr),
-            rx_rd_port.re.eq(wb.cyc & wb.stb & ~is_tx & ~wb.we),
-        ]
+        # CPU reads RX buffer (sys domain ports, one per byte lane)
+        for k in range(4):
+            self.comb += [
+                rx_rd_ports[k].adr.eq(cpu_addr),
+                rx_rd_ports[k].re.eq(wb.cyc & wb.stb & ~is_tx & ~wb.we),
+            ]
 
-        # CPU writes TX buffer (sys domain port)
+        # CPU writes TX buffer (sys domain ports, wb.sel gates the lanes so
+        # sub-word stores from the softcore stay correct)
         # cpu_addr is bits [10:0] of wb.adr — already the offset within the TX
         # region (bit 11 selects TX vs RX), so no subtraction needed.
-        self.comb += [
-            tx_wr_port.adr.eq(cpu_addr),
-            tx_wr_port.dat_w.eq(wb.dat_w[:8]),
-            tx_wr_port.we.eq(wb.cyc & wb.stb & is_tx & wb.we),
-        ]
+        for k in range(4):
+            self.comb += [
+                tx_wr_ports[k].adr.eq(cpu_addr),
+                tx_wr_ports[k].dat_w.eq(wb.dat_w[8 * k:8 * k + 8]),
+                tx_wr_ports[k].we.eq(wb.cyc & wb.stb & is_tx & wb.we &
+                                     wb.sel[k]),
+            ]
 
         # Wishbone read data: only RX buffer is readable, TX is write-only
-        self.comb += wb.dat_r.eq(rx_rd_port.dat_r)
+        self.comb += wb.dat_r.eq(Cat(*[p.dat_r for p in rx_rd_ports]))
 
         # Ack: 1-cycle latency for memory read
         wb_ack = Signal()

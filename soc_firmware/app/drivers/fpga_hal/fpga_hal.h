@@ -266,6 +266,10 @@ struct fpga_hal_system_cfg {
 	uint8_t  tx_max_streams;
 	uint8_t  tx_channels;
 	uint16_t tx_buffer_depth;
+	/* eth_buf packet-buffer layout: payload bytes per 32-bit Wishbone
+	 * word (4 on packed gateware; 1 on legacy builds, whose eth_buf CSR
+	 * block has no bytes_per_word register). */
+	uint8_t  eth_buf_bytes_per_word;
 };
 
 /**
@@ -295,6 +299,14 @@ bool fpga_hal_syscfg_valid(void);
 
 /** @brief Convenience: cached ptp_in_software flag (false before load). */
 bool fpga_hal_ptp_in_software(void);
+
+/**
+ * @brief Convenience: cached eth_buf payload bytes per 32-bit word.
+ *
+ * 1 (legacy byte packing) before the first syscfg load and on gateware
+ * without the eth_buf bytes_per_word CSR; 4 on packed gateware.
+ */
+uint8_t fpga_hal_eth_buf_bytes_per_word(void);
 
 /* ========================================================================
  * Status reads
