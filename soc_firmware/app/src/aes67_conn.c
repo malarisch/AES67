@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include "aes67_conn.h"
+#include "aes67_mem.h"
 #include "../drivers/fpga_hal/fpga_hal.h"
 #ifdef CONFIG_IO_CARD
 #include "../drivers/io_card/io_card.h"
@@ -39,7 +40,7 @@ static bool conn_ip_ready;
 
 static struct aes67_tx_stream tx_streams[AES67_MAX_TX_STREAMS];
 static struct aes67_rx_stream rx_streams[AES67_MAX_RX_STREAMS];
-static struct aes67_foreign_stream foreign_streams[AES67_MAX_FOREIGN_STREAMS];
+static struct aes67_foreign_stream foreign_streams[AES67_MAX_FOREIGN_STREAMS] AES67_BIG_BSS;
 
 static aes67_conn_tx_observer_t tx_observers[MAX_TX_OBSERVERS];
 static int num_tx_observers;

@@ -19,6 +19,8 @@
  *   ADDA nRST = GPIO14 (active low — low holds the card in reset;
  *                       shared with the display controller)
  *
+ * Console/shell: built-in USB Serial/JTAG (usb_serial), not uart0.
+ *
  * Display controller (LEDs/buttons/7-segment, 115200 8N1):
  *   TX = GPIO17, RX = GPIO18 (board default uart1 pinmux)
  *
@@ -99,8 +101,19 @@ i2c2: &i2c0 {
 	pinctrl-names = "default";
 };
 
+/* Console + shell on the ESP32-S3's built-in USB Serial/JTAG controller
+ * (the "USB" port of the DevKitC, CDC-ACM towards the host) instead of
+ * uart0 / the UART-bridge port. Zephyr derives ESP_CONSOLE_USB_SERIAL_JTAG
+ * and the ROM console device number from this chosen node, so no extra
+ * Kconfig is needed. uart0 stays enabled as a plain peripheral. */
+&usb_serial {
+	status = "okay";
+};
+
 / {
 	chosen {
+		zephyr,console = &usb_serial;
+		zephyr,shell-uart = &usb_serial;
 		zephyr,fpga-spi = &fpga_spi;
 	};
 

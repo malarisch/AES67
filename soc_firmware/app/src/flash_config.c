@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "flash_config.h"
+#include "aes67_mem.h"
 #include "config_json.h"
 
 LOG_MODULE_REGISTER(flash_config, LOG_LEVEL_INF);
@@ -72,7 +73,7 @@ static uint32_t seq_b;
 
 /* ---- JSON buffer (shared with serialization) ---- */
 #define JSON_BUF_SIZE  8192
-static char json_buf[JSON_BUF_SIZE];
+static char json_buf[JSON_BUF_SIZE] AES67_BIG_BSS;
 
 /* ================================================================
  * Flash backend primitives

@@ -17,6 +17,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <string.h>
+#include "aes67_mem.h"
 
 #define PERF_MAX_THREADS 48
 
@@ -35,7 +36,7 @@ struct perf_slot {
 	bool seen;
 };
 
-static struct perf_slot slots[PERF_MAX_THREADS];
+static struct perf_slot slots[PERF_MAX_THREADS] AES67_BIG_BSS;
 static int64_t prev_ms;
 static bool have_prev;
 static bool table_full;

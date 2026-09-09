@@ -43,6 +43,7 @@
 #include <ctype.h>
 
 #include "mdns_sd.h"
+#include "aes67_mem.h"
 #include "aes67_config.h"
 #include "aes67_sdp_utils.h"
 #include "aes67_conn.h"
@@ -131,7 +132,7 @@ struct discovered_session {
 	int64_t  next_describe_ms;       /* DESCRIBE rate limit         */
 };
 
-static struct discovered_session discovered[MDNS_MAX_DISCOVERED];
+static struct discovered_session discovered[MDNS_MAX_DISCOVERED] AES67_BIG_BSS;
 
 #ifdef CONFIG_NMOS_REGISTRATION
 /* ---- Discovered NMOS Registration APIs (_nmos-register._tcp) ---- */
@@ -158,7 +159,7 @@ struct nmos_registry {
 	int64_t  next_followup_ms;
 };
 
-static struct nmos_registry registries[NMOS_MAX_REGISTRIES];
+static struct nmos_registry registries[NMOS_MAX_REGISTRIES] AES67_BIG_BSS;
 #endif /* CONFIG_NMOS_REGISTRATION */
 
 /* ---- Module state ---- */
@@ -495,7 +496,7 @@ static void send_packet(const uint8_t *buf, size_t len,
  * Responder
  * ================================================================ */
 
-static uint8_t tx_buf[1400];
+static uint8_t tx_buf[1400] AES67_BIG_BSS;
 
 /* Start a response packet; answer count patched in finish_response(). */
 static int begin_response(uint16_t query_id)
@@ -586,7 +587,7 @@ static int add_instance(int off, int *answers, const char *instance,
 #define NMOS_TXT_MAX 9
 
 static struct nmos_mdns_info nmos_info;      /* last polled state */
-static char nmos_txt_store[NMOS_TXT_MAX][16];
+static char nmos_txt_store[NMOS_TXT_MAX][16] AES67_BIG_BSS;
 static const char *nmos_txt[NMOS_TXT_MAX];
 static int nmos_txt_count;
 
@@ -1696,7 +1697,7 @@ static void periodic_tick(void)
  * Socket thread
  * ================================================================ */
 
-static uint8_t rx_buf[1500];
+static uint8_t rx_buf[1500] AES67_BIG_BSS;
 
 static void mdns_thread(void *a, void *b, void *c)
 {

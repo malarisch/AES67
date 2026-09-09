@@ -1446,7 +1446,8 @@ static void is08_worker(void *a, void *b, void *c)
 	}
 }
 
-K_THREAD_STACK_DEFINE(is08_stack, 4096);
+/* Measured high-water 340 B (ESP32-S3, deferred logging, 2026-09-09). */
+K_THREAD_STACK_DEFINE(is08_stack, 2048);
 static struct k_thread is08_thread;
 
 /* ================================================================

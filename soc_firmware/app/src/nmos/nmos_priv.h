@@ -17,6 +17,7 @@
 
 #include "../webapi/webapi_priv.h"
 #include "../aes67_conn.h"
+#include "../aes67_mem.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,12 +34,8 @@ extern "C" {
 #define NMOS_LABEL_MAX    64
 
 /* Large NMOS buffers/stores go to PSRAM on the ESP32 (dram0 is tight);
- * everywhere else this is a no-op. */
-#if defined(CONFIG_ESP_SPIRAM)
-#define NMOS_BIG_BSS __attribute__((section(".ext_ram.bss")))
-#else
-#define NMOS_BIG_BSS
-#endif
+ * everywhere else this is a no-op. See aes67_mem.h for the rules. */
+#define NMOS_BIG_BSS AES67_BIG_BSS
 
 /* Resource kinds; the (kind, index) pair determines the deterministic
  * per-device UUID, so the values must never be reordered. */

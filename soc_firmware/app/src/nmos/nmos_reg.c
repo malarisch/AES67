@@ -43,7 +43,7 @@ LOG_MODULE_REGISTER(nmos_reg, LOG_LEVEL_INF);
 #define HTTP_TIMEOUT_S  5
 #define BACKOFF_MAX_S   64
 
-static char reg_body[4096];
+static char reg_body[4096] AES67_BIG_BSS;
 
 /* Counters at the last successful push — a later mismatch is what marks
  * resources dirty. (Resources never disappear: all TX/RX slots exist
@@ -367,7 +367,9 @@ static int try_adopt(const struct mdns_nmos_registry *r)
  * Client thread
  * ================================================================ */
 
-K_THREAD_STACK_DEFINE(nmos_reg_stack, 6144);
+/* Measured high-water 404 B (ESP32-S3, deferred logging, 2026-09-09); the
+ * 4 KB request body is static (reg_body), not on the stack. */
+K_THREAD_STACK_DEFINE(nmos_reg_stack, 3072);
 static struct k_thread nmos_reg_thread_data;
 
 static void reg_thread_fn(void *a, void *b, void *c)

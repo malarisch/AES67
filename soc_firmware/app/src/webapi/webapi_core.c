@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "../webserver.h"
+#include "../aes67_mem.h"
 #include "../aes67_config.h"
 #include "webapi_priv.h"
 
@@ -53,10 +54,10 @@ HTTP_SERVICE_DEFINE(aes67_http, "0.0.0.0", &http_port,
 /* Shared response/body buffers: dynamic resources are serialised per
  * resource holder, so one request at a time uses them. */
 #define JSON_BUF_SIZE 4096
-static char json_buf[JSON_BUF_SIZE];
+static char json_buf[JSON_BUF_SIZE] AES67_BIG_BSS;
 
 #define BODY_BUF_SIZE 4096
-static char body_buf[BODY_BUF_SIZE];
+static char body_buf[BODY_BUF_SIZE] AES67_BIG_BSS;
 static size_t body_len;
 
 /* ================================================================

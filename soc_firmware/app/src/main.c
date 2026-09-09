@@ -152,7 +152,9 @@ static bool g_dhcp_running;
  * has a small stack, and the system workqueue is shared with the network stack
  * itself. g_my_ip/g_ip_valid/g_ip_is_ll are only ever written there.
  */
-#define IPCFG_STACK_SIZE  8192
+/* Measured high-water 1028 B (ESP32-S3, deferred logging, 2026-09-09).
+ * Sized ~3x that; immediate-mode logging adds ~1-2 KB per logging thread. */
+#define IPCFG_STACK_SIZE  3072
 #define LL_RETRY_MS       5000
 
 /* How long DHCP gets to (re)produce a lease before the node adopts the

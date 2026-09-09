@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "aes67_mem.h"
 
 #include "rtsp.h"
 #include "aes67_conn.h"
@@ -42,17 +43,17 @@ static struct k_thread rtsp_server_thread_data;
 static int rtsp_server_sock = -1;
 static bool rtsp_server_running;
 static struct k_mutex rtsp_mutex;
-static struct rtsp_session rtsp_sessions[RTSP_MAX_SESSIONS];
+static struct rtsp_session rtsp_sessions[RTSP_MAX_SESSIONS] AES67_BIG_BSS;
 
 /* ---- Client connections state ---- */
-static struct rtsp_client_connection rtsp_clients[RTSP_MAX_CLIENTS];
+static struct rtsp_client_connection rtsp_clients[RTSP_MAX_CLIENTS] AES67_BIG_BSS;
 
 /* ---- Local IP address (set after DHCP) ---- */
 static struct in_addr local_ip_addr;
 
 /* ---- Receive/send buffers (per-connection in thread) ---- */
-static char rtsp_recv_buf[RTSP_RECV_BUF_SIZE];
-static char rtsp_send_buf[RTSP_SEND_BUF_SIZE];
+static char rtsp_recv_buf[RTSP_RECV_BUF_SIZE] AES67_BIG_BSS;
+static char rtsp_send_buf[RTSP_SEND_BUF_SIZE] AES67_BIG_BSS;
 
 /* ================================================================
  * Method name lookup
@@ -1171,7 +1172,7 @@ static int parse_describe_response(const char *response, size_t len,
 /* ---- One-shot DESCRIBE (mDNS discovery) ---- */
 
 static K_MUTEX_DEFINE(describe_lock);
-static char describe_buf[2048];
+static char describe_buf[2048] AES67_BIG_BSS;
 
 /* Percent-encode a URL path segment (session names may contain spaces). */
 static size_t url_encode_segment(const char *in, char *out, size_t out_size)

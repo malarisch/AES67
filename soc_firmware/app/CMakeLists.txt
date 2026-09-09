@@ -118,6 +118,8 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
     # ESP32-S3 PSRAM: keep net-stack thread stacks in internal DRAM while the
     # packet pools live in PSRAM (content is #ifdef'd on the SPIRAM symbol).
     zephyr_linker_sources(SECTIONS sections-psram-stacks.ld)
+    # ... and keep kernel objects of PSRAM-relocated libraries in DRAM.
+    zephyr_linker_sources(RAM_SECTIONS sections-psram-dram-keep.ld)
 
     if(CONFIG_AES67_PTP_SOFTWARE)
       # ptp_ctrl's software backend reads the Zephyr PTP stack's internal

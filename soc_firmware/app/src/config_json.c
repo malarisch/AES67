@@ -27,6 +27,7 @@
 #include <stdlib.h>
 
 #include "config_json.h"
+#include "aes67_mem.h"
 #include "aes67_config.h"
 #include "aes67_conn.h"
 #include "card_manager.h"
@@ -252,7 +253,7 @@ static const struct json_obj_descr doc_descr[] = {
 /* ~3 KB — too much for the calling thread's stack (config saves run from
  * the shell, the web API and a work queue). Serialization and parsing
  * never overlap, so one instance under a mutex is enough. */
-static struct cfg_doc doc;
+static struct cfg_doc doc AES67_BIG_BSS;
 static K_MUTEX_DEFINE(doc_mutex);
 
 /* ================================================================
