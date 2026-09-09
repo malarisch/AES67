@@ -86,7 +86,7 @@ static const struct flash_area *cfg_area;
 
 static int cfg_backend_init(void)
 {
-	int ret = flash_area_open(FIXED_PARTITION_ID(storage_partition), &cfg_area);
+	int ret = flash_area_open(PARTITION_ID(storage_partition), &cfg_area);
 
 	if (ret < 0) {
 		LOG_ERR("Flash config: storage partition unavailable (err %d)", ret);

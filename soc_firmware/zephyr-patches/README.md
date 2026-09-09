@@ -1,26 +1,28 @@
 # Local Zephyr patches (alright to call it "AI slop")
 
 Zephyr comes from our fork, https://github.com/malarisch/zephyr. Branch
-`aes67/main-<date>` there is an upstream `main` snapshot with this patch
-series already applied; `soc_firmware/app/west-manifest/west.yml` pins
-its tip, so a plain `west update` yields the patched tree. The `.patch`
-files here are the same commits (`git format-patch upstream..branch`),
-kept as a readable changelog and as a fallback for re-applying onto a
-newer upstream (`git am`).
+`aes67` there is an upstream `main` snapshot with the patch series below
+already applied (rebased and force-pushed on each upstream bump). Its
+tip is pinned twice, and the two must agree (CI checks): as the git submodule `external/zephyr` (so a plain
+`git clone --recurse-submodules` has the tree) and as the `revision:` in
+`soc_firmware/app/west-manifest/west.yml` (west still owns the workspace
+and fetches the imported modules). The commits themselves live only on
+the fork — this file is the changelog (`git log origin/main..aes67`).
 
-Current base: upstream main 042104ba7e (2026-09-09), branch
-`aes67/main-20260909`.
+Current base: upstream main 042104ba7e (2026-09-09).
 
 Rebasing onto a newer upstream:
 
+    # sync the fork's main with upstream on GitHub first ("Sync fork")
     cd external/zephyr
-    git fetch fork main                        # fork = malarisch/zephyr
-    git checkout -b aes67/main-<date> fork/main
-    git am ../../soc_firmware/zephyr-patches/*.patch   # or cherry-pick the old branch
+    git fetch origin main                      # origin = malarisch/zephyr
+    git checkout aes67
+    git rebase origin/main            # drop anything merged upstream meanwhile
     # build all targets + twister, then:
-    git push fork aes67/main-<date>
-    git format-patch -o ../../soc_firmware/zephyr-patches fork/main..HEAD
-    # bump revision: in west.yml to the pushed tip, update this README
+    git push --force-with-lease origin aes67
+    # bump BOTH pins to the pushed tip: `revision:` in west.yml and the
+    # submodule gitlink (`git add external/zephyr` from the repo root),
+    # then update "Current base" here
 
 - 0001 spi_litex: local behaviour change (SPI_CS_ACTIVE_HIGH deasserts CS
   during transfer for SD-card init clocking; SPI_LOCK_ON ignored).

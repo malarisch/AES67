@@ -82,3 +82,4 @@ CLAUDE.md
 nmos-results/
 twister-out/
 twister-out.*/
+**/toolchains/**

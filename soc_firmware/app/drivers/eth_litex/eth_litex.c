@@ -1053,16 +1053,9 @@ static enum ethernet_hw_caps eth_litex_get_capabilities(const struct device *dev
 	ARG_UNUSED(dev);
 	ARG_UNUSED(iface);
 
-	enum ethernet_hw_caps caps = ETHERNET_LINK_100BASE;
-
-#ifdef CONFIG_AES67_PTP_SOFTWARE
-	/* ETHERNET_PTP only when the loaded gateware actually provides the
-	 * software-PTP surface (timestamp trailer + wallclock CSRs). */
-	if (fpga_hal_ptp_in_software()) {
-		caps |= ETHERNET_PTP;
-	}
-#endif
-	return caps;
+	/* PTP capability is no longer a hw_caps flag: the stack asks
+	 * get_ptp_clock() (below), which keys off the loaded gateware. */
+	return ETHERNET_LINK_100BASE;
 }
 
 #ifdef CONFIG_AES67_PTP_SOFTWARE

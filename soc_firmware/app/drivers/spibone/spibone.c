@@ -64,8 +64,8 @@ static struct spibone_data spibone_data_inst;
 static const struct spibone_config spibone_config_inst = {
 	/* spibone gateware speaks SPI mode 0 (CPOL=0, CPHA=0), MSB first. */
 	.bus = SPI_DT_SPEC_GET(SPIBONE_NODE,
-			       SPI_OP_MODE_MASTER | SPI_WORD_SET(8) |
-			       SPI_TRANSFER_MSB, 0),
+			       SPI_OP_MODE_CONTROLLER | SPI_WORD_SET(8) |
+			       SPI_TRANSFER_MSB),
 };
 
 /* Contiguous scratch buffers for burst transfers. Some SPI controllers

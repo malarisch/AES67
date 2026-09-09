@@ -2,15 +2,21 @@ manifest:
   remotes:
     - name: zephyrproject
       url-base: https://github.com/zephyrproject-rtos
+    # Our Zephyr fork: upstream main + the AES67 patch series (changelog in
+    # soc_firmware/zephyr-patches/README.md). The modules imported below
+    # still come from zephyrproject-rtos via Zephyr's own manifest.
+    - name: malarisch
+      url-base: https://github.com/malarisch
   projects:
     - name: zephyr
       repo-path: zephyr
-      remote: zephyrproject
-      # Pinned main snapshot (2026-07-03): post-v4.4.1, includes the PTP
-      # overhaul (configurable PI servo gains, uptime-based msg aging,
-      # ingress-ts validity guards). Local patches live on branch
-      # aes67/main-20260703 in external/zephyr — re-checkout after west update.
-      revision: 8edca5b8df024f290d30daad028fd5e4488877bd
+      remote: malarisch
+      # Branch `aes67` on the fork = upstream main snapshot (currently
+      # 042104ba7e, 2026-09-09) + our patches already applied, so a plain
+      # `west update` yields the patched tree — no `git am` needed.
+      # Pin the branch TIP (not the branch name) so builds are reproducible;
+      # keep it equal to the external/zephyr submodule gitlink.
+      revision: a33f1cc90c3a4a0c569325b2d05f02e1ea4091e7
       clone-depth: 1
       import:
         path-prefix: external
