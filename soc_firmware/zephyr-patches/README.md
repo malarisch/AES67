@@ -2,12 +2,16 @@
 
 Zephyr comes from our fork, https://github.com/malarisch/zephyr. Branch
 `aes67` there is an upstream `main` snapshot with the patch series below
-already applied (rebased and force-pushed on each upstream bump). Its
-tip is pinned twice, and the two must agree (CI checks): as the git submodule `external/zephyr` (so a plain
-`git clone --recurse-submodules` has the tree) and as the `revision:` in
-`soc_firmware/app/west-manifest/west.yml` (west still owns the workspace
-and fetches the imported modules). The commits themselves live only on
-the fork — this file is the changelog (`git log origin/main..aes67`).
+already applied (rebased and force-pushed on each upstream bump).
+`soc_firmware/app/west-manifest/west.yml` follows that branch
+(`revision: aes67`) — the fork exists only for this project, so its tip
+is always the intended state. The tree is also the git submodule
+`external/zephyr`, whose gitlink records which commit a given AES67
+revision was built against (`git add external/zephyr` after `west update`
+moved it; a stale gitlink is harmless, west checks out the tip anyway).
+West still owns the workspace and fetches the imported modules. The
+commits themselves live only on the fork — this file is the changelog
+(`git log origin/main..aes67`).
 
 Current base: upstream main 042104ba7e (2026-09-09).
 
@@ -20,8 +24,7 @@ Rebasing onto a newer upstream:
     git rebase origin/main            # drop anything merged upstream meanwhile
     # build all targets + twister, then:
     git push --force-with-lease origin aes67
-    # bump BOTH pins to the pushed tip: `revision:` in west.yml and the
-    # submodule gitlink (`git add external/zephyr` from the repo root),
+    # record the new tip: `git add external/zephyr` from the repo root,
     # then update "Current base" here
 
 - 0001 spi_litex: local behaviour change (SPI_CS_ACTIVE_HIGH deasserts CS

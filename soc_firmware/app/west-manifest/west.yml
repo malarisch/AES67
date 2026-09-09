@@ -14,9 +14,12 @@ manifest:
       # Branch `aes67` on the fork = upstream main snapshot (currently
       # 042104ba7e, 2026-09-09) + our patches already applied, so a plain
       # `west update` yields the patched tree — no `git am` needed.
-      # Pin the branch TIP (not the branch name) so builds are reproducible;
-      # keep it equal to the external/zephyr submodule gitlink.
-      revision: a33f1cc90c3a4a0c569325b2d05f02e1ea4091e7
+      # The fork exists only for this project, so its branch tip is always
+      # the intended state: follow the branch here. The exact commit a
+      # given AES67 revision was built against is recorded by the
+      # external/zephyr submodule gitlink (`git add external/zephyr` after
+      # `west update` moved it).
+      revision: aes67
       clone-depth: 1
       import:
         path-prefix: external

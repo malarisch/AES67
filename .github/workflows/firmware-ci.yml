@@ -55,22 +55,12 @@ jobs:
           pip install "migen @ git+https://github.com/m-labs/migen" \
                       "litex @ git+https://github.com/enjoy-digital/litex"
 
-      - name: Zephyr pin consistency (submodule gitlink == west.yml revision)
-        # external/zephyr is both a git submodule (for plain git users) and
-        # the west "zephyr" project (for the build). Both must pin the same
-        # commit on the malarisch/zephyr fork; bump them together.
-        run: |
-          gitlink=$(git rev-parse HEAD:external/zephyr)
-          westrev=$(sed -n 's/^ *revision: *\([0-9a-f]\{40\}\).*/\1/p' soc_firmware/app/west-manifest/west.yml | head -1)
-          echo "submodule: $gitlink"
-          echo "west.yml:  $westrev"
-          test "$gitlink" = "$westrev"
-
       - name: West workspace (pinned Zephyr fork)
         run: |
           # Repo root == west topdir, same as the local checkout. The
-          # manifest pins a branch tip on github.com/malarisch/zephyr that
-          # already carries our patch series (soc_firmware/zephyr-patches/README.md).
+          # manifest follows branch `aes67` of github.com/malarisch/zephyr,
+          # which already carries our patch series
+          # (soc_firmware/zephyr-patches/README.md).
           west init -l --mf app/west-manifest/west.yml soc_firmware
           west update --narrow -o=--depth=1
           # base + build/run-test (twister needs natsort, psutil, ...)
