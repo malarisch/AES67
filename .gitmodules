@@ -10,3 +10,9 @@
 [submodule "soc_firmware/app/webui"]
 	path = soc_firmware/app/webui
 	url = https://github.com/malarisch/aes67-soc-webui
+[submodule "external/zephyr"]
+	path = external/zephyr
+	url = https://github.com/malarisch/zephyr.git
+	branch = aes67
+	shallow = true
+	ignore = untracked

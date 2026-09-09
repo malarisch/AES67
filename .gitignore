@@ -48,7 +48,10 @@ db/
 .idea/
 .venv
 build/
-external/
+# west workspace lives under external/ — only the Zephyr fork is tracked
+# (as a submodule); the imported modules stay west-managed and ignored.
+external/*
+!external/zephyr
 **/greybox_tmp/
 build*/
 **/node_modules/
