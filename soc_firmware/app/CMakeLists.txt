@@ -239,6 +239,20 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
       target_sources(app PRIVATE src/nmos/nmos_json.c)
     endif()
     target_sources_ifdef(CONFIG_SD_CONFIG         app PRIVATE src/sd_config.c)
+    # USB Audio Class 2 <-> FPGA I2S bridge (ESP32-S3 external MCU only).
+    # usb_audio_i2s.c drives I2S0 + GDMA through the ESP HAL directly (the
+    # Zephyr I2S driver cannot stream gaplessly); the I2S HAL sources are
+    # only compiled by the hal_espressif module when CONFIG_I2S_ESP32 is
+    # set, so pull them in here.
+    if(CONFIG_AES67_USB_AUDIO)
+      target_sources(app PRIVATE src/usb_audio.c src/usb_audio_i2s.c)
+      # register dump in `usbaudio dwc2` (bring-up diagnostics)
+      target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/usb/common)
+      target_sources(app PRIVATE
+        ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/esp_hal_i2s/i2s_hal.c
+        ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/hal/hal_utils.c
+      )
+    endif()
     target_sources_ifdef(CONFIG_FLASH_CONFIG      app PRIVATE src/flash_config.c)
     if(CONFIG_THREAD_RUNTIME_STATS AND CONFIG_SHELL)
       target_sources(app PRIVATE src/perf_stats.c)

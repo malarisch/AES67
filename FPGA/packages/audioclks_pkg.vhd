@@ -61,6 +61,13 @@ package audioclks_pkg is
         fs_high_is_channel_2 => true,
         tdm_channels => 2
     );
+    constant i2s_esp_config : t_audio_clock_io_cfg := (
+        data_is_valid_on_rising_bclk_edge => true,
+        bits_are_right_shifted_to_fs => true,
+        fs_is_one_bclk_high => false,
+        fs_high_is_channel_2 => true,
+        tdm_channels => 2
+    );
     constant i2s_lj_dac_config : t_audio_clock_io_cfg := (
         data_is_valid_on_rising_bclk_edge => true,
         bits_are_right_shifted_to_fs => false,

@@ -163,6 +163,49 @@ Rebasing onto a newer upstream:
   (timeout path quiesces + releases the PM lock). Polling mode and target
   mode unchanged — candidate for upstream submission.
 
+- 0017 i2s_esp32: target (slave) mode module clock. The driver derived
+  MCLK from the frame clock (fs x 8 = 384 kHz at 48 kHz) instead of from
+  BCLK (bclk x 8, the ESP-IDF rule "module clock >= 8 x BCLK"), so a
+  slave receiving a 3.072 MHz BCLK sampled it with a 384 kHz clock and
+  never locked. Also: rx/tx_stop_transfer() dropped the pointer to the
+  block the DMA was working on without freeing it, so every DROP / STOP /
+  error path leaked one slab block per direction (the slab is empty after
+  a handful of restarts). Needed for the USB-audio experiment (ESP32-S3 as
+  I2S slave of the FPGA media clock) — candidate for upstream submission.
+
+- 0018 cache_esp32: treat NULL/zero-length ranges as no-ops. udc_dwc2 in
+  buffer-DMA mode syncs every net_buf before a transfer, including ZLPs
+  (data NULL, len 0); esp_cache_msync() rejects those with a logged
+  "null pointer" error on every packet, which floods the console —
+  candidate for upstream submission.
+
+- 0019 udc_dwc2: CONFIG_UDC_DWC2_RXFIFO_MAX_PERCENTAGE. The RxFIFO share
+  of the controller SPRAM was a hard-coded 25 %; on the ESP32-S3 (1 KB
+  SPRAM) that is 256 B, so any OUT packet above that — every UAC2
+  Full-Speed audio packet — is dropped by the core and isochronous OUT
+  completes empty on every frame while IN works. Made configurable
+  (default unchanged) — candidate for upstream submission. Also adds
+  CONFIG_UDC_DWC2_FIFO0_PACKETS (default 2 = unchanged): the EP0 TxFIFO
+  was hard-coded to two 64 B packets; with 1 the S3 budget (200 usable
+  words) fits RxFIFO 110 + EP0 16 + ISO IN 74 for 2 ch 24 bit duplex.
+  HW finding: the core drops an ISO OUT packet (DOEPINT.PktDrpSts) when
+  the RxFIFO is smaller than about MPS/4 + 1 + one EP0 packet + 1 words,
+  not just when it is smaller than the packet.
+- 0020 udc_dwc2: re-arm isochronous OUT endpoints from the ISR. The
+  driver used to arm the next queued OUT buffer from its thread after
+  every completion; whenever a cooperative thread (Zephyr's tx_tstamp at
+  K_PRIO_COOP(1), doing SPI on the ESP32) held the CPU for more than the
+  rest of the frame, the host's next packet hit a disabled endpoint and
+  was dropped (OUTTknEPdis + PktDrpSts, ~2 % loss). Completed ISO OUT
+  buffers now go through a k_fifo (priv->iso_out_done) to the thread,
+  and the ISR arms the next queued buffer immediately.
+- 0021 usbd_uac2: CONFIG_USBD_AUDIO2_QUEUE_DEPTH (default 2 = the old
+  fixed double-buffering). The class kept at most two transfers queued
+  per AudioStreaming interface; with the ISR re-arm above the queue must
+  survive several frames of class-thread latency, so the two bitmasks
+  became a per-interface counter and uac2_sof tops the queue up to the
+  configured depth (ESP32 build uses 4).
+
 Merged upstream (dropped from the series):
 - announce messages must advertise logAnnounceInterval (was 0004) —
   upstream f939ffaa8f "ptp: put announce interval into announce

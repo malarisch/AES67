@@ -19,7 +19,20 @@
  *   ADDA nRST = GPIO14 (active low — low holds the card in reset;
  *                       shared with the display controller)
  *
- * Console/shell: built-in USB Serial/JTAG (usb_serial), not uart0.
+ * Console/shell: uart0 (GPIO43 TX / GPIO44 RX, the DevKitC's "UART"
+ * USB connector). The built-in USB Serial/JTAG controller shares the
+ * chip's single internal USB PHY with the USB-OTG core; enabling the USB
+ * audio device (usb_otg) hands the PHY to OTG, so the "USB" connector is
+ * the audio interface and can no longer carry the console.
+ *
+ * USB audio (UAC2) <-> FPGA I2S, ESP32 is I2S *target* (slave) of the
+ * FPGA's media clock (BCLK = 64 fs, WS = fs, 24-bit in 32-bit slots):
+ *   BCLK = GPIO40 (in,  FPGA bclk_dac / bclk_adc)
+ *   WS   = GPIO41 (in,  FPGA fs_dac / fs_adc)
+ *   DIN  = GPIO42 (in,  FPGA tdm_out[0]  -> USB record)
+ *   DOUT = GPIO39 (out, FPGA tdm_in[0]   <- USB playback)
+ * GPIO39..42 are the chip's own JTAG pads (unused: FPGA JTAG is bit-banged
+ * on GPIO4..7, the ESP itself is debugged over USB-JTAG/UART).
  *
  * Display controller (LEDs/buttons/7-segment, 115200 8N1):
  *   TX = GPIO17, RX = GPIO18 (board default uart1 pinmux)
@@ -33,6 +46,8 @@
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/esp32s3-pinctrl.h>
+#include <zephyr/dt-bindings/usb/audio.h>
 
 &psram0 {
 	size = <DT_SIZE_M(8)>;
@@ -55,6 +70,47 @@
 		};
 	};
 
+	/* I2S0 as full-duplex target: BCLK and WS are inputs only, so they
+	 * are muxed with explicit ESP32_PINMUX(pin, <in-signal>, ESP_NOSIG)
+	 * instead of the stock I2S0_O_BCK_GPIOnn macros, which also connect
+	 * the peripheral's output signal and enable the pad driver — that
+	 * would fight the FPGA's clock outputs. The TX (O_) and RX (I_)
+	 * halves both get the same pads (the GPIO matrix fans one pad out
+	 * to several input signals); the driver additionally sets
+	 * sig_loopback so RX follows TX's clock inputs. */
+	i2s0_fpga: i2s0_fpga {
+		group1 {
+			pinmux = <ESP32_PINMUX(40, ESP_I2S0O_BCK_IN, ESP_NOSIG)>,
+				 <ESP32_PINMUX(40, ESP_I2S0I_BCK_IN, ESP_NOSIG)>,
+				 <ESP32_PINMUX(41, ESP_I2S0O_WS_IN, ESP_NOSIG)>,
+				 <ESP32_PINMUX(41, ESP_I2S0I_WS_IN, ESP_NOSIG)>,
+				 <I2S0_I_SD_GPIO42>;
+		};
+		group2 {
+			pinmux = <I2S0_O_SD_GPIO39>;
+			output-low;
+		};
+	};
+};
+
+/* I2S0 <-> FPGA audio port. usb_audio_i2s.c programs the controller and
+ * GDMA channel 0 through the ESP HAL (Zephyr's I2S driver restarts the DMA
+ * per block and drops samples in the gap); it only takes reg, clocks and
+ * the pinctrl from this node. The node stays disabled so the Zephyr driver
+ * is never instantiated, and `dma` stays disabled as in the board DTS. */
+&i2s0 {
+	pinctrl-0 = <&i2s0_fpga>;
+	pinctrl-names = "default";
+};
+
+/* USB-OTG device controller (already labelled zephyr_udc0 / okay in the
+ * board DTS) and the USB Audio Class 2 function on top of it. */
+&usb_otg {
+	status = "okay";
+};
+
+&usb_serial {
+	status = "disabled";
 };
 
 &spi2 {
@@ -101,19 +157,9 @@ i2c2: &i2c0 {
 	pinctrl-names = "default";
 };
 
-/* Console + shell on the ESP32-S3's built-in USB Serial/JTAG controller
- * (the "USB" port of the DevKitC, CDC-ACM towards the host) instead of
- * uart0 / the UART-bridge port. Zephyr derives ESP_CONSOLE_USB_SERIAL_JTAG
- * and the ROM console device number from this chosen node, so no extra
- * Kconfig is needed. uart0 stays enabled as a plain peripheral. */
-&usb_serial {
-	status = "okay";
-};
-
 / {
+	/* Console + shell stay on the board default, uart0 (see header). */
 	chosen {
-		zephyr,console = &usb_serial;
-		zephyr,shell-uart = &usb_serial;
 		zephyr,fpga-spi = &fpga_spi;
 	};
 
@@ -143,5 +189,81 @@ i2c2: &i2c0 {
 	adda_nrst: adda-nrst {
 		compatible = "aes67,adda-nrst";
 		gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
+	};
+};
+
+/* USB Audio Class 2 function: 2 in / 2 out, 48 kHz, 24 bit in 3-byte
+ * subslots (294 B per Full-Speed packet; 4-byte subslots would need a
+ * 392 B RxFIFO, more than the ESP32-S3's DWC2 can spare next to the IN
+ * FIFO, see CONFIG_UDC_DWC2_RXFIFO_MAX_PERCENTAGE). The clock is the FPGA's
+ * PTP-disciplined media clock: external, free-running, not SOF-locked ->
+ * asynchronous endpoints. Rate matching uses implicit feedback: the IN
+ * stream carries exactly as many frames per SOF as I2S delivered and the
+ * host derives the OUT packet size from that; both directions share the
+ * clock, so the playback queue stays level. Entity IDs are the child
+ * index + 1 (UAC2_ENTITY_ID()), the order below is therefore significant. */
+/ {
+	uac2_fpga: usb_audio2 {
+		compatible = "zephyr,uac2";
+		status = "okay";
+		full-speed;
+		audio-function = <AUDIO_FUNCTION_IO_BOX>;
+
+		uac_aclk: aclk {
+			compatible = "zephyr,uac2-clock-source";
+			clock-type = "external";
+			frequency-control = "read-only";
+			sampling-frequencies = <48000>;
+		};
+
+		/* Host -> device (USB playback) ... */
+		usb_out_terminal: usb_out_terminal {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&uac_aclk>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+			front-left;
+			front-right;
+		};
+
+		/* ... leaves through the I2S port into the FPGA (AES67 TX). */
+		fpga_tx_terminal: fpga_tx {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&usb_out_terminal>;
+			clock-source = <&uac_aclk>;
+			terminal-type = <EXTERNAL_TERMINAL_DIGITAL_AUDIO_INTERFACE>;
+		};
+
+		/* FPGA (AES67 RX) enters through the I2S port ... */
+		fpga_rx_terminal: fpga_rx {
+			compatible = "zephyr,uac2-input-terminal";
+			clock-source = <&uac_aclk>;
+			terminal-type = <EXTERNAL_TERMINAL_DIGITAL_AUDIO_INTERFACE>;
+			front-left;
+			front-right;
+		};
+
+		/* ... and goes to the host (USB record). */
+		usb_in_terminal: usb_in_terminal {
+			compatible = "zephyr,uac2-output-terminal";
+			data-source = <&fpga_rx_terminal>;
+			clock-source = <&uac_aclk>;
+			terminal-type = <USB_TERMINAL_STREAMING>;
+		};
+
+		as_iso_out: out_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&usb_out_terminal>;
+			implicit-feedback;
+			subslot-size = <3>;
+			bit-resolution = <24>;
+		};
+
+		as_iso_in: in_interface {
+			compatible = "zephyr,uac2-audio-streaming";
+			linked-terminal = <&usb_in_terminal>;
+			implicit-feedback;
+			subslot-size = <3>;
+			bit-resolution = <24>;
+		};
 	};
 };

@@ -61,6 +61,9 @@
 #ifdef CONFIG_NMOS
 #include "nmos/nmos.h"
 #endif
+#ifdef CONFIG_AES67_USB_AUDIO
+#include "usb_audio.h"
+#endif
 #ifdef CONFIG_AES67_PTP_SOFTWARE
 #include "../drivers/eth_litex/eth_litex.h"
 #include <zephyr/net/ptp.h>  /* ptp_start() — application-managed stack start */
@@ -1364,6 +1367,23 @@ int main(void)
 
 	/* ---- Start PPB measurement / PLL correction thread ---- */
 	fpga_poll_start(dhcp_restart);
+
+#ifdef CONFIG_AES67_USB_AUDIO
+	/* ---- USB audio interface (UAC2 <-> FPGA I2S) ----
+	 * Last: it takes the USB PHY away from the Serial/JTAG controller,
+	 * and the I2S port only makes sense once the FPGA's audio clocks
+	 * run (reset domains released above). */
+	int ua_ret = usb_audio_init();
+
+	if (ua_ret < 0) {
+		LOG_ERR("USB audio did not initialise (err %d)", ua_ret);
+	} else if (IS_ENABLED(CONFIG_AES67_USB_AUDIO_AUTOSTART)) {
+		ua_ret = usb_audio_start();
+		if (ua_ret < 0) {
+			LOG_ERR("USB audio did not start (err %d)", ua_ret);
+		}
+	}
+#endif
 
 	LOG_INF("System ready");
 	return 0;

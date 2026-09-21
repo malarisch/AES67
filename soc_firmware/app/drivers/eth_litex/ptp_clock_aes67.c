@@ -109,6 +109,17 @@ static bool nco_written_once;
  * mismatch is a ±2^40 glitch). */
 static K_MUTEX_DEFINE(nco_lock);
 
+/* Diagnostics: hold back the periodic register writes (shell "aes67 nco
+ * hold ...") to check whether a rate update disturbs the media clock. */
+static bool hold_wc_ppb;
+static bool hold_nco_adj;
+
+void aes67_ptp_nco_hold(bool wc, bool nco)
+{
+	hold_wc_ppb = wc;
+	hold_nco_adj = nco;
+}
+
 static void nco_write_adj(int64_t units)
 {
 	/* LO, HI (committed atomically CSR-side on the HI write), then a
@@ -135,7 +146,7 @@ static void nco_recompute(void)
 	 * and the >>16 result (±2^35) fits the 48-bit register. */
 	int64_t units = (nco_acc_q16 * NCO_UNITS_PER_PPB) >> 16;
 
-	if (units != nco_written_units || !nco_written_once) {
+	if ((units != nco_written_units || !nco_written_once) && !hold_nco_adj) {
 		nco_write_adj(units);
 	}
 }
@@ -174,7 +185,9 @@ void aes67_ptp_nco_status(struct aes67_nco_status *st)
 static void wc_write_ppb(int32_t ppb)
 {
 	applied_ppb = ppb;
-	wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+	if (!hold_wc_ppb) {
+		wc_csr_write(CSR_AES67_CSR_WALLCLOCK_PPB_ADDR, (uint32_t)ppb & 0xFFFFF);
+	}
 	nco_smooth_update(ppb);
 }
 

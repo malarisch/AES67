@@ -336,10 +336,9 @@ static void print_milli(char *buf, size_t len, int32_t m)
  * behind IS_ENABLED(), the symbol itself is always referenced. */
 static int cmd_aes67_nco(const struct shell *sh, size_t argc, char **argv)
 {
+#ifndef CONFIG_AES67_PTP_SOFTWARE
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-
-#ifndef CONFIG_AES67_PTP_SOFTWARE
 	shell_error(sh, "not available (no software-PTP support in this build)");
 	return -ENOTSUP;
 #else
@@ -350,6 +349,16 @@ static int cmd_aes67_nco(const struct shell *sh, size_t argc, char **argv)
 
 	struct aes67_nco_status st;
 	char v[24];
+
+	if (argc >= 3 && strcmp(argv[1], "hold") == 0) {
+		bool wc = strcmp(argv[2], "wc") == 0 || strcmp(argv[2], "all") == 0;
+		bool nco = strcmp(argv[2], "nco") == 0 || strcmp(argv[2], "all") == 0;
+
+		aes67_ptp_nco_hold(wc, nco);
+		shell_print(sh, "hold: wallclock ppb %s, nco adjust %s",
+			    wc ? "held" : "written", nco ? "held" : "written");
+		return 0;
+	}
 
 	aes67_ptp_nco_status(&st);
 

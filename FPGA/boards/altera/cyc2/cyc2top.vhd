@@ -8,7 +8,7 @@ use work.audioclks_pkg.all;
 use work.system_cfg_pkg.all;
 ENTITY cyc2top IS
 	generic (
-		syscfg: t_global_system_cfg := global_system_cfg_lo
+		syscfg: t_global_system_cfg := global_system_cfg_rn2io
 	);
 	PORT 
 	(
@@ -17,6 +17,10 @@ ENTITY cyc2top IS
 		
         fs_adc: OUT STD_LOGIC; -- lrclk
 		  fs_dac: OUT STD_LOGIC; -- lrclk
+		  esp_fsclk : OUT STD_LOGIC;
+		  esp_bclk : OUT STD_LOGIC;
+		  esp_din : IN STD_LOGIC;
+		  esp_dout : OUT std_logic;
 		  fs_ext : OUT STD_LOGIC;
         tdm_out: OUT STD_LOGIC_VECTOR(3 downto 0); -- tdm out
         bclk_adc: OUT STD_LOGIC; -- bclk
@@ -76,14 +80,18 @@ signal mclk_reg : std_logic;
 signal dbg_mac_tx_clk_o : std_logic;
 
 begin
-	tdm_in_reg <= tdm_in(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
+	--tdm_in_reg <= tdm_in(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
 	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	tdm_out(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0) <= tdm_out_reg;
+	--tdm_out(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0) <= tdm_out_reg;
+	esp_dout <= tdm_out_reg(0);
+	tdm_in_reg(0) <= esp_din;
 	mclk <= mclk_reg;
 	 phy_rstn_o <= '1';
 	 bclk_adc <= not bclk;
 	 bclk_dac <= not bclk;
+	 esp_bclk <= not bclk;
+	 esp_fsclk <= fs;
 	 txen(0) <= phy_txen;
 	 phy0tx <= phy_tx;
 	 phy1tx <= phy_tx;

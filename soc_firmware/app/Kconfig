@@ -53,6 +53,75 @@ config APP_SPI_BRINGUP
 	  (HTTP / RTSP / mDNS / PTP BMC) is the default for every HAL
 	  backend that has networking, including SPI.
 
+menu "USB audio interface (UAC2 <-> FPGA I2S)"
+
+config AES67_USB_AUDIO
+	bool "Expose the FPGA audio port as a USB Audio Class 2 device"
+	default n
+	depends on FPGA_HAL_SPI
+	depends on USB_DEVICE_STACK_NEXT && USBD_AUDIO2_CLASS
+	depends on SOC_SERIES_ESP32S3
+	help
+	  Experimental "AES67 USB audio interface": the ESP32-S3's USB-OTG
+	  core enumerates as a UAC2 device (2 in / 2 out, 48 kHz, 24 bit)
+	  and the samples are shovelled between the USB isochronous
+	  endpoints and an I2S port on which the ESP32 is the *target*
+	  (slave) of the FPGA's PTP-disciplined media clock. Implicit
+	  feedback keeps the host's rate locked to the FPGA clock. See
+	  soc_firmware/docs/usb-audio-plan.md and src/usb_audio.c.
+
+	  Needs the zephyr,uac2 node + i2s0 + usb_otg from the board overlay
+	  and moves the console off the USB Serial/JTAG port (shared PHY).
+
+if AES67_USB_AUDIO
+
+config AES67_USB_AUDIO_VID
+	hex "USB vendor ID"
+	default 0x1209
+	help
+	  0x1209 is pid.codes; PIDs 0x0001-0x0010 there are reserved for
+	  testing/private use, which is what this experiment is. Replace
+	  before shipping anything.
+
+config AES67_USB_AUDIO_PID
+	hex "USB product ID"
+	default 0x0001
+
+config AES67_USB_AUDIO_MANUFACTURER
+	string "USB manufacturer string"
+	default "AES67 project"
+
+config AES67_USB_AUDIO_PRODUCT
+	string "USB product string suffix"
+	default "AES67USB"
+	help
+	  The USB product string is "<hostname> <suffix>", the hostname being
+	  the same one the device uses on the network (aes67_config). The
+	  suffix alone is used when no hostname is configured. Note that
+	  desktops resolve the model name from the USB ID database first;
+	  with a pid.codes test PID they display "pid.codes Test PID"
+	  regardless of this string.
+
+config AES67_USB_AUDIO_MAX_POWER
+	int "bMaxPower (2 mA units)"
+	default 250
+	help
+	  Bus power the configuration descriptor asks for. 250 = 500 mA:
+	  the DevKitC + FPGA board are powered from this port in the
+	  bench setup.
+
+config AES67_USB_AUDIO_AUTOSTART
+	bool "Enable the USB device at boot"
+	default y
+	help
+	  Bring the USB device up at the end of main(). Off = the I2S/USB
+	  path stays idle until 'usbaudio start' is issued from the shell
+	  (bring-up aid).
+
+endif # AES67_USB_AUDIO
+
+endmenu
+
 menu "RAVENNA RTSP Server/Client"
 
 config RTSP

@@ -219,6 +219,8 @@ struct aes67_nco_status {
 };
 
 void aes67_ptp_nco_status(struct aes67_nco_status *st);
+/* Diagnostics: suppress the wallclock ppb / NCO adjust register writes. */
+void aes67_ptp_nco_hold(bool wc, bool nco);
 
 /** Reconstruct a full RX/TX hardware timestamp from a captured (4-bit seconds,
  *  30-bit nanoseconds) pair using the live wallclock seconds. */
