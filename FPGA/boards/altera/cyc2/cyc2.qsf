@@ -139,6 +139,8 @@ set_location_assignment PIN_192 -to dbg_o[2]
 set_location_assignment PIN_193 -to dbg_o[1]
 set_location_assignment PIN_195 -to dbg_o[0]
 set_location_assignment PIN_63 -to mclk
+set_location_assignment PIN_64 -to vcxo_pdout_a
+set_location_assignment PIN_57 -to vcxo_pdout_b
 set_location_assignment PIN_12 -to tdm_out[0]
 set_location_assignment PIN_13 -to tdm_out[1]
 set_location_assignment PIN_15 -to tdm_out[2]

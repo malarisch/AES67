@@ -34,6 +34,31 @@ package audioclks_pkg is
         clk_64fs  => AUDIO_CLOCKS_RESET_SELECTED,
         fsclk_50 => '0'
     );
+    -- Where the 512fs master clock comes from (wallclock MCLK_FROM_VCXO):
+    --   MCLK_SRC_NCO  : NCO in the sys_clk domain (no extra oscillator, MCLK
+    --                   carries sys_clk quantisation jitter).
+    --   MCLK_SRC_VCXO : external 24.576 MHz VCXO, phase-locked to the NCO
+    --                   through a tri-state charge pump on its CV loop filter.
+    type t_mclk_source is (MCLK_SRC_NCO, MCLK_SRC_VCXO);
+
+    -- Tri-state charge-pump outputs into the VCXO loop filter. Each path is
+    -- driven (oe = '1') only while pumping and floats otherwise, so the
+    -- filter capacitor holds the control voltage.
+    --   pd_a : high-ohmic path (fine, tracking)
+    --   pd_b : low-ohmic path (coarse, acquisition)
+    type t_vcxo_pump is record
+        pd_a    : std_logic;
+        pd_a_oe : std_logic;
+        pd_b    : std_logic;
+        pd_b_oe : std_logic;
+    end record;
+    constant VCXO_PUMP_IDLE : t_vcxo_pump := (
+        pd_a    => '0',
+        pd_a_oe => '0',
+        pd_b    => '0',
+        pd_b_oe => '0'
+    );
+
     subtype audio_clock_speed is std_logic_vector(2 downto 0);
     constant audio_clock_24_57 : audio_clock_speed := "000";
     constant audio_clock_12_28 : audio_clock_speed := "001";

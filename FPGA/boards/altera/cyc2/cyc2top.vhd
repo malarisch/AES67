@@ -8,7 +8,13 @@ use work.audioclks_pkg.all;
 use work.system_cfg_pkg.all;
 ENTITY cyc2top IS
 	generic (
-		syscfg: t_global_system_cfg := global_system_cfg_rn2io
+		-- MCLK from the on-board 24.576 MHz VCXO (U404, needs R405 fitted):
+		--   syscfg: t_global_system_cfg := with_vcxo_mclk(global_system_cfg_rn2io)
+		-- plus pin BCLK/LRCK clocked by the VCXO (PIN_63 used as clock):
+		--   syscfg: t_global_system_cfg := with_vcxo_mclk(global_system_cfg_rn2io, true)
+		-- With R405 fitted an NCO bitstream would drive PIN_63 against the
+		-- VCXO output -- keep the two in step.
+		syscfg: t_global_system_cfg := with_vcxo_mclk(global_system_cfg_lo, true)
 	);
 	PORT 
 	(
@@ -25,7 +31,11 @@ ENTITY cyc2top IS
         tdm_out: OUT STD_LOGIC_VECTOR(3 downto 0); -- tdm out
         bclk_adc: OUT STD_LOGIC; -- bclk
 		  bclk_dac : out std_logic;
-        mclk: OUT STD_LOGIC; -- sclk
+        -- PIN_63: NCO MCLK out, or VCXO clock in (MCLK_SRC_VCXO)
+        mclk: INOUT STD_LOGIC; -- sclk
+        -- VCXO loop-filter charge pump: PIN_64 via 10k, PIN_57 via 100R
+        vcxo_pdout_a : OUT STD_LOGIC;
+        vcxo_pdout_b : OUT STD_LOGIC;
         
         tdm_in : IN STD_LOGIC_VECTOR(3 downto 0);
         mdc : OUT STD_LOGIC; -- mdc
@@ -78,15 +88,18 @@ signal phy_rxdv : std_logic;
 signal phy_txen : std_logic;
 signal mclk_reg : std_logic;
 signal dbg_mac_tx_clk_o : std_logic;
+signal vcxo_pump : t_vcxo_pump;
 
 begin
 	--tdm_in_reg <= tdm_in(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
 	INIT_DONE <= '1';
     tx_err_o <= (others => '0');
-	--tdm_out(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0) <= tdm_out_reg;
+	tdm_out(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0) <= tdm_out_reg;
 	esp_dout <= tdm_out_reg(0);
 	tdm_in_reg(0) <= esp_din;
-	mclk <= mclk_reg;
+	mclk <= mclk_reg when syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_NCO else 'Z';
+	vcxo_pdout_a <= vcxo_pump.pd_a when vcxo_pump.pd_a_oe = '1' else 'Z';
+	vcxo_pdout_b <= vcxo_pump.pd_b when vcxo_pump.pd_b_oe = '1' else 'Z';
 	 phy_rstn_o <= '1';
 	 bclk_adc <= not bclk;
 	 bclk_dac <= not bclk;
@@ -129,6 +142,8 @@ begin
     hbus_clk0_p => open,
     hbus_clk0_n => open,
     pll_512fs_i => '0',
+    vcxo_clk_i => mclk,
+    vcxo_pump_o => vcxo_pump,
     --audioclk_512fs_o => AIN7,
     audioclk_mclk_o => mclk_reg,
     audioclk_bclk_o => bclk,

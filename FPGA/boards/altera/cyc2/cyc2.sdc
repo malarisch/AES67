@@ -95,7 +95,13 @@ set_false_path  -from  [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_g
 set_false_path  -from  [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[1]}]  -to  [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}]
 set_false_path  -from  [get_clocks {txclk_i}]  -to  [get_clocks {rxclk_i}]
 set_false_path  -from  [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}]  -to  [get_clocks {rxclk_i}]
-set_false_path -from [get_registers {*speed_o*}] 
+set_false_path -from [get_registers {*speed_o*}]
+# VCXO (MCLK_SRC_VCXO) is asynchronous to sys_clk; 2-FF synchroniser in wallclock
+set_false_path -from [get_ports {mclk}] -to [get_registers {*vcxo_meta*}]
+# VCXO_DOMAIN_CLOCKS: PIN_63 also clocks the pin BCLK/LRCK registers. All
+# crossings to/from sys_clk go through synchronisers (Gray count, offset).
+create_clock -name {vcxo_mclk} -period 40.690 -waveform { 0.000 20.345 } [get_ports {mclk}]
+set_clock_groups -asynchronous -group [get_clocks {vcxo_mclk}]
 set_false_path -from [get_registers {*aes67_csr*storage*}] 
 set_false_path -from [get_registers {*aes67soc_reset_storage*}] 
 set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|rx_overflow_reg*}] 

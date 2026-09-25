@@ -13,7 +13,11 @@ ENTITY ptp_module IS
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		STATIC_PTP_CONF : BOOLEAN := true;
 		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 4; 
-		PTP_IN_SOFTWARE : BOOLEAN := false
+		PTP_IN_SOFTWARE : BOOLEAN := false;
+		-- MCLK from an external VCXO (charge-pump PLL in wallclock.vhd)
+		-- instead of the NCO
+		MCLK_FROM_VCXO : BOOLEAN := false;
+		VCXO_DOMAIN_CLOCKS : BOOLEAN := false
 	);
 	PORT
 	(
@@ -58,6 +62,10 @@ ENTITY ptp_module IS
 		wallclock_configured :  OUT  STD_LOGIC;
 		
 		audioclocks_o : OUT t_audio_clocks;
+		vcxo_clk_i : IN STD_LOGIC := '0';
+		vcxo_pump_o : OUT t_vcxo_pump;
+		-- clocks for the audio pins (VCXO-clocked with VCXO_DOMAIN_CLOCKS)
+		pin_audioclocks_o : OUT t_audio_clocks;
 		wallclock_signals_io : INOUT t_wallclock_signals;
 		timestamps_o : OUT t_eth_timestamps;
 
@@ -569,7 +577,9 @@ b2v_wallclock :  entity work.wallclock
 GENERIC MAP(audio_fs => 48000,
 			increment_interval => 8,
 			sys_clk_hz => 125000000,
-			PTP_IN_SOFTWARE => PTP_IN_SOFTWARE
+			PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
+			MCLK_FROM_VCXO => MCLK_FROM_VCXO,
+			VCXO_DOMAIN_CLOCKS => VCXO_DOMAIN_CLOCKS
 			)
 PORT MAP(clk => sys_clk,
 		 reset_n => powerGood,
@@ -585,7 +595,13 @@ PORT MAP(clk => sys_clk,
 		 bias_dbg_o => open,
 		 sample_pulse_int_o => open,
 		 nco_phase_dbg_o => open,
-		 nco_inc_dbg_o => open);
+		 nco_inc_dbg_o => open,
+		 vcxo_clk_i => vcxo_clk_i,
+		 vcxo_pump_o => vcxo_pump_o,
+		 vcxo_locked_o => open,
+		 vcxo_phase_err_dbg_o => open,
+		 vcxo_pump_dbg_o => open,
+		 pin_clocks_o => pin_audioclocks_o);
 
 powerGood <= rst_n;
 

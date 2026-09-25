@@ -65,6 +65,15 @@ ENTITY soc_top IS
 		-- audio clock in from external pll - only used when USE_EXTERNAL_PLL is true
 		pll_512fs_i :  IN  STD_LOGIC := '0'; -- gpio 1
 
+		-- external 24.576 MHz VCXO - only used with
+		-- syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO. The board top
+		-- turns vcxo_pump_o into two tri-state pins into the CV loop filter
+		-- (pin <= pd_x when pd_x_oe = '1' else 'Z').
+		-- With VCXO_DOMAIN_CLOCKS the audioclk_* outputs below come from
+		-- registers clocked by vcxo_clk_i.
+		vcxo_clk_i :  IN  STD_LOGIC := '0';
+		vcxo_pump_o : OUT t_vcxo_pump;
+
 		-- audio clocks outputs
 		audioclk_mclk_o :  OUT  STD_LOGIC;
 		audioclk_bclk_o : OUT STD_LOGIC;
@@ -240,6 +249,11 @@ signal eth_buf_irq : std_logic;
 signal audioclocks : t_audio_clocks;
 signal selected_audio_clock : t_audio_clocks_selected;
 begin
+  -- audioclocks = pin clocks (VCXO-clocked with VCXO_DOMAIN_CLOCKS,
+  -- otherwise identical to the internal sys_clk-grid clocks)
+  selected_audio_clock <= audioclocks.clk_256fs when syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_12_28
+                     else audioclocks.clk_128fs when syscfg.AUDIO_CONFIG.bclk_speed = audio_clock_06_14
+                     else audioclocks.clk_64fs;
 
   audioclk_mclk_o <= audioclocks.mclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_24_57
                 ELSE audioclocks.clk_256fs.bclk WHEN syscfg.AUDIO_CONFIG.mclk_speed = audio_clock_12_28
@@ -280,8 +294,11 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     enet_mdc => enet_mdc,
     enet_mdio => enet_mdio,
     pll_512fs_i => pll_512fs_i,
-    audioclocks_o => audioclocks,
-    selected_audio_clock_o => selected_audio_clock,
+    audioclocks_o => open,
+    vcxo_clk_i => vcxo_clk_i,
+    vcxo_pump_o => vcxo_pump_o,
+    pin_audioclocks_o => audioclocks,
+    selected_audio_clock_o => open,
     tdm_in => tdm_in,
     tdm_out => tdm_out,
     rx_sample_register => rx_sample_register,

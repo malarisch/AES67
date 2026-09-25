@@ -49,6 +49,9 @@ entity aes67_wb_bridge is
 
 		pll_512fs_i : IN STD_LOGIC;
     audioclocks_o: OUT t_audio_clocks;
+    vcxo_clk_i : IN STD_LOGIC := '0';
+    vcxo_pump_o : OUT t_vcxo_pump;
+    pin_audioclocks_o : OUT t_audio_clocks;
     selected_audio_clock_o : OUT t_audio_clocks_selected;
 
 
@@ -469,6 +472,9 @@ begin
         mac_tx_start_prefetch_o => mcu_tx_start_prefetch,
         pll_512fs_i => pll_512fs_i,
         audioclocks_o => audioclocks_o,
+        vcxo_clk_i => vcxo_clk_i,
+        vcxo_pump_o => vcxo_pump_o,
+        pin_audioclocks_o => pin_audioclocks_o,
         selected_audio_clock_o => selected_audio_clock_o,
         mac_address_i => mac_address_i,
         ip_address_i => ip_address_i,

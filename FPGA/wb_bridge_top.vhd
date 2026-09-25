@@ -38,6 +38,9 @@ generic (
 
 		-- audio clocks outputs
 		audioclocks_o : out t_audio_clocks;
+		vcxo_clk_i : IN STD_LOGIC := '0';
+		vcxo_pump_o : OUT t_vcxo_pump;
+		pin_audioclocks_o : OUT t_audio_clocks;
         selected_audio_clock_o : out t_audio_clocks_selected;
 		
 
@@ -126,6 +129,9 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
     enet_mdc => enet_mdc,
     pll_512fs_i => pll_512fs_i,
     audioclocks_o => audioclocks_o,
+    vcxo_clk_i => vcxo_clk_i,
+    vcxo_pump_o => vcxo_pump_o,
+    pin_audioclocks_o => pin_audioclocks_o,
     selected_audio_clock_o => selected_audio_clock_o,
     aes67_wb_ack => aes67_wb_ack,
     aes67_wb_adr => aes67_wb_adr,

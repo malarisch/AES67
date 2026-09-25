@@ -65,6 +65,10 @@ ENTITY aes67_top IS
 
 		pll_512fs_i : IN STD_LOGIC;
 		audioclocks_o : out t_audio_clocks;
+		-- external VCXO (syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO)
+		vcxo_clk_i : IN STD_LOGIC := '0';
+		vcxo_pump_o : OUT t_vcxo_pump;
+		pin_audioclocks_o : OUT t_audio_clocks;
 		selected_audio_clock_o : out t_audio_clocks_selected;
 
 
@@ -344,7 +348,9 @@ generic map (
 	MII_TYPE => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_TYPE,
 	STATIC_PTP_CONF => syscfg.STATIC_PTP_CONFIG,
 	PTP_MOVING_AVERAGE_DEPTH => syscfg.PTP_MOVING_AVERAGE_DEPTH,
-	PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE
+	PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE,
+	MCLK_FROM_VCXO => syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO,
+	VCXO_DOMAIN_CLOCKS => syscfg.AUDIO_CONFIG.VCXO_DOMAIN_CLOCKS
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 rst_n => ptp_module_rst_n,
@@ -393,6 +399,9 @@ PORT MAP(sys_clk => sys_clk_125MHz_i,
 		 
 
 		 audioclocks_o => audioclks,
+		 vcxo_clk_i => vcxo_clk_i,
+		 vcxo_pump_o => vcxo_pump_o,
+		 pin_audioclocks_o => pin_audioclocks_o,
 		 wallclock_signals_io => wallclock_signals,
 		 timestamps_o => timestamps_reg,
 		 second_pulse_sys => second_pulse_sys,
