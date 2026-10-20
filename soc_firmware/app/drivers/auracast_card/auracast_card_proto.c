@@ -58,6 +58,15 @@ void aura_proto_config_defaults(struct auracast_config *cfg)
 	strncpy(cfg->name, AURA_DEFAULT_NAME, AURA_NAME_SIZE);
 	cfg->name[AURA_NAME_SIZE] = '\0';
 	cfg->code[0] = '\0';
+	cfg->hq_preset = AURA_DEFAULT_HQ_PRESET;
+	cfg->hq_channels = AURA_DEFAULT_HQ_CHANNELS;
+	cfg->hq_context = AURA_DEFAULT_HQ_CONTEXT;
+}
+
+bool aura_proto_preset_is_hq(uint8_t preset)
+{
+	return preset == AURA_PRESET_48_2_1 || preset == AURA_PRESET_48_4_1 ||
+	       preset == AURA_PRESET_48_6_1;
 }
 
 int aura_proto_config_validate(const struct auracast_config *cfg, uint8_t *bad_reg)
@@ -85,12 +94,23 @@ int aura_proto_config_validate(const struct auracast_config *cfg, uint8_t *bad_r
 		   cfg->broadcast_id > 0xFFFFFFu) {
 		reg = AURA_REG_BROADCAST_ID;
 	} else {
+		const bool hq = cfg->hq_preset != AURA_PRESET_NONE;
+
 		/* Byte counts, not characters: the register holds 32 bytes. */
 		len = field_len(cfg->name, sizeof(cfg->name));
 		if (len < AURA_NAME_MIN_LEN || len > AURA_NAME_SIZE) {
 			reg = AURA_REG_NAME;
 		} else if (field_len(cfg->code, sizeof(cfg->code)) > AURA_CODE_SIZE) {
 			reg = AURA_REG_CODE;
+		} else if (hq && (!aura_proto_preset_is_hq(cfg->hq_preset) ||
+				  aura_proto_preset_is_hq(cfg->preset))) {
+			/* HQ subgroup must be 48 kHz, the first one Standard Quality */
+			reg = AURA_REG_HQ_PRESET;
+		} else if (hq && cfg->hq_channels >= AURA_CH_COUNT) {
+			reg = AURA_REG_HQ_CHANNELS;
+		} else if (hq && (cfg->hq_context == 0 ||
+				  (cfg->hq_context & ~AURA_CONTEXT_MASK) != 0)) {
+			reg = AURA_REG_HQ_CONTEXT;
 		}
 	}
 
@@ -143,6 +163,20 @@ void aura_proto_unpack_config(const uint8_t block[AURA_CFG_BLOCK_LEN],
 	out->code[AURA_CODE_SIZE] = '\0';
 }
 
+void aura_proto_pack_hq(const struct auracast_config *cfg, uint8_t block[AURA_HQ_BLOCK_LEN])
+{
+	block[AURA_REG_HQ_PRESET - AURA_HQ_BLOCK_REG] = cfg->hq_preset;
+	block[AURA_REG_HQ_CHANNELS - AURA_HQ_BLOCK_REG] = cfg->hq_channels;
+	put_le16(&block[AURA_REG_HQ_CONTEXT - AURA_HQ_BLOCK_REG], cfg->hq_context);
+}
+
+void aura_proto_unpack_hq(const uint8_t block[AURA_HQ_BLOCK_LEN], struct auracast_config *out)
+{
+	out->hq_preset = block[AURA_REG_HQ_PRESET - AURA_HQ_BLOCK_REG];
+	out->hq_channels = block[AURA_REG_HQ_CHANNELS - AURA_HQ_BLOCK_REG];
+	out->hq_context = get_le16(&block[AURA_REG_HQ_CONTEXT - AURA_HQ_BLOCK_REG]);
+}
+
 bool aura_proto_config_matches(const struct auracast_config *stored,
 			       const struct auracast_config *live)
 {
@@ -152,7 +186,13 @@ bool aura_proto_config_matches(const struct auracast_config *stored,
 	    stored->flags != live->flags ||
 	    stored->tx_power_dbm != live->tx_power_dbm ||
 	    stored->pd_us != live->pd_us ||
-	    stored->fifo_target != live->fifo_target) {
+	    stored->fifo_target != live->fifo_target ||
+	    stored->hq_preset != live->hq_preset) {
+		return false;
+	}
+	if (stored->hq_preset != AURA_PRESET_NONE &&
+	    (stored->hq_channels != live->hq_channels ||
+	     stored->hq_context != live->hq_context)) {
 		return false;
 	}
 	if (stored->broadcast_id != AURA_BROADCAST_ID_RANDOM &&
@@ -236,6 +276,9 @@ const char *aura_proto_reg_name(uint8_t reg)
 	case AURA_REG_NAME:         return "name";
 	case AURA_REG_CODE:         return "code";
 	case AURA_REG_COMMAND:      return "command";
+	case AURA_REG_HQ_PRESET:    return "hq_preset";
+	case AURA_REG_HQ_CHANNELS:  return "hq_channels";
+	case AURA_REG_HQ_CONTEXT:   return "hq_context";
 	default:                    return "unknown";
 	}
 }
@@ -248,6 +291,7 @@ const char *aura_proto_preset_label(uint8_t preset)
 	case AURA_PRESET_48_2_1: return "48 kHz / 100 B / High";
 	case AURA_PRESET_48_4_1: return "48 kHz / 120 B / High";
 	case AURA_PRESET_48_6_1: return "48 kHz / 155 B / High";
+	case AURA_PRESET_NONE:   return "none";
 	default:                 return "unknown";
 	}
 }

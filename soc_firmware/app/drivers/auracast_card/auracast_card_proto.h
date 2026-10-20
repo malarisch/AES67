@@ -35,11 +35,19 @@ struct auracast_config {
 	uint32_t broadcast_id;             /* AURA_BROADCAST_ID_RANDOM or 0..0xFFFFFF */
 	char     name[AURA_NAME_SIZE + 1]; /* UTF-8, 4..32 bytes */
 	char     code[AURA_CODE_SIZE + 1]; /* 0..16 bytes, empty = unencrypted */
+	/* Optional second (High Quality, 48 kHz) subgroup, protocol 2 */
+	uint8_t  hq_preset;                /* AURA_PRESET_48_* or AURA_PRESET_NONE */
+	uint8_t  hq_channels;              /* AURA_CH_* */
+	uint16_t hq_context;
 };
 
 /* Configuration register block PRESET..BROADCAST_ID (0x10..0x1D). */
 #define AURA_CFG_BLOCK_REG   AURA_REG_PRESET
 #define AURA_CFG_BLOCK_LEN   14
+
+/* HQ subgroup register block HQ_PRESET..HQ_CONTEXT (0x50..0x53). */
+#define AURA_HQ_BLOCK_REG    AURA_REG_HQ_PRESET
+#define AURA_HQ_BLOCK_LEN    4
 
 /* Status block PIPE_STATE..UPTIME_MS (0x80..0xAB). */
 #define AURA_STATUS_LEN      (AURA_REG_STATUS_END - AURA_REG_PIPE_STATE)
@@ -78,11 +86,19 @@ void aura_proto_pack_config(const struct auracast_config *cfg,
 			    uint8_t name[AURA_NAME_SIZE],
 			    uint8_t code[AURA_CODE_SIZE]);
 
-/** Inverse of pack. out->enabled is left untouched; name/code are NUL-terminated. */
+/** Inverse of pack. out->enabled and the HQ fields are left untouched;
+ *  name/code are NUL-terminated. */
 void aura_proto_unpack_config(const uint8_t block[AURA_CFG_BLOCK_LEN],
 			      const uint8_t name[AURA_NAME_SIZE],
 			      const uint8_t code[AURA_CODE_SIZE],
 			      struct auracast_config *out);
+
+/** Pack/unpack the HQ subgroup block 0x50..0x53. */
+void aura_proto_pack_hq(const struct auracast_config *cfg, uint8_t block[AURA_HQ_BLOCK_LEN]);
+void aura_proto_unpack_hq(const uint8_t block[AURA_HQ_BLOCK_LEN], struct auracast_config *out);
+
+/** True for the 48 kHz (High Quality) presets; false for SQ and AURA_PRESET_NONE. */
+bool aura_proto_preset_is_hq(uint8_t preset);
 
 /**
  * True when a broadcast the S31 is running with @p live may be kept for

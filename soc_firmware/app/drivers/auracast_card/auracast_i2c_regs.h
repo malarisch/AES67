@@ -1,6 +1,6 @@
 /*
  * Vendored from the auracast-s31 repository,
- * components/ctrl_regs/include/auracast_i2c_regs.h @ 68392be + uncommitted 2026-10-20 (exact-length read rule).
+ * components/ctrl_regs/include/auracast_i2c_regs.h @ 5269770 (protocol 2).
  * Do not edit here; update by copying the file again.
  */
 /*
@@ -28,13 +28,17 @@
  *   write AURA_CMD_RESET: the S31 restarts ~10 ms later and is back in WAIT_CONFIG.
  *   The configuration lives in RAM only: after any restart (also watchdog/brownout) the S31 waits again.
  * Rejected writes never NAK; they set ERROR (and ERROR_REG) instead.
+ *
+ * Registers 0x50..0x53 describe an optional second subgroup (48 kHz High Quality) in the same BIG, so
+ * hearing aids (Standard Quality, registers 0x10..0x13) and headphones (High Quality) are served at once.
+ * Protocol 2 added them; a master that never writes them gets protocol 1 behaviour.
  */
 #pragma once
 
 #include <stdint.h>
 
 #define AURA_I2C_DEFAULT_ADDR      0x3A
-#define AURA_PROTO_VERSION         1
+#define AURA_PROTO_VERSION         2
 #define AURA_READ_MAX              31      /* bytes per read transaction, exactly (one hardware FIFO fill) */
 
 /* ---- Identification and control ---------------------------------------- */
@@ -59,6 +63,11 @@
 #define AURA_REG_NAME              0x20    /* RW 32 Broadcast_Name, UTF-8, 4..32 bytes up to the first 0x00 */
 #define AURA_REG_CODE              0x40    /* RW 16 Broadcast_Code, 0..16 bytes up to the first 0x00; empty = unencrypted */
 /* NAME and CODE: always write the whole field, padded with 0x00, or the tail of the old value remains */
+
+/* ---- Optional HQ subgroup (protocol 2; writable like the configuration above) */
+#define AURA_REG_HQ_PRESET         0x50    /* RW 1  AURA_PRESET_48_* or AURA_PRESET_NONE = no HQ subgroup; requires PRESET = 16/24 kHz */
+#define AURA_REG_HQ_CHANNELS       0x51    /* RW 1  AURA_CH_* of the HQ subgroup */
+#define AURA_REG_HQ_CONTEXT        0x52    /* RW 2  streaming context of the HQ subgroup, != 0, within AURA_CONTEXT_MASK */
 
 #define AURA_NAME_SIZE             32
 #define AURA_CODE_SIZE             16
@@ -104,6 +113,7 @@
 #define AURA_PRESET_48_4_1         3       /* 48 kHz, 120 B, High Quality */
 #define AURA_PRESET_48_6_1         4       /* 48 kHz, 155 B, High Quality */
 #define AURA_PRESET_COUNT          5
+#define AURA_PRESET_NONE           0xFF    /* HQ_PRESET: no HQ subgroup */
 
 #define AURA_CH_MONO_MIX           0       /* one BIS, (L+R)/2 */
 #define AURA_CH_STEREO             1       /* two BIS, front left / front right */
@@ -142,3 +152,6 @@
 #define AURA_DEFAULT_FIFO_TARGET   840
 #define AURA_DEFAULT_BROADCAST_ID  AURA_BROADCAST_ID_RANDOM
 #define AURA_DEFAULT_NAME          "AES67 Auracast"
+#define AURA_DEFAULT_HQ_PRESET     AURA_PRESET_NONE
+#define AURA_DEFAULT_HQ_CHANNELS   AURA_CH_STEREO
+#define AURA_DEFAULT_HQ_CONTEXT    0x0004  /* Media */

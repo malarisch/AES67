@@ -375,6 +375,9 @@ ZTEST(config_json, test_auracast_settings_roundtrip)
 	aura.context = 0x0004;
 	aura.broadcast_id = 0x123456;
 	aura.enabled = false;
+	aura.hq_preset = AURA_PRESET_48_6_1;
+	aura.hq_channels = AURA_CH_MONO_MIX;
+	aura.hq_context = 0x0044;
 	store_auracast(&aura);
 
 	/* No card is detected in the test image: capture() returns -ENODEV
@@ -405,6 +408,9 @@ ZTEST(config_json, test_auracast_settings_roundtrip)
 	zassert_equal(cs->aura.broadcast_id, 0x123456);
 	zassert_str_equal(cs->aura.name, "Main Hall");
 	zassert_str_equal(cs->aura.code, "secret");
+	zassert_equal(cs->aura.hq_preset, AURA_PRESET_48_6_1);
+	zassert_equal(cs->aura.hq_channels, AURA_CH_MONO_MIX);
+	zassert_equal(cs->aura.hq_context, 0x0044);
 	card_settings_unlock();
 }
 
@@ -461,5 +467,8 @@ ZTEST(config_json, test_auracast_missing_fields_default)
 	zassert_equal(cs->aura.broadcast_id, def.broadcast_id);
 	zassert_str_equal(cs->aura.name, def.name);
 	zassert_str_equal(cs->aura.code, "");
+	zassert_equal(cs->aura.hq_preset, AURA_PRESET_NONE, "old config: no HQ subgroup");
+	zassert_equal(cs->aura.hq_channels, def.hq_channels);
+	zassert_equal(cs->aura.hq_context, def.hq_context);
 	card_settings_unlock();
 }

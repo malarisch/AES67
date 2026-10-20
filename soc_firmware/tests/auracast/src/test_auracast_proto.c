@@ -14,6 +14,8 @@
 
 ZTEST_SUITE(auracast_proto, NULL, NULL, NULL, NULL, NULL);
 
+static void expect_bad(struct auracast_config *cfg, uint8_t reg);
+
 static struct auracast_config defaults(void)
 {
 	struct auracast_config cfg;
@@ -37,7 +39,70 @@ ZTEST(auracast_proto, test_defaults_match_header)
 	zassert_equal(cfg.broadcast_id, AURA_BROADCAST_ID_RANDOM);
 	zassert_str_equal(cfg.name, "AES67 Auracast");
 	zassert_str_equal(cfg.code, "");
+	zassert_equal(cfg.hq_preset, AURA_PRESET_NONE);
+	zassert_equal(cfg.hq_channels, AURA_CH_STEREO);
+	zassert_equal(cfg.hq_context, 0x0004);
 	zassert_equal(aura_proto_config_validate(&cfg, NULL), 0);
+}
+
+ZTEST(auracast_proto, test_validate_hq_subgroup)
+{
+	struct auracast_config cfg;
+
+	/* 24 kHz SQ + 48_4_1 HQ: valid two-subgroup setup. */
+	cfg = defaults(); cfg.hq_preset = AURA_PRESET_48_4_1;
+	zassert_equal(aura_proto_config_validate(&cfg, NULL), 0);
+
+	/* HQ subgroup must be a 48 kHz preset. */
+	cfg = defaults(); cfg.hq_preset = AURA_PRESET_24_2_1; expect_bad(&cfg, AURA_REG_HQ_PRESET);
+	cfg = defaults(); cfg.hq_preset = 7; expect_bad(&cfg, AURA_REG_HQ_PRESET);
+	/* With an HQ subgroup the first subgroup must be Standard Quality. */
+	cfg = defaults(); cfg.preset = AURA_PRESET_48_2_1; cfg.hq_preset = AURA_PRESET_48_4_1;
+	expect_bad(&cfg, AURA_REG_HQ_PRESET);
+	/* Without HQ a 48 kHz first subgroup stays fine. */
+	cfg = defaults(); cfg.preset = AURA_PRESET_48_2_1;
+	zassert_equal(aura_proto_config_validate(&cfg, NULL), 0);
+	/* HQ channel/context rules only apply with an HQ subgroup. */
+	cfg = defaults(); cfg.hq_preset = AURA_PRESET_48_6_1; cfg.hq_channels = AURA_CH_COUNT;
+	expect_bad(&cfg, AURA_REG_HQ_CHANNELS);
+	cfg = defaults(); cfg.hq_preset = AURA_PRESET_48_6_1; cfg.hq_context = 0;
+	expect_bad(&cfg, AURA_REG_HQ_CONTEXT);
+	cfg = defaults(); cfg.hq_preset = AURA_PRESET_48_6_1; cfg.hq_context = 0x1004;
+	expect_bad(&cfg, AURA_REG_HQ_CONTEXT);
+	cfg = defaults(); cfg.hq_channels = AURA_CH_COUNT; cfg.hq_context = 0;
+	zassert_equal(aura_proto_config_validate(&cfg, NULL), 0, "ignored without HQ");
+}
+
+ZTEST(auracast_proto, test_pack_unpack_hq_block)
+{
+	struct auracast_config cfg = defaults(), back;
+	uint8_t hq[AURA_HQ_BLOCK_LEN];
+	static const uint8_t expect[AURA_HQ_BLOCK_LEN] = { 3, 2, 0x44, 0x00 };
+
+	cfg.hq_preset = AURA_PRESET_48_4_1;
+	cfg.hq_channels = AURA_CH_MONO_LEFT;
+	cfg.hq_context = 0x0044;
+	aura_proto_pack_hq(&cfg, hq);
+	zassert_mem_equal(hq, expect, sizeof(expect));
+
+	memset(&back, 0, sizeof(back));
+	aura_proto_unpack_hq(hq, &back);
+	zassert_equal(back.hq_preset, AURA_PRESET_48_4_1);
+	zassert_equal(back.hq_channels, AURA_CH_MONO_LEFT);
+	zassert_equal(back.hq_context, 0x0044);
+}
+
+ZTEST(auracast_proto, test_matches_compares_hq)
+{
+	struct auracast_config stored = defaults(), live = defaults();
+
+	zassert_true(aura_proto_config_matches(&stored, &live));
+	live.hq_preset = AURA_PRESET_48_6_1;
+	zassert_false(aura_proto_config_matches(&stored, &live));
+	stored.hq_preset = AURA_PRESET_48_6_1;
+	zassert_true(aura_proto_config_matches(&stored, &live));
+	live.hq_context = 0x0040;
+	zassert_false(aura_proto_config_matches(&stored, &live));
 }
 
 ZTEST(auracast_proto, test_pack_config_little_endian)
@@ -272,5 +337,11 @@ ZTEST(auracast_proto, test_names)
 	zassert_str_equal(aura_proto_reg_name(AURA_REG_COMMAND), "command");
 	zassert_str_equal(aura_proto_reg_name(0x99), "unknown");
 	zassert_true(strncmp(aura_proto_preset_label(AURA_PRESET_24_2_1), "24 kHz", 6) == 0);
+	zassert_str_equal(aura_proto_preset_label(AURA_PRESET_NONE), "none");
+	zassert_str_equal(aura_proto_reg_name(AURA_REG_HQ_PRESET), "hq_preset");
+	zassert_str_equal(aura_proto_reg_name(AURA_REG_HQ_CONTEXT), "hq_context");
+	zassert_true(aura_proto_preset_is_hq(AURA_PRESET_48_2_1));
+	zassert_false(aura_proto_preset_is_hq(AURA_PRESET_16_2_1));
+	zassert_false(aura_proto_preset_is_hq(AURA_PRESET_NONE));
 	zassert_str_equal(aura_proto_channels_label(AURA_CH_STEREO), "Stereo (2 BIS)");
 }

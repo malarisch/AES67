@@ -218,6 +218,7 @@ static int read_live_config_locked(struct auracast_config *out)
 	uint8_t block[AURA_CFG_BLOCK_LEN];
 	uint8_t name[AURA_NAME_SIZE];
 	uint8_t code[AURA_CODE_SIZE];
+	uint8_t hq[AURA_HQ_BLOCK_LEN];
 	int ret;
 
 	ret = rd(AURA_CFG_BLOCK_REG, block, sizeof(block));
@@ -238,8 +239,13 @@ static int read_live_config_locked(struct auracast_config *out)
 	if (ret < 0) {
 		return ret;
 	}
+	ret = rd(AURA_HQ_BLOCK_REG, hq, sizeof(hq));
+	if (ret < 0) {
+		return ret;
+	}
 
 	aura_proto_unpack_config(block, name, code, out);
+	aura_proto_unpack_hq(hq, out);
 	return 0;
 }
 
@@ -319,10 +325,12 @@ static int write_config_locked(void)
 	uint8_t block[AURA_CFG_BLOCK_LEN];
 	uint8_t name[AURA_NAME_SIZE];
 	uint8_t code[AURA_CODE_SIZE];
+	uint8_t hq[AURA_HQ_BLOCK_LEN];
 	uint8_t err[2];
 	int ret;
 
 	aura_proto_pack_config(&s_cfg, block, name, code);
+	aura_proto_pack_hq(&s_cfg, hq);
 
 	ret = wr(AURA_CFG_BLOCK_REG, block, sizeof(block));
 	if (ret == 0) {
@@ -330,6 +338,9 @@ static int write_config_locked(void)
 	}
 	if (ret == 0) {
 		ret = wr(AURA_REG_CODE, code, sizeof(code));
+	}
+	if (ret == 0) {
+		ret = wr(AURA_HQ_BLOCK_REG, hq, sizeof(hq));
 	}
 	if (ret < 0) {
 		return -ENODEV;
