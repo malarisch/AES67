@@ -755,6 +755,18 @@ static int fpga_jtag_bringup(void)
 	return 0;
 }
 
+/* Does the FPGA answer on its host bus? Used after a failed JTAG bring-up to
+ * tell "FPGA configured by other means" apart from "no FPGA at all". */
+static bool fpga_bus_answers(void)
+{
+#if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)
+	/* Scratch round-trip: a floating bus cannot fake this. */
+	return fpga_hal_spibone_probe() == 0;
+#else
+	return fpga_hal_is_ready();
+#endif
+}
+
 #ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
 /* Health-monitor events (runs in the fpga_jtag_mon thread). */
 static void fpga_jtag_health_event(enum fpga_jtag_event evt,
@@ -986,11 +998,39 @@ int main(void)
 	}
 #endif
 
+	/* Set when the bus was already verified on the JTAG fallback path. */
+	bool bus_probed = false;
+
+	ARG_UNUSED(bus_probed);
+
 #ifdef CONFIG_AES67_FPGA_JTAG_BOOT_LOAD
 	/* ---- Configure the FPGA over JTAG (display is up, shows progress) ----
 	 * Scans the chain, skips the upload if the FPGA already holds this
 	 * bitstream, otherwise loads it with a 7-segment progress bar. */
 	int jtag_ret = fpga_jtag_bringup();
+	bool jtag_managed = true;
+
+	if (jtag_ret < 0) {
+		/* No JTAG access (chain dead, foreign/unknown device), yet the
+		 * FPGA may still be up: a platform whose FPGA configures itself
+		 * from its own flash, or one without the JTAG GPIOs wired. If
+		 * the Wishbone bus answers, the gateware is evidently loaded —
+		 * carry on without JTAG management. A failed upload cannot
+		 * land here: it leaves the FPGA blank, so the bus stays dead. */
+		if (fpga_bus_answers()) {
+			LOG_WRN("FPGA not reachable over JTAG (err %d), but the "
+				"bus answers - assuming it is configured by other "
+				"means; JTAG upload and health monitor disabled",
+				jtag_ret);
+			jtag_managed = false;
+			bus_probed = true;
+#ifdef CONFIG_DISPLAY_CTRL
+			if (display_ctrl_ready()) {
+				display_ctrl_show_status("  FPGA");
+			}
+#endif
+		}
+	}
 
 #ifdef CONFIG_AES67_FPGA_JTAG_MONITOR
 	/* Watch the FPGA from here on: periodic JTAG health checks (IDCODE,
@@ -998,25 +1038,29 @@ int main(void)
 	 * than at "system ready" so a failed boot upload keeps being retried
 	 * and a fault during the remaining bring-up is already caught. On a
 	 * confirmed fault the handler above mutes the outputs, the bitstream
-	 * is reloaded and the node reboots into a clean bring-up. */
-	int mon_ret = fpga_jtag_monitor_start(fpga_jtag_health_event,
+	 * is reloaded and the node reboots into a clean bring-up. Not on an
+	 * FPGA configured by other means: it is not ours to reload. */
+	if (jtag_managed) {
+		int mon_ret = fpga_jtag_monitor_start(fpga_jtag_health_event,
 #ifdef CONFIG_DISPLAY_CTRL
-					      jtag_upload_progress,
+						      jtag_upload_progress,
 #else
-					      NULL,
+						      NULL,
 #endif
-					      NULL);
+						      NULL);
 
-	if (mon_ret < 0) {
-		LOG_ERR("FPGA JTAG health monitor did not start (err %d) - a "
-			"configuration fault will go unnoticed", mon_ret);
+		if (mon_ret < 0) {
+			LOG_ERR("FPGA JTAG health monitor did not start (err %d)"
+				" - a configuration fault will go unnoticed",
+				mon_ret);
+		}
 	}
 #endif
 
 	/* Only now: with the monitor armed a marginal upload still gets its
 	 * retry (and reboots the node on recovery). Without a configured FPGA
 	 * there is nothing left to boot into. */
-	if (jtag_ret < 0) {
+	if (jtag_managed && jtag_ret < 0) {
 		boot_fatal("FPGAER",
 			   "FPGA JTAG configuration failed - no data plane and "
 			   "no spibone bus", jtag_ret);
@@ -1025,7 +1069,7 @@ int main(void)
 
 #if defined(CONFIG_FPGA_HAL_SPI) && defined(CONFIG_AES67_SPIBONE_PROBE)
 	/* ---- Verify the Wishbone bus answers now that the FPGA is up ---- */
-	{
+	if (!bus_probed) {
 		int probe_ret = fpga_hal_spibone_probe();
 
 		if (probe_ret < 0) {
