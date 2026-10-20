@@ -19,6 +19,9 @@
 #ifdef CONFIG_IO_CARD
 #include "../drivers/io_card/io_card.h"
 #endif
+#ifdef CONFIG_AURACAST_CARD
+#include "../drivers/auracast_card/auracast_card.h"
+#endif
 #ifdef CONFIG_SD_CONFIG
 #include "sd_config.h"
 #endif
@@ -114,6 +117,14 @@ int card_settings_capture(void)
 		}
 		break;
 #endif
+#ifdef CONFIG_AURACAST_CARD
+	case CARD_TYPE_AURACAST:
+		if (!auracast_card_ready()) {
+			return -EAGAIN;
+		}
+		(void)auracast_card_get_config(&tmp.aura);
+		break;
+#endif
 	default:
 		return -ENODEV;
 	}
@@ -186,6 +197,15 @@ int card_settings_apply(void)
 			failed += io_card_set_out_clip(ch, s.out_gain[ch]) < 0;
 			failed += io_card_set_out_mute(ch, s.out_mute[ch]) < 0;
 		}
+		break;
+#endif
+#ifdef CONFIG_AURACAST_CARD
+	case CARD_TYPE_AURACAST:
+		if (!auracast_card_ready()) {
+			return 0;	/* applied by the driver after init */
+		}
+		/* Before the PTP lock the driver only stores the config. */
+		failed += auracast_card_set_config(&s.aura) < 0;
 		break;
 #endif
 	default:

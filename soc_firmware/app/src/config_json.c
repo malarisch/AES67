@@ -40,7 +40,7 @@ LOG_MODULE_REGISTER(config_json, LOG_LEVEL_INF);
  * over one long name would be a far worse outcome than truncating it. */
 #define CFG_NAME_MAX 64
 #define CFG_ADDR_MAX 24
-#define CFG_TYPE_MAX 8
+#define CFG_TYPE_MAX         12   /* "auracast" + NUL */
 
 /* ================================================================
  * Document model
@@ -151,6 +151,19 @@ struct cfg_doc {
 	uint8_t  card_out_mute[CARD_SETTINGS_MAX_OUT];
 	size_t   card_out_mute_len;
 
+	/* -- Auracast card stream configuration (card_type "auracast") -- */
+	bool     aura_enabled;
+	int32_t  aura_preset;
+	int32_t  aura_channels;
+	int32_t  aura_context;
+	int32_t  aura_flags;
+	int32_t  aura_tx_power;
+	int32_t  aura_pd_us;
+	int32_t  aura_fifo_target;
+	int64_t  aura_broadcast_id;     /* 4294967295 = random */
+	char     aura_name[AURA_NAME_SIZE + 1];
+	char     aura_code[AURA_CODE_SIZE + 1];
+
 	/* -- Stream tables -- */
 	struct cfg_tx_dto tx_streams[AES67_MAX_TX_STREAMS];
 	size_t   tx_streams_len;
@@ -242,6 +255,17 @@ static const struct json_obj_descr doc_descr[] = {
 	JSON_OBJ_DESCR_ARRAY(struct cfg_doc, card_out_mute,
 			     CARD_SETTINGS_MAX_OUT, card_out_mute_len,
 			     JSON_TOK_UINT),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_enabled, JSON_TOK_TRUE),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_preset, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_channels, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_context, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_flags, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_tx_power, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_pd_us, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_fifo_target, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_broadcast_id, JSON_TOK_INT64),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_name, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_code, JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_OBJ_ARRAY(struct cfg_doc, tx_streams,
 				 AES67_MAX_TX_STREAMS, tx_streams_len,
 				 tx_descr, ARRAY_SIZE(tx_descr)),
@@ -266,6 +290,7 @@ static const char *card_type_to_str(uint8_t type)
 	case CARD_TYPE_MI: return "mi";
 	case CARD_TYPE_LO: return "lo";
 	case CARD_TYPE_IO: return "io";
+	case CARD_TYPE_AURACAST: return "auracast";
 	default:           return "";
 	}
 }
@@ -283,6 +308,9 @@ static uint8_t card_type_from_str(const char *s)
 	}
 	if (strcmp(s, "io") == 0) {
 		return CARD_TYPE_IO;
+	}
+	if (strcmp(s, "auracast") == 0) {
+		return CARD_TYPE_AURACAST;
 	}
 	return CARD_TYPE_NONE;
 }
@@ -334,6 +362,49 @@ static void collect_device_config(struct cfg_doc *d)
 	aes67_config_unlock();
 }
 
+static void aura_to_doc(const struct auracast_config *a, struct cfg_doc *d)
+{
+	d->aura_enabled      = a->enabled;
+	d->aura_preset       = a->preset;
+	d->aura_channels     = a->channels;
+	d->aura_context      = a->context;
+	d->aura_flags        = a->flags;
+	d->aura_tx_power     = a->tx_power_dbm;
+	d->aura_pd_us        = a->pd_us;
+	d->aura_fifo_target  = a->fifo_target;
+	d->aura_broadcast_id = a->broadcast_id;
+	strncpy(d->aura_name, a->name, sizeof(d->aura_name) - 1);
+	d->aura_name[sizeof(d->aura_name) - 1] = '\0';
+	strncpy(d->aura_code, a->code, sizeof(d->aura_code) - 1);
+	d->aura_code[sizeof(d->aura_code) - 1] = '\0';
+}
+
+static void aura_from_doc(const struct cfg_doc *d, struct auracast_config *a)
+{
+	a->enabled      = d->aura_enabled;
+	a->preset       = (uint8_t)d->aura_preset;
+	a->channels     = (uint8_t)d->aura_channels;
+	a->context      = (uint16_t)d->aura_context;
+	a->flags        = (uint8_t)d->aura_flags;
+	a->tx_power_dbm = (int8_t)d->aura_tx_power;
+	a->pd_us        = (uint16_t)d->aura_pd_us;
+	a->fifo_target  = (uint16_t)d->aura_fifo_target;
+	a->broadcast_id = (uint32_t)d->aura_broadcast_id;
+	strncpy(a->name, d->aura_name, AURA_NAME_SIZE);
+	a->name[AURA_NAME_SIZE] = '\0';
+	strncpy(a->code, d->aura_code, AURA_CODE_SIZE);
+	a->code[AURA_CODE_SIZE] = '\0';
+}
+
+/* Absent aura_* keys must read as the S31 power-on values, not zero. */
+static void prefill_aura_defaults(struct cfg_doc *d)
+{
+	struct auracast_config def;
+
+	aura_proto_config_defaults(&def);
+	aura_to_doc(&def, d);
+}
+
 static void collect_card_settings(struct cfg_doc *d)
 {
 	/* Refresh the shadow store from the live card if it is ready; a
@@ -363,6 +434,10 @@ static void collect_card_settings(struct cfg_doc *d)
 		for (size_t i = 0; i < d->card_out_gain_len; i++) {
 			d->card_out_gain[i] = cs->out_gain[i];
 			d->card_out_mute[i] = cs->out_mute[i] ? 1 : 0;
+		}
+
+		if (cs->card_type == CARD_TYPE_AURACAST) {
+			aura_to_doc(&cs->aura, d);
 		}
 	}
 
@@ -522,6 +597,9 @@ static void apply_card_settings(const struct cfg_doc *d)
 	for (size_t i = 0; i < d->card_out_mute_len; i++) {
 		cs->out_mute[i] = d->card_out_mute[i] != 0;
 	}
+	if (type == CARD_TYPE_AURACAST) {
+		aura_from_doc(d, &cs->aura);
+	}
 	cs->valid = true;
 
 	card_settings_unlock();
@@ -622,6 +700,7 @@ int config_json_serialize(char *buf, size_t sz)
 
 	memset(&doc, 0, sizeof(doc));
 	collect_device_config(&doc);
+	prefill_aura_defaults(&doc);   /* analog cards: defaults, not zeros */
 	collect_card_settings(&doc);
 	collect_streams(&doc);
 
@@ -656,6 +735,7 @@ int config_json_parse_and_apply(char *json)
 	memset(&doc, 0, sizeof(doc));
 	collect_device_config(&doc);
 	prefill_stream_defaults(&doc);
+	prefill_aura_defaults(&doc);
 
 	ret = json_obj_parse(json, strlen(json), doc_descr,
 			     ARRAY_SIZE(doc_descr), &doc);

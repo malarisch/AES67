@@ -14,6 +14,10 @@
  *        AND must not be 0x00 or 0xFF (floating bus artefacts).
  *     4. Only if that passes: call the matching driver init().
  *
+ *   The Auracast card (ESP32-S31) has no LPC. It is probed only when no
+ *   LPC answers: register 0x00 at 0x3A must read MAGIC "AURA" plus the
+ *   protocol version the driver speaks, twice (auracast_card_probe()).
+ *
  *   A separate informational bus scan is still performed for the web UI
  *   (GET /api/cards), but its results are NEVER used for detection.
  */
@@ -36,6 +40,9 @@
 #endif
 #ifdef CONFIG_IO_CARD
 #include "../drivers/io_card/io_card.h"
+#endif
+#ifdef CONFIG_AURACAST_CARD
+#include "../drivers/auracast_card/auracast_card.h"
 #endif
 
 LOG_MODULE_REGISTER(card_manager, LOG_LEVEL_INF);
@@ -124,6 +131,8 @@ static void do_scan(void)
 		0x70, 0x71, 0x72, 0x73,
 		/* Si5351A, SSD1306 (same shared bus as the cards) */
 		0x60, 0x3C,
+		/* Auracast card (ESP32-S31 I2C slave) */
+		0x3A,
 		/* DSP (AD1941) */
 		0x14,
 	};
@@ -131,8 +140,21 @@ static void do_scan(void)
 	for (size_t i = 0; i < ARRAY_SIZE(known_addrs); i++) {
 		uint8_t addr = known_addrs[i];
 		uint8_t dummy;
+		int ret;
 
-		if (i2c_read(s_i2c_dev, &dummy, 1, addr) == 0) {
+		if (addr == 0x3A) {
+			/* Auracast S31: the protocol forbids register-less and
+			 * short reads (either leaves a stale byte in the slave's
+			 * TX path), so probe with a full-length write_read. */
+			uint8_t reg = 0x00;
+			uint8_t full[31];
+
+			ret = i2c_write_read(s_i2c_dev, addr, &reg, 1, full, sizeof(full));
+		} else {
+			ret = i2c_read(s_i2c_dev, &dummy, 1, addr);
+		}
+
+		if (ret == 0) {
 			if (s_scan.count < CARD_MGR_MAX_I2C_DEVICES) {
 				s_scan.addr[s_scan.count++] = addr;
 			}
@@ -157,6 +179,84 @@ static bool board_id_is_known(uint8_t id)
 	return id == BOARD_ID_MI || id == BOARD_ID_LO || id == BOARD_ID_IO_IN;
 }
 
+/*
+ * Auracast card: content verification through MAGIC + protocol version.
+ * Returns 0 with *out filled, -ENOTSUP for a foreign protocol version,
+ * -ENODEV otherwise (no answer, or not the S31).
+ */
+#ifdef CONFIG_AURACAST_CARD
+static int aura_read_ident(struct card_ident *out)
+{
+	uint8_t buf[AURA_IDENT_LEN];
+	int ret = auracast_card_probe(s_i2c_dev, buf);
+
+	if (ret == -ENODEV) {
+		LOG_WRN("Auracast probe: 0x%02x answers but no MAGIC: "
+			"%02x %02x %02x %02x %02x %02x %02x %02x",
+			CONFIG_AURACAST_CARD_I2C_ADDR, buf[0], buf[1], buf[2],
+			buf[3], buf[4], buf[5], buf[6], buf[7]);
+		return -ENODEV;
+	}
+	if (ret < 0) {
+		LOG_WRN("Auracast probe: write_read at 0x%02x failed (%d)",
+			CONFIG_AURACAST_CARD_I2C_ADDR, ret);
+		return -ENODEV;
+	}
+	if (buf[4] != AURA_PROTO_VERSION) {
+		LOG_WRN("Auracast card speaks protocol v%u, driver v%u - not initialised",
+			buf[4], AURA_PROTO_VERSION);
+		return -ENOTSUP;
+	}
+
+	out->lpc_addr = CONFIG_AURACAST_CARD_I2C_ADDR;
+	out->soft_id  = buf[5];   /* fw major */
+	out->board_id = buf[6];   /* fw minor */
+	out->hard_rev = buf[7];   /* fw patch */
+	return 0;
+}
+#endif
+
+/* Fallback when no LPC answered: look for the Auracast card. */
+static int detect_auracast_slot0(struct card_info *card)
+{
+#ifdef CONFIG_AURACAST_CARD
+	struct card_ident a, b;
+	int ret;
+
+	if (aura_read_ident(&a) < 0) {
+		return 0;
+	}
+	if (aura_read_ident(&b) < 0 || memcmp(&a, &b, sizeof(a)) != 0) {
+		LOG_WRN("Auracast identity unstable - bus noise, skipping init");
+		return 0;
+	}
+
+	card->ident   = a;
+	card->present = true;
+	card->type    = CARD_TYPE_AURACAST;
+	LOG_INF("Detected: Auracast card (S31 fw %u.%u.%u at 0x%02x)",
+		a.soft_id, a.board_id, a.hard_rev, a.lpc_addr);
+
+	ret = auracast_card_init(s_i2c_dev);
+	if (ret < 0) {
+		LOG_ERR("Auracast card init failed: %d", ret);
+		card->initialized = false;
+		return ret;
+	}
+	card->initialized = true;
+	LOG_INF("Card initialised: %s", card_type_name(card->type));
+
+	/* Restore the persisted stream configuration. Before the PTP lock
+	 * the driver only stores it; afterwards (rescan) it adopts a
+	 * matching running broadcast or reconfigures. */
+	card_settings_apply();
+	return 0;
+#else
+	ARG_UNUSED(card);
+	return 0;
+#endif
+}
+
 static int detect_and_init_slot0(void)
 {
 	struct card_info *card = &s_cards[CARD_SLOT_MAIN];
@@ -176,15 +276,16 @@ static int detect_and_init_slot0(void)
 	struct card_ident ident_a, ident_b;
 
 	if (lpc_read_ident(LPC_PRIMARY_ADDR, &ident_a) < 0) {
-		LOG_INF("No card detected (no response at 0x%02x)", LPC_PRIMARY_ADDR);
-		return 0;
+		LOG_INF("No LPC card (no response at 0x%02x) - probing Auracast",
+			LPC_PRIMARY_ADDR);
+		return detect_auracast_slot0(card);
 	}
 
 	/* Reject bus-float values */
 	if (!board_id_is_known(ident_a.board_id)) {
-		LOG_INF("No card detected (board_id=0x%02x not recognised - "
-			"floating bus?)", ident_a.board_id);
-		return 0;
+		LOG_INF("No LPC card (board_id=0x%02x not recognised - "
+			"floating bus?) - probing Auracast", ident_a.board_id);
+		return detect_auracast_slot0(card);
 	}
 
 	/* Second read — must match first */
@@ -272,6 +373,16 @@ static int activate_slot0_locked(void)
 #ifdef CONFIG_IO_CARD
 	case CARD_TYPE_IO:
 		ret = io_card_enable_outputs(true);
+		break;
+#endif
+#ifdef CONFIG_AURACAST_CARD
+	case CARD_TYPE_AURACAST:
+		/* PTP lock: push the stored configuration first (the config
+		 * file may have been loaded after detection), then allow the
+		 * driver to apply it. The cycle itself runs asynchronously on
+		 * the driver's work queue. */
+		card_settings_apply();
+		ret = auracast_card_activate();
 		break;
 #endif
 	default:
@@ -416,6 +527,7 @@ const char *card_type_name(card_type_t type)
 	case CARD_TYPE_MI:  return "MI (8-ch ADC preamp)";
 	case CARD_TYPE_LO:  return "LO (8-ch DAC output)";
 	case CARD_TYPE_IO:  return "IO (16-ch ADC + 8-ch DAC)";
+	case CARD_TYPE_AURACAST: return "Auracast (BLE Audio TX)";
 	default:            return "none";
 	}
 }

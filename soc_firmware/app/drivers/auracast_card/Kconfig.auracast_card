@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config AURACAST_CARD
+	bool "Auracast transmitter card (ESP32-S31) driver"
+	depends on I2C
+	help
+	  Enable the driver for the Auracast card: an ESP32-S31 that turns
+	  the FPGA's I2S output into a Bluetooth LE Audio broadcast. The S31
+	  is an I2C slave (default address 0x3A) with a register protocol
+	  (auracast_i2c_regs.h). The driver configures and starts the
+	  broadcast once the PTP lock is seen, polls the S31's status once
+	  per second and reconfigures it after an unexpected S31 restart.
+
+if AURACAST_CARD
+
+config AURACAST_CARD_LOG_LEVEL
+	int "Auracast card driver log level"
+	default 3
+	range 0 4
+	help
+	  0 = OFF, 1 = ERR, 2 = WRN, 3 = INF, 4 = DBG
+
+config AURACAST_CARD_I2C_ADDR
+	hex "Auracast card I2C address (7-bit)"
+	default 0x3A
+	help
+	  7-bit I2C slave address of the S31 (AURA_I2C_DEFAULT_ADDR in the
+	  protocol header; Kconfig on the S31 side).
+
+endif # AURACAST_CARD

@@ -27,6 +27,7 @@ Set `QEMU_BIN_PATH` yourself to override it.
 
 | Directory | Scenario | Covers |
 | --- | --- | --- |
+| `auracast/` | `aes67.unit.auracast` | Auracast card register protocol (`auracast_card_proto`): validation, register pack/unpack, adopt-running-stream comparison, name tables |
 | `parsers/` | `aes67.unit.parsers` | `nmos_json` DOM parser, the REST `json_util` writer/parser, the shared SDP builder + parser, the IEEE 1588 clock-identity helpers |
 | `config/` | `aes67.unit.config` | `aes67_config` defaults and derived identities (MAC, hostname, node id), the `config_json` persistence round trip, `aes67_conn` stream tables / observers / foreign-stream registry |
 | `fpga_hal/` | `aes67.unit.fpga_hal` | the FPGA HAL mock backend (register file, wallclock snapshot protocol, status word), the `system_cfg` bitfield decoder, the PPB arithmetic in `fpga_regs` |

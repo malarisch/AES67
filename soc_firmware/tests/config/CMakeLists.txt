@@ -26,6 +26,7 @@ target_sources(app PRIVATE
   ${APP_DIR}/src/aes67_conn.c
   ${APP_DIR}/src/card_manager.c
   ${APP_DIR}/src/card_settings.c
+  ${APP_DIR}/drivers/auracast_card/auracast_card_proto.c
 )
 
-target_include_directories(app PRIVATE ${APP_DIR}/src)
+target_include_directories(app PRIVATE ${APP_DIR}/src ${APP_DIR}/drivers/auracast_card)

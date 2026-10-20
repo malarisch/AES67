@@ -4,6 +4,9 @@
  * /api/cards/mi[...]                — MI card (8-ch ADC preamp)
  * /api/cards/lo[...]                — LO card (8-ch line output)
  * /api/cards/io[...]                — IO card (16-in / 8-out combo)
+ * /api/cards/auracast[...]          — Auracast card (ESP32-S31 BLE Audio TX):
+ *                                     GET status+config, PATCH config (restarts
+ *                                     the broadcast), POST start|stop|reset
  *
  * Per-card settings writes are persisted through the card_settings shadow
  * store with a debounced save (a dragged gain slider must not erase a
@@ -12,6 +15,8 @@
  */
 
 #include <zephyr/kernel.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "webapi_priv.h"
 #include "../card_manager.h"
@@ -26,6 +31,9 @@
 #endif
 #ifdef CONFIG_IO_CARD
 #include "../../drivers/io_card/io_card.h"
+#endif
+#ifdef CONFIG_AURACAST_CARD
+#include "../../drivers/auracast_card/auracast_card.h"
 #endif
 #ifdef CONFIG_DISPLAY_CTRL
 #include "../../drivers/display_ctrl/display_ctrl.h"
@@ -650,6 +658,339 @@ static int post_io_reset(struct webapi_request *req)
 }
 #endif /* CONFIG_IO_CARD */
 
+#ifdef CONFIG_AURACAST_CARD
+/* ---------------- /api/cards/auracast ----------------
+ *
+ * Unlike the analog cards nothing here is written live: every accepted
+ * PATCH (and start/stop/reset) runs the driver's configuration cycle,
+ * which RESETs the S31 when it is broadcasting and waits up to ~3 s for
+ * it to come back. The handler blocks for that time on the shared
+ * shared /api resource, so a parallel request may see a 409 meanwhile (known
+ * behaviour of Zephyr's HTTP server, see the UI which pauses its poll
+ * during these actions). GET reads only the driver's cache.
+ *
+ * A configuration the S31 or the driver rejects answers 422 with the
+ * offending register named, so the form can mark the field.
+ */
+
+/* Name/code buffers are oversized on purpose: the JSON parser fails the
+ * whole body (400) when a string does not fit, but a too-long name is a
+ * field error (422 "name"), so it has to fit here and be measured. */
+#define AURA_REQ_NAME_MAX  (3 * AURA_NAME_SIZE)
+#define AURA_REQ_CODE_MAX  (3 * AURA_CODE_SIZE)
+
+struct aura_cfg_req {
+	bool    enabled;
+	int32_t preset;
+	int32_t channels;
+	int32_t context;
+	int32_t flags;
+	int32_t tx_power;
+	int32_t pd_us;
+	int32_t fifo_target;
+	int64_t broadcast_id;
+	bool    broadcast_id_random;
+	char    name[AURA_REQ_NAME_MAX + 1];
+	char    code[AURA_REQ_CODE_MAX + 1];
+};
+
+enum {
+	AC_ENABLED, AC_PRESET, AC_CHANNELS, AC_CONTEXT, AC_FLAGS, AC_TX_POWER,
+	AC_PD_US, AC_FIFO_TARGET, AC_BROADCAST_ID, AC_BROADCAST_ID_RANDOM,
+	AC_NAME, AC_CODE,
+};
+
+static const struct json_obj_descr aura_cfg_descr[] = {
+	[AC_ENABLED] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, enabled, JSON_TOK_TRUE),
+	[AC_PRESET] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, preset, JSON_TOK_NUMBER),
+	[AC_CHANNELS] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, channels, JSON_TOK_NUMBER),
+	[AC_CONTEXT] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, context, JSON_TOK_NUMBER),
+	[AC_FLAGS] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, flags, JSON_TOK_NUMBER),
+	[AC_TX_POWER] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, tx_power, JSON_TOK_NUMBER),
+	[AC_PD_US] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, pd_us, JSON_TOK_NUMBER),
+	[AC_FIFO_TARGET] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, fifo_target,
+					       JSON_TOK_NUMBER),
+	[AC_BROADCAST_ID] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, broadcast_id,
+						JSON_TOK_INT64),
+	[AC_BROADCAST_ID_RANDOM] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req,
+						       broadcast_id_random, JSON_TOK_TRUE),
+	[AC_NAME] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, name, JSON_TOK_STRING_BUF),
+	[AC_CODE] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, code, JSON_TOK_STRING_BUF),
+};
+
+static void build_aura_status(struct json_out *jo, const struct auracast_status *st)
+{
+	char buf[16];
+
+	jo_key(jo, "status");
+	jo_obj_begin(jo);
+	jo_bool(jo, "present", st->present);
+	jo_bool(jo, "ready", auracast_card_ready());
+	jo_bool(jo, "stats_valid", st->stats_valid);
+	snprintf(buf, sizeof(buf), "%u.%u.%u", st->fw_major, st->fw_minor, st->fw_patch);
+	jo_str(jo, "fw_version", buf);
+	jo_uint(jo, "state", st->state);
+	jo_str(jo, "state_name", aura_proto_state_name(st->state));
+	jo_uint(jo, "error", st->error);
+	jo_str(jo, "error_name", aura_proto_error_name(st->error));
+	jo_uint(jo, "error_reg", st->error_reg);
+	jo_str(jo, "error_reg_name", aura_proto_reg_name(st->error_reg));
+	jo_uint(jo, "reset_reason", st->reset_reason);
+	jo_uint(jo, "pipe_state", st->stats.pipe_state);
+	jo_str(jo, "pipe_state_name", aura_proto_pipe_name(st->stats.pipe_state));
+	jo_bool(jo, "i2s_signal", (st->stats.status_flags & AURA_STATUS_I2S_SIGNAL) != 0);
+	jo_bool(jo, "bis_streaming",
+		(st->stats.status_flags & AURA_STATUS_BIS_STREAMING) != 0);
+	jo_uint(jo, "fifo_fill", st->stats.fifo_fill);
+	jo_int(jo, "drift_ppm", st->stats.drift_cppm / 100);
+	jo_int(jo, "in_ppm", st->stats.in_cppm / 100);
+	snprintf(buf, sizeof(buf), "0x%08x", st->stats.i2s_bits);
+	jo_str(jo, "i2s_bits", buf);
+	jo_uint(jo, "underrun", st->stats.underrun);
+	jo_uint(jo, "overflow", st->stats.overflow);
+	jo_uint(jo, "lost", st->stats.lost);
+	jo_uint(jo, "send_err", st->stats.send_err);
+	jo_uint(jo, "sent", st->stats.sent);
+	if (st->stats_valid) {
+		snprintf(buf, sizeof(buf), "0x%06x", st->stats.active_id & 0xFFFFFFu);
+		jo_str(jo, "active_id", buf);
+	} else {
+		jo_raw(jo, "\"active_id\":null,");
+	}
+	jo_uint(jo, "uptime_ms", st->stats.uptime_ms);
+	jo_int(jo, "last_errno", st->last_errno);
+	jo_uint(jo, "age_ms", st->age_ms);
+	jo_obj_end(jo);
+}
+
+static void build_aura_config(struct json_out *jo, const struct auracast_config *cfg)
+{
+	jo_key(jo, "config");
+	jo_obj_begin(jo);
+	jo_bool(jo, "enabled", cfg->enabled);
+	jo_uint(jo, "preset", cfg->preset);
+	jo_uint(jo, "channels", cfg->channels);
+	jo_uint(jo, "context", cfg->context);
+	jo_uint(jo, "flags", cfg->flags);
+	jo_int(jo, "tx_power", cfg->tx_power_dbm);
+	jo_uint(jo, "pd_us", cfg->pd_us);
+	jo_uint(jo, "fifo_target", cfg->fifo_target);
+	jo_uint(jo, "broadcast_id", cfg->broadcast_id);
+	jo_bool(jo, "broadcast_id_random", cfg->broadcast_id == AURA_BROADCAST_ID_RANDOM);
+	jo_str(jo, "name", cfg->name);
+	jo_str(jo, "code", cfg->code);
+	jo_obj_end(jo);
+}
+
+static void build_aura_choices(struct json_out *jo)
+{
+	jo_key(jo, "presets");
+	jo_arr_begin(jo);
+	for (uint8_t i = 0; i < AURA_PRESET_COUNT; i++) {
+		jo_obj_begin(jo);
+		jo_uint(jo, "id", i);
+		jo_str(jo, "label", aura_proto_preset_label(i));
+		jo_obj_end(jo);
+	}
+	jo_arr_end(jo);
+
+	jo_key(jo, "channel_modes");
+	jo_arr_begin(jo);
+	for (uint8_t i = 0; i < AURA_CH_COUNT; i++) {
+		jo_obj_begin(jo);
+		jo_uint(jo, "id", i);
+		jo_str(jo, "label", aura_proto_channels_label(i));
+		jo_obj_end(jo);
+	}
+	jo_arr_end(jo);
+}
+
+static void build_aura(struct json_out *jo)
+{
+	struct auracast_status st;
+	struct auracast_config cfg;
+
+	(void)auracast_card_get_status(&st);
+	(void)auracast_card_get_config(&cfg);
+
+	jo_obj_begin(jo);
+	build_aura_status(jo, &st);
+	build_aura_config(jo, &cfg);
+	build_aura_choices(jo);
+	jo_obj_end(jo);
+}
+
+static bool aura_present(void)
+{
+	const struct card_info *info = card_manager_get_info(CARD_SLOT_MAIN);
+
+	return info != NULL && info->present && info->type == CARD_TYPE_AURACAST &&
+	       auracast_card_ready();
+}
+
+/* 422 with the rejected register named; the handler then returns 0 so
+ * the core keeps this body instead of its generic error JSON. */
+static void aura_reply_rejected(struct webapi_request *req, uint8_t error,
+				uint8_t error_reg)
+{
+	struct auracast_status st;
+	struct auracast_config cfg;
+
+	(void)auracast_card_get_status(&st);
+	(void)auracast_card_get_config(&cfg);
+
+	req->status = HTTP_422_UNPROCESSABLE_ENTITY;
+	jo_obj_begin(&req->out);
+	jo_str(&req->out, "error", aura_proto_error_name(error));
+	jo_uint(&req->out, "error_reg", error_reg);
+	jo_str(&req->out, "error_reg_name", aura_proto_reg_name(error_reg));
+	jo_str(&req->out, "message", "configuration rejected");
+	build_aura_status(&req->out, &st);
+	build_aura_config(&req->out, &cfg);
+	jo_obj_end(&req->out);
+}
+
+/* Shared tail of PATCH/start/stop/reset: map the cycle result. */
+static int aura_finish(struct webapi_request *req, int ret)
+{
+	if (ret == -EINVAL) {
+		struct auracast_status st;
+
+		(void)auracast_card_get_status(&st);
+		aura_reply_rejected(req, st.error, st.error_reg);
+		return 0;
+	}
+	if (ret < 0) {
+		return ret;
+	}
+	card_settings_schedule_save();
+	build_aura(&req->out);
+	return 0;
+}
+
+static int get_aura(struct webapi_request *req)
+{
+	if (!aura_present()) {
+		return -ENODEV;
+	}
+	build_aura(&req->out);
+	return 0;
+}
+
+static int patch_aura(struct webapi_request *req)
+{
+	struct aura_cfg_req r = { 0 };
+	struct auracast_config cfg;
+	int64_t present;
+	size_t len;
+
+	if (!aura_present()) {
+		return -ENODEV;
+	}
+
+	(void)auracast_card_get_config(&cfg);
+
+	present = req->body_len ? webapi_parse_body(req, aura_cfg_descr,
+						    ARRAY_SIZE(aura_cfg_descr), &r) : 0;
+	if (present < 0) {
+		return -EINVAL;
+	}
+
+	if (WEBAPI_HAS(present, AC_ENABLED)) {
+		cfg.enabled = r.enabled;
+	}
+	if (WEBAPI_HAS(present, AC_PRESET)) {
+		cfg.preset = (uint8_t)CLAMP(r.preset, 0, 255);
+	}
+	if (WEBAPI_HAS(present, AC_CHANNELS)) {
+		cfg.channels = (uint8_t)CLAMP(r.channels, 0, 255);
+	}
+	if (WEBAPI_HAS(present, AC_CONTEXT)) {
+		if (r.context < 0 || r.context > 0xFFFF) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_CONTEXT);
+			return 0;
+		}
+		cfg.context = (uint16_t)r.context;
+	}
+	if (WEBAPI_HAS(present, AC_FLAGS)) {
+		cfg.flags = (uint8_t)CLAMP(r.flags, 0, 255);
+	}
+	if (WEBAPI_HAS(present, AC_TX_POWER)) {
+		if (r.tx_power < INT8_MIN || r.tx_power > INT8_MAX) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_TX_POWER);
+			return 0;
+		}
+		cfg.tx_power_dbm = (int8_t)r.tx_power;
+	}
+	if (WEBAPI_HAS(present, AC_PD_US)) {
+		if (r.pd_us < 0 || r.pd_us > 0xFFFF) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_PD_US);
+			return 0;
+		}
+		cfg.pd_us = (uint16_t)r.pd_us;
+	}
+	if (WEBAPI_HAS(present, AC_FIFO_TARGET)) {
+		if (r.fifo_target < 0 || r.fifo_target > 0xFFFF) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_FIFO_TARGET);
+			return 0;
+		}
+		cfg.fifo_target = (uint16_t)r.fifo_target;
+	}
+	if (WEBAPI_HAS(present, AC_BROADCAST_ID)) {
+		if (r.broadcast_id < 0 || r.broadcast_id > (int64_t)UINT32_MAX) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_BROADCAST_ID);
+			return 0;
+		}
+		cfg.broadcast_id = (uint32_t)r.broadcast_id;
+	}
+	if (WEBAPI_HAS(present, AC_BROADCAST_ID_RANDOM) && r.broadcast_id_random) {
+		cfg.broadcast_id = AURA_BROADCAST_ID_RANDOM;
+	}
+	if (WEBAPI_HAS(present, AC_NAME)) {
+		len = strlen(r.name);   /* bytes, not characters */
+		if (len > AURA_NAME_SIZE) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_NAME);
+			return 0;
+		}
+		memcpy(cfg.name, r.name, len + 1);
+	}
+	if (WEBAPI_HAS(present, AC_CODE)) {
+		len = strlen(r.code);
+		if (len > AURA_CODE_SIZE) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_CODE);
+			return 0;
+		}
+		memcpy(cfg.code, r.code, len + 1);
+	}
+
+	return aura_finish(req, auracast_card_set_config(&cfg));
+}
+
+static int post_aura_start(struct webapi_request *req)
+{
+	if (!aura_present()) {
+		return -ENODEV;
+	}
+	return aura_finish(req, auracast_card_start());
+}
+
+static int post_aura_stop(struct webapi_request *req)
+{
+	if (!aura_present()) {
+		return -ENODEV;
+	}
+	return aura_finish(req, auracast_card_stop());
+}
+
+static int post_aura_reset(struct webapi_request *req)
+{
+	if (!aura_present()) {
+		return -ENODEV;
+	}
+	return aura_finish(req, auracast_card_restart());
+}
+#endif /* CONFIG_AURACAST_CARD */
+
 static const struct webapi_route routes[] = {
 	WEBAPI_ROUTE(HTTP_GET,  "/api/cards",        get_cards),
 	WEBAPI_ROUTE(HTTP_POST, "/api/cards/rescan", post_rescan),
@@ -673,6 +1014,13 @@ static const struct webapi_route routes[] = {
 	WEBAPI_ROUTE(HTTP_PATCH, "/api/cards/io/inputs/{id}",   patch_io_input),
 	WEBAPI_ROUTE(HTTP_PATCH, "/api/cards/io/outputs/{id}",  patch_io_output),
 	WEBAPI_ROUTE(HTTP_POST,  "/api/cards/io/reset",         post_io_reset),
+#endif
+#ifdef CONFIG_AURACAST_CARD
+	WEBAPI_ROUTE(HTTP_GET,   "/api/cards/auracast",         get_aura),
+	WEBAPI_ROUTE(HTTP_PATCH, "/api/cards/auracast",         patch_aura),
+	WEBAPI_ROUTE(HTTP_POST,  "/api/cards/auracast/start",   post_aura_start),
+	WEBAPI_ROUTE(HTTP_POST,  "/api/cards/auracast/stop",    post_aura_stop),
+	WEBAPI_ROUTE(HTTP_POST,  "/api/cards/auracast/reset",   post_aura_reset),
 #endif
 };
 

@@ -216,10 +216,15 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
     target_sources_ifdef(CONFIG_DISPLAY_CTRL app PRIVATE src/webapi/webapi_display.c)
 
     # card_manager itself is portable — it only pulls in the per-card
-    # drivers (mi/lo/io) when those Kconfigs are set, so it's safe to
-    # always compile. card_settings persists gain/48V/mute through the
-    # config_json backends and is likewise Kconfig-gated internally.
-    target_sources(app PRIVATE src/card_manager.c src/card_settings.c)
+    # drivers (mi/lo/io/auracast) when those Kconfigs are set, so it's
+    # safe to always compile. card_settings persists gain/48V/mute (and
+    # the Auracast stream configuration) through the config_json
+    # backends; the Auracast *protocol* helpers it needs for that have
+    # no I2C/kernel dependency and are compiled here unconditionally,
+    # independent of the CONFIG_AURACAST_CARD driver.
+    target_sources(app PRIVATE src/card_manager.c src/card_settings.c
+      drivers/auracast_card/auracast_card_proto.c)
+    target_include_directories(app PRIVATE drivers/auracast_card)
     # Si5351A PI controller is only meaningful on boards that ship the
     # clock generator. Boards without it (ESP32 SPI bring-up) skip the
     # PPB feedback loop entirely; pll_ctrl is stubbed in pll_ctrl.h.

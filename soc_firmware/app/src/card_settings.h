@@ -16,6 +16,10 @@
  *
  * Settings are tagged with the card type they belong to; a different
  * card in the slot ignores them.
+ *
+ * The Auracast card has no channel values; its section is the stream
+ * configuration (`aura`), applied through the driver which configures
+ * and starts the S31 once broadcasting is allowed.
  */
 
 #ifndef CARD_SETTINGS_H_
@@ -23,6 +27,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#include "../drivers/auracast_card/auracast_card_proto.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +47,7 @@ struct card_settings {
 	bool    in_mute[CARD_SETTINGS_MAX_IN];
 	int8_t  out_gain[CARD_SETTINGS_MAX_OUT];   /* LO/IO clip level (dB) */
 	bool    out_mute[CARD_SETTINGS_MAX_OUT];
+	struct auracast_config aura;               /* Auracast card only */
 };
 
 /**

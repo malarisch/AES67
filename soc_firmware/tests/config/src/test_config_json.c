@@ -16,6 +16,8 @@
 #include "aes67_config.h"
 #include "aes67_conn.h"
 #include "config_json.h"
+#include "card_manager.h"
+#include "card_settings.h"
 
 #define JSON_BUF 8192
 
@@ -343,3 +345,121 @@ ZTEST(config_json, test_serialize_reports_overflow)
 }
 
 ZTEST_SUITE(config_json, NULL, NULL, reset_all, NULL, NULL);
+
+/* ---- Auracast card: stream configuration in the card section ---- */
+
+static void store_auracast(const struct auracast_config *aura)
+{
+	struct card_settings *cs;
+
+	card_settings_lock();
+	cs = card_settings_get();
+	memset(cs, 0, sizeof(*cs));
+	cs->valid = true;
+	cs->card_type = CARD_TYPE_AURACAST;
+	cs->aura = *aura;
+	card_settings_unlock();
+}
+
+ZTEST(config_json, test_auracast_settings_roundtrip)
+{
+	struct auracast_config aura;
+	const struct card_settings *cs;
+	int len;
+
+	aura_proto_config_defaults(&aura);
+	strcpy(aura.name, "Main Hall");
+	strcpy(aura.code, "secret");
+	aura.preset = AURA_PRESET_48_4_1;
+	aura.channels = AURA_CH_STEREO;
+	aura.context = 0x0004;
+	aura.broadcast_id = 0x123456;
+	aura.enabled = false;
+	store_auracast(&aura);
+
+	/* No card is detected in the test image: capture() returns -ENODEV
+	 * and leaves the store alone, exactly as for an unplugged card. */
+	len = config_json_serialize(json, sizeof(json));
+	zassert_true(len > 0);
+	zassert_not_null(strstr(json, "\"card_type\":\"auracast\""));
+	zassert_not_null(strstr(json, "\"aura_name\":\"Main Hall\""));
+
+	card_settings_lock();
+	memset(card_settings_get(), 0, sizeof(struct card_settings));
+	card_settings_unlock();
+
+	zassert_equal(config_json_parse_and_apply(json), 0);
+
+	card_settings_lock();
+	cs = card_settings_get();
+	zassert_true(cs->valid);
+	zassert_equal(cs->card_type, CARD_TYPE_AURACAST);
+	zassert_false(cs->aura.enabled);
+	zassert_equal(cs->aura.preset, AURA_PRESET_48_4_1);
+	zassert_equal(cs->aura.channels, AURA_CH_STEREO);
+	zassert_equal(cs->aura.context, 0x0004);
+	zassert_equal(cs->aura.flags, aura.flags);
+	zassert_equal(cs->aura.tx_power_dbm, aura.tx_power_dbm);
+	zassert_equal(cs->aura.pd_us, aura.pd_us);
+	zassert_equal(cs->aura.fifo_target, aura.fifo_target);
+	zassert_equal(cs->aura.broadcast_id, 0x123456);
+	zassert_str_equal(cs->aura.name, "Main Hall");
+	zassert_str_equal(cs->aura.code, "secret");
+	card_settings_unlock();
+}
+
+ZTEST(config_json, test_auracast_random_id_roundtrip)
+{
+	struct auracast_config aura;
+	const struct card_settings *cs;
+
+	aura_proto_config_defaults(&aura);
+	zassert_equal(aura.broadcast_id, AURA_BROADCAST_ID_RANDOM);
+	store_auracast(&aura);
+
+	zassert_true(config_json_serialize(json, sizeof(json)) > 0);
+	card_settings_lock();
+	memset(card_settings_get(), 0, sizeof(struct card_settings));
+	card_settings_unlock();
+	zassert_equal(config_json_parse_and_apply(json), 0);
+
+	card_settings_lock();
+	cs = card_settings_get();
+	zassert_equal(cs->aura.broadcast_id, AURA_BROADCAST_ID_RANDOM,
+		      "0xFFFFFFFF must survive the JSON number round trip");
+	zassert_true(cs->aura.enabled);
+	card_settings_unlock();
+}
+
+ZTEST(config_json, test_auracast_missing_fields_default)
+{
+	/* A config written before the Auracast fields existed. */
+	char partial[] = "{\n  \"card_type\": \"auracast\"\n}\n";
+	struct auracast_config def;
+	const struct card_settings *cs;
+
+	aura_proto_config_defaults(&def);
+
+	card_settings_lock();
+	memset(card_settings_get(), 0x55, sizeof(struct card_settings));
+	card_settings_unlock();
+
+	zassert_equal(config_json_parse_and_apply(partial), 0);
+
+	card_settings_lock();
+	cs = card_settings_get();
+	zassert_true(cs->valid);
+	zassert_equal(cs->card_type, CARD_TYPE_AURACAST);
+	zassert_true(cs->aura.enabled);
+	zassert_equal(cs->aura.preset, def.preset);
+	zassert_equal(cs->aura.channels, def.channels);
+	zassert_equal(cs->aura.context, def.context);
+	zassert_equal(cs->aura.flags, def.flags);
+	zassert_equal(cs->aura.tx_power_dbm, def.tx_power_dbm);
+	zassert_equal(cs->aura.pd_us, def.pd_us);
+	zassert_equal(cs->aura.fifo_target, def.fifo_target);
+	zassert_equal(cs->aura.broadcast_id, def.broadcast_id);
+	zassert_str_equal(cs->aura.name, def.name);
+	zassert_str_equal(cs->aura.code, "");
+	card_settings_unlock();
+}

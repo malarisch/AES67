@@ -5,6 +5,8 @@
  *   - MI card  (8-ch ADC preamp,  LPC board_id 0x01 at 0x40)
  *   - LO card  (8-ch DAC output,  LPC board_id 0x02 at 0x40)
  *   - IO card  (16-ch ADC + 8-ch DAC, LPC board_id 0x31 at 0x40)
+ *   - Auracast card (ESP32-S31 BLE Audio transmitter, no LPC: MAGIC
+ *     "AURA" at 0x3A, probed only when no LPC answers)
  *
  * After detect, the appropriate driver is initialised.  The manager
  * tracks runtime state so the web server can expose a single unified
@@ -32,6 +34,7 @@ typedef enum {
 	CARD_TYPE_MI    = 1,    /**< 8-ch ADC preamp (MI card) */
 	CARD_TYPE_LO    = 2,    /**< 8-ch DAC line output (LO card) */
 	CARD_TYPE_IO    = 3,    /**< 16-ch ADC + 8-ch DAC (IO card) */
+	CARD_TYPE_AURACAST = 4, /**< ESP32-S31 Auracast (BLE Audio) transmitter */
 } card_type_t;
 
 /** Slot index — the system supports one card per slot */
@@ -42,7 +45,9 @@ typedef enum {
  * Per-device info stored after detection
  * --------------------------------------------------------------------- */
 
-/** Raw identity info read from a detected LPC board */
+/** Raw identity info read from a detected LPC board. For the Auracast
+ *  card lpc_addr is the S31's address and soft_id/board_id/hard_rev
+ *  carry its firmware version major/minor/patch. */
 struct card_ident {
 	uint8_t lpc_addr;   /**< I2C address of the primary LPC */
 	uint8_t soft_id;
