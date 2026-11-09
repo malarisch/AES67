@@ -203,6 +203,11 @@ set_global_assignment -name OUTPUT_IO_TIMING_FAR_END_VMEAS "HALF SIGNAL SWING" -
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS PROGRAMMING PIN"
 set_global_assignment -name ENABLE_SIGNALTAP ON
 set_global_assignment -name USE_SIGNALTAP_FILE output_files/stp1.stp
+set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
+set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
+set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
+
+set_global_assignment -name VHDL_FILE ../../../packages/system_cfg_pkg.vhd
 set_global_assignment -name VHDL_FILE top_c10_006.vhd
 set_global_assignment -name VHDL_FILE ../../../packages/wallclock_signals_pkg.vhd
 set_global_assignment -name VHDL_FILE ../../../packages/audioclks_pkg.vhd
@@ -291,124 +296,28 @@ set_global_assignment -name SDC_FILE c10_006.sdc
 set_global_assignment -name SIGNALTAP_FILE output_files/stp1.stp
 set_global_assignment -name QIP_FILE ../ppls/sysclks_altpll_12m_in.qip
 set_global_assignment -name VHDL_FILE ../plls/sysclks_altpll_50m_in.vhd
-set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
-set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
-set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to PHY_MDIO
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[0]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to c10_clk50m
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_sda
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[1]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk1
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_512fs_o
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_256fs_falling
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lrclk0
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio14
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio15
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio16
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio17
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio18
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio19
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_mosi
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8in_0_i
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_512fs_i
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio2
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio3
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio4
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8out_0_o
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to tdm8out_1_o
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio31
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio7
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to gpio8
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to pll_256fs_rising
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[3]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[2]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[1]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led[0]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to user_led
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[2]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io[3]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[4]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io4
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to arduino_io3
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio20
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio21
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio22
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to i2c1_scl
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to i2c1_sda
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to adda_nRST
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to i2c0_scl
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to i2c0_sda
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to uart1_rx
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to spiflash_cs
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart1_tx
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[0]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[1]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[2]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[3]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[4]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[5]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[6]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to pmod_d[7]
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to gpio30
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart0_rx
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to uart0_tx
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[6]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[7]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[8]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[10]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[11]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[12]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[13]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_rstn
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[5]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io5
-set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to pll_512fs_o
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io9
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to arduino_io[9]
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_miso
-set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to spiflash_clk
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8in_0_i
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8in_1_i
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8out_0_o
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to tdm8out_1_o
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_256fs_rising
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio10
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_512fs_o
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to pll_256fs_falling
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to gpio13
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN3
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN4
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN5
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN6
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to AIN7
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to D0
-set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to PIO_04
-set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to PIO_05
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to PIO_04
-set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to PIO_05
-set_location_assignment PIN_91 -to c10_clk50m
-set_location_assignment PIN_3 -to mdio
-set_location_assignment PIN_7 -to mdc
-set_location_assignment PIN_143 -to rx0
-set_location_assignment PIN_1 -to refclk
-set_location_assignment PIN_2 -to crsdv
-set_location_assignment PIN_144 -to rx1
-set_location_assignment PIN_141 -to tx0
-set_location_assignment PIN_142 -to tx1
-set_location_assignment PIN_129 -to mclk
-set_location_assignment PIN_86 -to bclk
-set_location_assignment PIN_128 -to lrclk
-set_location_assignment PIN_32 -to tdm_in0
-set_location_assignment PIN_33 -to tdm_out0
-set_location_assignment PIN_67 -to spictrl_clk
-set_location_assignment PIN_70 -to spictrl_mosi
-set_location_assignment PIN_68 -to spictrl_miso
-set_location_assignment PIN_69 -to spictrl_irq
-set_location_assignment PIN_66 -to spictrl_cs
-set_location_assignment PIN_137 -to txen
-set_global_assignment -name RESERVE_FLASH_NCE_AFTER_CONFIGURATION "AS INPUT TRI-STATED"
-set_location_assignment PIN_100 -to led_o
-set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to spictrl_irq
+set_location_assignment PIN_133 -to mdc
+set_location_assignment PIN_135 -to mdio
+set_location_assignment PIN_112 -to spictrl_clk
+set_location_assignment PIN_114 -to spictrl_cs
+set_location_assignment PIN_115 -to spictrl_irq
+set_location_assignment PIN_111 -to spictrl_miso
+set_location_assignment PIN_113 -to spictrl_mosi
+set_location_assignment PIN_143 -to txen
+set_location_assignment PIN_91 -to sys_clk_i
+set_location_assignment PIN_88 -to rst_n_i
+set_location_assignment PIN_144 -to phy0tx[1]
+set_location_assignment PIN_142 -to phy0tx[0]
+set_location_assignment PIN_137 -to phy0rx[1]
+set_location_assignment PIN_141 -to phy0rx[0]
+set_location_assignment PIN_136 -to phy_rxdv
+set_location_assignment PIN_138 -to phy_refclk_i
+set_location_assignment PIN_119 -to tdm_in[0]
+set_location_assignment PIN_120 -to esp_bclk
+set_location_assignment PIN_121 -to esp_fsclk
+set_location_assignment PIN_124 -to tdm_out[0]
+set_location_assignment PIN_60 -to aura_bclk
+set_location_assignment PIN_59 -to aura_fsclk
+set_location_assignment PIN_58 -to aura_data
 set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

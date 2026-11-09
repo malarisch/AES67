@@ -46,10 +46,10 @@ set_time_format -unit ns -decimal_places 3
 # 1. Board-input clocks
 #**************************************************************
 
-create_clock -name {c10_clk50m} -period 20 -waveform { 0.000 10.665 } [get_ports {c10_clk50m}]
+create_clock -name {c10_clk50m} -period 20 -waveform { 0.000 10.665 } [get_ports {sys_clk_i}]
 
 # RMII 50 MHz reference clock from PHY (external, asynchronous to c10_clk12m)
-create_clock -name {phy_rmii_ref_clk} -period 20.000 -waveform { 0.000 10.000 } [get_ports {refclk}]
+create_clock -name {phy_rmii_ref_clk} -period 20.000 -waveform { 0.000 10.000 } [get_ports {phy_refclk_i}]
 
 #**************************************************************
 # 2. Auto-derive every PLL-internal clock
@@ -74,13 +74,13 @@ set sys_pll_clk1      {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysc
 set sys_pll_clk2      {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen12:sysclks_altpll_50m_in_inst|altpll_component|auto_generated|pll1|clk[2]}
 
 create_generated_clock -name {mac_mii_rxc} \
-    -source [get_ports {*phy_rmii_ref_clk*}] \
+    -source [get_ports {*phy_refclk_i*}] \
     -divide_by 2 \
     [get_registers {*mac_mii_rxc*}]
 
 # mac_mii_txc: MII TX clock used by MAC and aes67_top for transmit path
 create_generated_clock -name {mac_mii_txc} \
-    -source [get_ports {*phy_rmii_ref_clk*}] \
+    -source [get_ports {*phy_refclk_i*}] \
     -divide_by 2 \
     [get_registers {*mac_mii_txc*}]
 #**************************************************************

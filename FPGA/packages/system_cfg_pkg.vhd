@@ -128,6 +128,13 @@ package system_cfg_pkg is
         TDM_PINS => 1,
         ADDA_CFG => i2s_esp_config
     );
+    constant two_i2s_outputs_bclkinv : t_audio_cfg := (
+        MAX_STREAMS => 2,
+        BUFFER_DEPTH => 256,
+        CHANNELS => 2,
+        TDM_PINS => 1,
+        ADDA_CFG => i2s_esp_config
+    );
     constant four_i2s_outputs : t_audio_cfg := (
         MAX_STREAMS => 8,
         BUFFER_DEPTH => 256,
@@ -167,7 +174,7 @@ package system_cfg_pkg is
         BCLK_SPEED => audio_clock_03_07,
         USE_PARALLEL_INTERFACE => false,
         PARALLEL_BYTE_DEPTH => 3,
-        RX_DA_CFG => two_i2s_inputs_bclkinv,
+        RX_DA_CFG => two_i2s_outputs_bclkinv,
         TX_AD_CFG => two_i2s_inputs_bclkinv
     );
     constant audio_config_mi : t_global_audio_cfg := (
@@ -230,6 +237,17 @@ package system_cfg_pkg is
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lan8720a_cfg,
         AUDIO_CONFIG => audio_config_cyc,
+        STATIC_PTP_CONFIG => true,
+        PTP_IN_SOFTWARE => true,
+        ENABLE_METERING => false,
+        PTP_MOVING_AVERAGE_DEPTH => 4
+    );
+    constant global_system_cfg_c006 : t_global_system_cfg := (
+        CLK_IN_SPEED => 50,
+        SOC_TYPE => LITEX_SPIBONE,
+        PLATFORM => ALTERA,
+        PHY_CONFIG => std_lan8720a_cfg,
+        AUDIO_CONFIG => audio_config_2io,
         STATIC_PTP_CONFIG => true,
         PTP_IN_SOFTWARE => true,
         ENABLE_METERING => false,

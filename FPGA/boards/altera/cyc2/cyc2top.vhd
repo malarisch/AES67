@@ -14,7 +14,7 @@ ENTITY cyc2top IS
 		--   syscfg: t_global_system_cfg := with_vcxo_mclk(global_system_cfg_rn2io, true)
 		-- With R405 fitted an NCO bitstream would drive PIN_63 against the
 		-- VCXO output -- keep the two in step.
-		syscfg: t_global_system_cfg := with_vcxo_mclk(global_system_cfg_lo, true)
+		syscfg: t_global_system_cfg := (global_system_cfg_rn2io)
 	);
 	PORT 
 	(
