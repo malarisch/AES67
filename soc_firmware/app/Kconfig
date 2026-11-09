@@ -255,6 +255,76 @@ config NMOS_IS08
 
 endmenu
 
+menu "AES70 (OCA) control"
+
+config AES70
+	bool "AES70 / OCP.1 control server"
+	default y
+	depends on NETWORKING && NET_TCP && NET_SOCKETS
+	help
+	  Expose the device as an AES70 (Open Control Architecture) Device:
+	  an OCP.1 binary-protocol server over TCP (AES70-3) with the
+	  mandatory managers, a root block and worker objects for the analog
+	  card channels (gain / mute / phantom), the AES67 TX/RX stream
+	  slots, the PTP clock and the network identity. Controllers get
+	  PropertyChanged notifications for every change, whichever
+	  interface made it. Advertised via DNS-SD as _oca._tcp.
+
+if AES70
+
+config AES70_PORT
+	int "OCP.1 TCP port"
+	default 65000
+	range 49152 65535
+	help
+	  AES70-3 requires a port from the IANA dynamic range; it is
+	  published in the _oca._tcp SRV record.
+
+config AES70_MAX_SESSIONS
+	int "Maximum simultaneous controller connections"
+	default 4
+	range 1 8
+
+config AES70_MAX_SUBSCRIPTIONS
+	int "Subscriptions per controller connection"
+	default 64
+	range 8 256
+
+config AES70_MAX_OBJECTS
+	int "Object table size"
+	default 256
+	range 32 1024
+	help
+	  Upper bound for the object tree. A 16-in/8-out card with 8+8
+	  stream slots needs about 210 entries.
+
+config AES70_RX_BUF_SIZE
+	int "Receive buffer per connection (bytes)"
+	default 1024
+	help
+	  Largest single OCP.1 command (or keep-alive PDU) accepted. Command
+	  PDUs themselves may be arbitrarily large: their commands are
+	  consumed one at a time as they arrive (AES70 Explorer batches its
+	  whole discovery into one 1.5 KB PDU).
+
+config AES70_TX_BUF_SIZE
+	int "Response buffer (bytes)"
+	default 8192
+	help
+	  Shared response/notification build buffer. GetActionObjects-
+	  Recursive on the root block needs roughly 24 bytes per object.
+
+config AES70_STACK_SIZE
+	int "Server thread stack size"
+	default 6144
+	help
+	  The thread calls into the card drivers (I2C), the stream tables
+	  (FPGA HAL) and the configuration persistence (flash write).
+
+endif # AES70
+
+endmenu
+
 menu "SD Card Configuration Storage"
 
 config SD_CONFIG

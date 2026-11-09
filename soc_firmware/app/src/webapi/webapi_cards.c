@@ -692,12 +692,15 @@ struct aura_cfg_req {
 	bool    broadcast_id_random;
 	char    name[AURA_REQ_NAME_MAX + 1];
 	char    code[AURA_REQ_CODE_MAX + 1];
+	int32_t hq_preset;
+	int32_t hq_channels;
+	int32_t hq_context;
 };
 
 enum {
 	AC_ENABLED, AC_PRESET, AC_CHANNELS, AC_CONTEXT, AC_FLAGS, AC_TX_POWER,
 	AC_PD_US, AC_FIFO_TARGET, AC_BROADCAST_ID, AC_BROADCAST_ID_RANDOM,
-	AC_NAME, AC_CODE,
+	AC_NAME, AC_CODE, AC_HQ_PRESET, AC_HQ_CHANNELS, AC_HQ_CONTEXT,
 };
 
 static const struct json_obj_descr aura_cfg_descr[] = {
@@ -716,6 +719,10 @@ static const struct json_obj_descr aura_cfg_descr[] = {
 						       broadcast_id_random, JSON_TOK_TRUE),
 	[AC_NAME] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, name, JSON_TOK_STRING_BUF),
 	[AC_CODE] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, code, JSON_TOK_STRING_BUF),
+	[AC_HQ_PRESET] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, hq_preset, JSON_TOK_NUMBER),
+	[AC_HQ_CHANNELS] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, hq_channels,
+					       JSON_TOK_NUMBER),
+	[AC_HQ_CONTEXT] = JSON_OBJ_DESCR_PRIM(struct aura_cfg_req, hq_context, JSON_TOK_NUMBER),
 };
 
 static void build_aura_status(struct json_out *jo, const struct auracast_status *st)
@@ -779,6 +786,10 @@ static void build_aura_config(struct json_out *jo, const struct auracast_config 
 	jo_bool(jo, "broadcast_id_random", cfg->broadcast_id == AURA_BROADCAST_ID_RANDOM);
 	jo_str(jo, "name", cfg->name);
 	jo_str(jo, "code", cfg->code);
+	jo_uint(jo, "hq_preset", cfg->hq_preset);
+	jo_bool(jo, "hq_enabled", cfg->hq_preset != AURA_PRESET_NONE);
+	jo_uint(jo, "hq_channels", cfg->hq_channels);
+	jo_uint(jo, "hq_context", cfg->hq_context);
 	jo_obj_end(jo);
 }
 
@@ -787,6 +798,24 @@ static void build_aura_choices(struct json_out *jo)
 	jo_key(jo, "presets");
 	jo_arr_begin(jo);
 	for (uint8_t i = 0; i < AURA_PRESET_COUNT; i++) {
+		jo_obj_begin(jo);
+		jo_uint(jo, "id", i);
+		jo_str(jo, "label", aura_proto_preset_label(i));
+		jo_obj_end(jo);
+	}
+	jo_arr_end(jo);
+
+	/* HQ subgroup choices: the 48 kHz presets plus "none" (255). */
+	jo_key(jo, "hq_presets");
+	jo_arr_begin(jo);
+	jo_obj_begin(jo);
+	jo_uint(jo, "id", AURA_PRESET_NONE);
+	jo_str(jo, "label", "none (single subgroup)");
+	jo_obj_end(jo);
+	for (uint8_t i = 0; i < AURA_PRESET_COUNT; i++) {
+		if (!aura_proto_preset_is_hq(i)) {
+			continue;
+		}
 		jo_obj_begin(jo);
 		jo_uint(jo, "id", i);
 		jo_str(jo, "label", aura_proto_preset_label(i));
@@ -961,6 +990,19 @@ static int patch_aura(struct webapi_request *req)
 			return 0;
 		}
 		memcpy(cfg.code, r.code, len + 1);
+	}
+	if (WEBAPI_HAS(present, AC_HQ_PRESET)) {
+		cfg.hq_preset = (uint8_t)CLAMP(r.hq_preset, 0, 255);
+	}
+	if (WEBAPI_HAS(present, AC_HQ_CHANNELS)) {
+		cfg.hq_channels = (uint8_t)CLAMP(r.hq_channels, 0, 255);
+	}
+	if (WEBAPI_HAS(present, AC_HQ_CONTEXT)) {
+		if (r.hq_context < 0 || r.hq_context > 0xFFFF) {
+			aura_reply_rejected(req, AURA_ERR_BAD_VALUE, AURA_REG_HQ_CONTEXT);
+			return 0;
+		}
+		cfg.hq_context = (uint16_t)r.hq_context;
 	}
 
 	return aura_finish(req, auracast_card_set_config(&cfg));

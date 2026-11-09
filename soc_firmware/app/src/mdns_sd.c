@@ -83,6 +83,14 @@ LOG_MODULE_REGISTER(mdns_sd, LOG_LEVEL_INF);
 /* NMOS IS-04 node advertisement (P2P discovery, withdrawn once the node
  * is registered with a registry). */
 #define SVC_NMOS         "_nmos-node._tcp.local"
+/* AES70 OCP.1 control (AES70-3 clause 8.5): TCP transport, TXT records
+ * txtvers/protovers in this order. */
+#define SVC_OCA          "_oca._tcp.local"
+#ifdef CONFIG_AES70
+#include "aes70/aes70.h"
+static const char *const txt_oca[] = {"txtvers=1",
+				      "protovers=" STRINGIFY(AES70_OCA_VERSION)};
+#endif
 
 static const char *const txt_ravenna[] = {"type=ravenna"};
 
@@ -675,8 +683,26 @@ static int answer_question(int off, int *answers, const char *qname,
 			}
 		}
 #endif
+#ifdef CONFIG_AES70
+		n = add_ptr(tx_buf, sizeof(tx_buf), off, SVC_ENUM, SVC_OCA,
+			    TTL_SERVICE);
+		if (n > 0) {
+			off = n;
+			(*answers)++;
+		}
+#endif
 		return off;
 	}
+
+#ifdef CONFIG_AES70
+	if (t_ptr && name_eq(qname, SVC_OCA)) {
+		off = add_instance_txt(off, answers, vendor_node_id, SVC_OCA,
+				       CONFIG_AES70_PORT, NULL, true,
+				       TTL_SERVICE, txt_oca,
+				       ARRAY_SIZE(txt_oca));
+		return off;
+	}
+#endif
 
 #ifdef CONFIG_NMOS
 	if (t_ptr && name_eq(qname, SVC_NMOS)) {
@@ -786,6 +812,15 @@ static int answer_question(int off, int *answers, const char *qname,
 			txt = nmos_txt;
 			ntxt = nmos_txt_count;
 #endif
+#ifdef CONFIG_AES70
+		} else if (qlen > strlen(SVC_OCA) + 1 &&
+			   name_eq(qname + (qlen - strlen(SVC_OCA)), SVC_OCA)) {
+			svc = SVC_OCA;
+			port = CONFIG_AES70_PORT;
+			is_nmos = true;   /* vendor node ID only, like NMOS */
+			txt = txt_oca;
+			ntxt = ARRAY_SIZE(txt_oca);
+#endif
 		} else {
 			return off;
 		}
@@ -893,6 +928,16 @@ static void announce_all(uint32_t ptr_ttl)
 	off = add_instance(off, &answers, user_device_name, SVC_HTTP, 80,
 			   NULL, false, ptr_ttl);
 	finish_response(off, answers, NULL, 0);
+
+#ifdef CONFIG_AES70
+	/* AES70 OCP.1 service in its own packet. */
+	answers = 0;
+	off = begin_response(0);
+	off = add_instance_txt(off, &answers, vendor_node_id, SVC_OCA,
+			       CONFIG_AES70_PORT, NULL, true, ptr_ttl,
+			       txt_oca, ARRAY_SIZE(txt_oca));
+	finish_response(off, answers, NULL, 0);
+#endif
 
 #ifdef CONFIG_NMOS
 	/* NMOS node advertisement in its own packet (the node-services

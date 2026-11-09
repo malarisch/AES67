@@ -237,6 +237,12 @@ elseif(CONFIG_FPGA_HAL_LITEX OR CONFIG_FPGA_HAL_SPI OR CONFIG_FPGA_HAL_MOCK)
       src/nmos/nmos_node.c
       src/nmos/nmos_api.c
     )
+    target_sources_ifdef(CONFIG_AES70 app PRIVATE
+      src/aes70/ocp1.c
+      src/aes70/aes70_core.c
+      src/aes70/aes70_device.c
+      src/aes70/aes70_server.c
+    )
     target_sources_ifdef(CONFIG_NMOS_REGISTRATION app PRIVATE src/nmos/nmos_reg.c)
     target_sources_ifdef(CONFIG_NMOS_IS05 app PRIVATE src/nmos/nmos_is05.c)
     target_sources_ifdef(CONFIG_NMOS_IS08 app PRIVATE src/nmos/nmos_is08.c)

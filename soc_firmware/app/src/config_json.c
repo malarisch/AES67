@@ -163,6 +163,9 @@ struct cfg_doc {
 	int64_t  aura_broadcast_id;     /* 4294967295 = random */
 	char     aura_name[AURA_NAME_SIZE + 1];
 	char     aura_code[AURA_CODE_SIZE + 1];
+	int32_t  aura_hq_preset;        /* 255 = no HQ subgroup */
+	int32_t  aura_hq_channels;
+	int32_t  aura_hq_context;
 
 	/* -- Stream tables -- */
 	struct cfg_tx_dto tx_streams[AES67_MAX_TX_STREAMS];
@@ -266,6 +269,9 @@ static const struct json_obj_descr doc_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_broadcast_id, JSON_TOK_INT64),
 	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_name, JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_code, JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_hq_preset, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_hq_channels, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct cfg_doc, aura_hq_context, JSON_TOK_NUMBER),
 	JSON_OBJ_DESCR_OBJ_ARRAY(struct cfg_doc, tx_streams,
 				 AES67_MAX_TX_STREAMS, tx_streams_len,
 				 tx_descr, ARRAY_SIZE(tx_descr)),
@@ -377,6 +383,9 @@ static void aura_to_doc(const struct auracast_config *a, struct cfg_doc *d)
 	d->aura_name[sizeof(d->aura_name) - 1] = '\0';
 	strncpy(d->aura_code, a->code, sizeof(d->aura_code) - 1);
 	d->aura_code[sizeof(d->aura_code) - 1] = '\0';
+	d->aura_hq_preset   = a->hq_preset;
+	d->aura_hq_channels = a->hq_channels;
+	d->aura_hq_context  = a->hq_context;
 }
 
 static void aura_from_doc(const struct cfg_doc *d, struct auracast_config *a)
@@ -394,6 +403,9 @@ static void aura_from_doc(const struct cfg_doc *d, struct auracast_config *a)
 	a->name[AURA_NAME_SIZE] = '\0';
 	strncpy(a->code, d->aura_code, AURA_CODE_SIZE);
 	a->code[AURA_CODE_SIZE] = '\0';
+	a->hq_preset   = (uint8_t)d->aura_hq_preset;
+	a->hq_channels = (uint8_t)d->aura_hq_channels;
+	a->hq_context  = (uint16_t)d->aura_hq_context;
 }
 
 /* Absent aura_* keys must read as the S31 power-on values, not zero. */

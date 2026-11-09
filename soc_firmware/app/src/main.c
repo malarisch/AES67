@@ -61,6 +61,9 @@
 #ifdef CONFIG_NMOS
 #include "nmos/nmos.h"
 #endif
+#ifdef CONFIG_AES70
+#include "aes70/aes70.h"
+#endif
 #ifdef CONFIG_AES67_USB_AUDIO
 #include "usb_audio.h"
 #endif
@@ -253,6 +256,10 @@ static void apply_node_ip(const struct in_addr *addr, bool link_local)
 
 #ifdef CONFIG_NMOS
 	nmos_notify_ip_ready(addr);
+#endif
+
+#ifdef CONFIG_AES70
+	aes70_notify_ip_ready(addr);
 #endif
 
 #ifdef CONFIG_RTSP
@@ -1406,6 +1413,16 @@ int main(void)
 	if (nmos_ret < 0) {
 		LOG_ERR("NMOS did not start (err %d) - node invisible to "
 			"NMOS controllers", nmos_ret);
+	}
+#endif
+
+#ifdef CONFIG_AES70
+	/* ---- AES70 / OCP.1 control server (object tree built from the
+	 * detected card + restored stream tables) ---- */
+	int aes70_ret = aes70_start(iface);
+	if (aes70_ret < 0) {
+		LOG_ERR("AES70 did not start (err %d) - no OCA control",
+			aes70_ret);
 	}
 #endif
 
