@@ -13,7 +13,7 @@
 -- Time scaling: the real loop (C = 470 uF, 1.33 ms windows, ~0.2 Hz
 -- bandwidth) would take minutes of simulated time. The TB shrinks C to
 -- 1.6 nF and the PD window to 2^8 edges and re-derives the gains with
--- the same formulas as the header of gen_mclk_vcxo:
+-- the same formulas as for the board loop (wallclock_vcxo_ctl.vhd):
 --   Kf (pd_a, mid-rail) = 165 uA * 8 ns / 1.6 nF * 1229 Hz/V = 1.0 Hz
 --   Kp = 2^14, Ki = 2^10, T = 10.4 us -> wn = 9.9e3 rad/s, zeta = 0.83
 --   Kb = 2^2 -> leak-comp zero at wn/26
@@ -41,6 +41,11 @@
 -- Run (~18 ms sim time, ~10 minutes):
 --   ghdl -a --std=08 packages/audioclks_pkg.vhd \
 --        packages/wallclock_signals_pkg.vhd ptp/average.vhd \
+--        ptp/wallclock_vcxo_pkg.vhd ptp/wallclock_time.vhd \
+--        ptp/wallclock_media_clock.vhd ptp/wallclock_nco.vhd \
+--        ptp/wallclock_clk_div.vhd ptp/wallclock_vcxo_pd.vhd \
+--        ptp/wallclock_vcxo_ctl.vhd ptp/wallclock_vcxo_pump.vhd \
+--        ptp/wallclock_vcxo_domain.vhd ptp/wallclock_vcxo.vhd \
 --        ptp/wallclock.vhd ptp/wallclock_vcxo_tb.vhd
 --   ghdl -e --std=08 wallclock_vcxo_tb
 --   ghdl -r --std=08 wallclock_vcxo_tb [-gDOMAIN=true] > vcxo.csv

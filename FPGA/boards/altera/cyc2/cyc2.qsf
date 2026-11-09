@@ -197,6 +197,16 @@ set_global_assignment -name VHDL_FILE ../../../ptp/ptpv2_bmc.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/ptp_module.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/average.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_time.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_media_clock.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_nco.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_clk_div.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pkg.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pd.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_ctl.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pump.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_domain.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo.vhd
 set_global_assignment -name VHDL_FILE ../../../wb_bridge_top.vhd
 set_global_assignment -name VHDL_FILE ../../../sysclk_pll_gen.vhd
 set_global_assignment -name VHDL_FILE ../../../aes67_wb_bridge.vhd

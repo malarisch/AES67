@@ -76,7 +76,7 @@ static int32_t applied_ppb;
  * nco_ppb_adj CSRs, which the gateware adds to the NCO base increment
  * as-is (valid = 1 bypasses its own multiply and 8-sample average).
  *
- * Conversion: mirrors wallclock.vhd's NCO_PPB_SCALE for the platform
+ * Conversion: mirrors wallclock_nco.vhd's NCO_PPB_SCALE for the platform
  * constants fs = 48 kHz, sys_clk = 125 MHz —
  *   round(48000*512 / 125e6 * 2^32 / 1e9 * 65536) = 55340
  * increment units per ppb. The Q16 smoothing accumulator feeds the

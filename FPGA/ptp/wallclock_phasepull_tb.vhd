@@ -7,7 +7,7 @@
 -- i.e. ~200 ms settling -- far too slow to simulate. The TB therefore
 -- overrides the gain generics with LG=6 / INT=27. That scales both
 -- gains by the same argument (see the loop-analysis comment in
--- wallclock.vhd): damping stays ~1, the dynamics just run ~16x faster,
+-- wallclock_nco.vhd): damping stays ~1, the dynamics just run ~16x faster,
 -- so acquisition + settling fit in a few ms of sim time. The loop
 -- STRUCTURE under test (held P bias, pipelined I clamp, no control-path
 -- dead band) is identical to synthesis.
@@ -33,7 +33,13 @@
 -- Run (fast, ~13 ms sim time):
 --   cd <workdir>
 --   ghdl -a --std=08 packages/audioclks_pkg.vhd \
---        packages/wallclock_signals_pkg.vhd ptp/wallclock.vhd \
+--        packages/wallclock_signals_pkg.vhd ptp/average.vhd \
+--        ptp/wallclock_vcxo_pkg.vhd ptp/wallclock_time.vhd \
+--        ptp/wallclock_media_clock.vhd ptp/wallclock_nco.vhd \
+--        ptp/wallclock_clk_div.vhd ptp/wallclock_vcxo_pd.vhd \
+--        ptp/wallclock_vcxo_ctl.vhd ptp/wallclock_vcxo_pump.vhd \
+--        ptp/wallclock_vcxo_domain.vhd ptp/wallclock_vcxo.vhd \
+--        ptp/wallclock.vhd \
 --        ptp/wallclock_phasepull_tb.vhd
 --   ghdl -e --std=08 wallclock_phasepull_tb
 --   ghdl -r --std=08 wallclock_phasepull_tb > phasepull.csv

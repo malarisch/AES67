@@ -497,6 +497,16 @@ set_global_assignment -name VHDL_FILE ../../../aes67_wb_bridge.vhd
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/aes67_bridge/gateware/litex_soc_aes67_bridge.v
 set_global_assignment -name VHDL_FILE ../../../ptp/ptp_header_rom.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_time.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_media_clock.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_nco.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_clk_div.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pkg.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pd.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_ctl.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pump.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_domain.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo.vhd
 set_global_assignment -name VHDL_FILE ../../../old_modules_unused/audioclock_generator.vhd
 set_global_assignment -name VERILOG_FILE ../../../../litex_soc/build/cyclone10/gateware/litex_soc_cyclone10.v
 set_global_assignment -name SOURCE_FILE litex_soc_cyc1000.cmp
