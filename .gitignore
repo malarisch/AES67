@@ -15,6 +15,7 @@ db/
 *.eqn
 *.hex
 *.html
+!config_tool/crates/web/src/index.html
 !soc_firmware/app/webui/index.html
 *.jdi
 *.jpg

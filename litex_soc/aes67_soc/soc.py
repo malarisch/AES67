@@ -10,6 +10,7 @@ from migen import *
 
 from litex.gen import *
 
+from litex.build.lattice import LatticePlatform
 from litex.soc.integration.soc_core import SoCCore
 from litex.soc.integration.soc import SoCRegion
 from litex.soc.cores.spi import SPIMaster
@@ -372,7 +373,12 @@ class AES67SoC(SoCCore):
                 # with_burst=True enables the auto-incrementing burst read/write
                 # commands (repo-local fork) the Linux daemon uses to stream
                 # whole frames in one SPI transfer.
-                self.spibone = SPIBone(platform.request("spibone"), with_burst=True)
+                # Lattice: no MISO tristate. LiteX lowers it to an explicit BB pad
+                # primitive, which Diamond only accepts on a top-level pin; on the
+                # X32 MISO is shared with the routing matrix and muxed in fabric
+                # by chip-select, so the core drives a plain output instead.
+                self.spibone = SPIBone(platform.request("spibone"), with_burst=True,
+                    with_tristate=not isinstance(platform, LatticePlatform))
                 add_spibone(self, platform)
             elif is_uartbone:
                 # UART->Wishbone master.  Constructed here (not in the helper) so
