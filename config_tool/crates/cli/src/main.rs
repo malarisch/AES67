@@ -13,14 +13,14 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 
 use aes67_client::RemoteDevice;
+use aes67_config::status::{RX_MUTE_CHANNELS, RX_UNDERRUN_STREAMS};
 use aes67_config::{
-    ControlApi, CsrMap, Device, KernelTransport, PtpGrandmaster, RxStream, SpiTransport, Transport,
-    TxStream, UartTransport,
+    ControlApi, CsrMap, Device, KernelTransport, PtpGrandmaster, RxStream, SpiTransport,
+    StatusWord, SystemCfg, Transport, TxStream, UartTransport,
 };
 
 /// Register name constants used by the convenience subcommands.
 const REG_SCRATCH: &str = "aes67_csr_scratch";
-const REG_STATUS: &str = "aes67_csr_status";
 const REG_PTP_SYNC_INTERVAL: &str = "aes67_csr_ptp_log_msg_interval";
 const REG_PTP_ANNOUNCE_INTERVAL: &str = "aes67_csr_ptp_announce_msg_interval";
 const REG_PTP_TIME_SOURCE: &str = "aes67_csr_ptp_time_source";
@@ -121,7 +121,8 @@ enum Command {
         #[arg(value_parser = parse_u32)]
         value: Option<u32>,
     },
-    /// Read the AES67 status register.
+    /// Show the decoded FPGA status: link, PTP, RX stream underrun / muted
+    /// outputs, and the gateware build configuration.
     Status,
     /// Set PTP grandmaster announce parameters.
     Ptp(PtpArgs),
@@ -426,10 +427,7 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
             }
         },
 
-        Command::Status => {
-            let v = dev.read_register(REG_STATUS)? as u32;
-            println!("status = 0x{v:08x}");
-        }
+        Command::Status => print_status(dev)?,
 
         Command::Ptp(p) => {
             dev.set_grandmaster(PtpGrandmaster {
@@ -537,6 +535,78 @@ fn parse_mac(s: &str) -> Result<[u8; 6]> {
             .map_err(|e| anyhow!("invalid MAC octet '{p}': {e}"))?;
     }
     Ok(mac)
+}
+
+/// Indices of the set bits in the low `n` bits of `mask`, e.g. "1, 3", or "none".
+fn fmt_bits(mask: u8, n: u8) -> String {
+    let set: Vec<String> = (0..n).filter(|i| mask >> i & 1 != 0).map(|i| i.to_string()).collect();
+    if set.is_empty() {
+        "none".into()
+    } else {
+        set.join(", ")
+    }
+}
+
+/// `aes67cfg status`: decode the status word and the gateware build config.
+fn print_status(dev: &mut dyn ControlApi) -> Result<()> {
+    let st = StatusWord::read(dev)?;
+    let gw = SystemCfg::read(dev)?;
+    let sw_ptp = gw.is_some_and(|g| g.ptp_in_software);
+    let yn = |b: bool| if b { "yes" } else { "no" };
+
+    println!("status word      0x{:08x}", st.raw());
+    let speed = st.eth_speed_mbps().map_or("?".into(), |m| format!("{m} Mbit/s"));
+    println!(
+        "link             {}",
+        if st.eth_link_up() { format!("up, {speed}") } else { "down".into() }
+    );
+    println!("rx overflow      {}", yn(st.eth_rx_overflow()));
+    if sw_ptp {
+        // The FPGA servo/BMC CSRs read 0 here; ptp4l (pmc) has the numbers.
+        println!("ptp              software (ptp4l via kernel PHC) — query ptp4l/pmc for state");
+    } else {
+        let role = if st.ptp_leader() {
+            "leader"
+        } else if st.ptp_follower() {
+            "follower"
+        } else {
+            "listening"
+        };
+        println!("ptp              hardware, {role}");
+        println!("wallclock locked {}", yn(st.wallclock_locked()));
+    }
+    println!("wallclock config {}", yn(st.wallclock_configured()));
+
+    let (slots, chans) = gw.map_or((RX_UNDERRUN_STREAMS, RX_MUTE_CHANNELS), |g| {
+        (g.rx.max_streams.min(RX_UNDERRUN_STREAMS), g.rx.channels.min(RX_MUTE_CHANNELS))
+    });
+    if slots > 0 {
+        println!(
+            "rx underrun      slot(s) {}   (monitored: slots 0..{})",
+            fmt_bits(st.rx_underrun_mask(), slots),
+            slots - 1
+        );
+        println!("rx muted outputs {}", fmt_bits(st.rx_mute_mask(), chans));
+    }
+
+    match gw {
+        Some(g) => {
+            println!(
+                "gateware         PTP {}{}, metering {}",
+                if g.ptp_in_software { "software" } else { "hardware" },
+                if g.static_ptp_config { " (static servo)" } else { "" },
+                if g.metering { "on" } else { "off" }
+            );
+            for (dir, p) in [("rx (DA)", g.rx), ("tx (AD)", g.tx)] {
+                println!(
+                    "  {dir:<14} {} slot(s), {} channel(s), buffer {} samples",
+                    p.max_streams, p.channels, p.buffer_depth
+                );
+            }
+        }
+        None => println!("gateware         no system_cfg CSRs (older bitstream)"),
+    }
+    Ok(())
 }
 
 fn fmt_mac(mac: [u8; 6]) -> String {

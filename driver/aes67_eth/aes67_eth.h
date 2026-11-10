@@ -2,12 +2,14 @@
 /*
  * AES67 FPGA Ethernet + PHC driver — shared definitions.
  *
- * The FPGA (CPU-less aes67_bridge target, built with --ptp-in-software) hangs
- * off an SPI link via the LiteX spibone Wishbone bridge. This driver is the sole
- * Wishbone master: it carries the eth_buf control-plane datapath as a netdev,
- * exposes the FPGA wallclock as a PHC, and hardware-timestamps PTP frames so
- * stock ptp4l can discipline the clock. Config traffic from userspace rides the
- * same bus through /dev/aes67ctl (see aes67_uapi.h).
+ * The FPGA (CPU-less aes67_bridge target) hangs off an SPI link via the LiteX
+ * spibone Wishbone bridge. This driver is the sole Wishbone master: it carries
+ * the eth_buf control-plane datapath as a netdev, exposes the FPGA wallclock as
+ * a PHC, and — on gateware built with PTP_IN_SOFTWARE — hardware-timestamps PTP
+ * frames so stock ptp4l can discipline the clock. On hardware-PTP gateware the
+ * FPGA servo owns the wallclock and the PHC is read-only (phc2sys can still
+ * follow it). The PTP mode is read from the system_cfg CSRs at probe. Config
+ * traffic from userspace rides the same bus through /dev/aes67ctl.
  */
 #ifndef AES67_ETH_H
 #define AES67_ETH_H
@@ -29,14 +31,17 @@
 #define AES67_EV_RX_READY          BIT(0)   /* eth_buf EventManager: RX ready   */
 #define AES67_WC_CTRL_SET          BIT(0)   /* wallclock_ctrl: load out regs    */
 #define AES67_WC_CTRL_PHASEJUMP    BIT(1)   /* wallclock_ctrl: add signed delta */
+#define AES67_SYSCFG_PTP_IN_SW     BIT(0)   /* system_cfg_flags: software PTP   */
+#define AES67_SYSCFG_STATIC_PTP    BIT(1)   /* system_cfg_flags: static servo   */
+#define AES67_SYSCFG_METERING      BIT(2)   /* system_cfg_flags: metering live  */
 
 #define AES67_TX_REGION_OFFSET     0x2000u  /* TX buffer base within eth_buf    */
 
-/* RX framing. The MAC includes the 4-byte FCS in the buffer; the FPGA appends a
- * 5-byte hardware-timestamp trailer after it (1 byte seconds[3:0], then 4 bytes
- * little-endian nanoseconds[29:0]). rx_len counts payload + FCS + trailer.
- * NOTE: this is the contract the FPGA RX FSM must honour (see plan / the
- * litex_eth_buffer_bridge.vhd RX_WRITE_* states). */
+/* RX framing. The MAC includes the 4-byte FCS in the buffer. Software-PTP
+ * gateware appends a 5-byte hardware-timestamp trailer after it (1 byte
+ * seconds[3:0], then 4 bytes little-endian nanoseconds[29:0]) and rx_len counts
+ * payload + FCS + trailer; hardware-PTP gateware strips the trailer in
+ * litex_eth_buffer_bridge.vhd, so rx_len is payload + FCS. */
 #define AES67_FCS_LEN              4
 #define AES67_RX_TS_TRAILER_LEN    5
 #define AES67_WC_SEC_CAP_BITS      4        /* captured seconds field width     */
@@ -97,6 +102,23 @@ struct aes67_priv {
 	bool                  hwts_tx_on;
 	bool                  hwts_rx_on;
 
+	/* Gateware build configuration (system_cfg_flags), read at probe. */
+	u32                   syscfg_flags;
+	/* Gateware built with PTP_IN_SOFTWARE: ptp4l disciplines the wallclock
+	 * through this PHC. False: the FPGA servo owns it, the PHC is read-only. */
+	bool                  ptp_sw;
+	/* RX frames carry the 5-byte timestamp trailer (rx_ts param, default:
+	 * follows ptp_sw). */
+	bool                  rx_trailer;
+
+	/* Software media-clock (NCO) rate loop, SW-PTP only (aes67_phc.c): the
+	 * applied wallclock ppb is smoothed and written to nco_ppb_adj, the only
+	 * frequency input of the audio NCO in software-PTP gateware. Guarded by
+	 * bus_lock. */
+	s64                   nco_acc_q16;
+	s64                   nco_written_units;
+	bool                  nco_written_once;
+
 	/* eth_buf word packing, probed from the bytes_per_word CSR: true on
 	 * packed gateware (4 payload bytes per word, little-endian lanes),
 	 * false on legacy bitstreams (1 byte per word). */
@@ -135,6 +157,7 @@ int  aes67_ctl_register(struct aes67_priv *p);
 void aes67_ctl_unregister(struct aes67_priv *p);
 
 /* --- PHC (aes67_phc.c) ---------------------------------------------------- */
+/* Reset both rate registers to neutral (SW-PTP), then register the PHC. */
 int  aes67_phc_register(struct aes67_priv *p);
 void aes67_phc_unregister(struct aes67_priv *p);
 /* Reconstruct a full 64-bit ns timestamp from a captured (4-bit sec, 30-bit ns)

@@ -24,9 +24,17 @@ static unsigned int poll_ms = 1;
 module_param(poll_ms, uint, 0644);
 MODULE_PARM_DESC(poll_ms, "RX poll interval (ms) when no IRQ is wired");
 
-static bool rx_ts = true;
-module_param(rx_ts, bool, 0644);
-MODULE_PARM_DESC(rx_ts, "Parse the FPGA RX hardware-timestamp trailer");
+/* -1 = follow the gateware (system_cfg_flags.ptp_in_software): software-PTP
+ * gateware appends the 5-byte RX timestamp trailer, hardware-PTP gateware
+ * strips it. Forcing 1 on hardware-PTP gateware would cut 5 bytes off every
+ * frame. Read once at probe. */
+static int rx_ts = -1;
+module_param(rx_ts, int, 0444);
+MODULE_PARM_DESC(rx_ts, "RX timestamp trailer: -1 = auto from gateware PTP mode (default), 0 = absent, 1 = present");
+
+static bool map_check = true;
+module_param(map_check, bool, 0444);
+MODULE_PARM_DESC(map_check, "Verify at probe that aes67_regs.h matches the gateware CSR map (scratch read-back)");
 
 /* Trailing bytes to strip from each RX frame (the MAC's FCS). Whether the FPGA
  * stores the 4-byte FCS in eth_buf is a gateware detail; if frames arrive
@@ -180,7 +188,7 @@ static bool aes67_rx_one(struct aes67_priv *p)
 {
 	struct net_device *ndev = p->netdev;
 	u32 rx_base = AES67_MEM_ETH_BUF;
-	unsigned int trailer = rx_ts ? AES67_RX_TS_TRAILER_LEN : 0;
+	unsigned int trailer = p->rx_trailer ? AES67_RX_TS_TRAILER_LEN : 0;
 	struct sk_buff *skb;
 	u32 raw_len;
 	unsigned int total, payload;
@@ -249,7 +257,7 @@ release:
 	}
 	skb_put_data(skb, p->rx_buf, payload);
 
-	if (rx_ts && trailer_ok && p->hwts_rx_on) {
+	if (trailer && trailer_ok && p->hwts_rx_on) {
 		u64 ns;
 
 		if (!aes67_ts_reconstruct(p, cap_sec, cap_nsec, &ns))
@@ -376,6 +384,13 @@ static int aes67_hwtstamp_set(struct net_device *ndev, struct ifreq *ifr)
 	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
 		return -EFAULT;
 
+	/* Hardware-PTP gateware: the FPGA runs PTP itself and its servo owns
+	 * the wallclock, so a host PTP stack must not run on this port. RX
+	 * frames carry no timestamp there either. */
+	if (!p->ptp_sw && (cfg.tx_type != HWTSTAMP_TX_OFF ||
+			   cfg.rx_filter != HWTSTAMP_FILTER_NONE))
+		return -EOPNOTSUPP;
+
 	switch (cfg.tx_type) {
 	case HWTSTAMP_TX_OFF:
 		p->hwts_tx_on = false;
@@ -442,12 +457,18 @@ static int aes67_get_ts_info(struct net_device *ndev,
 {
 	struct aes67_priv *p = netdev_priv(ndev);
 
-	info->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
-				SOF_TIMESTAMPING_RX_HARDWARE |
-				SOF_TIMESTAMPING_RAW_HARDWARE;
+	/* The PHC is always listed (phc2sys can follow it); hardware
+	 * timestamping only on software-PTP gateware. */
 	info->phc_index = p->ptp_clock ? ptp_clock_index(p->ptp_clock) : -1;
-	info->tx_types  = BIT(HWTSTAMP_TX_OFF) | BIT(HWTSTAMP_TX_ON);
-	info->rx_filters = BIT(HWTSTAMP_FILTER_NONE) | BIT(HWTSTAMP_FILTER_ALL);
+	info->tx_types  = BIT(HWTSTAMP_TX_OFF);
+	info->rx_filters = BIT(HWTSTAMP_FILTER_NONE);
+	if (p->ptp_sw) {
+		info->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
+					SOF_TIMESTAMPING_RX_HARDWARE |
+					SOF_TIMESTAMPING_RAW_HARDWARE;
+		info->tx_types   |= BIT(HWTSTAMP_TX_ON);
+		info->rx_filters |= BIT(HWTSTAMP_FILTER_ALL);
+	}
 	return 0;
 }
 
@@ -458,6 +479,62 @@ static const struct ethtool_ops aes67_ethtool_ops = {
 };
 
 /* --- probe / remove ------------------------------------------------------- */
+
+/* aes67_regs.h bakes in the CSR addresses of one generate.py run; they shift
+ * when CSR groups are added or dropped (e.g. --no-servo-csr). A stale header
+ * would aim the PHC at unrelated registers, so check before touching anything:
+ * aes67_csr_scratch is a plain RW register at an address that moves with the
+ * map, and a mismatch lands on a read-only register or a hole. */
+static int aes67_check_csr_map(struct aes67_priv *p)
+{
+	static const u32 pattern[] = { 0xa5e6c3d2, 0x5a193c2d };
+	u32 saved, rb;
+	int i, ret;
+
+	mutex_lock(&p->bus_lock);
+	ret = aes67_wb_read_locked(p, AES67_REG_AES67_CSR_SCRATCH, &saved);
+	if (ret)
+		goto out;   /* bus not answering at all */
+	for (i = 0; !ret && i < ARRAY_SIZE(pattern); i++) {
+		ret = aes67_wb_write_locked(p, AES67_REG_AES67_CSR_SCRATCH, pattern[i]);
+		if (!ret)
+			ret = aes67_wb_read_locked(p, AES67_REG_AES67_CSR_SCRATCH, &rb);
+		if (!ret && rb != pattern[i])
+			ret = -ENODEV;
+	}
+	aes67_wb_write_locked(p, AES67_REG_AES67_CSR_SCRATCH, saved);
+out:
+	mutex_unlock(&p->bus_lock);
+	return ret;
+}
+
+/* Read the gateware build configuration and derive the PTP mode. */
+static void aes67_read_syscfg(struct aes67_priv *p)
+{
+	u32 flags = 0, rx = 0, tx = 0;
+
+	aes67_wb_read(p, AES67_REG_AES67_CSR_SYSTEM_CFG_FLAGS, &flags);
+	aes67_wb_read(p, AES67_REG_AES67_CSR_SYSTEM_CFG_RX, &rx);
+	aes67_wb_read(p, AES67_REG_AES67_CSR_SYSTEM_CFG_TX, &tx);
+
+	p->syscfg_flags = flags;
+	p->ptp_sw = flags & AES67_SYSCFG_PTP_IN_SW;
+	p->rx_trailer = rx_ts < 0 ? p->ptp_sw : !!rx_ts;
+
+	dev_info(&p->spi->dev,
+		 "gateware: %s PTP%s, metering %s, RX %u stream(s)/%u ch, TX %u stream(s)/%u ch\n",
+		 p->ptp_sw ? "software" : "hardware",
+		 flags & AES67_SYSCFG_STATIC_PTP ? " (static servo)" : "",
+		 flags & AES67_SYSCFG_METERING ? "on" : "off",
+		 rx & 0xff, (rx >> 8) & 0xff, tx & 0xff, (tx >> 8) & 0xff);
+	if (p->rx_trailer != p->ptp_sw)
+		dev_warn(&p->spi->dev,
+			 "rx_ts=%d overrides the gateware (%s PTP) — RX frames will be mis-sized\n",
+			 rx_ts, p->ptp_sw ? "software" : "hardware");
+	if (!p->ptp_sw)
+		dev_info(&p->spi->dev,
+			 "FPGA runs PTP itself: PHC is read-only, no HW timestamping (do not run ptp4l on this port)\n");
+}
 
 static int aes67_probe(struct spi_device *spi)
 {
@@ -500,6 +577,18 @@ static int aes67_probe(struct spi_device *spi)
 	ndev->watchdog_timeo = msecs_to_jiffies(5000);
 
 	spi_set_drvdata(spi, p);
+
+	if (map_check) {
+		ret = aes67_check_csr_map(p);
+		if (ret) {
+			dev_err(&spi->dev,
+				"CSR map mismatch (scratch read-back failed: %d): aes67_regs.h does not match the loaded gateware — rebuild with `make regs CSV=<gateware csr.csv>` (or load with map_check=0)\n",
+				ret);
+			ret = -ENODEV;
+			goto err_wq;
+		}
+	}
+	aes67_read_syscfg(p);
 
 	/* Seed the MAC from the FPGA (set by a prior boot/daemon) if non-zero,
 	 * otherwise assign a random one and program it back in aes67_open(). */

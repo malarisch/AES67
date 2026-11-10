@@ -18,6 +18,9 @@ pub struct Device<T: Transport> {
     /// `None` until first queried, then whether the gateware packs 4 payload
     /// bytes per 32-bit buffer word. Constant per bitstream.
     pub(crate) eth_buf_packed: Option<bool>,
+    /// Cached RX timestamp-trailer length (see `ethbuf::Device::eth_rx_trailer`):
+    /// 5 on software-PTP gateware, 0 otherwise. Constant per bitstream.
+    pub(crate) eth_rx_trailer: Option<usize>,
 }
 
 impl<T: Transport> Device<T> {
@@ -26,6 +29,7 @@ impl<T: Transport> Device<T> {
             transport,
             map,
             eth_buf_packed: None,
+            eth_rx_trailer: None,
         }
     }
 

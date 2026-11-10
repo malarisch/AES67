@@ -36,6 +36,7 @@ use std::net::Ipv4Addr;
 use aes67_transport::Transport;
 
 use crate::device::Device;
+use crate::status::SystemCfg;
 use crate::ConfigError;
 
 /// Region names in the LiteX CSR map.
@@ -185,11 +186,13 @@ pub trait Aes67Streams {
 impl<T: Transport> Aes67Streams for Device<T> {
     fn write_tx_stream(&mut self, stream: &TxStream) -> Result<(), ConfigError> {
         let buf = stream.encode()?;
+        check_slot_implemented(self, "tx", stream.id)?;
         write_stream_ram(self, REGION_TX, stream.id, &buf)
     }
 
     fn write_rx_stream(&mut self, stream: &RxStream) -> Result<(), ConfigError> {
         let buf = stream.encode()?;
+        check_slot_implemented(self, "rx", stream.id)?;
         write_stream_ram(self, REGION_RX, stream.id, &buf)
     }
 
@@ -200,6 +203,29 @@ impl<T: Transport> Aes67Streams for Device<T> {
     fn clear_rx_stream(&mut self, id: u8) -> Result<(), ConfigError> {
         clear_stream_ram(self, REGION_RX, id)
     }
+}
+
+/// Reject a slot the loaded gateware does not implement. The config RAM always
+/// has room for [`MAX_STREAMS`] slots, but the bitstream may be built with
+/// fewer (`system_cfg_{rx,tx}.max_streams`); a write past that is silently
+/// ignored by the FPGA. Gateware without the `system_cfg` CSRs is not checked.
+/// Clearing is never checked, so stale persisted slots can still be removed.
+fn check_slot_implemented<T: Transport>(
+    dev: &mut Device<T>,
+    dir: &str,
+    stream_id: u8,
+) -> Result<(), ConfigError> {
+    let Some(cfg) = SystemCfg::read(dev)? else {
+        return Ok(());
+    };
+    let max = if dir == "rx" { cfg.rx.max_streams } else { cfg.tx.max_streams };
+    if stream_id >= max {
+        return Err(ConfigError::Unsupported(format!(
+            "{dir} stream slot {stream_id} not implemented by the loaded gateware \
+             ({max} {dir} slot(s), system_cfg_{dir}.max_streams)"
+        )));
+    }
+    Ok(())
 }
 
 /// Zero a stream's whole 32-byte config slot, disabling it. For TX this clears
@@ -348,5 +374,38 @@ mod tests {
 
         // Out-of-range id is rejected.
         assert!(dev.clear_rx_stream(MAX_STREAMS).is_err());
+    }
+
+    #[test]
+    fn rejects_slots_the_gateware_does_not_implement() {
+        use crate::device::Device;
+
+        let map = crate::csr::CsrMap::from_csv(
+            "csr_register,aes67_csr_system_cfg_flags,0x0,1,ro\n\
+             csr_register,aes67_csr_system_cfg_rx,0x4,1,ro\n\
+             csr_register,aes67_csr_system_cfg_tx,0x8,1,ro\n\
+             memory_region,tx_stream_cfg,0x1000,1024,io\n\
+             memory_region,rx_stream_cfg,0x2000,1024,io\n",
+        )
+        .unwrap();
+        let mut bus = MapTransport::default();
+        bus.0.insert(0x4, (8 << 8) | 2); // RX: 2 slots, 8 channels
+        bus.0.insert(0x8, (8 << 8) | 1); // TX: 1 slot
+        let mut dev = Device::new(bus, map);
+
+        let rx = |id| RxStream {
+            id,
+            dst_ip: Ipv4Addr::new(239, 69, 2, 1),
+            dst_port: 5004,
+            ch_map: vec![0, 1],
+            channels: None,
+            output_delay: 0,
+            samples_per_channel: 48,
+            name: None,
+        };
+        assert!(dev.write_rx_stream(&rx(1)).is_ok());
+        assert!(dev.write_rx_stream(&rx(2)).is_err());
+        // Clearing an unimplemented slot is still allowed (stale config cleanup).
+        assert!(dev.clear_rx_stream(5).is_ok());
     }
 }

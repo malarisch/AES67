@@ -11,13 +11,91 @@
  *              the 30-bit sign-extended nanoseconds_i to nanoseconds separately,
  *              then normalises — so the nanoseconds component must stay within
  *              30-bit signed range (|ns| < 2^29 ≈ 0.537 s); we split accordingly.
- *   adjfine  : write signed 20-bit ppb to wallclock_ppb (freq_correction_ppb_i).
+ *   adjfine  : write signed 20-bit ppb to wallclock_ppb (freq_correction_ppb_i),
+ *              and feed the smoothed rate to the audio NCO (see below).
+ *
+ * Only software-PTP gateware lets the host steer the wallclock. On hardware-PTP
+ * gateware the FPGA servo owns it: the PHC stays readable (phc2sys can follow
+ * the FPGA's PTP time) but every adjusting op returns -EOPNOTSUPP.
  */
 #include <linux/math64.h>
+#include <linux/module.h>
 
 #include "aes67_eth.h"
 
 #define NS_PER_SEC 1000000000LL
+
+/* ---- Media-clock (NCO) rate loop, software-PTP gateware only ----
+ *
+ * In software-PTP gateware wallclock_ppb steers only the PTP time base; the
+ * audio NCO takes its frequency solely from the nco_ppb_adj CSRs
+ * (wallclock_nco.vhd), with the gateware phase pull absorbing what is left.
+ * Without this loop the media clock would free-run on the crystal. Mirrors
+ * the Zephyr firmware (drivers/eth_litex/ptp_clock_aes67.c): the applied ppb
+ * is smoothed by a Q16 EWMA (servo jitter must not reach the audio clock),
+ * large steps (>2000 ppb: first lock, GM change) snap instead of slewing, and
+ * the result is converted to 48-bit NCO increment units and written only when
+ * it changes.
+ *
+ * Units per ppb: round(fs*512 / sys_clk * 2^32 / 1e9 * 2^16) — 55340 for
+ * fs = 48 kHz and a 125 MHz wallclock sys_clk (NCO_PPB_SCALE in
+ * wallclock_nco.vhd). Override nco_units_per_ppb for another sys_clk.
+ */
+static unsigned int nco_units_per_ppb = 55340;
+module_param(nco_units_per_ppb, uint, 0644);
+MODULE_PARM_DESC(nco_units_per_ppb,
+		 "NCO increment units per ppb (55340 = 48 kHz @ 125 MHz sys_clk; 0 disables the media-clock rate loop)");
+
+static unsigned int nco_smooth_shift = 7;
+module_param(nco_smooth_shift, uint, 0644);
+MODULE_PARM_DESC(nco_smooth_shift,
+		 "EWMA shift of the media-clock rate smoothing (time constant 2^n rate updates)");
+
+#define NCO_RATE_SNAP_PPB  2000
+
+/* Write the 48-bit NCO adjustment: LO, then HI (commits atomically CSR-side),
+ * then a valid pulse — the NCO takes the value on any valid edge. Caller holds
+ * bus_lock. */
+static int nco_write_adj_locked(struct aes67_priv *p, s64 units)
+{
+	int ret;
+
+	ret  = aes67_wb_write_locked(p, AES67_REG_AES67_CSR_NCO_PPB_ADJ_LO,
+				     (u32)units);
+	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_NCO_PPB_ADJ_HI,
+				     (u32)((u64)units >> 32) & 0xffff);
+	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_NCO_PPB_ADJ_VALID, 1);
+	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_NCO_PPB_ADJ_VALID, 0);
+	if (ret)
+		return -EIO;
+	p->nco_written_units = units;
+	p->nco_written_once = true;
+	return 0;
+}
+
+/* Fold a new applied wallclock ppb into the NCO rate. Caller holds bus_lock. */
+static int nco_rate_update_locked(struct aes67_priv *p, s32 ppb)
+{
+	s64 target = (s64)ppb * 65536;
+	s64 diff = target - p->nco_acc_q16;
+	s64 snap = (s64)NCO_RATE_SNAP_PPB * 65536;
+	s64 units;
+
+	if (!nco_units_per_ppb)
+		return 0;
+
+	if (diff > snap || diff < -snap)
+		p->nco_acc_q16 = target;
+	else
+		p->nco_acc_q16 += diff >> min(nco_smooth_shift, 30u);
+
+	/* acc <= 2^19 ppb << 16 = 2^35; x 55340 < 2^51 — fits s64, and the
+	 * >> 16 result fits the 48-bit register. */
+	units = (p->nco_acc_q16 * (s64)nco_units_per_ppb) >> 16;
+	if (units == p->nco_written_units && p->nco_written_once)
+		return 0;
+	return nco_write_adj_locked(p, units);
+}
 
 static struct aes67_priv *info_to_priv(struct ptp_clock_info *info)
 {
@@ -78,6 +156,9 @@ static int aes67_phc_settime(struct ptp_clock_info *info,
 	u64 sec = ts->tv_sec;
 	int ret;
 
+	if (!p->ptp_sw)
+		return -EOPNOTSUPP;   /* FPGA servo owns the wallclock */
+
 	mutex_lock(&p->bus_lock);
 	ret =  aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO,
 				     (u32)sec);
@@ -99,6 +180,9 @@ static int aes67_phc_adjtime(struct ptp_clock_info *info, s64 delta_ns)
 	struct aes67_priv *p = info_to_priv(info);
 	s64 sec, nsec;
 	int ret;
+
+	if (!p->ptp_sw)
+		return -EOPNOTSUPP;
 
 	/* Split so the nanoseconds component lands in [-0.5s, 0.5s], well inside
 	 * the 30-bit signed range the HW sign-extends. */
@@ -124,13 +208,22 @@ static int aes67_phc_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 {
 	struct aes67_priv *p = info_to_priv(info);
 	s64 ppb;
+	int ret;
+
+	if (!p->ptp_sw)
+		return -EOPNOTSUPP;
 
 	/* scaled_ppm is ppm * 2^16 (signed). ppb = ppm * 1000. */
 	ppb = div_s64((s64)scaled_ppm * 1000, 65536);
 	ppb = clamp_t(s64, ppb, -AES67_MAX_PPB, AES67_MAX_PPB);
 
-	return aes67_wb_write(p, AES67_REG_AES67_CSR_WALLCLOCK_PPB,
-			      (u32)ppb & 0xfffff);
+	mutex_lock(&p->bus_lock);
+	ret = aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_PPB,
+				    (u32)ppb & 0xfffff);
+	if (!ret)
+		ret = nco_rate_update_locked(p, (s32)ppb);
+	mutex_unlock(&p->bus_lock);
+	return ret;
 }
 
 static int aes67_phc_enable(struct ptp_clock_info *info,
@@ -166,6 +259,18 @@ int aes67_ts_reconstruct(struct aes67_priv *p, u8 cap_sec, u32 cap_nsec,
 
 int aes67_phc_register(struct aes67_priv *p)
 {
+	/* A warm FPGA keeps last run's rate corrections; the PTP core starts
+	 * from 0 ppb, so make the hardware agree (firmware: rate_reset). */
+	if (p->ptp_sw) {
+		mutex_lock(&p->bus_lock);
+		aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_PPB, 0);
+		p->nco_acc_q16 = 0;
+		p->nco_written_once = false;
+		if (nco_units_per_ppb)
+			nco_write_adj_locked(p, 0);
+		mutex_unlock(&p->bus_lock);
+	}
+
 	p->ptp_info = (struct ptp_clock_info){
 		.owner     = THIS_MODULE,
 		.max_adj   = AES67_MAX_PPB,

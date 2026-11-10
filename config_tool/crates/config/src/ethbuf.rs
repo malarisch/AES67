@@ -5,7 +5,8 @@
 //! the on-target firmware (`drivers/eth_litex/eth_litex.c`):
 //!
 //! * **RX** (FPGA → host): when `rx_ready` is set, read `rx_len` (which includes
-//!   the 4-byte FCS), burst-read `rx_len-4` bytes from the RX region, pulse
+//!   the 4-byte FCS, plus a 5-byte timestamp trailer on software-PTP gateware,
+//!   see `system_cfg_flags`), burst-read the frame bytes from the RX region, pulse
 //!   `rx_ack` (1 then 0) to release the buffer, and clear the `ev_pending`
 //!   RX-ready event (which de-asserts the IRQ line).
 //! * **TX** (host → FPGA): burst-write the frame bytes to the TX region
@@ -34,6 +35,13 @@ const REG_TX_LEN: &str = "eth_buf_tx_len";
 const REG_EV_ENABLE: &str = "eth_buf_ev_enable";
 const REG_EV_PENDING: &str = "eth_buf_ev_pending";
 const REG_BYTES_PER_WORD: &str = "eth_buf_bytes_per_word";
+const REG_SYSCFG_FLAGS: &str = crate::status::REG_SYSCFG_FLAGS;
+/// `system_cfg_flags.ptp_in_software`.
+const SYSCFG_PTP_IN_SOFTWARE: u64 = 1 << 0;
+/// Software-PTP gateware appends a hardware RX timestamp behind the FCS:
+/// 1 byte seconds[3:0] + 4 bytes nanoseconds (LE), counted in `rx_len`.
+/// Hardware-PTP gateware strips it before the host sees the frame.
+const RX_TS_TRAILER_LEN: usize = 5;
 
 // The transmit trigger and completion live in the AES67 control/status CSRs, not
 // in eth_buf: writing tx_len only stages the frame — the MAC transmits when
@@ -91,6 +99,21 @@ impl<T: Transport> Device<T> {
         Ok(packed)
     }
 
+    /// Length of the RX timestamp trailer behind each frame's FCS: 5 bytes on
+    /// software-PTP gateware (`system_cfg_flags.ptp_in_software`), else 0.
+    /// The TAP bridge carries no PTP, so the trailer is simply dropped. Probed
+    /// once, then cached; gateware without `system_cfg` is hardware PTP.
+    fn eth_rx_trailer(&mut self) -> Result<usize, ConfigError> {
+        if let Some(len) = self.eth_rx_trailer {
+            return Ok(len);
+        }
+        let sw_ptp = self.map().get(REG_SYSCFG_FLAGS).is_some()
+            && self.read(REG_SYSCFG_FLAGS)? & SYSCFG_PTP_IN_SOFTWARE != 0;
+        let len = if sw_ptp { RX_TS_TRAILER_LEN } else { 0 };
+        self.eth_rx_trailer = Some(len);
+        Ok(len)
+    }
+
     /// `(rx_base, tx_base)` byte addresses from the CSR map's `eth_buf` region.
     fn eth_region(&self) -> Result<(u32, u32), ConfigError> {
         let (base, _size) = self.map().region(REGION).ok_or_else(|| {
@@ -143,7 +166,8 @@ impl<T: Transport> EthBufBridge for Device<T> {
 
     fn eth_rx_take_one(&mut self) -> Result<Option<Vec<u8>>, ConfigError> {
         let raw_len = self.read(REG_RX_LEN)? as u16;
-        let pkt_len = raw_len.saturating_sub(FCS_LEN) as usize;
+        let trailer = self.eth_rx_trailer()?;
+        let pkt_len = (raw_len.saturating_sub(FCS_LEN) as usize).saturating_sub(trailer);
 
         let frame = if (MIN_FRAME..=MAX_FRAME).contains(&pkt_len) {
             let (rx_base, _) = self.eth_region()?;
@@ -270,6 +294,29 @@ memory_region,eth_buf,0x90000000,16384,io
         let pend = dev.map().get("eth_buf_ev_pending").unwrap().addr;
         assert_eq!(dev.peek(ack).unwrap(), 0);
         assert_eq!(dev.peek(pend).unwrap(), EV_RX_READY as u32);
+    }
+
+    #[test]
+    fn rx_take_strips_sw_ptp_trailer() {
+        // Software-PTP gateware: rx_len = frame + FCS(4) + timestamp trailer(5).
+        let map = CsrMap::from_csv(
+            "\
+csr_register,eth_buf_rx_len,0x9001100c,1,ro
+csr_register,eth_buf_rx_ack,0x90011014,1,rw
+csr_register,eth_buf_ev_pending,0x90011004,1,rw
+csr_register,aes67_csr_system_cfg_flags,0x90010090,1,ro
+memory_region,eth_buf,0x90000000,16384,io
+",
+        )
+        .unwrap();
+        let mut dev = Device::new(MockBus::default(), map);
+        seed(&mut dev, "aes67_csr_system_cfg_flags", 1); // ptp_in_software
+        let frame: Vec<u8> = (0..14).collect();
+        for (i, b) in frame.iter().chain(&[0xee; 9]).enumerate() {
+            dev.poke(0x9000_0000 + 4 * i as u32, *b as u32).unwrap();
+        }
+        seed(&mut dev, "eth_buf_rx_len", 14 + 4 + 5);
+        assert_eq!(dev.eth_rx_take_one().unwrap(), Some(frame));
     }
 
     #[test]

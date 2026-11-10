@@ -26,6 +26,7 @@ pub mod csr;
 pub mod device;
 pub mod ethbuf;
 pub mod proto_conv;
+pub mod status;
 pub mod stream;
 
 pub use config::{Aes67Config, PtpGrandmaster};
@@ -33,6 +34,7 @@ pub use control::{ControlApi, RegisterInfo};
 pub use csr::{Access, CsrMap, Register};
 pub use device::Device;
 pub use ethbuf::EthBufBridge;
+pub use status::{Metering, PathCfg, StatusWord, SystemCfg};
 pub use stream::{Aes67Streams, RxStream, TxStream};
 
 // Re-export the transport surface so downstream users (the CLI) need only

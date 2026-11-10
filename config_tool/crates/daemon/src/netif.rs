@@ -13,9 +13,9 @@ use std::os::unix::io::AsRawFd;
 use std::process::Command;
 
 // _IOW('T', 202, int) on Linux.
-const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
+const TUNSETIFF: libc::Ioctl = 0x4004_54ca_u32 as libc::Ioctl;
 // _IOW('T', 226, int) — set the tap's carrier (link) state (Linux ≥ 5.0).
-const TUNSETCARRIER: libc::c_ulong = 0x4004_54e2;
+const TUNSETCARRIER: libc::Ioctl = 0x4004_54e2_u32 as libc::Ioctl;
 const IFF_TAP: libc::c_short = 0x0002;
 const IFF_NO_PI: libc::c_short = 0x1000;
 

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AES67 Monitor</title>
+<style>
+  :root {
+    --bg: #0f1419; --card: #1a212b; --line: #2a3441;
+    --fg: #e6edf3; --muted: #8b98a5; --accent: #4aa3ff;
+    --ok: #2ea043; --bad: #d1242f; --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; }
+  #conn { font-size: 12px; color: var(--muted); }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px;
+          grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line);
+          border-radius: 10px; padding: 16px; min-width: 0; }
+  .card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+             letter-spacing: .04em; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; align-items: center;
+         padding: 4px 0; }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px;
+          font-weight: 600; }
+  .pill.ok { background: rgba(46,160,67,.18); color: #56d364; }
+  .pill.bad { background: rgba(209,36,47,.18); color: #ff7b72; }
+  .pill.muted { background: rgba(139,152,165,.15); color: var(--muted); }
+  details { margin-top: 24px; }
+  summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line);
+           font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 600; }
+  /* Stream tables can be wider than their card (long IPs/SSRCs don't wrap), so
+     let the list scroll horizontally instead of spilling over the card. */
+  #tx-list, #rx-list, #disc-list { overflow-x: auto; }
+  #tx-list th, #tx-list td, #rx-list th, #rx-list td,
+  #disc-list th, #disc-list td { white-space: nowrap; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h2.section { margin: 28px 0 12px; font-size: 13px; text-transform: uppercase;
+               letter-spacing: .04em; color: var(--muted); }
+  form label { display: flex; flex-direction: column; gap: 3px; padding: 4px 0;
+               color: var(--muted); font-size: 12px; }
+  form input { background: #0d1117; border: 1px solid var(--line); color: var(--fg);
+               border-radius: 6px; padding: 5px 8px; width: 100%; font: inherit;
+               font-variant-numeric: tabular-nums; }
+  form button { margin-top: 12px; background: var(--accent); color: #04101f; border: 0;
+                border-radius: 6px; padding: 7px 14px; font-weight: 600; cursor: pointer; }
+  .result { margin-top: 8px; font-size: 12px; min-height: 1.2em; }
+  button.stop { background: var(--bad); color: #fff; border: 0; border-radius: 5px;
+                padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  button.sub, button.save { background: var(--accent); color: #04101f; border: 0; border-radius: 5px;
+               padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  button.edit { background: transparent; color: var(--accent); border: 1px solid var(--accent);
+               border-radius: 5px; padding: 2px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+  button.cancel { background: transparent; color: var(--muted); border: 1px solid var(--line);
+               border-radius: 5px; padding: 2px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+  input.cell { width: 9em; background: #0d1117; border: 1px solid var(--line); color: var(--fg);
+               border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 12px;
+               font-variant-numeric: tabular-nums; }
+  td:last-child { text-align: right; white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-end; }
+  .chip { min-width: 22px; text-align: center; padding: 1px 5px; border-radius: 4px;
+          font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+          background: rgba(139,152,165,.15); color: var(--muted); }
+  .chip.ok { background: rgba(46,160,67,.18); color: #56d364; }
+  .chip.bad { background: rgba(209,36,47,.25); color: #ff7b72; }
+  .chip.warn { background: rgba(210,153,34,.2); color: #e3b341; }
+  .mute-row { padding: 2px 0 6px; }
+  .mute-row .chips { justify-content: flex-start; }
+  .hint { color: var(--muted); font-size: 12px; font-weight: 400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AES67 Monitor</h1>
+  <span id="conn">connecting…</span>
+</header>
+<main>
+  <div class="grid">
+    <div class="card">
+      <h2>Link</h2>
+      <div class="row"><span class="k">Status</span><span id="link-up" class="v"></span></div>
+      <div class="row"><span class="k">Speed</span><span id="link-speed" class="v">–</span></div>
+      <div class="row"><span class="k">RX overflow</span><span id="eth-of" class="v"></span></div>
+    </div>
+    <div class="card">
+      <h2>PTP</h2>
+      <div class="row"><span class="k">Mode</span><span id="ptp-mode" class="v">–</span></div>
+      <div class="row"><span class="k">Role</span><span id="ptp-role" class="v"></span></div>
+      <div class="row"><span class="k">Offset</span><span id="ptp-offset" class="v">–</span></div>
+      <div class="row"><span class="k">Path delay</span><span id="ptp-delay" class="v">–</span></div>
+      <div class="row"><span class="k">Leader ID</span><span id="ptp-leader" class="v"><code>–</code></span></div>
+    </div>
+    <div class="card">
+      <h2>Wallclock</h2>
+      <div class="row"><span class="k">Locked</span><span id="wc-locked" class="v"></span></div>
+      <div class="row"><span class="k">Configured</span><span id="wc-config" class="v"></span></div>
+    </div>
+    <div class="card">
+      <h2>Network</h2>
+      <div class="row"><span class="k">IP</span><span id="net-ip" class="v"><code>–</code></span></div>
+      <div class="row"><span class="k">MAC</span><span id="net-mac" class="v"><code>–</code></span></div>
+      <div class="row"><span class="k">Status word</span><span id="status-raw" class="v"><code>–</code></span></div>
+    </div>
+    <div class="card">
+      <h2>Audio RX</h2>
+      <div class="row"><span class="k">Stream underrun</span><span id="rx-underrun" class="v">–</span></div>
+      <div class="row"><span class="k">Muted outputs</span></div>
+      <div id="rx-mute" class="mute-row">–</div>
+      <div class="hint" id="rx-hint"></div>
+    </div>
+    <div class="card">
+      <h2>Gateware</h2>
+      <div class="row"><span class="k">PTP</span><span id="gw-ptp" class="v">–</span></div>
+      <div class="row"><span class="k">RX (DA)</span><span id="gw-rx" class="v">–</span></div>
+      <div class="row"><span class="k">TX (AD)</span><span id="gw-tx" class="v">–</span></div>
+      <div class="row"><span class="k">Metering</span><span id="gw-meter" class="v">–</span></div>
+    </div>
+    <div class="card" id="meter-card" style="display:none">
+      <h2>Metering <span class="hint">(since last poll)</span></h2>
+      <div class="row"><span class="k">RX</span><span id="meter-rx" class="v"></span></div>
+      <div class="row"><span class="k">TX</span><span id="meter-tx" class="v"></span></div>
+      <div class="hint">green = signal · red = clip · grey = silent</div>
+    </div>
+  </div>
+
+  <h2 class="section">Active streams</h2>
+  <div class="card"><h2>TX streams</h2><div id="tx-list"><span style="color:var(--muted)">…</span></div></div>
+  <div class="card" style="margin-top:16px"><h2>RX streams</h2><div id="rx-list"><span style="color:var(--muted)">…</span></div></div>
+
+  <h2 class="section">Discovered on network <span style="color:var(--muted);font-size:13px">(SAP/SDP)</span></h2>
+  <div class="card"><div id="disc-list"><span style="color:var(--muted)">…</span></div></div>
+
+  <h2 class="section">Configuration</h2>
+  <div class="grid">
+    <form class="card" id="form-ptp">
+      <h2>PTP parameters</h2>
+      <label>Priority1 <input name="priority1" type="number" min="0" max="255" placeholder="–"></label>
+      <label>Priority2 <input name="priority2" type="number" min="0" max="255" placeholder="–"></label>
+      <label>Clock class <input name="clock_class" type="number" min="0" max="255" placeholder="–"></label>
+      <label>Clock accuracy <input name="clock_accuracy" type="number" min="0" max="255" placeholder="–"></label>
+      <label>Sync interval <input name="sync_interval" type="number" min="-128" max="127" placeholder="log2 s, e.g. -3"></label>
+      <label>Announce interval <input name="announce_interval" type="number" min="-128" max="127" placeholder="log2 s, e.g. 0"></label>
+      <label>Time source <input name="time_source" type="text" placeholder="e.g. 0xa0"></label>
+      <button type="submit">Apply PTP</button>
+      <div class="result" id="res-ptp"></div>
+    </form>
+
+    <form class="card" id="form-tx">
+      <h2>TX stream</h2>
+      <label>ID <input name="id" type="number" min="0" max="7" required data-dir="tx"></label>
+      <label>Name <input name="name" type="text" placeholder="AES67 TX &lt;id&gt;"></label>
+      <label>Dest IP <input name="dst_ip" type="text" placeholder="239.69.1.1" required></label>
+      <label>Channels <input name="channels" type="number" min="0" max="8" placeholder="auto"></label>
+      <label>Samples/packet <input name="samples_per_packet" type="number" min="0" placeholder="–"></label>
+      <label>Channel IDs <input name="ch_ids" type="text" placeholder="0,1"></label>
+      <label>SSRC <input name="ssrc" type="text" placeholder="0x12345678"></label>
+      <button type="submit">Apply TX stream</button>
+      <div class="result" id="res-tx"></div>
+    </form>
+
+    <form class="card" id="form-rx">
+      <h2>RX stream</h2>
+      <label>ID <input name="id" type="number" min="0" max="7" required data-dir="rx"></label>
+      <label>Name <input name="name" type="text" placeholder="optional"></label>
+      <label>Dest IP <input name="dst_ip" type="text" placeholder="239.69.2.1" required></label>
+      <label>Dest port <input name="dst_port" type="number" min="0" max="65535" required></label>
+      <label>Channel map <input name="ch_map" type="text" placeholder="0,1"></label>
+      <label>Channels <input name="channels" type="number" min="0" max="8" placeholder="auto"></label>
+      <label>Output delay <input name="output_delay" type="number" min="0" placeholder="–"></label>
+      <label>Samples/channel <input name="samples_per_channel" type="number" min="0" placeholder="–"></label>
+      <button type="submit">Apply RX stream</button>
+      <div class="result" id="res-rx"></div>
+    </form>
+  </div>
+
+  <details>
+    <summary>All registers</summary>
+    <button id="load-regs" style="margin-top:12px">Load registers</button>
+    <table id="regs"><thead><tr><th>Name</th><th>Address</th><th>Access</th><th>Value</th></tr></thead><tbody></tbody></table>
+  </details>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function pill(el, on, onText, offText, neutral) {
+  el.innerHTML = '';
+  const s = document.createElement('span');
+  if (neutral) { s.className = 'pill muted'; s.textContent = neutral; }
+  else { s.className = 'pill ' + (on ? 'ok' : 'bad'); s.textContent = on ? onText : offText; }
+  el.appendChild(s);
+}
+
+// Latest /api/status (RX table uses it for the per-stream underrun column).
+let lastStatus = null;
+
+function chips(n, cls) {
+  let h = '<span class="chips">';
+  for (let i = 0; i < n; i++) h += `<span class="chip ${cls(i)}">${i}</span>`;
+  return h + '</span>';
+}
+
+function renderAudioRx(s) {
+  const a = s.audio_rx;
+  if (!a || a.monitored_streams === 0) {
+    $('rx-underrun').textContent = '–';
+    $('rx-mute').textContent = '–';
+    $('rx-hint').textContent = a ? 'gateware has no RX path' : '';
+    return;
+  }
+  if (a.underrun_streams.length === 0) pill($('rx-underrun'), true, 'none', '');
+  else pill($('rx-underrun'), false, '', 'slot ' + a.underrun_streams.join(', '));
+  const muted = new Set(a.muted_channels);
+  $('rx-mute').innerHTML = chips(a.monitored_channels, i => muted.has(i) ? 'bad' : 'ok');
+  $('rx-hint').textContent = 'Underrun is reported for RX slots 0–' + (a.monitored_streams - 1) +
+    '; the FPGA mutes a stream\'s outputs until packets arrive again.';
+}
+
+function fmtPath(p) {
+  return p.max_streams + ' slot' + (p.max_streams === 1 ? '' : 's') + ' · ' +
+         p.channels + ' ch · ' + p.buffer_depth + ' smp';
+}
+
+function renderGateware(g) {
+  if (!g) {
+    for (const id of ['gw-ptp', 'gw-rx', 'gw-tx', 'gw-meter']) $(id).textContent = 'n/a';
+    return;
+  }
+  $('gw-ptp').textContent = (g.ptp_in_software ? 'software' : 'hardware') +
+    (g.static_ptp_config ? ' · static servo' : '');
+  $('gw-rx').textContent = fmtPath(g.rx);
+  $('gw-tx').textContent = fmtPath(g.tx);
+  $('gw-meter').textContent = g.metering ? 'on' : 'off';
+  // Stream slot inputs follow the gateware's real slot count.
+  for (const inp of document.querySelectorAll('input[name="id"][data-dir]')) {
+    const n = g[inp.dataset.dir].max_streams;
+    inp.max = Math.max(0, n - 1);
+  }
+}
+
+function renderMetering(m, g) {
+  if (!m) { $('meter-card').style.display = 'none'; return; }
+  $('meter-card').style.display = '';
+  const cls = (sig, clip) => i => (clip >> i & 1) ? 'bad' : (sig >> i & 1) ? 'ok' : '';
+  const rxN = g ? g.rx.channels : 16, txN = g ? g.tx.channels : 16;
+  $('meter-rx').innerHTML = chips(Math.min(rxN, 16), cls(m.rx_signal, m.rx_clip));
+  $('meter-tx').innerHTML = chips(Math.min(txN, 16), cls(m.tx_signal, m.tx_clip));
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+    $('conn').textContent = 'connected · ' + new Date().toLocaleTimeString();
+    $('conn').style.color = 'var(--muted)';
+
+    const haveStatus = s.status_raw !== null;
+    if (!haveStatus) { pill($('link-up'), false, '', 'no data', 'no data'); }
+    else { pill($('link-up'), s.link.up, 'UP', 'DOWN'); }
+    $('link-speed').textContent = s.link.speed_mbps ? s.link.speed_mbps + ' Mbps' : '–';
+    pill($('eth-of'), !s.eth.rx_overflow, 'none', 'OVERFLOW');
+
+    // Software PTP: the FPGA only timestamps; ptp4l (via the kernel PHC) runs
+    // the servo, so the FPGA's role/offset/lock CSRs read 0 — don't show them.
+    const swPtp = s.ptp.mode === 'software';
+    $('ptp-mode').textContent = s.ptp.mode === null ? '–'
+      : swPtp ? 'software (ptp4l)' : 'hardware (FPGA)';
+    if (swPtp) {
+      pill($('ptp-role'), false, '', '', 'via ptp4l');
+    } else {
+      const role = s.ptp.leader ? 'Leader' : s.ptp.follower ? 'Follower' : 'Listening';
+      pill($('ptp-role'), s.ptp.leader || s.ptp.follower, role, role,
+           (s.ptp.leader || s.ptp.follower) ? null : role);
+    }
+    const viaPtp4l = swPtp ? 'see ptp4l' : '–';
+    $('ptp-offset').textContent = s.ptp.offset_ns === null ? viaPtp4l : s.ptp.offset_ns + ' ns';
+    $('ptp-delay').textContent = s.ptp.path_delay_ns === null ? viaPtp4l : s.ptp.path_delay_ns + ' ns';
+    $('ptp-leader').innerHTML = '<code>' + (s.ptp.leader_id ?? viaPtp4l) + '</code>';
+
+    if (s.wallclock.locked === null) pill($('wc-locked'), false, '', '', 'via ptp4l');
+    else pill($('wc-locked'), s.wallclock.locked, 'LOCKED', 'unlocked');
+    pill($('wc-config'), s.wallclock.configured, 'yes', 'no');
+
+    lastStatus = s;
+    renderAudioRx(s);
+    renderGateware(s.gateware);
+    renderMetering(s.metering, s.gateware);
+    if (streamsLoaded && (!editing || editing.kind !== 'rx')) renderStreams('rx');
+
+    $('net-ip').innerHTML = '<code>' + (s.network.ip ?? '–') + '</code>';
+    $('net-mac').innerHTML = '<code>' + (s.network.mac ?? '–') + '</code>';
+    $('status-raw').innerHTML = '<code>' + (s.status_raw ?? '–') + '</code>';
+  } catch (e) {
+    $('conn').textContent = 'daemon unreachable (' + e.message + ')';
+    $('conn').style.color = 'var(--bad)';
+  }
+}
+
+// -- Pre-fill the PTP form with the current values --
+async function loadPtp() {
+  try {
+    const r = await fetch('/api/ptp', { cache: 'no-store' });
+    if (!r.ok) return;
+    const p = await r.json();
+    const f = $('form-ptp');
+    for (const k of ['priority1','priority2','clock_class','clock_accuracy','sync_interval','announce_interval']) {
+      if (p[k] !== null && p[k] !== undefined && f.elements[k].value === '') f.elements[k].value = p[k];
+    }
+    if (p.time_source != null && f.elements['time_source'].value === '')
+      f.elements['time_source'].value = '0x' + p.time_source.toString(16);
+  } catch (e) { /* leave blank */ }
+}
+
+// -- Active stream lists --
+// Per-kind columns; `edit` marks editable fields (everything but the ID) and its
+// input type (str | ip | num | list). The POST goes to the normal apply endpoint.
+const STREAM_COLS = {
+  tx: [
+    {key:'id', label:'ID'},
+    {key:'name', label:'Name', edit:'str'},
+    {key:'dst_ip', label:'Dest IP', edit:'ip'},
+    {key:'channels', label:'Ch', edit:'num'},
+    {key:'samples_per_packet', label:'Smp/pkt', edit:'num'},
+    {key:'ch_ids', label:'Ch map', edit:'list'},
+    {key:'ssrc', label:'SSRC', edit:'num'},
+  ],
+  rx: [
+    {key:'id', label:'ID'},
+    {key:'name', label:'Name', edit:'str'},
+    {key:'dst_ip', label:'Dest IP', edit:'ip'},
+    {key:'dst_port', label:'Port', edit:'num'},
+    {key:'ch_map', label:'Ch map', edit:'list'},
+    {key:'channels', label:'Ch', edit:'num'},
+    {key:'output_delay', label:'Delay', edit:'num'},
+    {key:'samples_per_channel', label:'Smp/ch', edit:'num'},
+    {key:'_health', label:'Status', render: rxHealth},
+  ],
+};
+
+// Per-stream health from the status CSR: underrun flag of this RX slot (the
+// FPGA mutes the stream's outputs while it is set).
+function rxHealth(s) {
+  const a = lastStatus && lastStatus.audio_rx;
+  if (!a || s.id >= a.monitored_streams) return '<span class="chip">n/a</span>';
+  return a.underrun_streams.includes(s.id)
+    ? '<span class="pill bad">UNDERRUN · muted</span>'
+    : '<span class="pill ok">OK</span>';
+}
+const POST_URL = { tx: '/api/tx-stream', rx: '/api/rx-stream' };
+
+// Latest streams (so Subscribe can pick a free RX slot) and the row, if any,
+// currently being edited inline (so the periodic refresh doesn't clobber it).
+let lastStreams = { tx: [], rx: [] };
+let streamsLoaded = false;
+let editing = null; // { kind, id }
+
+function fmtVal(v) {
+  if (Array.isArray(v)) return v.length ? v.join(',') : '–';
+  return (v === null || v === undefined || v === '') ? '–' : v;
+}
+function escAttr(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function streamRow(kind, s) {
+  const cols = STREAM_COLS[kind];
+  const editingThis = editing && editing.kind === kind && editing.id === s.id;
+  const cells = cols.map(c => {
+    if (editingThis && c.edit) {
+      const raw = c.edit === 'list' ? (s[c.key] || []).join(',') : (s[c.key] ?? '');
+      return `<td><input class="cell" data-field="${c.key}" data-type="${c.edit}" value="${escAttr(raw)}"></td>`;
+    }
+    if (c.render) return `<td>${c.render(s)}</td>`;
+    return `<td><code>${fmtVal(s[c.key])}</code></td>`;
+  }).join('');
+  const actions = editingThis
+    ? `<button class="save" data-kind="${kind}" data-id="${s.id}">Save</button> ` +
+      `<button class="cancel">Cancel</button>`
+    : `<button class="edit" data-kind="${kind}" data-id="${s.id}">Edit</button> ` +
+      `<button class="stop" data-kind="${kind}" data-id="${s.id}">Stop</button>`;
+  return `<tr data-row="${kind}-${s.id}">${cells}<td>${actions}</td></tr>`;
+}
+
+function renderStreams(kind) {
+  const el = $(kind + '-list');
+  const streams = lastStreams[kind];
+  if (!streams || streams.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted)">none configured</span>';
+    return;
+  }
+  const head = STREAM_COLS[kind].map(c => `<th>${c.label}</th>`).join('') + '<th></th>';
+  const rows = streams.map(s => streamRow(kind, s)).join('');
+  el.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function enterEdit(kind, id) { editing = { kind, id }; renderStreams(kind); }
+function cancelEdit() { if (!editing) return; const k = editing.kind; editing = null; renderStreams(k); }
+
+// Collect the edited row's inputs into an apply body (id + the changed fields).
+// Empty inputs are omitted, so clearing e.g. Channels falls back to "auto".
+function collectRow(kind, id) {
+  const row = $(kind + '-list').querySelector(`tr[data-row="${kind}-${id}"]`);
+  const body = { id };
+  row.querySelectorAll('input.cell').forEach(inp => {
+    const v = inp.value.trim();
+    if (v === '') return;
+    const t = inp.dataset.type, f = inp.dataset.field;
+    if (t === 'list') body[f] = v.split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x));
+    else if (t === 'num') body[f] = parseInt(v, v.toLowerCase().startsWith('0x') ? 16 : 10);
+    else body[f] = v;
+  });
+  return body;
+}
+
+async function saveEdit(kind, id) {
+  const body = collectRow(kind, id);
+  try {
+    const r = await fetch(POST_URL[kind], {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) { alert('Save failed: ' + (j.message || ('HTTP ' + r.status))); return; }
+  } catch (e) { alert('Save failed: ' + e.message); return; }
+  editing = null;
+  loadStreams();
+  refresh();
+}
+
+async function stopStream(kind, id) {
+  const url = kind === 'tx' ? '/api/tx-stream/stop' : '/api/rx-stream/stop';
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id }),
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) alert('Stop failed: ' + (j.message || ('HTTP ' + r.status)));
+  } catch (e) {
+    alert('Stop failed: ' + e.message);
+  }
+  loadStreams();
+  refresh();
+}
+
+async function loadStreams() {
+  try {
+    const r = await fetch('/api/streams', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const c = await r.json();
+    lastStreams = { tx: c.tx_streams || [], rx: c.rx_streams || [] };
+    streamsLoaded = true;
+    // Don't redraw a table whose row is mid-edit, or the inputs would reset.
+    if (!editing || editing.kind !== 'tx') renderStreams('tx');
+    if (!editing || editing.kind !== 'rx') renderStreams('rx');
+  } catch (e) {
+    if (editing) return;
+    $('tx-list').innerHTML = $('rx-list').innerHTML = '<span style="color:var(--bad)">unavailable</span>';
+  }
+}
+
+// Action buttons are added dynamically, so delegate clicks from the lists.
+for (const id of ['tx-list', 'rx-list']) {
+  $(id).addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const kind = b.dataset.kind, sid = parseInt(b.dataset.id, 10);
+    if (b.classList.contains('edit')) enterEdit(kind, sid);
+    else if (b.classList.contains('stop')) stopStream(kind, sid);
+    else if (b.classList.contains('save')) saveEdit(kind, sid);
+    else if (b.classList.contains('cancel')) cancelEdit();
+  });
+}
+
+// -- Streams discovered on the network (SAP/SDP) --
+async function loadDiscovered() {
+  const el = $('disc-list');
+  try {
+    const r = await fetch('/api/discovered', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const streams = await r.json();
+    if (!streams || streams.length === 0) {
+      el.innerHTML = '<span style="color:var(--muted)">none discovered</span>';
+      return;
+    }
+    const cols = [
+      {k:'session_name', l:'Name'}, {k:'origin', l:'From'},
+      {k:'dst_ip', l:'Group'}, {k:'dst_port', l:'Port'},
+      {k:'channels', l:'Ch'}, {k:'sample_rate', l:'Rate'},
+      {k:'encoding', l:'Enc'},
+      {k:'transports', l:'Via', fmt: v => (v && v.length) ? v.join(' + ') : '–'},
+      {k:'age_secs', l:'Age (s)'},
+    ];
+    const head = cols.map(c => `<th>${c.l}</th>`).join('') + '<th></th>';
+    const rows = streams.map(s => {
+      const sub = JSON.stringify({
+        session_name: s.session_name, dst_ip: s.dst_ip, dst_port: s.dst_port,
+        channels: s.channels, sample_rate: s.sample_rate, ptime_ms: s.ptime_ms,
+      }).replace(/'/g, '&#39;');
+      return '<tr>' + cols.map(c => `<td><code>${c.fmt ? c.fmt(s[c.k]) : (s[c.k] ?? '–')}</code></td>`).join('') +
+        `<td><button class="sub" data-stream='${sub}'>Subscribe</button></td></tr>`;
+    }).join('');
+    el.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  } catch (e) {
+    el.innerHTML = '<span style="color:var(--bad)">unavailable</span>';
+  }
+}
+
+// Create an RX stream from a discovered one: pick the lowest free RX slot, derive
+// the channel map and packet size, and POST it through the normal RX path.
+async function subscribe(s) {
+  // Re-read the streams so we don't overwrite a slot taken since the last poll.
+  let rx = lastStreams.rx;
+  try {
+    const r = await fetch('/api/streams', { cache: 'no-store' });
+    if (r.ok) rx = (await r.json()).rx_streams || [];
+  } catch (e) { /* fall back to the cached list */ }
+
+  const used = new Set(rx.map(r => r.id));
+  const slots = (lastStatus && lastStatus.gateware) ? lastStatus.gateware.rx.max_streams : 8;
+  let id = -1;
+  for (let i = 0; i < slots; i++) { if (!used.has(i)) { id = i; break; } }
+  if (id < 0) { alert('All ' + slots + ' RX slots are in use — stop one first.'); return; }
+
+  const channels = Math.max(1, s.channels || 1);
+  const ch_map = Array.from({ length: channels }, (_, i) => i);
+  // ptime (ms) × samples/ms (= rate/1000), default 1 ms at 48 kHz → 48.
+  const spc = Math.max(1, Math.round((s.ptime_ms || 1) * (s.sample_rate || 48000) / 1000));
+  const body = {
+    id, name: s.session_name, dst_ip: s.dst_ip, dst_port: s.dst_port, ch_map,
+    channels, output_delay: 0, samples_per_channel: spc,
+  };
+  try {
+    const r = await fetch('/api/rx-stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok }));
+    if (!j.ok) { alert('Subscribe failed: ' + (j.message || ('HTTP ' + r.status))); return; }
+    alert('Subscribed as RX stream ' + id + '.');
+  } catch (e) {
+    alert('Subscribe failed: ' + e.message);
+  }
+  loadStreams();
+  refresh();
+}
+
+$('disc-list').addEventListener('click', e => {
+  const b = e.target.closest('button.sub');
+  if (b) subscribe(JSON.parse(b.dataset.stream));
+});
+
+$('load-regs').addEventListener('click', async () => {
+  const tbody = document.querySelector('#regs tbody');
+  tbody.innerHTML = '<tr><td colspan="4">loading…</td></tr>';
+  try {
+    const r = await fetch('/api/registers', { cache: 'no-store' });
+    const regs = await r.json();
+    tbody.innerHTML = '';
+    for (const g of regs) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><code>${g.name}</code></td><td><code>${g.addr}</code></td>` +
+                     `<td>${g.access}</td><td><code>${g.value ?? '–'}</code></td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="4">error: ' + e.message + '</td></tr>';
+  }
+});
+
+// -- Configuration forms --
+function collect(form, spec) {
+  const obj = {};
+  for (const [name, type] of Object.entries(spec)) {
+    const el = form.elements[name];
+    if (!el) continue;
+    const v = el.value.trim();
+    if (v === '') continue;
+    if (type === 'list') {
+      obj[name] = v.split(',').map(x => parseInt(x.trim(), 10)).filter(x => !isNaN(x));
+    } else if (type === 'num') {
+      obj[name] = parseInt(v, v.toLowerCase().startsWith('0x') ? 16 : 10);
+    } else {
+      obj[name] = v; // ip / string
+    }
+  }
+  return obj;
+}
+
+async function submitForm(form, url, spec, resEl) {
+  const body = collect(form, spec);
+  resEl.textContent = 'applying…';
+  resEl.style.color = 'var(--muted)';
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({ ok: r.ok, message: 'HTTP ' + r.status }));
+    resEl.textContent = (j.ok ? '✓ ' : '✗ ') + (j.message || (r.ok ? 'ok' : 'error'));
+    resEl.style.color = j.ok ? 'var(--ok)' : 'var(--bad)';
+    if (j.ok) { refresh(); loadStreams(); }
+  } catch (e) {
+    resEl.textContent = '✗ ' + e.message;
+    resEl.style.color = 'var(--bad)';
+  }
+}
+
+$('form-ptp').addEventListener('submit', e => {
+  e.preventDefault();
+  submitForm(e.target, '/api/ptp', {
+    priority1: 'num', priority2: 'num', clock_class: 'num', clock_accuracy: 'num',
+    sync_interval: 'num', announce_interval: 'num', time_source: 'num',
+  }, $('res-ptp'));
+});
+$('form-tx').addEventListener('submit', e => {
+  e.preventDefault();
+  submitForm(e.target, '/api/tx-stream', {
+    id: 'num', name: 'str', dst_ip: 'ip', channels: 'num', samples_per_packet: 'num',
+    ch_ids: 'list', ssrc: 'num',
+  }, $('res-tx'));
+});
+$('form-rx').addEventListener('submit', e => {
+  e.preventDefault();
+  submitForm(e.target, '/api/rx-stream', {
+    id: 'num', name: 'str', dst_ip: 'ip', dst_port: 'num', ch_map: 'list', channels: 'num',
+    output_delay: 'num', samples_per_channel: 'num',
+  }, $('res-rx'));
+});
+
+refresh();
+loadPtp();
+loadStreams();
+loadDiscovered();
+setInterval(refresh, 2000);
+setInterval(loadStreams, 5000);
+setInterval(loadDiscovered, 5000);
+</script>
+</body>
+</html>

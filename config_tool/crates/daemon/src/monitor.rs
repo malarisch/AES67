@@ -29,7 +29,7 @@ use std::net::Ipv4Addr;
 use std::process::Command;
 use std::time::Duration;
 
-use aes67_config::ControlApi;
+use aes67_config::{ControlApi, StatusWord};
 
 use crate::igmp::IgmpManager;
 use crate::persist::{NetworkCfg, Settings};
@@ -111,6 +111,8 @@ fn run(
         }
     };
     let mut igmp_rejoin_pending = true; // force a fresh join at startup
+    // Last seen RX underrun / muted-output masks, for edge logging.
+    let mut last_rx_health: Option<(u8, u8)> = None;
 
     if verbose >= 1 {
         eprintln!("aes67d: monitor: watching FPGA link and {tap_name} address");
@@ -169,6 +171,30 @@ fn run(
         }
         reconcile_ip(&device, &tap_name, &mut last_ip);
         reconcile_igmp(&mut igmp, &config, &tap_name, &mut igmp_rejoin_pending, verbose);
+        report_rx_health(&device, &mut last_rx_health);
+    }
+}
+
+/// Log edges of the gateware's RX underrun detection: a stream whose packets
+/// stopped (or arrive too late) gets its output channels muted by the FPGA
+/// until complete packets arrive again. Only changes are logged.
+fn report_rx_health(device: &SharedDevice, last: &mut Option<(u8, u8)>) {
+    let Ok(st) = StatusWord::read(&mut *device.lock().unwrap()) else {
+        return;
+    };
+    let now = (st.rx_underrun_mask(), st.rx_mute_mask());
+    let prev = last.replace(now).unwrap_or((0, 0));
+    if now == prev {
+        return;
+    }
+    let (under, mute) = now;
+    for slot in 0..aes67_config::status::RX_UNDERRUN_STREAMS {
+        let (was, is) = (prev.0 >> slot & 1 != 0, under >> slot & 1 != 0);
+        if is && !was {
+            eprintln!("aes67d: monitor: RX stream {slot} underrun — outputs muted (mute mask 0x{mute:02x})");
+        } else if was && !is {
+            eprintln!("aes67d: monitor: RX stream {slot} recovered");
+        }
     }
 }
 

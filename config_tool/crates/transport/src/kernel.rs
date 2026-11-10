@@ -36,12 +36,12 @@ mod linux {
     // _IOC encoding (asm-generic, used by x86 and arm64): dir<<30 | size<<16 |
     // type<<8 | nr. dir: _IOC_WRITE=1, _IOC_READ=2, _IOWR=3. Magic 0xA6, the
     // struct is 8 bytes.
-    const fn ioc(dir: u32, nr: u32) -> libc::c_ulong {
+    const fn ioc(dir: u32, nr: u32) -> libc::Ioctl {
         let size = core::mem::size_of::<WbXfer>() as u32;
-        ((dir << 30) | (size << 16) | (0xA6u32 << 8) | nr) as libc::c_ulong
+        ((dir << 30) | (size << 16) | (0xA6u32 << 8) | nr) as libc::Ioctl
     }
-    const AES67_IOC_PEEK: libc::c_ulong = ioc(3, 1); // _IOWR(0xA6, 1, xfer)
-    const AES67_IOC_POKE: libc::c_ulong = ioc(1, 2); // _IOW (0xA6, 2, xfer)
+    const AES67_IOC_PEEK: libc::Ioctl = ioc(3, 1); // _IOWR(0xA6, 1, xfer)
+    const AES67_IOC_POKE: libc::Ioctl = ioc(1, 2); // _IOW (0xA6, 2, xfer)
 
     /// A connection to the FPGA through the kernel driver's control device.
     pub struct KernelTransport {
