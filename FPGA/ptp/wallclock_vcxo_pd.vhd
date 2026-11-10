@@ -35,6 +35,9 @@ entity wallclock_vcxo_pd is
         mclk_o         : out std_logic;                -- synchronised VCXO
         tick_o         : out std_logic;                -- VCXO rising edge
         cnt_o          : out unsigned(8 downto 0);     -- MCLK cycle in sample
+        -- value cnt_o takes on the next clk edge (combinational), lets a
+        -- clock divider run one sys_clk earlier
+        cnt_next_o     : out unsigned(8 downto 0);
         sample_pulse_o : out std_logic;                -- cnt wrap
 
         win_done_o     : out std_logic;                -- 1-cycle, window complete
@@ -90,6 +93,8 @@ architecture rtl of wallclock_vcxo_pd is
     -- computes the error, so a slip decided while later edges are still
     -- in the pipeline is never counted twice.
     signal vcxo_cnt    : unsigned(8 downto 0) := (others => '0');
+    signal cnt_inc     : integer range -1 to 2;     -- this cycle: edge + slip
+    signal cnt_next    : unsigned(8 downto 0);
     signal vcxo_raw    : unsigned(8 downto 0) := (others => '0');
     signal slip_ofs    : unsigned(8 downto 0) := (others => '0');
     signal vcxo_spulse : std_logic := '0';
@@ -131,6 +136,7 @@ begin
     mclk_o         <= vcxo_sync;
     tick_o         <= vcxo_tick;
     cnt_o          <= vcxo_cnt;
+    cnt_next_o     <= cnt_next;
     sample_pulse_o <= vcxo_spulse;
     win_done_o     <= win_done;
     win_mean_o     <= win_mean;
@@ -147,9 +153,30 @@ begin
         end if;
     end process;
 
+    -- Counter step this cycle: VCXO edge plus slip (-1..+2)
+    cnt_step_proc: process(vcxo_tick, slip_up, slip_dn, vcxo_cnt)
+        variable v_inc : integer range -1 to 2;
+    begin
+        v_inc := 0;
+        if vcxo_tick = '1' then
+            v_inc := 1;
+        end if;
+        if slip_up = '1' then
+            v_inc := v_inc + 1;
+        elsif slip_dn = '1' then
+            v_inc := v_inc - 1;
+        end if;
+        cnt_inc <= v_inc;
+        case v_inc is
+            when 1      => cnt_next <= vcxo_cnt + 1;
+            when 2      => cnt_next <= vcxo_cnt + 2;
+            when -1     => cnt_next <= vcxo_cnt - 1;
+            when others => cnt_next <= vcxo_cnt;
+        end case;
+    end process;
+
     -- VCXO MCLK counter + phase detector stage 1
     vcxo_cnt_proc: process(clk, reset_n)
-        variable v_inc : integer range -1 to 2;
     begin
         if reset_n = '0' then
             vcxo_cnt    <= (others => '0');
@@ -159,36 +186,20 @@ begin
             pd_nsec     <= (others => '0');
             pd_raw1     <= (others => '0');
         elsif rising_edge(clk) then
-            v_inc := 0;
             if vcxo_tick = '1' then
-                v_inc := 1;
                 vcxo_raw <= vcxo_raw + 1;
             end if;
             if slip_up = '1' then
-                v_inc := v_inc + 1;
                 slip_ofs <= slip_ofs + 1;
             elsif slip_dn = '1' then
-                v_inc := v_inc - 1;
                 slip_ofs <= slip_ofs - 1;
             end if;
 
+            vcxo_cnt    <= cnt_next;
             vcxo_spulse <= '0';
-            case v_inc is
-                when 1 =>
-                    vcxo_cnt <= vcxo_cnt + 1;
-                    if vcxo_cnt = 511 then
-                        vcxo_spulse <= '1';
-                    end if;
-                when 2 =>
-                    vcxo_cnt <= vcxo_cnt + 2;
-                    if vcxo_cnt >= 510 then
-                        vcxo_spulse <= '1';
-                    end if;
-                when -1 =>
-                    vcxo_cnt <= vcxo_cnt - 1;
-                when others =>
-                    null;
-            end case;
+            if (cnt_inc = 1 and vcxo_cnt = 511) or (cnt_inc = 2 and vcxo_cnt >= 510) then
+                vcxo_spulse <= '1';
+            end if;
 
             -- Stage 1: wallclock time of this edge + its raw index.
             -- nsec_i is the time of the previous clk edge, i.e. 1.5

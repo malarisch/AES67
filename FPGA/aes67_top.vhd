@@ -65,7 +65,9 @@ ENTITY aes67_top IS
 
 		pll_512fs_i : IN STD_LOGIC;
 		audioclocks_o : out t_audio_clocks;
-		-- external VCXO (syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO)
+		-- external VCXO / PLL (syscfg.AUDIO_CONFIG.MCLK_SOURCE =
+		-- MCLK_SRC_VCXO / MCLK_SRC_EXT_PLL); vcxo_pump_o.pll_ref is the
+		-- external PLL's reference clock
 		vcxo_clk_i : IN STD_LOGIC := '0';
 		vcxo_pump_o : OUT t_vcxo_pump;
 		pin_audioclocks_o : OUT t_audio_clocks;
@@ -343,13 +345,14 @@ mac_linkup_o <= mac_linkup;
 ptp_inst: entity work.ptp_module
 generic map (
 	MII_WIDTH => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_WIDTH,
-	SYS_CLK_NS_PER_TICK => SYS_CLK_NS_PER_TICK,
+	SYS_CLK_NS_PER_TICK => syscfg.SYS_CLK_NS_PER_TICK,
 	MII_CLK_NS_PER_TICK => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_CLK_NS_PER_TICK,
 	MII_TYPE => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_TYPE,
 	STATIC_PTP_CONF => syscfg.STATIC_PTP_CONFIG,
 	PTP_MOVING_AVERAGE_DEPTH => syscfg.PTP_MOVING_AVERAGE_DEPTH,
 	PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE,
-	MCLK_FROM_VCXO => syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO,
+	MCLK_FROM_VCXO => syscfg.AUDIO_CONFIG.MCLK_SOURCE /= MCLK_SRC_NCO,
+	VCXO_EXT_PLL => syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_EXT_PLL,
 	VCXO_DOMAIN_CLOCKS => syscfg.AUDIO_CONFIG.VCXO_DOMAIN_CLOCKS
 )
 PORT MAP(sys_clk => sys_clk_125MHz_i,
@@ -533,7 +536,8 @@ ethernet_top_inst: entity work.ethernet_top
  MIIM_PHY_ADDRESS => syscfg.PHY_CONFIG.MIIM_PHY_ADDRESS,
  MII_TYPE => syscfg.PHY_CONFIG.NETWORK_CONFIG.MII_TYPE,
  PTP_IN_SOFTWARE => syscfg.PTP_IN_SOFTWARE,
- PHY_TYPE => syscfg.PHY_CONFIG.PHY_TYPE)
+ PHY_TYPE => syscfg.PHY_CONFIG.PHY_TYPE,
+ MIIM_DISABLE => not syscfg.PHY_CONFIG.MIIM_ENABLE)
  port map(
 	sys_clk125MHz_i => sys_clk_125MHz_i,
 	enet_clk_i => enet_clk_i,

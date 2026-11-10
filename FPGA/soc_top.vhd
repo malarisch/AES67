@@ -18,6 +18,8 @@ ENTITY soc_top IS
 	(
 		rst_n_i :  IN  STD_LOGIC;
 		clock_i :  IN  STD_LOGIC;
+    ext_mcu_clk_i : IN STD_LOGIC;
+    ext_locked_i : IN STD_LOGIC;
 
 		-- rgmii if (use when ethernet_type  = RGMII)
 		phy_refclk_i :  IN  STD_LOGIC := '0';
@@ -69,6 +71,8 @@ ENTITY soc_top IS
 		-- syscfg.AUDIO_CONFIG.MCLK_SOURCE = MCLK_SRC_VCXO. The board top
 		-- turns vcxo_pump_o into two tri-state pins into the CV loop filter
 		-- (pin <= pd_x when pd_x_oe = '1' else 'Z').
+		-- MCLK_SRC_EXT_PLL: vcxo_clk_i is the external PLL's (e.g. CS2000)
+		-- output, vcxo_pump_o.pll_ref its reference (NCO MCLK) to a pin.
 		-- With VCXO_DOMAIN_CLOCKS the audioclk_* outputs below come from
 		-- registers clocked by vcxo_clk_i.
 		vcxo_clk_i :  IN  STD_LOGIC := '0';
@@ -280,8 +284,11 @@ wb_bridge_top_inst : entity work.wb_bridge_top
     syscfg => syscfg
   )
   port map (
+    
     rst_n_i => rst_n_i,
     clock_i => clock_i,
+    ext_mcu_clk_i => ext_mcu_clk_i,
+    ext_locked_i => ext_locked_i,
     phy_refclk_i => phy_refclk_i,
     phy_mii_enet_rx_clk => phy_mii_enet_rx_clk,
     phy_mii_enet_rx_dv => phy_mii_enet_rx_dv,

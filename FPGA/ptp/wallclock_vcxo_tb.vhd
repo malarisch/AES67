@@ -48,7 +48,7 @@
 --        ptp/wallclock_vcxo_domain.vhd ptp/wallclock_vcxo.vhd \
 --        ptp/wallclock.vhd ptp/wallclock_vcxo_tb.vhd
 --   ghdl -e --std=08 wallclock_vcxo_tb
---   ghdl -r --std=08 wallclock_vcxo_tb [-gDOMAIN=true] > vcxo.csv
+--   ghdl -r --std=08 wallclock_vcxo_tb [-gDOMAIN=true] [-gSYS_CLK_HZ=100000000] > vcxo.csv
 --
 -- CSV rows (one per PI window): time_us,phase_id,err_cyc,pump,locked,cv_v,f_ppm
 
@@ -63,15 +63,19 @@ use work.wallclock_signals_pkg.all;
 entity wallclock_vcxo_tb is
     generic (
         -- true: also test VCXO_DOMAIN_CLOCKS (pin clocks from the VCXO)
-        DOMAIN : boolean := false
+        DOMAIN     : boolean := false;
+        -- sys_clk; must have an integer period in ns
+        SYS_CLK_HZ : natural := 125_000_000
     );
 end entity;
 
 architecture sim of wallclock_vcxo_tb is
 
-    constant SYS_CLK_HZ_C : natural := 125_000_000;
+    constant SYS_CLK_HZ_C : natural := SYS_CLK_HZ;
+    constant CLK_NS       : natural := 1_000_000_000 / SYS_CLK_HZ;
     constant AUDIO_FS_C   : natural := 48_000;
-    constant CLK_PERIOD   : time := 8 ns;
+    constant CLK_PERIOD   : time := CLK_NS * 1 ns;
+    constant CLK_PS       : integer := CLK_NS * 1000;
     constant F_NOM        : real := 24.576e6;
 
     -- analog model
@@ -83,7 +87,7 @@ architecture sim of wallclock_vcxo_tb is
     constant KV_PPM_PER_V : real := 50.0;
     constant PULL_PPM     : real := 100.0;
     constant V_MID        : real := 1.65;
-    constant DT           : real := 8.0e-9;
+    constant DT           : real := real(CLK_NS) * 1.0e-9;
 
     -- VCXO vs NCO sample pulse, sys_clk cycles. The NCO pull loop has a
     -- +/-1 MCLK (~5 clk) quantiser dead zone, so where an NCO board sits
@@ -155,7 +159,7 @@ begin
 
     dut: entity work.wallclock
         generic map (
-            increment_interval   => 8,
+            increment_interval   => CLK_NS,
             sys_clk_hz           => SYS_CLK_HZ_C,
             audio_fs             => AUDIO_FS_C,
             pull_loop_gain_shift => 6,     -- TB-scaled NCO pull loop, as
@@ -341,7 +345,7 @@ begin
             if rising_edge(audio_clocks.fsclk_50) then
                 t_int := now;
                 if t_pin > 0 ns then
-                    d := ((now - t_pin) / 1 ps + 4000) / 8000;
+                    d := ((now - t_pin) / 1 ps + CLK_PS / 2) / CLK_PS;
                     if d < 256 then
                         if d < mon_lag_min then mon_lag_min <= d; end if;
                         if d > mon_lag_max then mon_lag_max <= d; end if;
@@ -349,7 +353,7 @@ begin
                 end if;
             end if;
             if rising_edge(pin_clocks.fsclk_50) and t_int > 0 ns then
-                d := -(((now - t_int) / 1 ps + 4000) / 8000);
+                d := -(((now - t_int) / 1 ps + CLK_PS / 2) / CLK_PS);
                 if d > -256 then
                     if d < mon_lag_min then mon_lag_min <= d; end if;
                     if d > mon_lag_max then mon_lag_max <= d; end if;
@@ -362,7 +366,7 @@ begin
             if (rising_edge(pin_clocks.fsclk_50) or (rising_edge(clk) and nco_spulse = '1'))
                and t_pin > 0 ns and t_ncofs > 0 ns then
                 d := (t_pin - t_ncofs) / 1 ps;
-                if d >= 0 then d := (d + 4000) / 8000; else d := -((-d + 4000) / 8000); end if;
+                if d >= 0 then d := (d + CLK_PS / 2) / CLK_PS; else d := -((-d + CLK_PS / 2) / CLK_PS); end if;
                 if abs(d) < 256 then
                     mon_pskew_sum <= mon_pskew_sum + d;
                     mon_pskew_n   <= mon_pskew_n + 1;

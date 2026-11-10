@@ -5,7 +5,6 @@ use work.audioclks_pkg.all;
 use work.miim_types.all;
 
 package system_cfg_pkg is
-    constant SYS_CLK_NS_PER_TICK : natural := 8;
     constant USE_EXTERNAL_PLL : boolean := false;
     type t_mii_types is (MII, RMII, GMII, RGMII);
     type t_phy_names is (LAN8720A, LXT973, CORTINA, OTHER);
@@ -23,6 +22,9 @@ package system_cfg_pkg is
     type t_phy_config is record
         MIIM_PHY_ADDRESS : t_phy_address;
         PHY_TYPE : t_phy_names;
+        -- false: no MDC/MDIO (PHY strapped or managed elsewhere), link
+        -- reported as always up; fixed-speed MII_TYPE (RMII / MII) only
+        MIIM_ENABLE : boolean;
         NETWORK_CONFIG : t_network_config;
     end record;
 
@@ -39,14 +41,20 @@ package system_cfg_pkg is
         PARALLEL_BYTE_DEPTH : integer;
         MCLK_SPEED : audio_clock_speed;
         MCLK_SOURCE : t_mclk_source;
-        -- MCLK_SRC_VCXO only: pin BCLK/LRCK clocked by the VCXO itself
+        -- MCLK_SRC_VCXO / MCLK_SRC_EXT_PLL only: pin BCLK/LRCK clocked by
+        -- the external MCLK itself
         VCXO_DOMAIN_CLOCKS : boolean;
         BCLK_SPEED : audio_clock_speed;
         RX_DA_CFG : t_audio_cfg;
         TX_AD_CFG : t_audio_cfg;
     end record;
     type t_global_system_cfg is record
+        -- board input clock [MHz]; sysclk_pll_gen derives sys_clk from it,
+        -- or passes it straight through when it already is the sys_clk
         CLK_IN_SPEED : natural;
+        -- sys_clk period [ns] (8 = 125 MHz, 10 = 100 MHz); must be an
+        -- integer. Wallclock increment, timestamp latencies.
+        SYS_CLK_NS_PER_TICK : natural;
         SOC_TYPE : t_soc_types;
         PLATFORM : t_platforms;
         PHY_CONFIG : t_phy_config;
@@ -64,6 +72,12 @@ package system_cfg_pkg is
     -- domain_clocks = true also clocks the pin BCLK/LRCK from the VCXO.
     function with_vcxo_mclk (cfg : in t_global_system_cfg;
                              domain_clocks : in boolean := false) return t_global_system_cfg;
+    -- Same config with the MCLK from an external PLL / jitter cleaner (e.g.
+    -- CS2000) that takes the NCO MCLK as reference (vcxo_pump_o.pll_ref)
+    -- and returns its clean MCLK on vcxo_clk_i.
+    -- domain_clocks = true also clocks the pin BCLK/LRCK from that MCLK.
+    function with_ext_pll_mclk (cfg : in t_global_system_cfg;
+                                domain_clocks : in boolean := false) return t_global_system_cfg;
     constant std_mii_cfg : t_network_config := (
         MII_TYPE => MII,
         MII_WIDTH => 4,
@@ -84,18 +98,28 @@ package system_cfg_pkg is
     );
     constant std_lxt_cfg : t_phy_config := (
         PHY_TYPE => LXT973,
+        MIIM_ENABLE => true,
         MIIM_PHY_ADDRESS => "00010",
         NETWORK_CONFIG => std_mii_cfg
     );
     constant std_lan8720a_cfg : t_phy_config := (
         PHY_TYPE => LAN8720A,
+        MIIM_ENABLE => true,
         MIIM_PHY_ADDRESS => "00001",
         NETWORK_CONFIG => std_rmii_cfg
     );
     constant std_cortina_cfg : t_phy_config := (
         PHY_TYPE => CORTINA,
+        MIIM_ENABLE => true,
         MIIM_PHY_ADDRESS => "00000",
         NETWORK_CONFIG => std_rgmii_cfg
+    );
+    -- RMII PHY without management interface (strapped, 100 Mbit/s)
+    constant std_rmii_no_miim_cfg : t_phy_config := (
+        PHY_TYPE => OTHER,
+        MIIM_ENABLE => false,
+        MIIM_PHY_ADDRESS => "00000",
+        NETWORK_CONFIG => std_rmii_cfg
     );
 
 
@@ -149,6 +173,20 @@ package system_cfg_pkg is
         TDM_PINS => 4,
         ADDA_CFG => i2s_adc_config
     );
+    constant eight_tdm8_outputs : t_audio_cfg := (
+        MAX_STREAMS => 8,
+        BUFFER_DEPTH => 256,
+        CHANNELS => 8,
+        TDM_PINS => 1,
+        ADDA_CFG => tdm8_dac_config
+    );
+    constant eight_tdm8_inputs : t_audio_cfg := (
+        MAX_STREAMS => 4,
+        BUFFER_DEPTH => 64,
+        CHANNELS => 8,
+        TDM_PINS => 1,
+        ADDA_CFG => tdm8_adc_config
+    );
     constant single_lj_output : t_audio_cfg := (
         MAX_STREAMS => 2,
         BUFFER_DEPTH => 256,
@@ -198,8 +236,21 @@ package system_cfg_pkg is
         TX_AD_CFG => disable_audio_path
     );
 
+    -- 8 in / 8 out, one TDM8 pin each (256fs BCLK)
+    constant audio_config_tdm8_8io : t_global_audio_cfg := (
+        MCLK_SPEED => audio_clock_24_57,
+        MCLK_SOURCE => MCLK_SRC_NCO,
+        VCXO_DOMAIN_CLOCKS => false,
+        BCLK_SPEED => audio_clock_12_28,
+        USE_PARALLEL_INTERFACE => false,
+        PARALLEL_BYTE_DEPTH => 3,
+        RX_DA_CFG => eight_tdm8_outputs,
+        TX_AD_CFG => eight_tdm8_inputs
+    );
+
     constant global_system_cfg_mi : t_global_system_cfg := (
         CLK_IN_SPEED => 25,
+        SYS_CLK_NS_PER_TICK => 8,
         SOC_TYPE => LITEX_SPIBONE,
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lxt_cfg,
@@ -211,6 +262,7 @@ package system_cfg_pkg is
     );
     constant global_system_cfg_lo : t_global_system_cfg := (
         CLK_IN_SPEED => 25,
+        SYS_CLK_NS_PER_TICK => 8,
         SOC_TYPE => LITEX_SPIBONE,
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lxt_cfg,
@@ -222,6 +274,7 @@ package system_cfg_pkg is
     );
     constant global_system_cfg_rn2io : t_global_system_cfg := (
         CLK_IN_SPEED => 25,
+        SYS_CLK_NS_PER_TICK => 8,
         SOC_TYPE => LITEX_SPIBONE,
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lxt_cfg,
@@ -233,6 +286,7 @@ package system_cfg_pkg is
     );
     constant global_system_cfg_cyc : t_global_system_cfg := (
         CLK_IN_SPEED => 12,
+        SYS_CLK_NS_PER_TICK => 8,
         SOC_TYPE => LITEX_VEXRISCV_SDRAM,
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lan8720a_cfg,
@@ -244,10 +298,26 @@ package system_cfg_pkg is
     );
     constant global_system_cfg_c006 : t_global_system_cfg := (
         CLK_IN_SPEED => 50,
+        SYS_CLK_NS_PER_TICK => 8,
         SOC_TYPE => LITEX_SPIBONE,
         PLATFORM => ALTERA,
         PHY_CONFIG => std_lan8720a_cfg,
         AUDIO_CONFIG => audio_config_2io,
+        STATIC_PTP_CONFIG => true,
+        PTP_IN_SOFTWARE => true,
+        ENABLE_METERING => false,
+        PTP_MOVING_AVERAGE_DEPTH => 4
+    );
+    -- Integration core: 100 MHz sys_clk fed directly (no PLL), RMII
+    -- without MIIM, 8 in / 8 out TDM8, spibone control. For an external
+    -- PLL MCLK (e.g. CS2000): with_ext_pll_mclk(global_system_cfg_rmii_tdm8_100m, true)
+    constant global_system_cfg_rmii_tdm8_100m : t_global_system_cfg := (
+        CLK_IN_SPEED => 100,
+        SYS_CLK_NS_PER_TICK => 10,
+        SOC_TYPE => LITEX_SPIBONE,
+        PLATFORM => LATTICE,
+        PHY_CONFIG => std_rmii_no_miim_cfg,
+        AUDIO_CONFIG => audio_config_tdm8_8io,
         STATIC_PTP_CONFIG => true,
         PTP_IN_SOFTWARE => true,
         ENABLE_METERING => false,
@@ -284,6 +354,16 @@ package body system_cfg_pkg is
     begin
         r := cfg;
         r.AUDIO_CONFIG.MCLK_SOURCE := MCLK_SRC_VCXO;
+        r.AUDIO_CONFIG.VCXO_DOMAIN_CLOCKS := domain_clocks;
+        return r;
+    end;
+
+    function with_ext_pll_mclk (cfg : in t_global_system_cfg;
+                                domain_clocks : in boolean := false) return t_global_system_cfg is
+        variable r : t_global_system_cfg;
+    begin
+        r := cfg;
+        r.AUDIO_CONFIG.MCLK_SOURCE := MCLK_SRC_EXT_PLL;
         r.AUDIO_CONFIG.VCXO_DOMAIN_CLOCKS := domain_clocks;
         return r;
     end;

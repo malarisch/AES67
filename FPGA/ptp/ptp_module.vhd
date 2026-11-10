@@ -9,7 +9,7 @@ ENTITY ptp_module IS
 	generic (
         MII_WIDTH : integer := 2;
 		MII_TYPE : t_mii_types;
-        SYS_CLK_NS_PER_TICK : integer := 8; -- 125 MHz
+        SYS_CLK_NS_PER_TICK : integer := 8; -- sys_clk period [ns], 8 = 125 MHz
         MII_CLK_NS_PER_TICK : integer := 20; -- 50 MHz
 		STATIC_PTP_CONF : BOOLEAN := true;
 		PTP_MOVING_AVERAGE_DEPTH : INTEGER := 4; 
@@ -17,6 +17,9 @@ ENTITY ptp_module IS
 		-- MCLK from an external VCXO (charge-pump PLL in wallclock.vhd)
 		-- instead of the NCO
 		MCLK_FROM_VCXO : BOOLEAN := false;
+		-- with MCLK_FROM_VCXO: the external MCLK is a PLL (e.g. CS2000)
+		-- referenced to the NCO MCLK (vcxo_pump_o.pll_ref), not a VCXO
+		VCXO_EXT_PLL : BOOLEAN := false;
 		VCXO_DOMAIN_CLOCKS : BOOLEAN := false
 	);
 	PORT
@@ -575,10 +578,11 @@ second_pulse_sys <= second_pulse_sys_ALTERA_SYNTHESIZED;
 
 b2v_wallclock :  entity work.wallclock
 GENERIC MAP(audio_fs => 48000,
-			increment_interval => 8,
-			sys_clk_hz => 125000000,
+			increment_interval => SYS_CLK_NS_PER_TICK,
+			sys_clk_hz => 1_000_000_000 / SYS_CLK_NS_PER_TICK,
 			PTP_IN_SOFTWARE => PTP_IN_SOFTWARE,
 			MCLK_FROM_VCXO => MCLK_FROM_VCXO,
+			VCXO_EXT_PLL => VCXO_EXT_PLL,
 			VCXO_DOMAIN_CLOCKS => VCXO_DOMAIN_CLOCKS
 			)
 PORT MAP(clk => sys_clk,

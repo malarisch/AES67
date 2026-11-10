@@ -15,6 +15,8 @@ generic (
 	(
 		rst_n_i :  IN  STD_LOGIC;
 		clock_i :  IN  STD_LOGIC;
+        ext_mcu_clk_i : IN STD_LOGIC;
+        ext_locked_i : IN STD_LOGIC;
 
 		-- rgmii if (use when ethernet_type  = RGMII)
 		phy_refclk_i :  IN  STD_LOGIC := '0';
@@ -155,10 +157,13 @@ aes67_wb_bridge_inst: entity work.aes67_wb_bridge
   sysclk_pll_gen_inst: entity work.sysclk_pll_gen
    generic map(
       platform => syscfg.PLATFORM,
-      clk_in_speed => syscfg.CLK_IN_SPEED
+      clk_in_speed => syscfg.CLK_IN_SPEED,
+      sys_clk_ns_per_tick => syscfg.SYS_CLK_NS_PER_TICK
   )
    port map(
       clock_i => clock_i,
+      ext_mcu_clk_i => ext_mcu_clk_i,
+      ext_locked_i => ext_locked_i,
       rst_n_i => rst_n_i,
       sys_clk_125MHz_o => sys_clk_125MHz,
       mcu_clk_o => mcu_clk,

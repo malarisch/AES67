@@ -7,8 +7,8 @@
 -- sys_clk-domain count (cnt_i, which includes the PD's slips) by an
 -- offset measured in sys_clk and handed back over a stable-value
 -- synchroniser. The pins then run the same divider as the sys_clk
--- clocks, one MCLK behind the internal count. Requires
--- sys_clk >= 4.5 * MCLK for the counter hand-over.
+-- clocks, one MCLK behind the internal count. The minimum sys_clk
+-- (internal edges ahead of the pin edges) is checked in wallclock_vcxo.
 -- ============================================================
 library ieee;
 use ieee.std_logic_1164.all;
@@ -17,10 +17,6 @@ use ieee.numeric_std.all;
 use work.audioclks_pkg.all;
 
 entity wallclock_vcxo_domain is
-    generic(
-        sys_clk_hz : natural;
-        audio_fs   : natural
-    );
     port(
         clk          : in  std_logic;
         vcxo_clk_i   : in  std_logic;
@@ -32,8 +28,6 @@ entity wallclock_vcxo_domain is
 end entity wallclock_vcxo_domain;
 
 architecture rtl of wallclock_vcxo_domain is
-    constant MCLK_HZ : real := real(audio_fs * 512);
-
     attribute PRESERVE : boolean;
 
     -- VCXO domain
@@ -56,9 +50,6 @@ architecture rtl of wallclock_vcxo_domain is
     signal tick_d  : std_logic_vector(1 to 3) := (others => '0');
     signal vofs_s  : unsigned(8 downto 0) := (others => '0');
 begin
-    assert real(sys_clk_hz) >= 4.5 * MCLK_HZ
-        report "wallclock: VCXO_DOMAIN_CLOCKS needs sys_clk >= 4.5 * MCLK"
-        severity failure;
 
     -- VCXO domain: free-running count, offset take-over (a value is
     -- used once two consecutive samples agree)

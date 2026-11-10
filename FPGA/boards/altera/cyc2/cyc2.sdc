@@ -40,7 +40,7 @@ set_time_format -unit ns -decimal_places 3
 
 create_clock -name {txclk_i} -period 40.000 -waveform { 0.000 20.000 } [get_ports {txclk_i}]
 create_clock -name {rxclk_i} -period 40.000 -waveform { 0.000 20.000 } [get_ports { rxclk_i }]
-create_clock -name {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_64fs.bclk} -period 81.779 -waveform { 0.000 40.889 } [get_registers {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_64fs.bclk}]
+create_clock -name {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|wallclock_clk_div:u_clk_div|clocks_o.clk_64fs.bclk} -period 81.779 -waveform { 0.000 40.889 } [get_registers {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|wallclock_clk_div:u_clk_div|clocks_o.clk_64fs.bclk}]
 
 
 #**************************************************************
@@ -79,8 +79,8 @@ create_generated_clock -name {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_ins
 # Set Clock Groups
 #**************************************************************
 
-set_clock_groups -asynchronous -group [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}] -group [get_clocks {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_64fs.bclk}] 
-set_clock_groups -asynchronous -group [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}] -group [get_clocks {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|audioclks_reg.clk_64fs.bclk}] 
+set_clock_groups -asynchronous -group [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}] -group [get_clocks {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|wallclock_clk_div:u_clk_div|clocks_o.clk_64fs.bclk}] 
+set_clock_groups -asynchronous -group [get_clocks {soc_top_inst|wb_bridge_top_inst|sysclk_pll_gen_inst|\sysclkgen25:sysclks_altpll_25m_in_inst|altpll_component|pll|clk[0]}] -group [get_clocks {soc_top:soc_top_inst|wb_bridge_top:wb_bridge_top_inst|aes67_wb_bridge:aes67_wb_bridge_inst|aes67_top:aes67_top_inst|ptp_module:ptp_inst|wallclock:b2v_wallclock|wallclock_clk_div:u_clk_div|clocks_o.clk_64fs.bclk}] 
 
 
 #**************************************************************
@@ -116,8 +116,8 @@ set_false_path -from [get_registers {*eth_buf_rx_ack*storage*}]
 # Set Multicycle Path
 #**************************************************************
 
-set_multicycle_path -setup -end -to [get_registers {*b2v_wallclock|ppb_adj_reg[*]}] 2
-set_multicycle_path -hold -end -to [get_registers {*b2v_wallclock|ppb_adj_reg[*]}] 1
+set_multicycle_path -setup -end -to [get_registers {*b2v_wallclock|*ppb_adj_reg[*]}] 2
+set_multicycle_path -hold -end -to [get_registers {*b2v_wallclock|*ppb_adj_reg[*]}] 1
 set_multicycle_path -setup -end -from [get_registers {*media_clock_nsec_latch*}] -to [get_registers {*media_mult_reg*}] 2
 set_multicycle_path -hold -end -from [get_registers {*media_clock_nsec_latch*}] -to [get_registers {*media_mult_reg*}] 1
 

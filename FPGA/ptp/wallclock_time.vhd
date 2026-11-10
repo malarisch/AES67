@@ -86,6 +86,9 @@ architecture rtl of wallclock_time is
     signal new_nsec_minus_sec : signed(31 downto 0) := -NS_PER_SEC;
     signal new_nsec_plus_sec  : signed(31 downto 0) := NS_PER_SEC;
 begin
+    assert real(increment_interval) * real(sys_clk_hz) = 1.0e9
+        report "wallclock: increment_interval (ns) does not match sys_clk_hz"
+        severity failure;
 
     -- Take the low 30 bits of nsec_reg (nanoseconds are always 0..1e9-1).
     nsec_o         <= unsigned(nsec_reg(29 downto 0));

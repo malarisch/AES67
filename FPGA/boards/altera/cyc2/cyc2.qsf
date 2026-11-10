@@ -205,6 +205,7 @@ set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pkg.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pd.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_ctl.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_pump.vhd
+set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_extpll_mon.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo_domain.vhd
 set_global_assignment -name VHDL_FILE ../../../ptp/wallclock_vcxo.vhd
 set_global_assignment -name VHDL_FILE ../../../wb_bridge_top.vhd

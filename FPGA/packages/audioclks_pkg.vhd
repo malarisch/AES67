@@ -39,24 +39,33 @@ package audioclks_pkg is
     --                   carries sys_clk quantisation jitter).
     --   MCLK_SRC_VCXO : external 24.576 MHz VCXO, phase-locked to the NCO
     --                   through a tri-state charge pump on its CV loop filter.
-    type t_mclk_source is (MCLK_SRC_NCO, MCLK_SRC_VCXO);
+    --   MCLK_SRC_EXT_PLL : external PLL / jitter cleaner (e.g. CS2000) that
+    --                   takes the NCO MCLK as reference (t_vcxo_pump.pll_ref)
+    --                   and returns a clean 24.576 MHz on the VCXO input. Its
+    --                   phase is measured against the wallclock and the MCLK
+    --                   counter is aligned to the sample grid; no steering.
+    type t_mclk_source is (MCLK_SRC_NCO, MCLK_SRC_VCXO, MCLK_SRC_EXT_PLL);
 
     -- Tri-state charge-pump outputs into the VCXO loop filter. Each path is
     -- driven (oe = '1') only while pumping and floats otherwise, so the
     -- filter capacitor holds the control voltage.
     --   pd_a : high-ohmic path (fine, tracking)
     --   pd_b : low-ohmic path (coarse, acquisition)
+    --   pll_ref : MCLK_SRC_EXT_PLL only: NCO MCLK as the external PLL's
+    --             reference clock ('0' otherwise)
     type t_vcxo_pump is record
         pd_a    : std_logic;
         pd_a_oe : std_logic;
         pd_b    : std_logic;
         pd_b_oe : std_logic;
+        pll_ref : std_logic;
     end record;
     constant VCXO_PUMP_IDLE : t_vcxo_pump := (
         pd_a    => '0',
         pd_a_oe => '0',
         pd_b    => '0',
-        pd_b_oe => '0'
+        pd_b_oe => '0',
+        pll_ref => '0'
     );
 
     subtype audio_clock_speed is std_logic_vector(2 downto 0);

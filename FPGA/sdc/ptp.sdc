@@ -75,9 +75,9 @@ set_multicycle_path -hold  -end 1 \
 # the signed multiply + shift 2 sys_clk_125m periods. Setup multicycle = 2,
 # hold multicycle = 1.
 set_multicycle_path -setup -end 2 \
-    -to [get_registers {*b2v_wallclock|ppb_adj_reg[*]}]
+    -to [get_registers {*b2v_wallclock|*ppb_adj_reg[*]}]
 set_multicycle_path -hold  -end 1 \
-    -to [get_registers {*b2v_wallclock|ppb_adj_reg[*]}]
+    -to [get_registers {*b2v_wallclock|*ppb_adj_reg[*]}]
 
 # --- BMC dataset comparators (ptpv2_bmc P_CMP_ANN_EXT / P_CMP_EXT_SELF) ---
 # The two long 136-bit dataset comparisons are registered into ann_better_r

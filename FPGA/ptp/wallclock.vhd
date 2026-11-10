@@ -5,8 +5,9 @@
 --   wallclock_time.vhd        48-bit seconds + nanoseconds time base
 --   wallclock_media_clock.vhd RTP media clock (pure function of the time)
 --   wallclock_nco.vhd         PTP-disciplined MCLK NCO + phase pull
---   wallclock_vcxo*.vhd       optional external VCXO as MCLK (PD, PI
---                             controller, charge pump, VCXO-domain pins)
+--   wallclock_vcxo*.vhd       optional external VCXO / PLL as MCLK (PD,
+--                             PI controller + charge pump or external-PLL
+--                             monitor, VCXO-domain pins)
 --   wallclock_clk_div.vhd     bclk / fs / TDM frame clocks from mclk_cnt
 -- ============================================================
 library ieee;
@@ -59,12 +60,18 @@ entity wallclock is
         VCXO_FAST_PUMP    : natural := 16384;
         -- Set if a higher CV lowers the VCXO frequency.
         VCXO_PUMP_INVERT  : boolean := false;
+        -- Only with MCLK_FROM_VCXO: vcxo_clk_i is an external PLL / jitter
+        -- cleaner (e.g. CS2000) instead of a VCXO. Its reference is the NCO
+        -- MCLK on vcxo_pump_o.pll_ref; nothing is steered, the MCLK counter
+        -- is only aligned to the wallclock sample grid (see
+        -- wallclock_extpll_mon.vhd). The VCXO_K*/FAST/INVERT generics are
+        -- unused then.
+        VCXO_EXT_PLL      : boolean := false;
         -- Only with MCLK_FROM_VCXO: generate the pin-level BCLK/LRCK/TDM
         -- frame clocks (pin_clocks_o) in the VCXO clock domain, i.e.
         -- without sys_clk quantisation jitter. The internal clocks_o stay
-        -- on the sys_clk grid (they run ~2.5 sys_clk behind the pins).
-        -- Requires sys_clk >= 4.5 * MCLK (counter hand-over, see
-        -- wallclock_vcxo_domain.vhd).
+        -- on the sys_clk grid, 1..3 sys_clk ahead of the pins. Requires
+        -- sys_clk >= 4 * MCLK (98.3 MHz at 48 kHz, see wallclock_vcxo.vhd).
         VCXO_DOMAIN_CLOCKS : boolean := false
     );
     port(
@@ -110,7 +117,7 @@ entity wallclock is
         vcxo_clk_i        : in  std_logic := '0';     -- VCXO output, async to clk
         vcxo_pump_o       : out t_vcxo_pump := VCXO_PUMP_IDLE;
         vcxo_locked_o     : out std_logic;
-        -- Window-averaged phase error NCO - VCXO, Q16 MCLK cycles
+        -- Window-averaged phase error wallclock - VCXO, Q16 MCLK cycles
         vcxo_phase_err_dbg_o : out signed(31 downto 0);
         -- Last charge-pump command, signed sys_clk cycles per window
         vcxo_pump_dbg_o   : out signed(31 downto 0);
@@ -286,6 +293,7 @@ begin
                 KB_SHIFT      => VCXO_KB_SHIFT,
                 FAST_PUMP     => VCXO_FAST_PUMP,
                 PUMP_INVERT   => VCXO_PUMP_INVERT,
+                EXT_PLL       => VCXO_EXT_PLL,
                 DOMAIN_CLOCKS => VCXO_DOMAIN_CLOCKS
             )
             port map(
@@ -294,6 +302,7 @@ begin
                 vcxo_clk_i      => vcxo_clk_i,
                 nsec_i          => nsec,
                 realign_i       => realign_evt,
+                nco_mclk_i      => nco_mclk,
                 sys_clocks_i    => audioclks_reg,
                 mclk_o          => mclk_int,
                 mclk_cnt_o      => mclk_cnt,

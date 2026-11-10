@@ -12,7 +12,11 @@ entity ethernet_top is
     MIIM_PHY_ADDRESS      : t_phy_address := (others => '0');
     MII_TYPE : t_mii_types;
     PTP_IN_SOFTWARE: BOOLEAN := false;
-    PHY_TYPE : t_phy_names := OTHER
+    PHY_TYPE : t_phy_names := OTHER;
+    -- No MIIM (PHY strapped / managed elsewhere): MDC idle, MDIO released,
+    -- link reported as always up. Speed comes from MII_TYPE (RMII/MII =
+    -- 100 Mbit/s), so only fixed-speed interfaces can run without MIIM.
+    MIIM_DISABLE : BOOLEAN := false
   );
   port (
     sys_clk125MHz_i : IN STD_LOGIC;
@@ -117,8 +121,25 @@ architecture rtl of ethernet_top is
 
     SIGNAL is_mcu_pkt_tog_done : STD_LOGIC;
     SIGNAL is_rtp_pkt_tog_done : STD_LOGIC;
+
+    SIGNAL mac_mdc     : STD_ULOGIC;
+    SIGNAL mac_link_up : STD_ULOGIC;
     
 begin
+  assert not MIIM_DISABLE or MII_TYPE = RMII or MII_TYPE = MII
+    report "ethernet_top: MIIM_DISABLE needs a fixed-speed MII_TYPE (RMII / MII)"
+    severity failure;
+
+  gen_miim: if not MIIM_DISABLE generate
+    enet_mdc     <= mac_mdc;
+    mac_linkup_o <= mac_link_up;
+  end generate;
+  gen_no_miim: if MIIM_DISABLE generate
+    enet_mdc     <= '0';
+    enet_mdio    <= 'Z';
+    mac_linkup_o <= '1';
+  end generate;
+
   mac_speed_override <= SPEED_100MBPS WHEN MII_TYPE = RMII OR MII_TYPE = MII else SPEED_UNSPECIFIED;
   is_rtp_pkt_tog_o <= is_rtp_pkt_tog_done when mac_speed = b"01" else is_rtp_pkt_tog_receive;
   is_mcu_pkt_tog_o <= is_mcu_pkt_tog_done when mac_speed = b"01" else is_mcu_pkt_tog_receive;
@@ -204,7 +225,7 @@ PORT MAP(mac_address_i => mac_addr_i,
 
 b2v_yol_mac : entity work.ethernet
 GENERIC MAP(MIIM_CLOCK_DIVIDER => MIIM_CLOCK_DIVIDER,
-			MIIM_DISABLE => false,
+			MIIM_DISABLE => MIIM_DISABLE,
 			MIIM_PHY_ADDRESS => MIIM_PHY_ADDRESS,
 			MIIM_POLL_WAIT_TICKS => 10000,
 			MIIM_RESET_WAIT_TICKS => 125000,
@@ -225,7 +246,7 @@ PORT MAP(clock_125_i => enet_clk_i,
 
 		 miim_clock_i => enet_clk_i,
          mdio_io => enet_mdio,
-         mdc_o => enet_mdc,
+         mdc_o => mac_mdc,
          
          tx_enable_i => mac_tx_enable,
 		 
@@ -234,7 +255,7 @@ PORT MAP(clock_125_i => enet_clk_i,
 		 tx_data_i => std_ulogic_vector(mac_tx_data),
 		 
 		 tx_reset_o => mac_tx_reset_o,
-		 link_up_o => mac_linkup_o,
+		 link_up_o => mac_link_up,
 		 tx_clock_o => mac_tx_clock,
 		 tx_byte_sent_o => mac_tx_byte_sent_o,
 		 tx_busy_o => mac_tx_busy_o,
