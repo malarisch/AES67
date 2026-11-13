@@ -10,6 +10,7 @@ name = "aes67cfg"
 path = "src/main.rs"
 
 [dependencies]
+serde_json = "1"
 aes67-config.workspace = true
 aes67-client.workspace = true
 clap = { version = "4", features = ["derive"] }

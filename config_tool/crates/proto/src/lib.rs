@@ -10,6 +10,11 @@
 //! the matching `id`. The first exchange should be [`Request::Hello`] so both
 //! sides agree on [`PROTO_VERSION`].
 //!
+//! After [`Request::SubscribeEvents`] the server additionally pushes unsolicited
+//! [`Event`] lines on that connection. A response line is an object with an `id`
+//! key, an event line an object with an `event` key, so a client that mixes
+//! requests and events on one connection can tell them apart by that key.
+//!
 //! The wire DTOs here are intentionally separate from the internal types in
 //! `aes67-config` (e.g. IP addresses travel as strings) so the on-the-wire
 //! format can stay stable independently of the implementation.
@@ -19,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
 /// Protocol version. Bumped on any breaking change to the message set.
-pub const PROTO_VERSION: u32 = 8;
+pub const PROTO_VERSION: u32 = 9;
 
 /// Newline-delimited JSON framing, shared by the daemon and every client so the
 /// wire format has a single source of truth.
@@ -104,6 +109,25 @@ pub enum Request {
     /// List the AES67 streams discovered on the network (via SAP/SDP), so a
     /// client can offer them as RX subscription candidates.
     GetDiscovered,
+
+    /// Turn this connection into an event subscriber: after the `Ok` response the
+    /// server pushes an [`Event`] line whenever the discovered-stream list or the
+    /// configured RX/TX streams change. The current state of both is sent once
+    /// right after the response, so a subscriber needs no separate initial query.
+    /// Requests keep working on the same connection.
+    SubscribeEvents,
+}
+
+/// Server → client unsolicited notifications (see [`Request::SubscribeEvents`]).
+/// One JSON line each: `{"event":"discovered","data":[…]}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
+pub enum Event {
+    /// The complete list of discovered streams, sent whenever a stream appears,
+    /// disappears or changes its description (not for mere `age_secs` updates).
+    Discovered(Vec<DiscoveredStream>),
+    /// The configured RX/TX streams, sent whenever any client changes them.
+    Config(ConfigSnapshot),
 }
 
 /// Server → client successful results.
@@ -300,11 +324,42 @@ mod tests {
     }
 
     #[test]
+    fn event_lines_are_tagged_by_event_key() {
+        let s = serde_json::to_string(&Event::Discovered(Vec::new())).unwrap();
+        assert_eq!(s, r#"{"event":"discovered","data":[]}"#);
+        let back: Event = serde_json::from_str(&s).unwrap();
+        assert!(matches!(back, Event::Discovered(v) if v.is_empty()));
+        // A response line never has an `event` key, an event line never an `id`.
+        assert!(serde_json::from_str::<ResponseEnvelope>(&s).is_err());
+    }
+
+    #[test]
     fn stream_params_default_optionals() {
         let p: TxStreamParams =
             serde_json::from_str(r#"{"id":0,"dst_ip":"239.69.1.1"}"#).unwrap();
         assert_eq!(p.id, 0);
         assert_eq!(p.samples_per_packet, 0);
         assert!(p.ch_ids.is_empty());
+    }
+
+    /// The line OpenX32's mixer control (omc, C++) sends for a transmit stream.
+    #[test]
+    fn omc_tx_stream_line_parses() {
+        let line = r#"{"id":5,"request":{"method":"set_tx_stream","params":{"id":2,"dst_ip":"239.69.1.3","channels":2,"samples_per_packet":48,"ch_ids":[2,3],"ssrc":0,"name":"Mix"}}}"#;
+        let env: RequestEnvelope = serde_json::from_str(line).unwrap();
+        match env.request {
+            Request::SetTxStream(p) => {
+                assert_eq!(p.id, 2);
+                assert_eq!(p.channels, Some(2));
+                assert_eq!(p.ch_ids, vec![2, 3]);
+                assert_eq!(p.name.as_deref(), Some("Mix"));
+            }
+            other => panic!("unexpected request {other:?}"),
+        }
+        let stop = r#"{"id":4,"request":{"method":"stop_tx_stream","params":{"id":1}}}"#;
+        let env: RequestEnvelope = serde_json::from_str(stop).unwrap();
+        assert!(matches!(env.request, Request::StopTxStream { id: 1 }));
+        let ip = serde_json::to_string(&Response::Ip("192.168.178.134".into())).unwrap();
+        assert_eq!(ip, r#"{"kind":"ip","data":"192.168.178.134"}"#);
     }
 }

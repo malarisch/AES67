@@ -558,7 +558,10 @@ static int aes67_probe(struct spi_device *spi)
 	INIT_WORK(&p->tx_work, aes67_tx_work);
 	INIT_DELAYED_WORK(&p->poll_work, aes67_poll_work);
 
-	p->wq = alloc_ordered_workqueue("aes67_%s", 0, dev_name(&spi->dev));
+	/* WQ_HIGHPRI: TX timestamps are read back over SPI inside this work.
+	 * At normal priority, busy userspace (omc on the X32) delays it by tens
+	 * of ms and ptp4l runs into tx_timestamp_timeout. */
+	p->wq = alloc_ordered_workqueue("aes67_%s", WQ_HIGHPRI, dev_name(&spi->dev));
 	if (!p->wq) {
 		ret = -ENOMEM;
 		goto err_free;

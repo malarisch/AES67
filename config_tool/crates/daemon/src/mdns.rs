@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use aes67_mdns::{BrowseEvent, Responder, Service};
 
-use crate::discovery::{session_name, wait_for_ip, SharedDiscovery, Transport};
+use crate::discovery::{session_name, wait_for_ip, SharedDiscovery, Transport, STALE_AFTER};
 use crate::{SharedConfig, SharedDevice};
 
 /// DNS-SD subtype marking a RAVENNA streaming session.
@@ -34,6 +34,13 @@ const ADVERTISE_POLL: Duration = Duration::from_secs(5);
 /// and the resolved A-records are not a reliable self-test — they can arrive
 /// empty or without the TAP address).
 type OwnNames = Arc<Mutex<HashSet<String>>>;
+
+/// How often a remote session found over mDNS is DESCRIBEd again, to notice
+/// that its sender is gone (and to pick up a changed description).
+const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The remote sessions mDNS currently lists: service fullname → (RTSP URL, host).
+type Remote = Arc<Mutex<HashMap<String, (String, Ipv4Addr)>>>;
 
 /// Spawn the mDNS session service. Waits for the TAP address itself, so it need
 /// not be sequenced with startup.
@@ -90,7 +97,11 @@ fn run(
         Ok(events) => {
             let reg = registry.clone();
             let own = own.clone();
-            std::thread::spawn(move || browse_loop(events, reg, own, local_ip, verbose));
+            let remote: Remote = Arc::default();
+            let known = remote.clone();
+            std::thread::spawn(move || browse_loop(events, reg, own, known, local_ip, verbose));
+            let reg = registry.clone();
+            std::thread::spawn(move || refresh_loop(reg, remote, verbose));
         }
         Err(e) => eprintln!("aes67d: mdns: cannot browse sessions: {e}"),
     }
@@ -169,6 +180,7 @@ fn browse_loop(
     events: std::sync::mpsc::Receiver<BrowseEvent>,
     registry: SharedDiscovery,
     own: OwnNames,
+    remote: Remote,
     local_ip: Ipv4Addr,
     verbose: u8,
 ) {
@@ -190,6 +202,7 @@ fn browse_loop(
                     continue; // no address resolved
                 };
                 let url = format!("rtsp://{host}:{}/by-name/{}", svc.port, encode_segment(&svc.instance));
+                remote.lock().unwrap().insert(svc.fullname.clone(), (url.clone(), host));
                 match aes67_rtsp::describe(&url) {
                     Ok(stream) => {
                         if verbose >= 1 {
@@ -213,9 +226,44 @@ fn browse_loop(
                 if verbose >= 1 {
                     eprintln!("aes67d: discovery: - {fullname} (mdns)");
                 }
+                remote.lock().unwrap().remove(&fullname);
                 registry.lock().unwrap().remove(&format!("mdns:{fullname}"));
             }
         }
+    }
+}
+
+/// Keep the mDNS sightings alive: DESCRIBE every listed session again and
+/// refresh its registry entry on success. A session whose sender does not answer
+/// any more is not refreshed and expires from the registry after [`STALE_AFTER`];
+/// it comes back with the first successful DESCRIBE.
+fn refresh_loop(registry: SharedDiscovery, remote: Remote, verbose: u8) {
+    loop {
+        std::thread::sleep(REFRESH_INTERVAL);
+
+        let sessions: Vec<(String, (String, Ipv4Addr))> =
+            remote.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        for (fullname, (url, host)) in sessions {
+            // network I/O without holding a lock
+            match aes67_rtsp::describe(&url) {
+                Ok(stream) => {
+                    // not if mDNS removed the session while we were asking
+                    if remote.lock().unwrap().contains_key(&fullname) {
+                        registry.lock().unwrap().upsert(
+                            format!("mdns:{fullname}"),
+                            stream,
+                            host,
+                            Transport::Mdns,
+                        );
+                    }
+                }
+                Err(e) if verbose >= 1 => eprintln!("aes67d: mdns: DESCRIBE {url} failed: {e}"),
+                Err(_) => {}
+            }
+        }
+
+        // The SAP listener expires too, but it does not run when SAP is disabled.
+        registry.lock().unwrap().expire(STALE_AFTER);
     }
 }
 

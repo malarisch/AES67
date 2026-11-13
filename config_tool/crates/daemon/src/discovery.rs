@@ -32,7 +32,7 @@ use crate::{SharedConfig, SharedDevice};
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(30);
 /// Drop a discovered stream that has not been re-announced within this window
 /// (3× the announce interval, matching common SAP receiver timeouts).
-const STALE_AFTER: Duration = Duration::from_secs(90);
+pub(crate) const STALE_AFTER: Duration = Duration::from_secs(90);
 /// Listener wake-up cadence, so stale entries are expired even when the network
 /// is silent.
 const LISTEN_TICK: Duration = Duration::from_secs(5);
@@ -94,12 +94,13 @@ impl Registry {
         self.streams.remove(key);
     }
 
-    /// Drop SAP sightings not refreshed within `after` (they are re-announced
-    /// periodically); mDNS sightings are managed by explicit add/remove events.
-    fn expire(&mut self, after: Duration) {
+    /// Drop sightings not refreshed within `after`. SAP sessions are re-announced
+    /// periodically by their sender; mDNS sessions are re-DESCRIBEd periodically by
+    /// the mDNS service (a sender that is switched off sends no mDNS goodbye, and
+    /// its records would otherwise stay until their TTL of more than an hour ends).
+    pub(crate) fn expire(&mut self, after: Duration) {
         let now = Instant::now();
-        self.streams
-            .retain(|_, s| s.transport != Transport::Sap || now.duration_since(s.last_seen) < after);
+        self.streams.retain(|_, s| now.duration_since(s.last_seen) < after);
     }
 
     /// An owned, age-stamped snapshot for the control API, with sightings of the
@@ -477,12 +478,17 @@ mod tests {
         reg.expire(Duration::from_secs(0)); // SAP + "older than 0" → dropped
         assert!(reg.snapshot().is_empty());
 
-        // mDNS sightings survive expiry and go only on remove.
+        // mDNS sightings go on remove ...
         let s = tx_to_stream(&tx(1, "239.69.1.1"), src, None).unwrap();
-        reg.upsert("mdns:Line._rtsp._tcp.local.".into(), s, src, Transport::Mdns);
-        reg.expire(Duration::from_secs(0));
+        reg.upsert("mdns:Line._rtsp._tcp.local.".into(), s.clone(), src, Transport::Mdns);
+        reg.expire(Duration::from_secs(60));
         assert_eq!(reg.snapshot().len(), 1);
         reg.remove("mdns:Line._rtsp._tcp.local.");
+        assert!(reg.snapshot().is_empty());
+
+        // ... and expire like SAP ones when they are not refreshed any more.
+        reg.upsert("mdns:Line._rtsp._tcp.local.".into(), s, src, Transport::Mdns);
+        reg.expire(Duration::from_secs(0));
         assert!(reg.snapshot().is_empty());
     }
 

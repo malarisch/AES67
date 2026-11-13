@@ -105,6 +105,30 @@ impl RemoteDevice {
     pub fn subscribe_rtsp(&mut self, url: &str, rx_id: u8) -> Result<(), ConfigError> {
         self.call_ok(proto::Request::SubscribeRtsp { url: url.to_string(), rx_id })
     }
+
+    /// Turn this connection into an event stream: the daemon pushes an event
+    /// whenever the discovered streams or the configured streams change, starting
+    /// with the current state of both. The connection is consumed, because event
+    /// lines would otherwise get in the way of request/response pairs; open a
+    /// second connection for requests.
+    pub fn into_events(mut self) -> Result<EventStream, ConfigError> {
+        self.call_ok(proto::Request::SubscribeEvents)?;
+        Ok(EventStream { reader: self.reader })
+    }
+}
+
+/// The receiving end of a daemon event subscription (see
+/// [`RemoteDevice::into_events`]).
+pub struct EventStream {
+    reader: BufReader<UnixStream>,
+}
+
+impl EventStream {
+    /// Block until the next event. `Ok(None)` when the daemon closed the
+    /// connection.
+    pub fn next_event(&mut self) -> Result<Option<proto::Event>, ConfigError> {
+        framing::read_line(&mut self.reader).map_err(|e| ConfigError::Remote(e.to_string()))
+    }
 }
 
 fn map_rpc_error(e: proto::RpcError) -> ConfigError {

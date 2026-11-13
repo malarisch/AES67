@@ -145,6 +145,9 @@ enum Command {
     },
     /// List AES67 streams discovered on the network (SAP/SDP). Daemon only.
     Discovered,
+    /// Print the daemon's events (discovered / configured streams changed) as
+    /// JSON lines until interrupted. Daemon only.
+    Events,
     /// Subscribe to a remote RAVENNA session over RTSP and configure it into an RX
     /// slot. Daemon only.
     Subscribe {
@@ -253,6 +256,9 @@ fn main() -> Result<()> {
     if let Command::Subscribe { url, rx_id } = &cli.command {
         return subscribe_rtsp(&cli, url, *rx_id);
     }
+    if let Command::Events = cli.command {
+        return watch_events(&cli);
+    }
 
     let mut backend = build_backend(&cli)?;
     dispatch(backend.as_mut(), cli.command)
@@ -268,6 +274,21 @@ fn subscribe_rtsp(cli: &Cli, url: &str, rx_id: u8) -> Result<()> {
         .with_context(|| format!("connecting to daemon at {}", t.socket.display()))?;
     dev.subscribe_rtsp(url, rx_id)?;
     println!("subscribed {url} -> rx stream {rx_id}");
+    Ok(())
+}
+
+/// Connect to the daemon and print every event it pushes, one JSON line each.
+fn watch_events(cli: &Cli) -> Result<()> {
+    let t = &cli.transport;
+    if t.uart.is_some() || t.spi.is_some() {
+        bail!("`events` needs the daemon (drop --uart/--spi)");
+    }
+    let mut events = RemoteDevice::connect(&t.socket)
+        .with_context(|| format!("connecting to daemon at {}", t.socket.display()))?
+        .into_events()?;
+    while let Some(event) = events.next_event()? {
+        println!("{}", serde_json::to_string(&event)?);
+    }
     Ok(())
 }
 
@@ -351,6 +372,7 @@ fn dispatch(dev: &mut dyn ControlApi, cmd: Command) -> Result<()> {
     match cmd {
         Command::Regs => unreachable!("handled before backend construction"),
         Command::Discovered => unreachable!("handled before backend construction"),
+        Command::Events => unreachable!("handled before backend construction"),
         Command::Subscribe { .. } => unreachable!("handled before backend construction"),
 
         Command::Dump => {

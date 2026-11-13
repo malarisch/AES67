@@ -10,6 +10,7 @@ use std::io::{self, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use aes67_config::{ControlApi, Device, RxStream, Transport, TxStream};
 use aes67_proto::{self as proto, framing};
@@ -67,6 +68,26 @@ pub struct Server {
     pub device: SharedDevice,
     pub persist: Option<Persist>,
     pub discovery: Option<SharedDiscovery>,
+    /// Connections that asked for [`proto::Request::SubscribeEvents`].
+    subscribers: Mutex<Vec<SharedWriter>>,
+}
+
+/// The write half of a client connection. Shared between the connection's own
+/// request loop (responses) and the event watcher (pushed events); the mutex
+/// keeps their JSON lines from interleaving.
+type SharedWriter = Arc<Mutex<UnixStream>>;
+
+/// How often the event watcher looks for changes to report to subscribers.
+const EVENT_POLL: Duration = Duration::from_millis(250);
+/// A subscriber that does not take an event line within this time is dropped,
+/// so one stuck client cannot stall the events for the others.
+const EVENT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// What the event watcher last reported, to detect changes.
+#[derive(Default)]
+pub struct EventState {
+    discovered: Option<String>,
+    config: Option<String>,
 }
 
 impl Server {
@@ -75,12 +96,85 @@ impl Server {
         persist: Option<Persist>,
         discovery: Option<SharedDiscovery>,
     ) -> Arc<Self> {
-        Arc::new(Self { device, persist, discovery })
+        Arc::new(Self { device, persist, discovery, subscribers: Mutex::new(Vec::new()) })
     }
+
+    /// Compare the discovered streams and the configured streams against `last`
+    /// and push an event to every subscriber for whichever changed. Called
+    /// periodically by the watcher thread ([`run`] spawns it).
+    pub fn poll_events(&self, last: &mut EventState) {
+        if self.subscribers.lock().expect("subscriber mutex poisoned").is_empty() {
+            // Nobody listens: forget the last state, so the next subscriber's
+            // first poll cannot miss a change that happened in between.
+            *last = EventState::default();
+            return;
+        }
+
+        let discovered = discovered_streams(self);
+        // The age changes all the time; it must not count as a change.
+        let key = serde_json::to_string(
+            &discovered.iter().cloned().map(|mut s| { s.age_secs = 0; s }).collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
+        if last.discovered.as_ref() != Some(&key) {
+            last.discovered = Some(key);
+            self.broadcast(&proto::Event::Discovered(discovered));
+        }
+
+        let config = config_streams(self);
+        let key = serde_json::to_string(&config).unwrap_or_default();
+        if last.config.as_ref() != Some(&key) {
+            last.config = Some(key);
+            self.broadcast(&proto::Event::Config(config));
+        }
+    }
+
+    /// Send `event` to every subscriber, dropping those whose connection is gone.
+    fn broadcast(&self, event: &proto::Event) {
+        let mut subs = self.subscribers.lock().expect("subscriber mutex poisoned");
+        subs.retain(|w| send_event(w, event).is_ok());
+    }
+
+    /// Register a connection for events and send it the current state.
+    fn subscribe(&self, writer: &SharedWriter) -> io::Result<()> {
+        writer
+            .lock()
+            .expect("writer mutex poisoned")
+            .set_write_timeout(Some(EVENT_WRITE_TIMEOUT))?;
+        // Holding the subscriber list while sending the initial state keeps the
+        // watcher from slipping a newer event in front of it.
+        let mut subs = self.subscribers.lock().expect("subscriber mutex poisoned");
+        send_event(writer, &proto::Event::Discovered(discovered_streams(self)))?;
+        send_event(writer, &proto::Event::Config(config_streams(self)))?;
+        if !subs.iter().any(|w| Arc::ptr_eq(w, writer)) {
+            subs.push(Arc::clone(writer));
+        }
+        Ok(())
+    }
+
+    fn unsubscribe(&self, writer: &SharedWriter) {
+        self.subscribers
+            .lock()
+            .expect("subscriber mutex poisoned")
+            .retain(|w| !Arc::ptr_eq(w, writer));
+    }
+}
+
+fn send_event(writer: &SharedWriter, event: &proto::Event) -> io::Result<()> {
+    framing::write_line(&mut *writer.lock().expect("writer mutex poisoned"), event)
 }
 
 /// Accept connections forever, serving each on its own thread.
 pub fn run(listener: UnixListener, server: Arc<Server>) {
+    let watcher = Arc::clone(&server);
+    std::thread::spawn(move || {
+        let mut last = EventState::default();
+        loop {
+            std::thread::sleep(EVENT_POLL);
+            watcher.poll_events(&mut last);
+        }
+    });
+
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -99,7 +193,13 @@ pub fn run(listener: UnixListener, server: Arc<Server>) {
 /// Serve one client until it disconnects: read request lines, dispatch through
 /// the shared device, persist successful mutations, write response lines.
 pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<()> {
-    let mut writer = stream.try_clone()?;
+    let writer: SharedWriter = Arc::new(Mutex::new(stream.try_clone()?));
+    let result = serve_requests(stream, &writer, &server);
+    server.unsubscribe(&writer);
+    result
+}
+
+fn serve_requests(stream: UnixStream, writer: &SharedWriter, server: &Server) -> io::Result<()> {
     let mut reader = BufReader::new(stream);
 
     while let Some(env) = framing::read_line::<_, proto::RequestEnvelope>(&mut reader)? {
@@ -109,9 +209,18 @@ pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<(
         // does its own network I/O and persistence — none hold the bus lock for the
         // whole request.
         let result = match env.request {
-            proto::Request::GetConfig => Ok(config_snapshot(&server)),
-            proto::Request::GetDiscovered => Ok(discovered_snapshot(&server)),
-            proto::Request::SubscribeRtsp { url, rx_id } => subscribe_rtsp(&server, &url, rx_id),
+            proto::Request::GetConfig => Ok(proto::Response::Config(config_streams(server))),
+            proto::Request::GetDiscovered => {
+                Ok(proto::Response::Discovered(discovered_streams(server)))
+            }
+            proto::Request::SubscribeRtsp { url, rx_id } => subscribe_rtsp(server, &url, rx_id),
+            proto::Request::SubscribeEvents => {
+                // Response first, then the initial state (see the request's docs).
+                let ok = proto::ResponseEnvelope { id: env.id, result: Ok(proto::Response::Ok) };
+                framing::write_line(&mut *writer.lock().expect("writer mutex poisoned"), &ok)?;
+                server.subscribe(writer)?;
+                continue;
+            }
             request => {
                 let mut dev = server.device.lock().expect("device mutex poisoned");
                 dispatch(&mut dev, request)
@@ -122,7 +231,10 @@ pub fn serve_connection(stream: UnixStream, server: Arc<Server>) -> io::Result<(
                 p.record(req);
             }
         }
-        framing::write_line(&mut writer, &proto::ResponseEnvelope { id: env.id, result })?;
+        framing::write_line(
+            &mut *writer.lock().expect("writer mutex poisoned"),
+            &proto::ResponseEnvelope { id: env.id, result },
+        )?;
     }
     Ok(())
 }
@@ -228,6 +340,9 @@ fn dispatch(
         Req::SubscribeRtsp { .. } => {
             Err(rpc(proto::ErrorCode::Internal, "SubscribeRtsp not dispatchable".into()))
         }
+        Req::SubscribeEvents => {
+            Err(rpc(proto::ErrorCode::Internal, "SubscribeEvents not dispatchable".into()))
+        }
     }
 }
 
@@ -262,10 +377,10 @@ fn subscribe_rtsp(server: &Server, url: &str, rx_id: u8) -> Result<proto::Respon
     Ok(proto::Response::Ok)
 }
 
-/// Build a [`proto::Response::Config`] from the persisted config (empty when
+/// The configured RX/TX streams from the persisted config (empty when
 /// persistence is disabled).
-fn config_snapshot(server: &Server) -> proto::Response {
-    let snapshot = match &server.persist {
+fn config_streams(server: &Server) -> proto::ConfigSnapshot {
+    match &server.persist {
         Some(p) => {
             let cfg = p.config.lock().expect("config mutex poisoned");
             proto::ConfigSnapshot {
@@ -274,14 +389,12 @@ fn config_snapshot(server: &Server) -> proto::Response {
             }
         }
         None => proto::ConfigSnapshot::default(),
-    };
-    proto::Response::Config(snapshot)
+    }
 }
 
-/// Build a [`proto::Response::Discovered`] from the discovery registry (empty when
-/// discovery is disabled).
-fn discovered_snapshot(server: &Server) -> proto::Response {
-    let streams = match &server.discovery {
+/// The streams in the discovery registry (empty when discovery is disabled).
+fn discovered_streams(server: &Server) -> Vec<proto::DiscoveredStream> {
+    match &server.discovery {
         Some(reg) => reg
             .lock()
             .expect("discovery mutex poisoned")
@@ -310,8 +423,7 @@ fn discovered_snapshot(server: &Server) -> proto::Response {
             })
             .collect(),
         None => Vec::new(),
-    };
-    proto::Response::Discovered(streams)
+    }
 }
 
 fn rpc(code: proto::ErrorCode, message: String) -> proto::RpcError {
