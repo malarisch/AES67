@@ -37,8 +37,7 @@ class AES67CSRs(LiteXModule, AutoCSR):
         self.i_ptp_offset          = Signal(32)
         self.i_eth_tx_done         = Signal()
         self.i_eth_rx_overflow     = Signal()
-        # RX stream-underrun diagnostics (stream_underrun / mute_channels, LSBs)
-        self.i_rx_underrun         = Signal(4)
+        # RX underrun-mute diagnostics (mute_channels, LSBs)
         self.i_rx_mute             = Signal(8)
         # PTP BMA results (from FPGA BMC)
         self.i_ptp_is_leader       = Signal()
@@ -140,10 +139,10 @@ class AES67CSRs(LiteXModule, AutoCSR):
             CSRField("eth_rx_overflow",     size=1, offset=8, description="Ethernet RX overflow"),
             CSRField("ptp_is_leader",       size=1, offset=9, description="PTP BMA result: node is leader"),
             CSRField("ptp_is_follower",     size=1, offset=10, description="PTP BMA result: node is follower"),
-            # RX stream-underrun diagnostics (bits 16-27), e.g. for web-UI
-            # monitoring; adding fields does not move the register, existing
-            # readers see them as previously-zero bits.
-            CSRField("rx_underrun",         size=4, offset=16, description="RX stream underrun flags (streams 3..0)"),
+            # RX underrun-mute diagnostics (bits 20-27), e.g. for web-UI
+            # monitoring. Bits 16-19 (was rx_underrun, per-stream flags) are a
+            # reserved gap: the gateware detector was removed, hosts derive a
+            # stream underrun from the mute mask (all mapped channels muted).
             CSRField("rx_mute",             size=8, offset=20, description="RX underrun-muted channels (channels 7..0)"),
         ])
 
@@ -318,7 +317,6 @@ class AES67CSRs(LiteXModule, AutoCSR):
             self.status.fields.eth_rx_overflow.eq(self.i_eth_rx_overflow),
             self.status.fields.ptp_is_leader.eq(self.i_ptp_is_leader),
             self.status.fields.ptp_is_follower.eq(self.i_ptp_is_follower),
-            self.status.fields.rx_underrun.eq(self.i_rx_underrun),
             self.status.fields.rx_mute.eq(self.i_rx_mute),
 
             self.ptp_leader_id_lo.status.eq(self.i_ptp_leader_id[:32]),
@@ -463,7 +461,6 @@ def add_aes67_csr(soc, platform):
         csr.i_ptp_offset.eq(aes67_pads.ptp_offset),
         csr.i_eth_tx_done.eq(aes67_pads.eth_tx_done),
         csr.i_eth_rx_overflow.eq(aes67_pads.eth_rx_overflow),
-        csr.i_rx_underrun.eq(aes67_pads.rx_underrun),
         csr.i_rx_mute.eq(aes67_pads.rx_mute),
         csr.i_ptp_is_leader.eq(aes67_pads.ptp_is_leader),
         csr.i_ptp_is_follower.eq(aes67_pads.ptp_is_follower),

@@ -5,7 +5,8 @@
 //! (and the firmware's `eth_litex.h` / `fpga_hal.h`):
 //!
 //! * `aes67_csr_status` — link, PTP role, wallclock state and the RX
-//!   stream-underrun diagnostics (bits 16–27).
+//!   underrun-mute mask (bits 20–27). The gateware has no per-stream underrun
+//!   flag; [`stream_underrun`] derives it from the mute mask.
 //! * `aes67_csr_system_cfg_{flags,rx,tx}` — the static build configuration
 //!   (`syscfg` generic) of the loaded bitstream: PTP mode, metering, and the
 //!   per-direction stream/channel limits.
@@ -40,13 +41,23 @@ const S_ETH_TX_DONE: u32 = 1 << 7;
 const S_ETH_RX_OVERFLOW: u32 = 1 << 8;
 const S_PTP_LEADER: u32 = 1 << 9;
 const S_PTP_FOLLOWER: u32 = 1 << 10;
-const S_RX_UNDERRUN_SHIFT: u32 = 16;
 const S_RX_MUTE_SHIFT: u32 = 20;
 
-/// RX streams covered by the `rx_underrun` field (streams 0..3).
-pub const RX_UNDERRUN_STREAMS: u8 = 4;
 /// Output channels covered by the `rx_mute` field (channels 0..7).
 pub const RX_MUTE_CHANNELS: u8 = 8;
+
+/// Underrun state of one subscribed RX stream, derived from the gateware's
+/// per-channel mute mask: the FPGA mutes every output channel whose last
+/// written sample playout has passed, so a stream whose mapped output channels
+/// (`ch_map`) are all muted has underrun. Only the low `channels` bits of
+/// `mute_mask` are meaningful; mapped channels beyond that are ignored, and a
+/// stream without any covered channel yields `None` (unknown).
+pub fn stream_underrun(ch_map: &[u8], mute_mask: u8, channels: u8) -> Option<bool> {
+    let channels = channels.min(RX_MUTE_CHANNELS);
+    let mut covered = ch_map.iter().filter(|&&c| c < channels).peekable();
+    covered.peek()?;
+    Some(covered.all(|&c| mute_mask >> c & 1 != 0))
+}
 
 // system_cfg_flags bits.
 const F_PTP_IN_SOFTWARE: u32 = 1 << 0;
@@ -93,20 +104,13 @@ impl StatusWord {
     pub fn ptp_follower(self) -> bool {
         self.0 & S_PTP_FOLLOWER != 0
     }
-    /// Per-stream underrun flags, bit n = RX stream slot n (slots 0..3). Live
-    /// state: the gateware sets the flag when the stream's write pointer falls
-    /// behind playout and clears it with the next complete packet.
-    pub fn rx_underrun_mask(self) -> u8 {
-        ((self.0 >> S_RX_UNDERRUN_SHIFT) & 0xf) as u8
-    }
-    /// Output channels muted because their source stream is in underrun,
-    /// bit n = output channel n (channels 0..7).
+    /// Output channels muted because playout overtook the last sample written
+    /// to them (their source stream is in underrun) or because nothing has
+    /// written them since reset (unused output, or a stream that has not
+    /// delivered a packet yet), bit n = output channel n (channels 0..7). Live
+    /// state: cleared when the channel is written again.
     pub fn rx_mute_mask(self) -> u8 {
         ((self.0 >> S_RX_MUTE_SHIFT) & 0xff) as u8
-    }
-    /// Underrun state of one RX slot, `None` for slots the CSR doesn't cover.
-    pub fn rx_stream_underrun(self, slot: u8) -> Option<bool> {
-        (slot < RX_UNDERRUN_STREAMS).then(|| self.rx_underrun_mask() >> slot & 1 != 0)
     }
 
     /// Read and decode the status register.
@@ -224,18 +228,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_decodes_underrun_and_mute() {
-        // link up, 100M, follower, stream 1+3 underrun, channels 2,3,6 muted.
-        let s = StatusWord((1 << 4) | (1 << 5) | (1 << 10) | (0b1010 << 16) | (0b0100_1100 << 20));
+    fn status_decodes_mute_and_derives_underrun() {
+        // link up, 100M, follower, channels 2,3,6 muted.
+        let s = StatusWord((1 << 4) | (1 << 5) | (1 << 10) | (0b0100_1100 << 20));
         assert!(s.eth_link_up());
         assert_eq!(s.eth_speed_mbps(), Some(100));
         assert!(s.ptp_follower() && !s.ptp_leader());
-        assert_eq!(s.rx_underrun_mask(), 0b1010);
-        assert_eq!(s.rx_mute_mask(), 0b0100_1100);
-        assert_eq!(s.rx_stream_underrun(0), Some(false));
-        assert_eq!(s.rx_stream_underrun(1), Some(true));
-        assert_eq!(s.rx_stream_underrun(3), Some(true));
-        assert_eq!(s.rx_stream_underrun(4), None);
+        let mute = s.rx_mute_mask();
+        assert_eq!(mute, 0b0100_1100);
+        // all mapped channels muted -> underrun
+        assert_eq!(stream_underrun(&[2, 3], mute, 8), Some(true));
+        // only some muted -> still playing
+        assert_eq!(stream_underrun(&[3, 4], mute, 8), Some(false));
+        assert_eq!(stream_underrun(&[0, 1], mute, 8), Some(false));
+        // channels beyond the mask are ignored, the covered one decides
+        assert_eq!(stream_underrun(&[6, 9], mute, 8), Some(true));
+        // nothing covered (or the gateware has fewer channels) -> unknown
+        assert_eq!(stream_underrun(&[8, 9], mute, 8), None);
+        assert_eq!(stream_underrun(&[2, 3], mute, 2), None);
+        assert_eq!(stream_underrun(&[], mute, 8), None);
     }
 
     #[test]

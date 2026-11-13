@@ -307,6 +307,41 @@ ZTEST(aes67_conn, test_rx_delay_clamp_is_accepted)
 	zassert_equal(rx[0].samples_per_channel, 96);
 }
 
+ZTEST(aes67_conn, test_rx_underrun_from_mute_mask)
+{
+	const uint8_t map_a[2] = { 0, 1 };
+	const uint8_t map_b[2] = { 4, 5 };
+	const uint8_t map_c[2] = { 7, 9 };   /* ch 9 is beyond the 8-bit mask */
+	const uint8_t map_d[2] = { 10, 11 }; /* not covered at all */
+	struct in_addr dst = addr("239.69.1.4");
+
+	zassert_equal(aes67_conn_configure_rx_stream(0, &dst, 5004, map_a, 2,
+						     0, 48, NULL, NULL, NULL), 0);
+	zassert_equal(aes67_conn_configure_rx_stream(2, &dst, 5006, map_b, 2,
+						     0, 48, NULL, NULL, NULL), 0);
+	zassert_equal(aes67_conn_configure_rx_stream(3, &dst, 5008, map_c, 2,
+						     0, 48, NULL, NULL, NULL), 0);
+	zassert_equal(aes67_conn_configure_rx_stream(5, &dst, 5010, map_d, 2,
+						     0, 48, NULL, NULL, NULL), 0);
+
+	zassert_equal(aes67_conn_rx_used_channels(),
+		      BIT(0) | BIT(1) | BIT(4) | BIT(5) | BIT(7) | BIT(9) |
+		      BIT(10) | BIT(11));
+
+	/* nothing muted -> nothing in underrun */
+	zassert_equal(aes67_conn_rx_underrun_mask(0x00, 8), 0);
+	/* only one of stream 0's two channels muted -> not an underrun */
+	zassert_equal(aes67_conn_rx_underrun_mask(0x01, 8), 0);
+	/* all channels of stream 0 muted */
+	zassert_equal(aes67_conn_rx_underrun_mask(0x03, 8), BIT(0));
+	/* streams 0 + 2; stream 3 judged by its covered channel 7 only */
+	zassert_equal(aes67_conn_rx_underrun_mask(0xB3, 8),
+		      BIT(0) | BIT(2) | BIT(3));
+	/* muted channels of inactive slots / uncovered streams never report */
+	zassert_equal(aes67_conn_rx_underrun_mask(0xFF, 8),
+		      BIT(0) | BIT(2) | BIT(3));
+}
+
 ZTEST(aes67_conn, test_rx_rejects_bad_arguments)
 {
 	const uint8_t ch_map[2] = { 0, 1 };

@@ -2,7 +2,7 @@
 //! [`ControlApi`]. The web server is just a client: it reads the FPGA status
 //! CSRs by name and decodes them — no protocol or daemon changes needed.
 
-use aes67_config::status::{RX_MUTE_CHANNELS, RX_UNDERRUN_STREAMS};
+use aes67_config::status::RX_MUTE_CHANNELS;
 use aes67_config::{ConfigError, ControlApi, Metering, StatusWord, SystemCfg};
 use serde::Serialize;
 
@@ -27,7 +27,7 @@ pub struct Snapshot {
     pub wallclock: Wallclock,
     pub eth: Eth,
     pub network: Network,
-    /// RX stream health (underrun detection + auto-mute).
+    /// RX stream health (the gateware's per-channel underrun mute).
     pub audio_rx: AudioRx,
     /// Static build configuration of the loaded bitstream, or null if the
     /// gateware predates the `system_cfg` CSRs.
@@ -81,14 +81,12 @@ pub struct Network {
 
 #[derive(Serialize)]
 pub struct AudioRx {
-    /// RX slots whose underrun flag is set (playout overtook the last packet;
-    /// clears with the next complete packet).
-    pub underrun_streams: Vec<u8>,
-    /// Output channels the gateware muted because their stream is in underrun.
+    /// Output channels the gateware muted because playout overtook the last
+    /// sample written to them. A subscribed stream whose mapped channels are
+    /// all in here is in underrun (derived by the dashboard, the gateware has
+    /// no per-stream flag).
     pub muted_channels: Vec<u8>,
-    /// How many RX slots the underrun field covers (slots 0..n-1).
-    pub monitored_streams: u8,
-    /// How many output channels the mute field covers.
+    /// How many output channels the mute field covers (0 = no RX path).
     pub monitored_channels: u8,
 }
 
@@ -127,9 +125,6 @@ pub fn snapshot(dev: &mut dyn ControlApi) -> Result<Snapshot, ConfigError> {
     let rx_channels = gateware
         .map(|g| g.rx.channels.min(RX_MUTE_CHANNELS))
         .unwrap_or(RX_MUTE_CHANNELS);
-    let rx_slots = gateware
-        .map(|g| g.rx.max_streams.min(RX_UNDERRUN_STREAMS))
-        .unwrap_or(RX_UNDERRUN_STREAMS);
 
     // Skip the metering read (and its clear toggle) when the gateware says
     // metering is off; the CSRs may still exist but would read 0.
@@ -161,9 +156,7 @@ pub fn snapshot(dev: &mut dyn ControlApi) -> Result<Snapshot, ConfigError> {
         eth: Eth { tx_done: status.eth_tx_done(), rx_overflow: status.eth_rx_overflow() },
         network: Network { ip, mac },
         audio_rx: AudioRx {
-            underrun_streams: bits(status.rx_underrun_mask().into(), rx_slots),
             muted_channels: bits(status.rx_mute_mask().into(), rx_channels),
-            monitored_streams: rx_slots,
             monitored_channels: rx_channels,
         },
         gateware,

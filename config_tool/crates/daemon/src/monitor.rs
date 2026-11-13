@@ -29,6 +29,7 @@ use std::net::Ipv4Addr;
 use std::process::Command;
 use std::time::Duration;
 
+use aes67_config::status::{stream_underrun, RX_MUTE_CHANNELS};
 use aes67_config::{ControlApi, StatusWord};
 
 use crate::igmp::IgmpManager;
@@ -111,7 +112,7 @@ fn run(
         }
     };
     let mut igmp_rejoin_pending = true; // force a fresh join at startup
-    // Last seen RX underrun / muted-output masks, for edge logging.
+    // Last seen RX underrun (derived per slot) / muted-output masks, for edge logging.
     let mut last_rx_health: Option<(u8, u8)> = None;
 
     if verbose >= 1 {
@@ -171,24 +172,27 @@ fn run(
         }
         reconcile_ip(&device, &tap_name, &mut last_ip);
         reconcile_igmp(&mut igmp, &config, &tap_name, &mut igmp_rejoin_pending, verbose);
-        report_rx_health(&device, &mut last_rx_health);
+        report_rx_health(&device, &config, &mut last_rx_health);
     }
 }
 
-/// Log edges of the gateware's RX underrun detection: a stream whose packets
-/// stopped (or arrive too late) gets its output channels muted by the FPGA
-/// until complete packets arrive again. Only changes are logged.
-fn report_rx_health(device: &SharedDevice, last: &mut Option<(u8, u8)>) {
+/// Log edges of RX stream underruns: the FPGA mutes the output channels of a
+/// stream whose packets stopped (or arrive too late) until they are written
+/// again. The gateware reports only that per-channel mute mask; a subscribed
+/// stream whose mapped channels are all muted is in underrun. Only changes
+/// are logged.
+fn report_rx_health(device: &SharedDevice, config: &SharedConfig, last: &mut Option<(u8, u8)>) {
     let Ok(st) = StatusWord::read(&mut *device.lock().unwrap()) else {
         return;
     };
-    let now = (st.rx_underrun_mask(), st.rx_mute_mask());
+    let mute = st.rx_mute_mask();
+    let under = rx_underrun_slots(&config.lock().unwrap().settings, mute);
+    let now = (under, mute);
     let prev = last.replace(now).unwrap_or((0, 0));
     if now == prev {
         return;
     }
-    let (under, mute) = now;
-    for slot in 0..aes67_config::status::RX_UNDERRUN_STREAMS {
+    for slot in 0..8u8 {
         let (was, is) = (prev.0 >> slot & 1 != 0, under >> slot & 1 != 0);
         if is && !was {
             eprintln!("aes67d: monitor: RX stream {slot} underrun — outputs muted (mute mask 0x{mute:02x})");
@@ -196,6 +200,20 @@ fn report_rx_health(device: &SharedDevice, last: &mut Option<(u8, u8)>) {
             eprintln!("aes67d: monitor: RX stream {slot} recovered");
         }
     }
+}
+
+/// Bitmask of the configured RX slots (0..7) whose mapped output channels are
+/// all muted, i.e. the streams currently in underrun.
+fn rx_underrun_slots(settings: &Settings, mute: u8) -> u8 {
+    settings
+        .rx_streams
+        .values()
+        .filter(|rx| rx.id < 8)
+        .filter(|rx| {
+            let n = rx.channels.map_or(rx.ch_map.len(), |c| (c as usize).min(rx.ch_map.len()));
+            stream_underrun(&rx.ch_map[..n], mute, RX_MUTE_CHANNELS) == Some(true)
+        })
+        .fold(0, |m, rx| m | 1 << rx.id)
 }
 
 /// Join the FPGA's multicast groups (PTP + RX/TX streams) on the TAP, but only

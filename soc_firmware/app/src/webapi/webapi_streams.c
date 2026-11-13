@@ -228,11 +228,12 @@ static int get_rx_streams(struct webapi_request *req)
 	char discovered_name[AES67_STREAM_NAME_MAX];
 	char discovered_sender[AES67_STREAM_NAME_MAX];
 	struct in_addr discovered_sender_ip;
-	/* Per-stream underrun flags from the FPGA status CSR (streams 3..0;
-	 * the FPGA slot index equals the table index). */
-	uint32_t rx_underrun = (fpga_hal_read_status() &
-				FPGA_HAL_RX_UNDERRUN_MASK) >>
-			       FPGA_HAL_RX_UNDERRUN_SHIFT;
+	/* Per-stream underrun, derived from the FPGA's per-channel mute mask:
+	 * a stream whose mapped channels are all muted has underrun. */
+	uint32_t rx_underrun = aes67_conn_rx_underrun_mask(
+		(fpga_hal_read_status() & FPGA_HAL_RX_MUTE_MASK) >>
+			FPGA_HAL_RX_MUTE_SHIFT,
+		FPGA_HAL_RX_MUTE_CHANNELS);
 
 	jo_obj_begin(jo);
 	jo_key(jo, "rx_streams");
@@ -273,7 +274,7 @@ static int get_rx_streams(struct webapi_request *req)
 		jo_uint(jo, "channel_count", rxs[i].channel_count);
 		jo_uint(jo, "output_delay", rxs[i].output_delay);
 		jo_uint(jo, "samples_per_channel", rxs[i].samples_per_channel);
-		jo_bool(jo, "underrun", i < 4 && ((rx_underrun >> i) & 1U));
+		jo_bool(jo, "underrun", (rx_underrun >> i) & 1U);
 
 		jo_key(jo, "ch_map");
 		jo_arr_begin(jo);

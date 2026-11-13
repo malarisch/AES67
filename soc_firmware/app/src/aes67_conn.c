@@ -359,6 +359,52 @@ const struct aes67_rx_stream *aes67_conn_get_rx_streams(void)
 	return rx_streams;
 }
 
+uint32_t aes67_conn_rx_underrun_mask(uint32_t rx_mute, uint8_t mute_channels)
+{
+	uint32_t underrun = 0;
+
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		const struct aes67_rx_stream *s = &rx_streams[i];
+		unsigned int covered = 0, muted = 0;
+
+		if (!s->active) {
+			continue;
+		}
+		for (int j = 0; j < s->channel_count &&
+				j < AES67_MAX_CH_PER_STREAM; j++) {
+			if (s->ch_map[j] >= mute_channels) {
+				continue;
+			}
+			covered++;
+			muted += (rx_mute >> s->ch_map[j]) & 1U;
+		}
+		if (covered > 0 && muted == covered) {
+			underrun |= BIT(i);
+		}
+	}
+	return underrun;
+}
+
+uint32_t aes67_conn_rx_used_channels(void)
+{
+	uint32_t used = 0;
+
+	for (int i = 0; i < AES67_MAX_RX_STREAMS; i++) {
+		const struct aes67_rx_stream *s = &rx_streams[i];
+
+		if (!s->active) {
+			continue;
+		}
+		for (int j = 0; j < s->channel_count &&
+				j < AES67_MAX_CH_PER_STREAM; j++) {
+			if (s->ch_map[j] < 32) {
+				used |= BIT(s->ch_map[j]);
+			}
+		}
+	}
+	return used;
+}
+
 bool aes67_conn_copy_tx_stream(uint8_t stream_id, struct aes67_tx_stream *out)
 {
 	bool active;

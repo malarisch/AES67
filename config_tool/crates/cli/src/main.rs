@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 
 use aes67_client::RemoteDevice;
-use aes67_config::status::{RX_MUTE_CHANNELS, RX_UNDERRUN_STREAMS};
+use aes67_config::status::RX_MUTE_CHANNELS;
 use aes67_config::{
     ControlApi, CsrMap, Device, KernelTransport, PtpGrandmaster, RxStream, SpiTransport,
     StatusWord, SystemCfg, Transport, TxStream, UartTransport,
@@ -121,8 +121,8 @@ enum Command {
         #[arg(value_parser = parse_u32)]
         value: Option<u32>,
     },
-    /// Show the decoded FPGA status: link, PTP, RX stream underrun / muted
-    /// outputs, and the gateware build configuration.
+    /// Show the decoded FPGA status: link, PTP, underrun-muted RX outputs,
+    /// and the gateware build configuration.
     Status,
     /// Set PTP grandmaster announce parameters.
     Ptp(PtpArgs),
@@ -577,16 +577,16 @@ fn print_status(dev: &mut dyn ControlApi) -> Result<()> {
     }
     println!("wallclock config {}", yn(st.wallclock_configured()));
 
-    let (slots, chans) = gw.map_or((RX_UNDERRUN_STREAMS, RX_MUTE_CHANNELS), |g| {
-        (g.rx.max_streams.min(RX_UNDERRUN_STREAMS), g.rx.channels.min(RX_MUTE_CHANNELS))
-    });
-    if slots > 0 {
+    // Underrun shows up as muted outputs: a stream whose mapped channels are
+    // all muted has underrun (the gateware has no per-stream flag). Outputs no
+    // stream writes to report muted as well.
+    let chans = gw.map_or(RX_MUTE_CHANNELS, |g| g.rx.channels.min(RX_MUTE_CHANNELS));
+    if chans > 0 {
         println!(
-            "rx underrun      slot(s) {}   (monitored: slots 0..{})",
-            fmt_bits(st.rx_underrun_mask(), slots),
-            slots - 1
+            "rx muted outputs {}   (underrun or unused, monitored: channels 0..{})",
+            fmt_bits(st.rx_mute_mask(), chans),
+            chans - 1
         );
-        println!("rx muted outputs {}", fmt_bits(st.rx_mute_mask(), chans));
     }
 
     match gw {

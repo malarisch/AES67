@@ -9,6 +9,7 @@
 #include "../ui_display.h"
 #include "../ieee1588_utils.h"
 #include "../ptp_ctrl.h"
+#include "../aes67_conn.h"
 #include "../../drivers/fpga_hal/fpga_hal.h"
 
 int webapi_read_fpga_metrics(struct ui_fpga_metrics *m)
@@ -25,10 +26,15 @@ int webapi_read_fpga_metrics(struct ui_fpga_metrics *m)
 	m->speed_code = (status & FPGA_HAL_ETH_SPEED_MASK) >>
 			FPGA_HAL_ETH_SPEED_SHIFT;
 
-	m->rx_underrun = (status & FPGA_HAL_RX_UNDERRUN_MASK) >>
-			 FPGA_HAL_RX_UNDERRUN_SHIFT;
-	m->rx_mute     = (status & FPGA_HAL_RX_MUTE_MASK) >>
-			 FPGA_HAL_RX_MUTE_SHIFT;
+	uint32_t rx_mute = (status & FPGA_HAL_RX_MUTE_MASK) >>
+			   FPGA_HAL_RX_MUTE_SHIFT;
+
+	/* derived: stream is in underrun when all its channels are muted */
+	m->rx_underrun = aes67_conn_rx_underrun_mask(rx_mute,
+						     FPGA_HAL_RX_MUTE_CHANNELS);
+	/* The FPGA also reports every unused output as muted: show only the
+	 * channels an active stream should be feeding. */
+	m->rx_mute     = rx_mute & aes67_conn_rx_used_channels();
 
 	m->path_delay_ns = fpga_hal_read_path_delay();
 	m->leader_offset_ns = fpga_hal_read_ptp_offset();

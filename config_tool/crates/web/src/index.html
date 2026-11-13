@@ -204,6 +204,19 @@ function pill(el, on, onText, offText, neutral) {
 // Latest /api/status (RX table uses it for the per-stream underrun column).
 let lastStatus = null;
 
+// Underrun state of one RX stream, derived from the FPGA's per-channel mute
+// mask (the gateware has no per-stream flag): a stream whose mapped output
+// channels are all muted has underrun. Channels the mask doesn't cover are
+// ignored; null = no covered channel / no status yet.
+function rxUnderrun(s) {
+  const a = lastStatus && lastStatus.audio_rx;
+  if (!a) return null;
+  const map = (s.ch_map || []).slice(0, s.channels || undefined)
+    .filter(c => c < a.monitored_channels);
+  if (map.length === 0) return null;
+  return map.every(c => a.muted_channels.includes(c));
+}
+
 function chips(n, cls) {
   let h = '<span class="chips">';
   for (let i = 0; i < n; i++) h += `<span class="chip ${cls(i)}">${i}</span>`;
@@ -212,18 +225,23 @@ function chips(n, cls) {
 
 function renderAudioRx(s) {
   const a = s.audio_rx;
-  if (!a || a.monitored_streams === 0) {
+  if (!a || a.monitored_channels === 0) {
     $('rx-underrun').textContent = '–';
     $('rx-mute').textContent = '–';
     $('rx-hint').textContent = a ? 'gateware has no RX path' : '';
     return;
   }
-  if (a.underrun_streams.length === 0) pill($('rx-underrun'), true, 'none', '');
-  else pill($('rx-underrun'), false, '', 'slot ' + a.underrun_streams.join(', '));
+  const under = lastStreams.rx.filter(r => rxUnderrun(r) === true).map(r => r.id);
+  if (under.length === 0) pill($('rx-underrun'), true, 'none', '');
+  else pill($('rx-underrun'), false, '', 'slot ' + under.join(', '));
+  // The FPGA reports every output nobody writes as muted: flag only the
+  // outputs a subscribed stream should be feeding, grey out the unused ones.
   const muted = new Set(a.muted_channels);
-  $('rx-mute').innerHTML = chips(a.monitored_channels, i => muted.has(i) ? 'bad' : 'ok');
-  $('rx-hint').textContent = 'Underrun is reported for RX slots 0–' + (a.monitored_streams - 1) +
-    '; the FPGA mutes a stream\'s outputs until packets arrive again.';
+  const used = new Set(lastStreams.rx.flatMap(r => (r.ch_map || []).slice(0, r.channels || undefined)));
+  $('rx-mute').innerHTML = chips(a.monitored_channels,
+    i => !used.has(i) ? '' : muted.has(i) ? 'bad' : 'ok');
+  $('rx-hint').textContent = 'The FPGA mutes an output until packets arrive (monitored: outputs 0–' +
+    (a.monitored_channels - 1) + ', grey = no stream mapped); a stream with all its outputs muted is in underrun.';
 }
 
 function fmtPath(p) {
@@ -348,12 +366,11 @@ const STREAM_COLS = {
   ],
 };
 
-// Per-stream health from the status CSR: underrun flag of this RX slot (the
-// FPGA mutes the stream's outputs while it is set).
+// Per-stream health, derived from the status CSR's mute mask (see rxUnderrun).
 function rxHealth(s) {
-  const a = lastStatus && lastStatus.audio_rx;
-  if (!a || s.id >= a.monitored_streams) return '<span class="chip">n/a</span>';
-  return a.underrun_streams.includes(s.id)
+  const u = rxUnderrun(s);
+  if (u === null) return '<span class="chip">n/a</span>';
+  return u
     ? '<span class="pill bad">UNDERRUN · muted</span>'
     : '<span class="pill ok">OK</span>';
 }

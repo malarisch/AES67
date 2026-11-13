@@ -211,6 +211,32 @@ const struct aes67_tx_stream *aes67_conn_get_tx_streams(void);
 const struct aes67_rx_stream *aes67_conn_get_rx_streams(void);
 
 /**
+ * @brief Derive the per-stream RX underrun flags from the FPGA mute mask.
+ *
+ * The gateware has no per-stream underrun detector: it mutes every output
+ * channel whose last written sample the playout pointer has passed (and
+ * every channel that was never written since reset). An
+ * active RX stream whose mapped output channels are all muted has therefore
+ * underrun. Channels beyond @p mute_channels are not covered by the mask and
+ * are ignored; a stream without any covered channel reports no underrun.
+ *
+ * @param rx_mute        Per-channel mute mask (bit n = output channel n)
+ * @param mute_channels  Number of output channels the mask covers
+ * @return Bitmask, bit n = RX stream table index n is in underrun
+ */
+uint32_t aes67_conn_rx_underrun_mask(uint32_t rx_mute, uint8_t mute_channels);
+
+/**
+ * @brief Output channels that active RX streams are mapped to.
+ *
+ * The FPGA reports every output channel nobody writes as muted, so status
+ * displays mask the mute mask with this to show only real underruns.
+ *
+ * @return Bitmask, bit n = output channel n is fed by an active RX stream
+ */
+uint32_t aes67_conn_rx_used_channels(void);
+
+/**
  * @brief Copy one TX stream entry under the table lock.
  *
  * @return true if the entry is active (out filled in), false otherwise

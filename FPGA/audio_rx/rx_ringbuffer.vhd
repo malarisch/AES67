@@ -47,7 +47,6 @@ entity rx_ringbuffer is
         metering_clear_i : in std_logic;
 
 
-        stream_underrun_o : out std_logic_vector(max_streams - 1 downto 0);
         mute_channels_o   : out std_logic_vector(global_channel_count - 1 downto 0);
 
         -- ===== Simulation backdoor into sample_ram (see SIM_SAMPLE_RAM_BACKDOOR) =====
@@ -83,6 +82,15 @@ architecture Behavioral of rx_ringbuffer is
     constant CHANNEL_STRIDE : integer := SLOT_BYTES; -- 4
     constant SAMPLE_STRIDE  : integer := global_channel_count * SLOT_BYTES;
     constant SAMPLE_SHIFT   : integer := clog2(SAMPLE_STRIDE); -- log2(SAMPLE_STRIDE) for address computation
+    -- Width of an output channel index (channel map entries); at least 1 bit so a
+    -- single-channel build still has a valid vector. The config RAM carries one
+    -- byte per map entry, so up to 256 output channels are addressable.
+    function f_ch_idx_bits return positive is
+    begin
+        if global_channel_count <= 2 then return 1; end if;
+        return clog2(global_channel_count);
+    end function;
+    constant CH_IDX_BITS : integer := f_ch_idx_bits;
     constant SAMPLE_IDX_BITS : integer := ADDR_BITS - SAMPLE_SHIFT; -- bits of sample index within buffer (= clog2(audio_buffer_sample_depth))
 
     type t_s_parsePacket is (s_Idle, s_readHeader, s_prepare, s_readSampleData_wait, s_readSampleData, s_End);
@@ -94,11 +102,17 @@ architecture Behavioral of rx_ringbuffer is
     signal sample_ram : t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram;
 
-    type t_stream_last_wr_ptr is array (0 to MAX_STREAMS - 1) of unsigned(SAMPLE_IDX_BITS - 1 downto 0);
-    signal stream_last_wr_ptr : t_stream_last_wr_ptr := (others => (others => '0'));
-    signal stream_underrun : STD_LOGIC_VECTOR(max_streams - 1 downto 0);
-    signal stream_underrun_reset : STD_LOGIC_VECTOR(max_streams - 1 downto 0);
     signal mute_channels : std_logic_vector(global_channel_count-1 downto 0);
+    -- Per-output-channel underrun tracking: the parser reports every sample it writes
+    -- (channel + sample position), the tracker mutes a channel as soon as the read
+    -- pointer has passed its last written sample. There is no per-stream underrun
+    -- flag in the gateware: the host derives it from the mute mask (a subscribed
+    -- stream whose mapped channels are all muted has underrun).
+    type t_ch_last_wr_ptr is array (0 to global_channel_count - 1) of unsigned(SAMPLE_IDX_BITS - 1 downto 0);
+    signal ch_last_wr_ptr : t_ch_last_wr_ptr := (others => (others => '0'));
+    signal ch_wr_stb : std_logic := '0';
+    signal ch_wr_ch  : unsigned(CH_IDX_BITS - 1 downto 0) := (others => '0');
+    signal ch_wr_pos : unsigned(SAMPLE_IDX_BITS - 1 downto 0) := (others => '0');
     -- Synthesis attributes for Block RAM inference (Intel/Altera, Cyclone 10 LP = M9K blocks)
     attribute ramstyle : string;
     attribute ramstyle of stream_ram : signal is "no_rw_check";
@@ -164,12 +178,8 @@ architecture Behavioral of rx_ringbuffer is
     signal cached_delay : unsigned(7 downto 0) := (others => '0');
 
     -- Cached channel map from stream_ram (avoids repeated stream_ram reads during parsing)
-    type t_channel_map is array (0 to 7) of unsigned(3 downto 0); -- hardcoded 8 channels per stream, as maximum per AES67 spec
-    type t_global_channel_map is array (0 to max_streams-1) of t_channel_map; -- hardcoded 8 channels per stream, as maximum per AES67 spec
+    type t_channel_map is array (0 to 7) of unsigned(CH_IDX_BITS - 1 downto 0); -- hardcoded 8 channels per stream, as maximum per AES67 spec
     signal channel_map : t_channel_map := (others => (others => '0'));
-    signal global_channel_map : t_global_channel_map := (others => (others => (others=> '0')));
-    type t_global_stream_ch_count is array (0 to max_streams-1) of integer range 0 to 8;
-    signal global_stream_ch_count : t_global_stream_ch_count := (others => 0);
     signal metering_clear_i_sync1 : std_logic := '0';
     signal metering_clear_i_sync2 : std_logic := '0';
     signal metering_clear_last : std_logic := '0';
@@ -206,46 +216,30 @@ architecture Behavioral of rx_ringbuffer is
     constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
 begin
 
-    stream_underrun_o <= stream_underrun;
     mute_channels_o   <= mute_channels;
 
-    -- stream underrun detector
-    stream_underrun_detector: process (sys_clk, reset_n)
+    -- Per-channel mute. A channel is muted once the read pointer (media clock) has
+    -- passed the last sample written to it (modular distance, MSB set <=> write behind
+    -- read), and stays muted until the parser writes the channel again. Every channel
+    -- comes out of reset muted, so a channel that was never written (unused output, or
+    -- a subscribed stream that has not delivered a packet yet) reports muted as well.
+    ch_mute_proc: process (sys_clk, reset_n)
         variable dist : unsigned(SAMPLE_IDX_BITS - 1 downto 0);
     begin
         if (reset_n = '0') then
-            stream_underrun <= (others => '0');
+            mute_channels <= (others => '1');
         elsif (rising_edge(sys_clk)) then
-            for i in 0 to max_streams - 1 loop
-                -- modular distance: MSB set <=> wr pointer behind rd pointer
-                dist := stream_last_wr_ptr(i) - unsigned(media_clock_i(SAMPLE_IDX_BITS-1 downto 0));
-                if (global_stream_ch_count(i) > 0) then
-                    if (stream_underrun_reset(i) = '1') then stream_underrun(i) <= '0';
-                    elsif (dist(SAMPLE_IDX_BITS-1) = '1') then
-                    stream_underrun(i) <= '1';
+            for c in 0 to global_channel_count - 1 loop
+                dist := ch_last_wr_ptr(c) - unsigned(media_clock_i(SAMPLE_IDX_BITS-1 downto 0));
+                if (ch_wr_stb = '1' and to_integer(ch_wr_ch) = c) then
+                    ch_last_wr_ptr(c) <= ch_wr_pos;
+                    mute_channels(c)  <= '0';
+                elsif (dist(SAMPLE_IDX_BITS-1) = '1') then
+                    mute_channels(c) <= '1';
                 end if;
-            end if;
             end loop;
         end if;
     end process;
-
-         process (sys_clk)
-            variable v_mute : std_logic_vector(global_channel_count - 1 downto 0);
-         begin
-            if(rising_edge(sys_clk)) then
-                v_mute := (others => '0');
-                for s in 0 to max_streams - 1 loop
-                    if (global_stream_ch_count(s) > 0 and stream_underrun(s) = '1') then
-                        for c in 0 to 7 loop
-                            if (c < global_stream_ch_count(s)) then
-                                v_mute(to_integer(global_channel_map(s)(c))) := '1';
-                            end if;
-                        end loop;
-                    end if;
-                end loop;
-                mute_channels <= v_mute;
-            end if;
-         end process;
 
 
 
@@ -268,10 +262,11 @@ begin
             ram_read_wait <= '0';
             channel_map_idx <= 0;
             cached_delay <= (others => '0');
+            ch_wr_stb <= '0';
             
         elsif rising_edge(sys_clk) then
             sample_wr_en <= '0';
-            stream_underrun_reset <= (others => '0');
+            ch_wr_stb <= '0';
             -- ======== Packet parser state machine ========
             case packetParserState is
                 when s_Idle =>
@@ -395,7 +390,7 @@ begin
 
                         when 4 =>
                             -- Latch channel map entry, advance to next
-                            channel_map(channel_map_idx) <= unsigned(stream_rd_data_r(3 downto 0));
+                            channel_map(channel_map_idx) <= unsigned(stream_rd_data_r(CH_IDX_BITS - 1 downto 0));
                             if channel_map_idx = 7 then
                                 -- All 8 channel map entries cached, read channel_count (offset +14)
                                 stream_rd_addr <= to_unsigned(config_ram_read_ptr + 14, 8);
@@ -407,7 +402,6 @@ begin
                             end if;
 
                         when 5 =>
-                            global_channel_map(config_ram_read_ptr/32) <= channel_map;
                             -- Wait for channel_count data (2 cycles)
                             if ram_read_wait = '0' then
                                 ram_read_wait <= '1';
@@ -426,7 +420,6 @@ begin
 
                         when 7 =>
                             -- Wait for delay data (2 cycles)
-                            global_stream_ch_count(config_ram_read_ptr/32) <= current_stream_channel_count;
                             if ram_read_wait = '0' then
                                 ram_read_wait <= '1';
                             else
@@ -515,6 +508,11 @@ begin
                             wr_addr_current <= wr_addr_current + 1;
                         else
                             byte_count_parser <= 0;
+                            -- Last byte of this channel's sample is being written:
+                            -- report channel + sample position to the mute tracker.
+                            ch_wr_stb <= '1';
+                            ch_wr_ch  <= channel_map(current_read_channel_index);
+                            ch_wr_pos <= wr_addr_sample_base(ADDR_BITS - 1 downto SAMPLE_SHIFT);
                             if current_read_channel_index < current_stream_channel_count - 1 then
                                 current_read_channel_index <= current_read_channel_index + 1;
                                 -- Jump to next channel's MSB byte (offset 0) using cached channel_map
@@ -532,8 +530,6 @@ begin
                                         + resize(channel_map(0) & "00", ADDR_BITS);
                                     wr_addr_current <= v_channel_addr;
                                 else
-                                    stream_last_wr_ptr(config_ram_read_ptr/32) <= wr_sample_pos + current_packet_sample_index;
-                                    stream_underrun_reset(config_ram_read_ptr/32) <= '1';
                                     current_packet_sample_index <= 0;
                                     packetParserState <= s_End;
                                 end if;

@@ -92,7 +92,6 @@ component litex_soc_aes67_bridge
     aes67_ctrl_eth_link_up : in std_logic;
     aes67_ctrl_eth_reset : out std_logic;
     aes67_ctrl_eth_rx_overflow : in std_logic;
-    aes67_ctrl_rx_underrun : in std_logic_vector    (3 downto 0);
     aes67_ctrl_rx_mute : in std_logic_vector    (7 downto 0);
     aes67_ctrl_eth_speed : in std_logic_vector     (1 downto 0);
     aes67_ctrl_eth_tx_done : in std_logic;
@@ -259,7 +258,6 @@ signal mac_tx_busy: std_logic;
 signal mac_tx_byte_sent: std_logic;
 signal mac_speed : STD_LOGIC_VECTOR(1 downto 0);
 signal mac_linkup : STD_LOGIC;
-signal rx_stream_underrun : STD_LOGIC_VECTOR(3 downto 0);
 signal rx_mute_channels : STD_LOGIC_VECTOR(7 downto 0);
 
 
@@ -319,7 +317,6 @@ begin
      port map(
         aes67_ctrl_eth_link_up => mac_linkup,
         aes67_ctrl_eth_rx_overflow => mcu_rx_overflow,
-        aes67_ctrl_rx_underrun => rx_stream_underrun,
         aes67_ctrl_rx_mute => rx_mute_channels,
         aes67_ctrl_eth_speed => mac_speed,
         aes67_ctrl_eth_tx_done => mcu_tx_done,
@@ -528,7 +525,6 @@ begin
         audio_rx_cfg_wr_addr_i => audio_rx_cfg_wr_addr_i,
         tdm_out => tdm_out,
         rx_sample_register => rx_sample_register,
-        rx_stream_underrun_o => rx_stream_underrun,
         rx_mute_channels_o => rx_mute_channels,
         tdm_in => tdm_in,
         tx_sample_register => tx_sample_register,

@@ -19,7 +19,8 @@ struct ui_fpga_metrics {
 	int32_t correction_ppb;
 	uint32_t cycle;
 	uint32_t outliers;
-	/* RX stream-underrun diagnostics: per-stream flags / per-channel mute */
+	/* RX underrun diagnostics: per-channel mute (FPGA) and the per-stream
+	 * flags derived from it (bit n = RX stream n, all channels muted) */
 	uint8_t rx_underrun;
 	uint8_t rx_mute;
 };

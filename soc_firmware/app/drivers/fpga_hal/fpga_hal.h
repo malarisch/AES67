@@ -38,13 +38,13 @@ extern "C" {
 #define FPGA_HAL_PTP_IS_LEADER       BIT(11)
 #define FPGA_HAL_PTP_IS_FOLLOWER     BIT(12)
 
-/* RX stream-underrun diagnostics: per-stream underrun flags (streams 3..0)
- * and the resulting per-channel underrun-mute mask (channels 7..0). Layout
- * mirrors the FPGA status CSR; 0 on backends without the fields. */
-#define FPGA_HAL_RX_UNDERRUN_SHIFT   16
-#define FPGA_HAL_RX_UNDERRUN_MASK    (0xFUL << FPGA_HAL_RX_UNDERRUN_SHIFT)
+/* RX underrun diagnostics: per-channel underrun-mute mask (channels 7..0).
+ * Layout mirrors the FPGA status CSR; 0 on backends without the field.
+ * There is no per-stream flag: a stream whose mapped channels are all muted
+ * has underrun (aes67_conn_rx_underrun_mask()). */
 #define FPGA_HAL_RX_MUTE_SHIFT       20
 #define FPGA_HAL_RX_MUTE_MASK        (0xFFUL << FPGA_HAL_RX_MUTE_SHIFT)
+#define FPGA_HAL_RX_MUTE_CHANNELS    8
 
 /* ---- Control flags (backend-independent) ---- */
 #define FPGA_HAL_CTRL_PPB_START       BIT(0)
