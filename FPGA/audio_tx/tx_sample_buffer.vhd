@@ -92,6 +92,7 @@ architecture Behavioral of tx_sample_buffer is
     constant AUDIO_BUFFER_LENGTH : integer := samples_per_channel_depth * global_channel_count * SLOT_BYTES;
     constant ADDR_BITS       : integer := clog2(AUDIO_BUFFER_LENGTH);
     constant SAMPLE_IDX_BITS : integer := ADDR_BITS - SAMPLE_SHIFT; -- = clog2(samples_per_channel_depth)
+    constant TDM_CH_BITS     : integer := SAMPLE_SHIFT - clog2(SLOT_BYTES); -- channel index of the TDM write address (all pins)
 
     type t_sample_ram is array (0 to AUDIO_BUFFER_LENGTH - 1) of std_logic_vector(7 downto 0);
    	signal sample_ram		: t_sample_ram := (others => (others => '0'));
@@ -330,18 +331,13 @@ begin
                 end if;
             end if;
         end process;
-        ram_wr_addr <= to_integer(
-                    media_clock_latch2 -- time index
-                    & (tdm_bit_counter(tdm_bit_counter'length -1 downto 5) -- channel index per tdm
-                     + (demux_pin * TDM_CONFIG.tdm_channels)) -- add the corresponding demux offset
-                    & tdm_bit_counter(4 downto 3)); -- byte index
-                    
         tdm_write_proc: process(sys_clk, reset_n)
         begin
             if reset_n = '0' then
                 demux_pin <= 0;
                 ram_wr_en <= '0';
                 ram_wr_data <= (others => '0');
+                ram_wr_addr <= 0;
                 demux_state <= ds_idle;
                 write_active <= '0';
             elsif rising_edge(sys_clk) then
@@ -361,6 +357,11 @@ begin
 
                     when ds_write =>
                         ram_wr_data <= tdm_shift(demux_pin);
+                        ram_wr_addr <= to_integer(
+                            media_clock_latch2 -- time index
+                            & (resize(tdm_bit_counter(tdm_bit_counter'length - 1 downto 5), TDM_CH_BITS) -- channel index within the pin
+                               + to_unsigned(demux_pin * TDM_CONFIG.tdm_channels, TDM_CH_BITS)) -- first channel of the pin
+                            & tdm_bit_counter(4 downto 3)); -- byte index
                         ram_wr_en <= '1';
 
                         if demux_pin = TDM_INPUTS - 1 then
