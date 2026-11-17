@@ -43,6 +43,9 @@ from aes67_soc import (
     SpiboneLatticeStubPlatform,
     UartboneLatticeStubPlatform,
     BridgeLatticeStubPlatform,
+    SpiboneXilinxStubPlatform,
+    UartboneXilinxStubPlatform,
+    BridgeXilinxStubPlatform,
 )
 
 
@@ -58,15 +61,20 @@ DEFAULT_SYS_CLK_FREQ = {"cyclone10": 75e6, "cyc1000": 75e6, "gowin": 75e6,
 # The device-agnostic CPU-less targets (spibone / uartbone / aes67_bridge) can
 # be generated for different FPGA vendor families.  The SoC logic is byte-for-byte
 # identical across families — only the AsyncResetSynchronizer primitive differs
-# (Altera `DFF` vs ECP5/Diamond `FD1S3BX`), because that is the one vendor cell
-# LiteX bakes into the SoC; the PLL lives in the top-level FPGA design (see crg.py).
+# (Altera `DFF` vs ECP5/Diamond `FD1S3BX` vs Xilinx `FDPE`), because that is the
+# one vendor cell LiteX bakes into the SoC; the PLL lives in the top-level FPGA
+# design (see crg.py).  'xilinx' targets Spartan-3A / ISE and additionally emits
+# the spibone MISO tristate as an `IOBUF`.
 # Vendor-specific targets (cyclone10 / cyc1000 / gowin) carry vendor RAM/PLL glue
 # and ignore --family.
-FAMILIES = ["altera", "lattice"]
+FAMILIES = ["altera", "lattice", "xilinx"]
 FAMILY_PLATFORMS = {
-    "spibone":      {"altera": SpiboneStubPlatform,  "lattice": SpiboneLatticeStubPlatform},
-    "uartbone":     {"altera": UartboneStubPlatform, "lattice": UartboneLatticeStubPlatform},
-    "aes67_bridge": {"altera": BridgeStubPlatform,   "lattice": BridgeLatticeStubPlatform},
+    "spibone":      {"altera": SpiboneStubPlatform,  "lattice": SpiboneLatticeStubPlatform,
+                     "xilinx": SpiboneXilinxStubPlatform},
+    "uartbone":     {"altera": UartboneStubPlatform, "lattice": UartboneLatticeStubPlatform,
+                     "xilinx": UartboneXilinxStubPlatform},
+    "aes67_bridge": {"altera": BridgeStubPlatform,   "lattice": BridgeLatticeStubPlatform,
+                     "xilinx": BridgeXilinxStubPlatform},
 }
 
 
@@ -208,7 +216,7 @@ def _build_target(target, args):
 def main():
     parser = argparse.ArgumentParser(description="Generate AES67 VexRiscV SoC HDL")
     parser.add_argument("--target",             default=None, choices=ALL_TARGETS, help="Target FPGA platform (default: build all)")
-    parser.add_argument("--family",             default="altera", choices=FAMILIES, help="FPGA vendor family for the device-agnostic CPU-less targets (spibone/uartbone/aes67_bridge). 'lattice' emits the ECP5/Diamond reset-FF primitive (FD1S3BX) instead of the Altera DFF; output goes to build/<target>_<family>/. Ignored for vendor-specific targets.")
+    parser.add_argument("--family",             default="altera", choices=FAMILIES, help="FPGA vendor family for the device-agnostic CPU-less targets (spibone/uartbone/aes67_bridge). 'lattice' emits the ECP5/Diamond reset-FF primitive (FD1S3BX) instead of the Altera DFF, 'xilinx' the Spartan-3A/ISE unisim cells (FDPE, IOBUF); output goes to build/<target>_<family>/. Ignored for vendor-specific targets.")
     parser.add_argument("--sys-clk-freq",       default=None,  type=float, help="System clock frequency (Hz). Default: 75 MHz for all targets (must match top-level PLL output).")
     parser.add_argument("--with-hyperram",      action="store_true", default=True,       help="Enable HyperRAM support (cyclone10 only)")
     parser.add_argument("--sram-size",          default=4,     type=int,   help="SRAM size in KB (default: 4)")

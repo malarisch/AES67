@@ -11,6 +11,7 @@ from litex.build.generic_platform import Pins, Subsignal, IOStandard
 from litex.build.altera import AlteraPlatform
 from litex.build.gowin.platform import GowinPlatform
 from litex.build.lattice import LatticePlatform
+from litex.build.xilinx import XilinxPlatform
 
 
 # -- Shared I/O: everything except clock and main RAM (identical across targets) --
@@ -451,6 +452,54 @@ class BridgeLatticeStubPlatform(LatticePlatform):
 
     def build(self, fragment, **kwargs):
         return _stub_build(self, fragment, **kwargs)
+
+
+# -- Xilinx (Spartan-3A / ISE) stub platforms ---------------------------------
+#
+# Xilinx counterpart of the device-agnostic CPU-less stubs, so LiteX lowers
+# migen's AsyncResetSynchronizer to the unisim `FDPE` flip-flop (and the spibone
+# MISO tristate to an `IOBUF`) instead of the Altera `DFF` primitive.
+#
+# LiteX has no dedicated Spartan-3 family: an ``xc3s*`` device selects only the
+# family-independent Xilinx overrides (FDPE / IOBUF / MultiReg attributes), which
+# is exactly what Spartan-3A needs -- none of the Spartan-6 / 7-series IO cells
+# (ODDR2, IDELAYE2, ...) can leak into the output.  The ISE toolchain object is
+# only used for its attribute translation (``async_reg`` & co. are dropped,
+# ``no_shreg_extract`` becomes XST's ``shreg_extract = "no"``); ISE itself is
+# never invoked.  The device string is irrelevant for HDL-only generation; pick
+# the real part in the ISE project.
+_XILINX_STUB_DEVICE = "xc3s700a-fg484-4"
+
+
+class _XilinxStubPlatform(XilinxPlatform):
+    """Common base of the Xilinx (Spartan-3A) HDL-only stubs."""
+    default_clk_name   = "clk_sys"
+    default_clk_period = 1e9 / 75e6
+    _io                = None
+
+    def __init__(self):
+        XilinxPlatform.__init__(self, _XILINX_STUB_DEVICE, self._io, toolchain="ise")
+
+    def create_programmer(self):
+        raise NotImplementedError
+
+    def build(self, fragment, **kwargs):
+        return _stub_build(self, fragment, **kwargs)
+
+
+class SpiboneXilinxStubPlatform(_XilinxStubPlatform):
+    """Xilinx/ISE counterpart of :class:`SpiboneStubPlatform`."""
+    _io = _io_spibone
+
+
+class UartboneXilinxStubPlatform(_XilinxStubPlatform):
+    """Xilinx/ISE counterpart of :class:`UartboneStubPlatform`."""
+    _io = _io_uartbone
+
+
+class BridgeXilinxStubPlatform(_XilinxStubPlatform):
+    """Xilinx/ISE counterpart of :class:`BridgeStubPlatform`."""
+    _io = _io_bridge
 
 
 class Cyc1000StubPlatform(AlteraPlatform):
