@@ -40,7 +40,8 @@ entity rx_ringbuffer is
 
         stream_config_wr_clk_i: in std_logic;
         stream_config_wr_en_i: in std_logic;
-        stream_config_addr_i: in std_logic_vector(7 downto 0);
+        -- stream config bus address: slot * 32 + byte offset, up to 32 slots
+        stream_config_addr_i: in std_logic_vector(9 downto 0);
         stream_config_data_i: in std_logic_vector(7 downto 0);
         metering_signal_o : out std_logic_vector(global_channel_count - 1 downto 0);
         metering_clip_o : out std_logic_vector(global_channel_count - 1 downto 0);
@@ -97,7 +98,17 @@ architecture Behavioral of rx_ringbuffer is
     signal packetParserState : t_s_parsePacket := s_Idle;
 
     type t_sample_ram is array (0 to AUDIO_BUFFER_LENGTH - 1) of std_logic_vector(7 downto 0);
-    type t_stream_ram is array (0 to 255) of std_logic_vector(7 downto 0);
+    -- Stream config RAM: 32 bytes per slot, max_streams slots (rounded up to a
+    -- power of two; at least one slot).
+    constant CFG_ADDR_BITS : integer := 5 + clog2(max_streams);
+    constant CFG_RAM_DEPTH : integer := 2**CFG_ADDR_BITS;
+    type t_stream_ram is array (0 to CFG_RAM_DEPTH - 1) of std_logic_vector(7 downto 0);
+    -- RAM read address from an integer byte address; the slot scan's final
+    -- "one past the last slot" address simply wraps (it is never used).
+    function cfg_addr(a : natural) return unsigned is
+    begin
+        return to_unsigned(a mod CFG_RAM_DEPTH, CFG_ADDR_BITS);
+    end function;
 
     signal sample_ram : t_sample_ram := (others => (others => '0'));
     signal stream_ram : t_stream_ram;
@@ -120,7 +131,7 @@ architecture Behavioral of rx_ringbuffer is
     -- Synchronous read port for stream_ram
     -- Two-stage pipeline: stream_rd_data (RAM output reg) -> stream_rd_data_r (user reg)
     -- This breaks the timing path from RAM to comparison logic
-    signal stream_rd_addr : unsigned(7 downto 0) := (others => '0');
+    signal stream_rd_addr : unsigned(CFG_ADDR_BITS - 1 downto 0) := (others => '0');
     signal stream_rd_data : std_logic_vector(7 downto 0) := (others => '0'); -- RAM output register
     signal stream_rd_data_r : std_logic_vector(7 downto 0) := (others => '0'); -- Pipeline register for comparison
 
@@ -215,6 +226,10 @@ architecture Behavioral of rx_ringbuffer is
     constant CLIP_THRESHOLD   : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#640000#, SAMPLE_BITS - 1);
     constant SIGNAL_THRESHOLD : unsigned(SAMPLE_BITS - 2 downto 0) := to_unsigned(16#004000#, SAMPLE_BITS - 1);
 begin
+
+    assert max_streams >= 1 and max_streams <= 32
+        report "rx_ringbuffer: max_streams must be 1..32 (10-bit stream config address)"
+        severity failure;
 
     mute_channels_o   <= mute_channels;
 
@@ -328,7 +343,7 @@ begin
                             config_ram_read_ptr <= 0;
                             comp_byte := 0;
                             -- Present first read address to stream_ram
-                            stream_rd_addr <= to_unsigned(0, 8);
+                            stream_rd_addr <= cfg_addr(0);
                             prepare_step <= 1;
 
                         when 1 =>
@@ -348,12 +363,12 @@ begin
                                 if comp_byte < 4 then
                                     if stream_rd_data_r = current_packet_dst_ip(31 - comp_byte * 8 downto 24 - comp_byte * 8) then
                                         comp_byte := comp_byte + 1;
-                                        stream_rd_addr <= to_unsigned(config_ram_read_ptr + comp_byte, 8);
+                                        stream_rd_addr <= cfg_addr(config_ram_read_ptr + comp_byte);
                                         prepare_step <= 1;
                                     else
                                         comp_byte := 0;
                                         config_ram_read_ptr <= config_ram_read_ptr + 32;
-                                        stream_rd_addr <= to_unsigned(config_ram_read_ptr + 32, 8);
+                                        stream_rd_addr <= cfg_addr(config_ram_read_ptr + 32);
                                         prepare_step <= 1;
                                     end if;
                                 else
@@ -363,17 +378,17 @@ begin
                                             -- Match found! Start caching channel map
                                             channel_map_idx <= 0;
                                             -- Present address for first channel map entry (offset +6)
-                                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + 6, 8);
+                                            stream_rd_addr <= cfg_addr(config_ram_read_ptr + 6);
                                             prepare_step <= 3;
                                         else
                                             comp_byte := comp_byte + 1;
-                                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + comp_byte, 8);
+                                            stream_rd_addr <= cfg_addr(config_ram_read_ptr + comp_byte);
                                             prepare_step <= 1;
                                         end if;
                                     else
                                         comp_byte := 0;
                                         config_ram_read_ptr <= config_ram_read_ptr + 32;
-                                        stream_rd_addr <= to_unsigned(config_ram_read_ptr + 32, 8);
+                                        stream_rd_addr <= cfg_addr(config_ram_read_ptr + 32);
                                         prepare_step <= 1;
                                     end if;
                                 end if;
@@ -393,11 +408,11 @@ begin
                             channel_map(channel_map_idx) <= unsigned(stream_rd_data_r(CH_IDX_BITS - 1 downto 0));
                             if channel_map_idx = 7 then
                                 -- All 8 channel map entries cached, read channel_count (offset +14)
-                                stream_rd_addr <= to_unsigned(config_ram_read_ptr + 14, 8);
+                                stream_rd_addr <= cfg_addr(config_ram_read_ptr + 14);
                                 prepare_step <= 5;
                             else
                                 channel_map_idx <= channel_map_idx + 1;
-                                stream_rd_addr <= to_unsigned(config_ram_read_ptr + 6 + channel_map_idx + 1, 8);
+                                stream_rd_addr <= cfg_addr(config_ram_read_ptr + 6 + channel_map_idx + 1);
                                 prepare_step <= 3;
                             end if;
 
@@ -415,7 +430,7 @@ begin
                             current_stream_channel_count <= to_integer(unsigned(stream_rd_data_r));
                             
                             
-                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + 15, 8);
+                            stream_rd_addr <= cfg_addr(config_ram_read_ptr + 15);
                             prepare_step <= 7;
 
                         when 7 =>
@@ -430,7 +445,7 @@ begin
                         when 8 =>
                             -- Latch delay, read samples_per_channel (offset +16)
                             cached_delay <= unsigned(stream_rd_data_r);
-                            stream_rd_addr <= to_unsigned(config_ram_read_ptr + 16, 8);
+                            stream_rd_addr <= cfg_addr(config_ram_read_ptr + 16);
                             prepare_step <= 9;
 
                         when 9 =>
@@ -911,8 +926,10 @@ end generate;
     process(stream_config_wr_clk_i)
     begin
         if rising_edge(stream_config_wr_clk_i) then
-            if stream_config_wr_en_i = '1' then
-                stream_ram(to_integer(unsigned(stream_config_addr_i))) <= stream_config_data_i;
+            -- writes beyond the implemented slots are ignored
+            if stream_config_wr_en_i = '1'
+               and to_integer(unsigned(stream_config_addr_i)) < CFG_RAM_DEPTH then
+                stream_ram(to_integer(unsigned(stream_config_addr_i(CFG_ADDR_BITS - 1 downto 0)))) <= stream_config_data_i;
             end if;
         end if;
     end process;

@@ -24,6 +24,11 @@ entity tx_transmitter is
     src_mac_address : in std_logic_vector(47 downto 0);
     src_ip_address  : in std_logic_vector(31 downto 0);
     dst_ip_address  : in std_logic_vector(31 downto 0);
+    -- Unicast addressing from the stream config. dst_mac_address is only used
+    -- when dst_ip_address is not multicast (224.0.0.0/4 derives the group MAC
+    -- 01:00:5E:xx:xx:xx); dst_udp_port = 0 selects the default RTP port 5004.
+    dst_mac_address : in std_logic_vector(47 downto 0) := (others => '0');
+    dst_udp_port    : in std_logic_vector(15 downto 0) := (others => '0');
     tx_clk          : in std_logic;
     tx_byte_sent    : in std_logic;
     sample_counter  : in std_logic_vector(31 downto 0) := (others => '0');
@@ -125,9 +130,17 @@ architecture Behavioral of tx_transmitter is
   signal SM_AssemblePacket : t_SM_AssemblePacket := s_A_Idle;
 
   signal read_base : integer range 0 to AUDIO_BUFFER_LENGTH - 1 := 0;
+
+  -- Effective L2/L4 destination of the packet being assembled (registered in
+  -- s_A_CalcValues, before the first header byte is written).
+  constant DEFAULT_RTP_PORT : std_logic_vector(15 downto 0) := x"138C"; -- 5004
+  signal eff_dst_mac  : std_logic_vector(47 downto 0) := (others => '0');
+  signal eff_dst_port : std_logic_vector(15 downto 0) := DEFAULT_RTP_PORT;
   -- Helper declarations
   function get_header_byte(
     idx                    : integer;
+    dst_mac                : std_logic_vector(47 downto 0);
+    dst_port               : std_logic_vector(15 downto 0);
     src_mac                : std_logic_vector(47 downto 0);
     src_ip                 : std_logic_vector(31 downto 0);
     dst_ip                 : std_logic_vector(31 downto 0);
@@ -146,12 +159,12 @@ architecture Behavioral of tx_transmitter is
     case idx is
 
         -- ethernet
-      when 0  => return x"01";
-      when 1  => return x"00";
-      when 2  => return x"5E";
-      when 3  => return b"0" & dst_ip(22 downto 16);
-      when 4  => return dst_ip(15 downto 8);
-      when 5  => return dst_ip(7 downto 0);
+      when 0  => return dst_mac(47 downto 40);
+      when 1  => return dst_mac(39 downto 32);
+      when 2  => return dst_mac(31 downto 24);
+      when 3  => return dst_mac(23 downto 16);
+      when 4  => return dst_mac(15 downto 8);
+      when 5  => return dst_mac(7 downto 0);
       when 6  => return src_mac(47 downto 40);
       when 7  => return src_mac(39 downto 32);
       when 8  => return src_mac(31 downto 24);
@@ -186,8 +199,8 @@ architecture Behavioral of tx_transmitter is
         -- udp
       when 34 => return x"13";
       when 35 => return x"8c";
-      when 36 => return x"13";
-      when 37 => return x"8c";
+      when 36 => return dst_port(15 downto 8);
+      when 37 => return dst_port(7 downto 0);
       when 38 => return udp_length(15 downto 8);
       when 39 => return udp_length(7 downto 0);
       when 40 => return x"00";
@@ -543,6 +556,20 @@ begin
 
           frame_write_index <= 0;
 
+          -- Destination MAC: a multicast group address maps straight onto its
+          -- Ethernet group MAC (RFC 1112); a unicast destination needs the
+          -- next-hop MAC the host resolved and stored in the stream config.
+          if (dst_ip_address(31 downto 28) = "1110") then
+            eff_dst_mac <= x"01005E" & '0' & dst_ip_address(22 downto 0);
+          else
+            eff_dst_mac <= dst_mac_address;
+          end if;
+          if (dst_udp_port = x"0000") then
+            eff_dst_port <= DEFAULT_RTP_PORT;
+          else
+            eff_dst_port <= dst_udp_port;
+          end if;
+
           -- Seed the UDP accumulator with the UDP/IPv4 pseudo-header sum. The
           -- dedicated udp_checksum_proc loads this on the next edge (csum_arm)
           -- and then folds every byte written from UDP_FIRST onward. The IP
@@ -565,7 +592,7 @@ begin
           packet_wr_addr <= frame_write_index;
           if (frame_write_index < PACKET_HEADER_LENGTH) then
 
-            header_data := get_header_byte(frame_write_index, src_mac_address, src_ip_address,
+            header_data := get_header_byte(frame_write_index, eff_dst_mac, eff_dst_port, src_mac_address, src_ip_address,
               dst_ip_address, sequence_id_in, sample_counter, samples_per_packet_per_channel_i,
               channel_count_i, ssrc_i, std_logic_vector(to_unsigned(IP_HEADER_LENGTH + UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)),
               std_logic_vector(to_unsigned(UDP_HEADER_LENGTH + UDP_PAYLOAD_LENGTH, 16)));

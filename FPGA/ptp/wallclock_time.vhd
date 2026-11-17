@@ -144,6 +144,7 @@ begin
     end process;
 
     time_proc: process(clk, reset_n)
+        variable sec_addend : unsigned(47 downto 0);
     begin
         if reset_n = '0' then
             second_pulse_int   <= '0';
@@ -160,11 +161,23 @@ begin
 
             -- ===== STAGE 4: Apply delayed seconds rollover =====
             -- sec_adj_pipe was written by Stage 3b in the PREVIOUS cycle.
-            if sec_adj_pipe = 1 then
-                sec_reg <= sec_reg + 1;
-                second_pulse_int <= '1';
+            -- The seconds are updated by ONE 48-bit adder whose addend is
+            -- selected first (jump offset or the +-1 rollover). Separate
+            -- "sec_reg +- 1" and "sec_reg + seconds_i" adders ended up
+            -- chained behind each other and missed 100 MHz on the ECP5.
+            if jump_i = '1' then
+                sec_addend := unsigned(seconds_i);      -- jump drops a pending rollover
+            elsif sec_adj_pipe = 1 then
+                sec_addend := to_unsigned(1, 48);
             elsif sec_adj_pipe = -1 then
-                sec_reg <= sec_reg - 1;
+                sec_addend := (others => '1');          -- -1
+            else
+                sec_addend := (others => '0');
+            end if;
+            sec_reg <= sec_reg + sec_addend;            -- set_i overrides below
+
+            if sec_adj_pipe = 1 then
+                second_pulse_int <= '1';
             end if;
             -- Default for this cycle (may be overwritten below)
             sec_adj_pipe <= 0;
@@ -181,7 +194,7 @@ begin
 
             elsif jump_i = '1' then
                 nsec_reg           <= nsec_reg + resize(signed(nanoseconds_i), 32);
-                sec_reg            <= unsigned(signed(sec_reg) + signed(seconds_i));
+                -- sec_reg: seconds_i is added by the shared adder in Stage 4
                 new_nsec_pipe      <= new_nsec_pipe + resize(signed(nanoseconds_i), 32);
                 new_nsec_minus_sec <= new_nsec_minus_sec + resize(signed(nanoseconds_i), 32) - NS_PER_SEC;
                 new_nsec_plus_sec  <= new_nsec_plus_sec + resize(signed(nanoseconds_i), 32) + NS_PER_SEC;

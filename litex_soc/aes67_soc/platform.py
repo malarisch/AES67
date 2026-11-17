@@ -144,14 +144,14 @@ _io_common = [
     # TX stream config RAM (SoC writes, tx_router reads via FPGA-side port)
     ("tx_stream_cfg", 0,
         Subsignal("wr_en",   Pins(1)),   # output: write enable
-        Subsignal("wr_addr", Pins(8)),   # output: write address (0..255)
+        Subsignal("wr_addr", Pins(10)),  # output: write address (slot*32 + byte, 0..1023)
         Subsignal("wr_data", Pins(8)),   # output: write data
     ),
 
     # RX stream config RAM (SoC writes, rx_ringbuffer reads via FPGA-side port)
     ("rx_stream_cfg", 0,
         Subsignal("wr_en",   Pins(1)),   # output: write enable
-        Subsignal("wr_addr", Pins(8)),   # output: write address (0..255)
+        Subsignal("wr_addr", Pins(10)),  # output: write address (slot*32 + byte, 0..1023)
         Subsignal("wr_data", Pins(8)),   # output: write data
     ),
 

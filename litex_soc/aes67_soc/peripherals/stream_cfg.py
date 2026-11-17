@@ -7,11 +7,14 @@ from litex.soc.interconnect.csr import AutoCSR
 from litex.soc.interconnect import wishbone
 
 
-# -- Stream Configuration RAM (256 bytes, CPU writes, FPGA reads) ------------
+# -- Stream Configuration RAM (1024 bytes, CPU writes, FPGA reads) -----------
 
 class StreamConfigRAM(LiteXModule, AutoCSR):
     """
-    256-byte configuration RAM for audio stream parameters.
+    Configuration RAM port for audio stream parameters: 32 bytes per stream
+    slot, up to 32 slots (1024 byte addresses).  How many slots a bitstream
+    really implements is its system config (``system_cfg_{rx,tx}`` CSRs);
+    writes to slots beyond that are ignored by the FPGA-side RAMs.
 
     CPU writes via Wishbone (sys clock domain).  The FPGA side gets a
     registered copy of every write as wr_en/wr_addr/wr_data output signals,
@@ -21,15 +24,15 @@ class StreamConfigRAM(LiteXModule, AutoCSR):
     storage — this module just forwards CPU writes to them.  No read-back
     from the FPGA side is needed (write-only from SoC perspective).
 
-    Wishbone address map: 256 byte addresses (1 byte per 32-bit word).
+    Wishbone address map: 1024 byte addresses (1 byte per 32-bit word).
     """
     def __init__(self):
         # -- FPGA-side output signals (directly connected to config RAM write port) --
         self.o_wr_en   = Signal()
-        self.o_wr_addr = Signal(8)
+        self.o_wr_addr = Signal(10)
         self.o_wr_data = Signal(8)
 
-        # -- Wishbone slave (write-only, 256 addresses) --
+        # -- Wishbone slave (write-only, 1024 addresses) --
         self.bus = wishbone.Interface(data_width=32, adr_width=10)
         wb = self.bus
 
@@ -38,7 +41,7 @@ class StreamConfigRAM(LiteXModule, AutoCSR):
             self.o_wr_en.eq(0),
             If(wb.cyc & wb.stb & wb.we,
                 self.o_wr_en.eq(1),
-                self.o_wr_addr.eq(wb.adr[:8]),
+                self.o_wr_addr.eq(wb.adr[:10]),
                 self.o_wr_data.eq(wb.dat_w[:8]),
             ),
         ]
@@ -67,7 +70,7 @@ def add_stream_cfg(soc, platform, name, pads_name, origin):
     """
     cfg = getattr(soc, name)
     soc.bus.add_slave(name, slave=cfg.bus,
-        region=SoCRegion(origin=origin, size=1024, cached=False))
+        region=SoCRegion(origin=origin, size=4096, cached=False))
 
     cfg_pads = platform.request(pads_name)
     soc.comb += [

@@ -117,16 +117,16 @@ package audioclks_pkg is
         tdm_channels => 2
     );
     constant tdm8_adc_config : t_audio_clock_io_cfg := (
-        data_is_valid_on_rising_bclk_edge => true,
+        data_is_valid_on_rising_bclk_edge => false,
         bits_are_right_shifted_to_fs => true,
-        fs_is_one_bclk_high => true,
+        fs_is_one_bclk_high => false,
         fs_high_is_channel_2 => false,
         tdm_channels => 8
     );
     constant tdm8_dac_config : t_audio_clock_io_cfg := (
-        data_is_valid_on_rising_bclk_edge => false,
+        data_is_valid_on_rising_bclk_edge => true,
         bits_are_right_shifted_to_fs => true,
-        fs_is_one_bclk_high => true,
+        fs_is_one_bclk_high => false,
         fs_high_is_channel_2 => false,
         tdm_channels => 8
     );

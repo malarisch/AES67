@@ -43,8 +43,10 @@ use crate::ConfigError;
 const REGION_TX: &str = "tx_stream_cfg";
 const REGION_RX: &str = "rx_stream_cfg";
 
-/// Maximum number of streams per direction and channels per stream.
-pub const MAX_STREAMS: u8 = 8;
+/// Maximum number of streams per direction the config RAM address space can
+/// hold (10-bit RAM address, 32 bytes per slot) and channels per stream. How
+/// many slots a bitstream implements is `system_cfg_{rx,tx}.max_streams`.
+pub const MAX_STREAMS: u8 = 32;
 pub const MAX_CHANNELS: usize = 8;
 
 /// Bytes per stream slot in either config RAM (`stream_id * SLOT_BYTES`).
@@ -116,7 +118,7 @@ impl TxStream {
             .unwrap_or(self.ch_ids.len() as u8);
 
         let mut buf = [0u8; 20];
-        buf[0] = self.id & 0x07;
+        buf[0] = self.id;
         buf[1..5].copy_from_slice(&self.dst_ip.octets());
         buf[5] = channels;
         buf[6] = self.samples_per_packet;
@@ -253,13 +255,20 @@ fn write_stream_ram<T: Transport>(
     stream_id: u8,
     buf: &[u8],
 ) -> Result<(), ConfigError> {
-    let (base, _size) = dev.map().region(region).ok_or_else(|| {
+    let (base, size) = dev.map().region(region).ok_or_else(|| {
         ConfigError::Unsupported(format!(
             "memory region '{region}' not in CSR map — wrong build? \
              (need the aes67_bridge map with stream config RAMs)"
         ))
     })?;
     let base_addr = stream_id as u32 * 32;
+    // Older gateware maps only 8 slots (256 words); never poke past the region.
+    if (base_addr + buf.len() as u32) << 2 > size {
+        return Err(ConfigError::Unsupported(format!(
+            "stream slot {stream_id} is outside memory region '{region}' \
+             ({size} bytes) of the loaded gateware"
+        )));
+    }
     for (i, &b) in buf.iter().enumerate() {
         let ram_addr = base_addr + i as u32;
         dev.poke(base + (ram_addr << 2), b as u32)?;
@@ -315,7 +324,7 @@ mod tests {
     #[test]
     fn rejects_out_of_range() {
         let s = TxStream {
-            id: 9,
+            id: MAX_STREAMS,
             dst_ip: Ipv4Addr::UNSPECIFIED,
             channels: None,
             samples_per_packet: 0,
@@ -346,8 +355,8 @@ mod tests {
 
         let map = crate::csr::CsrMap::from_csv(
             "csr_register,aes67_csr_scratch,0x0,1,rw\n\
-             memory_region,tx_stream_cfg,0x1000,256,linker\n\
-             memory_region,rx_stream_cfg,0x2000,256,linker\n",
+             memory_region,tx_stream_cfg,0x1000,4096,linker\n\
+             memory_region,rx_stream_cfg,0x2000,4096,linker\n",
         )
         .unwrap();
         let mut dev = Device::new(MapTransport::default(), map);

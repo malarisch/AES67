@@ -180,11 +180,25 @@ package system_cfg_pkg is
         TDM_PINS => 1,
         ADDA_CFG => tdm8_dac_config
     );
+    constant fourpins_32_tdm8_outputs : t_audio_cfg := (
+        MAX_STREAMS => 32,
+        BUFFER_DEPTH => 256,
+        CHANNELS => 32,
+        TDM_PINS => 4,
+        ADDA_CFG => tdm8_dac_config
+    );
     constant eight_tdm8_inputs : t_audio_cfg := (
         MAX_STREAMS => 4,
         BUFFER_DEPTH => 64,
         CHANNELS => 8,
         TDM_PINS => 1,
+        ADDA_CFG => tdm8_adc_config
+    );
+    constant fourpins_32_tdm8_inputs : t_audio_cfg := (
+        MAX_STREAMS => 8,
+        BUFFER_DEPTH => 64,
+        CHANNELS => 32,
+        TDM_PINS => 4,
         ADDA_CFG => tdm8_adc_config
     );
     constant single_lj_output : t_audio_cfg := (
@@ -246,6 +260,16 @@ package system_cfg_pkg is
         PARALLEL_BYTE_DEPTH => 3,
         RX_DA_CFG => eight_tdm8_outputs,
         TX_AD_CFG => eight_tdm8_inputs
+    );
+    constant audio_config_x32 : t_global_audio_cfg := (
+        MCLK_SPEED => audio_clock_24_57,
+        MCLK_SOURCE => MCLK_SRC_NCO,
+        VCXO_DOMAIN_CLOCKS => false,
+        BCLK_SPEED => audio_clock_12_28,
+        USE_PARALLEL_INTERFACE => false,
+        PARALLEL_BYTE_DEPTH => 3,
+        RX_DA_CFG => fourpins_32_tdm8_outputs,
+        TX_AD_CFG => fourpins_32_tdm8_inputs
     );
 
     constant global_system_cfg_mi : t_global_system_cfg := (
@@ -311,13 +335,13 @@ package system_cfg_pkg is
     -- Integration core: 100 MHz sys_clk fed directly (no PLL), RMII
     -- without MIIM, 8 in / 8 out TDM8, spibone control. For an external
     -- PLL MCLK (e.g. CS2000): with_ext_pll_mclk(global_system_cfg_rmii_tdm8_100m, true)
-    constant global_system_cfg_rmii_tdm8_100m : t_global_system_cfg := (
+    constant global_system_cfg_x32 : t_global_system_cfg := (
         CLK_IN_SPEED => 100,
         SYS_CLK_NS_PER_TICK => 10,
         SOC_TYPE => LITEX_SPIBONE,
         PLATFORM => LATTICE,
         PHY_CONFIG => std_rmii_no_miim_cfg,
-        AUDIO_CONFIG => audio_config_tdm8_8io,
+        AUDIO_CONFIG => audio_config_x32,
         STATIC_PTP_CONFIG => true,
         PTP_IN_SOFTWARE => true,
         ENABLE_METERING => false,

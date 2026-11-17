@@ -29,7 +29,7 @@ use work.system_cfg_pkg.all;
 entity top_rmii_tdm8_100m is
     generic(
         syscfg : t_global_system_cfg :=
-            with_ext_pll_mclk(global_system_cfg_rmii_tdm8_100m, true)
+            with_ext_pll_mclk(global_system_cfg_x32, true)
     );
     port(
         sys_clk_i      : in  std_logic;   -- 100 MHz
@@ -49,8 +49,8 @@ entity top_rmii_tdm8_100m is
         fsync_adc_o    : out std_logic;   -- TDM frame sync, ADC side
         fsync_dac_o    : out std_logic;   -- TDM frame sync, DAC side
         -- TDM8 data
-        tdm_in_i       : in  std_logic;   -- 8 channels from the ADC side
-        tdm_out_o      : out std_logic;   -- 8 channels to the DAC side
+        tdm_in_i       : in  std_logic_vector(3 downto 0);   -- 
+        tdm_out_o      : out std_logic_vector(3 downto 0);   -- 
 
         -- external PLL (MCLK_SRC_EXT_PLL)
         pll_ref_o      : out std_logic;   -- reference to the PLL (NCO MCLK)
@@ -66,22 +66,17 @@ entity top_rmii_tdm8_100m is
 end entity top_rmii_tdm8_100m;
 
 architecture rtl of top_rmii_tdm8_100m is
+	 signal bclk : std_logic;
     signal miso      : std_logic;
     signal pump      : t_vcxo_pump;
-    signal tdm_in_v  : std_logic_vector(syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS - 1 downto 0);
-    signal tdm_out_v : std_logic_vector(syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS - 1 downto 0);
 begin
     assert syscfg.SYS_CLK_NS_PER_TICK = 10 and syscfg.CLK_IN_SPEED = 100
         report "top_rmii_tdm8_100m: syscfg must describe a direct 100 MHz sys_clk"
         severity failure;
-    assert syscfg.AUDIO_CONFIG.TX_AD_CFG.TDM_PINS = 1 and syscfg.AUDIO_CONFIG.RX_DA_CFG.TDM_PINS = 1
-        report "top_rmii_tdm8_100m: one TDM pin per direction expected"
-        severity failure;
 
+	bclk_o <= bclk;
     spi_miso_o  <= miso;
     pll_ref_o   <= pump.pll_ref;
-    tdm_in_v(0) <= tdm_in_i;
-    tdm_out_o   <= tdm_out_v(0);
 
     soc_top_inst: entity work.soc_top
         generic map(
@@ -117,13 +112,13 @@ begin
             vcxo_pump_o          => pump,
 
             audioclk_mclk_o      => mclk_o,
-            audioclk_bclk_o      => bclk_o,
+            audioclk_bclk_o      => bclk,
             audioclk_lrclk_dac_o => fsync_dac_o,
             audioclk_lrclk_adc_o => fsync_adc_o,
             audioclk_lrclk_ext_o => open,
 
-            tdm_in               => tdm_in_v,
-            tdm_out              => tdm_out_v,
+            tdm_in               => tdm_in_i,
+            tdm_out              => tdm_out_o,
             rx_sample_register   => open,
 
             spibone_clk          => spi_clk_i,

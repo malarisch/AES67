@@ -18,8 +18,8 @@ ENTITY soc_top IS
 	(
 		rst_n_i :  IN  STD_LOGIC;
 		clock_i :  IN  STD_LOGIC;
-    ext_mcu_clk_i : IN STD_LOGIC;
-    ext_locked_i : IN STD_LOGIC;
+    ext_mcu_clk_i : IN STD_LOGIC := '0'; 
+    ext_locked_i : IN STD_LOGIC := '0';
 
 		-- rgmii if (use when ethernet_type  = RGMII)
 		phy_refclk_i :  IN  STD_LOGIC := '0';

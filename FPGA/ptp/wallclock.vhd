@@ -72,7 +72,16 @@ entity wallclock is
         -- without sys_clk quantisation jitter. The internal clocks_o stay
         -- on the sys_clk grid, 1..3 sys_clk ahead of the pins. Requires
         -- sys_clk >= 4 * MCLK (98.3 MHz at 48 kHz, see wallclock_vcxo.vhd).
-        VCXO_DOMAIN_CLOCKS : boolean := false
+        VCXO_DOMAIN_CLOCKS : boolean := false;
+        -- Only with VCXO_EXT_PLL: never move the MCLK counter behind the
+        -- PLL (no snap, not even on reset / wallclock set). Its offset to
+        -- the sample grid is removed by pulling the PLL reference (NCO)
+        -- instead, so BCLK / frame sync slew onto the grid (a few ppm, a
+        -- few seconds with a 1 Hz PLL) and never jump. Devices clocked
+        -- from the pins (ADC/DAC, DSP serial ports) keep their frame.
+        VCXO_EXT_PLL_STEER : boolean := true;
+        -- Steering loop gain, see wallclock_nco.vhd
+        VCXO_STEER_GAIN_SHIFT : natural := 18
     );
     port(
         clk                     : in  std_logic;
@@ -158,6 +167,11 @@ architecture Behavioral of wallclock is
 
     signal audioclks_reg    : t_audio_clocks;
 
+    -- external-PLL steering (VCXO_EXT_PLL_STEER)
+    constant EXT_STEER      : boolean := MCLK_FROM_VCXO and VCXO_EXT_PLL and VCXO_EXT_PLL_STEER;
+    signal steer_err        : signed(24 downto 0) := (others => '0');
+    signal steer_err_valid  : std_logic := '0';
+
     -- Millisecond tick: count audio_fs/1000 sample pulses per ms.
     constant MS_DIVIDER     : natural := audio_fs / 1000;
     signal ms_cnt           : unsigned(15 downto 0) := (others => '0');
@@ -239,7 +253,9 @@ begin
             sys_clk_hz           => sys_clk_hz,
             audio_fs             => audio_fs,
             pull_loop_gain_shift => pull_loop_gain_shift,
-            PTP_IN_SOFTWARE      => PTP_IN_SOFTWARE
+            PTP_IN_SOFTWARE      => PTP_IN_SOFTWARE,
+            EXT_STEER            => EXT_STEER,
+            EXT_STEER_GAIN_SHIFT => VCXO_STEER_GAIN_SHIFT
         )
         port map(
             clk                   => clk,
@@ -249,6 +265,8 @@ begin
             nco_ppb_adj_valid_i   => wallclock_signals.nco_ppb_adj_valid_i,
             set_i                 => set_evt,
             media_clock_i         => media_clock,
+            ext_err_i             => steer_err,
+            ext_err_valid_i       => steer_err_valid,
             mclk_o                => nco_mclk,
             mclk_cnt_o            => nco_mclk_cnt,
             sample_pulse_o        => nco_sample_pulse,
@@ -294,7 +312,8 @@ begin
                 FAST_PUMP     => VCXO_FAST_PUMP,
                 PUMP_INVERT   => VCXO_PUMP_INVERT,
                 EXT_PLL       => VCXO_EXT_PLL,
-                DOMAIN_CLOCKS => VCXO_DOMAIN_CLOCKS
+                DOMAIN_CLOCKS => VCXO_DOMAIN_CLOCKS,
+                EXT_PLL_STEER => EXT_STEER
             )
             port map(
                 clk             => clk,
@@ -311,7 +330,9 @@ begin
                 pump_o          => vcxo_pump_o,
                 phase_err_dbg_o => vcxo_phase_err_dbg_o,
                 pump_dbg_o      => vcxo_pump_dbg_o,
-                pin_clocks_o    => pin_clocks_o
+                pin_clocks_o    => pin_clocks_o,
+                steer_err_o       => steer_err,
+                steer_err_valid_o => steer_err_valid
             );
     end generate gen_mclk_vcxo;
 

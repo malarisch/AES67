@@ -28,7 +28,7 @@ ENTITY audio_tx_module IS
 		mac_tx_byte_sent :  IN  STD_LOGIC;
 		mac_audio_allow_i :  IN  STD_LOGIC;
 		metering_clear_i :  IN  STD_LOGIC;
-		cfg_wr_addr_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
+		cfg_wr_addr_i :  IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
 		cfg_wr_data_i :  IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
 		audio_i : IN STD_LOGIC_VECTOR((bytes_per_sample * 8) * global_channel_count - 1 downto 0) := (others => '0');
 		-- TDM serial input (only used when TDM_INPUT=true)
@@ -59,6 +59,8 @@ SIGNAL	sample_ram_read_data :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	sample_ready :  STD_LOGIC;
 SIGNAL	samples_per_packet_per_ch :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	ssrc :  STD_LOGIC_VECTOR(31 DOWNTO 0);
+SIGNAL	dst_mac :  STD_LOGIC_VECTOR(47 DOWNTO 0);
+SIGNAL	dst_port :  STD_LOGIC_VECTOR(15 DOWNTO 0);
 SIGNAL	tx_data_audiotx :  STD_LOGIC_VECTOR(7 DOWNTO 0);
 SIGNAL	tx_en_audiotx :  STD_LOGIC;
 SIGNAL	SYNTHESIZED_WIRE_0 :  STD_LOGIC;
@@ -94,6 +96,8 @@ PORT MAP(sys_clk_i => sys_clk,
 		 packet_time_o => packet_time,
 		 samples_per_packet_per_channel_o => samples_per_packet_per_ch,
 		 ssrc_o => ssrc,
+		 dst_mac_o => dst_mac,
+		 dst_port_o => dst_port,
 		 sequence_id_o => sequence_id);
 
 
@@ -135,6 +139,8 @@ PORT MAP(sys_clk => sys_clk,
 		 ch_ids_i => ch_ids,
 		 channel_count_i => channel_count,
 		 dst_ip_address => SYNTHESIZED_WIRE_1,
+		 dst_mac_address => dst_mac,
+		 dst_udp_port => dst_port,
 		 sample_counter => packet_time,
 		 sample_ram_data_in_i => sample_ram_read_data,
 		 samples_per_packet_per_channel_i => samples_per_packet_per_ch,

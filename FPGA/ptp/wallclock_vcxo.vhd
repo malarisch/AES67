@@ -40,7 +40,12 @@ entity wallclock_vcxo is
         FAST_PUMP     : natural;
         PUMP_INVERT   : boolean;
         EXT_PLL       : boolean;
-        DOMAIN_CLOCKS : boolean
+        DOMAIN_CLOCKS : boolean;
+        -- EXT_PLL only: never move the MCLK counter (no slips, no
+        -- reset). The grid offset is reported on steer_err_o instead and
+        -- removed by pulling the PLL's reference (wallclock_nco
+        -- EXT_STEER), i.e. the sample grid slews instead of jumping.
+        EXT_PLL_STEER : boolean := false
     );
     port(
         clk             : in  std_logic;
@@ -63,7 +68,11 @@ entity wallclock_vcxo is
         pump_o          : out t_vcxo_pump;
         phase_err_dbg_o : out signed(31 downto 0);    -- window mean, Q16 MCLK
         pump_dbg_o      : out signed(31 downto 0);
-        pin_clocks_o    : out t_audio_clocks
+        pin_clocks_o    : out t_audio_clocks;
+        -- EXT_PLL_STEER: window mean of wallclock grid - MCLK counter,
+        -- Q16 MCLK cycles in [-256, 256), valid for one clk
+        steer_err_o       : out signed(VCXO_PH_W - 1 downto 0);
+        steer_err_valid_o : out std_logic
     );
 end entity wallclock_vcxo;
 
@@ -96,6 +105,13 @@ begin
         report "wallclock: VCXO_DOMAIN_CLOCKS needs sys_clk >= 4 * MCLK"
         severity failure;
 
+    assert not EXT_PLL_STEER or EXT_PLL
+        report "wallclock: EXT_PLL_STEER needs EXT_PLL"
+        severity failure;
+
+    steer_err_o       <= win_mean;
+    steer_err_valid_o <= win_done when EXT_PLL_STEER else '0';
+
     mclk_cnt_o      <= cnt_next when DIV_LOOKAHEAD else vcxo_cnt;
     phase_err_dbg_o <= resize(e_mean, 32);
 
@@ -104,7 +120,8 @@ begin
             sys_clk_hz    => sys_clk_hz,
             audio_fs      => audio_fs,
             AVG_LOG2      => PD_AVG_LOG2,
-            DOMAIN_CLOCKS => DOMAIN_CLOCKS
+            DOMAIN_CLOCKS => DOMAIN_CLOCKS,
+            NO_SLIP       => EXT_PLL_STEER
         )
         port map(
             clk            => clk,

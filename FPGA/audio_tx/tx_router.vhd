@@ -33,7 +33,14 @@ entity tx_router is
         -- SSRC for RTP header
         ssrc_o                          : out std_logic_vector(31 downto 0) := (others => '0');
 
-        config_wr_addr_i                : in std_logic_vector(7 downto 0);
+        -- Unicast addressing (see config ram layout). Raw config values: the
+        -- transmitter ignores dst_mac_o for multicast destination IPs and
+        -- treats dst_port_o = 0 as the default RTP port.
+        dst_mac_o                       : out std_logic_vector(47 downto 0) := (others => '0');
+        dst_port_o                      : out std_logic_vector(15 downto 0) := (others => '0');
+
+        -- stream config bus address: slot * 32 + byte offset, up to 32 slots
+        config_wr_addr_i                : in std_logic_vector(9 downto 0);
         config_wr_data_i                : in std_logic_vector(7 downto 0);
         config_wr_en_i                  : in std_logic;
 
@@ -49,7 +56,32 @@ entity tx_router is
 end entity;
 
 architecture Behavioral of tx_router is
-    -- config ram layout per stream (20 bytes each, base = stream_index * 32):
+    -- ceil(log2(n)) (same helper as tx_sample_buffer / rx_ringbuffer)
+    function clog2(n : positive) return natural is
+        variable result : natural := 0;
+        variable val    : natural := n - 1;
+    begin
+        while val > 0 loop
+            result := result + 1;
+            val    := val / 2;
+        end loop;
+        return result;
+    end function;
+
+    -- Stream index width (at least 1 bit) and config RAM geometry: 32 bytes
+    -- per slot, max_streams slots rounded up to a power of two.
+    function f_stream_idx_bits return positive is
+    begin
+        if max_streams <= 2 then return 1; end if;
+        return clog2(max_streams);
+    end function;
+    constant STREAM_IDX_BITS : integer := f_stream_idx_bits;
+    constant CFG_ADDR_BITS   : integer := STREAM_IDX_BITS + 5;
+    constant CFG_RAM_DEPTH   : integer := 2**CFG_ADDR_BITS;
+    -- Packet-due queue depth: twice the slot count, so even all streams
+    -- becoming due at once never make a full queue look empty.
+    constant FIFO_PTR_BITS   : integer := STREAM_IDX_BITS + 1;
+    -- config ram layout per stream (28 bytes each, base = stream_index * 32):
     -- 0x00       stream_id (0-7)
     -- 0x01-0x04  IP address (4 bytes)
     -- 0x05       channel count
@@ -57,38 +89,46 @@ architecture Behavioral of tx_router is
     -- 0x07-0x0E  channel ids (max 8)
     -- 0x0F       reserved
     -- 0x10-0x13  SSRC (4 bytes, big-endian)
+    -- 0x14-0x19  destination MAC (6 bytes, first octet on the wire first).
+    --            Only used for a unicast destination IP: the host resolves the
+    --            next hop (ARP / gateway) and writes its MAC here. For a
+    --            multicast IP (224.0.0.0/4) the transmitter derives
+    --            01:00:5E:xx:xx:xx itself and ignores these bytes.
+    -- 0x1A-0x1B  destination UDP port (big-endian); 0 = default 5004
+    -- 0x1C-0x1F  reserved
     
     -- Block RAM for configuration storage (True Dual Port)
     -- Port A: Write from config_wr_clk_i domain
     -- Port B: Read from sys_clk_i domain (registered output for BRAM inference)
-    type t_config_ram is array (0 to 255) of std_logic_vector(7 downto 0);
+    type t_config_ram is array (0 to CFG_RAM_DEPTH - 1) of std_logic_vector(7 downto 0);
     signal config_ram : t_config_ram := (others => (others => '0'));
     
     
     -- Registered read address and data for Block RAM (Port B - sys_clk domain)
-    signal ram_rd_addr   : unsigned(7 downto 0) := (others => '0');
+    signal ram_rd_addr   : unsigned(CFG_ADDR_BITS - 1 downto 0) := (others => '0');
     signal ram_rd_data   : std_logic_vector(7 downto 0) := (others => '0');
     
 
     -- Pre-computed threshold (samples_per_packet - 1) to reduce critical path
     -- Computed in config_wr_clk domain and synchronized
-    type t_threshold_shadow is array (0 to 7) of unsigned(7 downto 0);
+    type t_threshold_shadow is array (0 to 2**STREAM_IDX_BITS - 1) of unsigned(7 downto 0);
     signal threshold_shadow : t_threshold_shadow := (others => (others => '0'));
     
 
-    type t_sample_count is array (0 to 7) of unsigned(7 downto 0);
+    type t_sample_count is array (0 to 2**STREAM_IDX_BITS - 1) of unsigned(7 downto 0);
     signal sample_count : t_sample_count := (others => (others => '0'));
 
     -- Packet-due queue: holds WHICH stream is due (multiple streams can cross
     -- threshold on the same fs edge, so a queue is still required). The write
     -- pointer is no longer queued -- it is re-derived from the media clock at
     -- dequeue time (see current_start_addr).
-    type t_stream_fifo is array (0 to max_streams - 1) of unsigned(2 downto 0);
-    type t_seqid_fifo is array (0 to max_streams - 1) of unsigned(15 downto 0);
+    type t_stream_fifo is array (0 to 2**FIFO_PTR_BITS - 1) of unsigned(STREAM_IDX_BITS - 1 downto 0);
+    -- per-stream RTP sequence number (indexed by stream, not a queue)
+    type t_seqid_fifo is array (0 to 2**STREAM_IDX_BITS - 1) of unsigned(15 downto 0);
     signal fifo_stream  : t_stream_fifo := (others => (others => '0'));
     signal fifo_seqid   : t_seqid_fifo := (others => (others => '0'));
-    signal fifo_wr_ptr  : unsigned(2 downto 0) := (others => '0');
-    signal fifo_rd_ptr  : unsigned(2 downto 0) := (others => '0');
+    signal fifo_wr_ptr  : unsigned(FIFO_PTR_BITS - 1 downto 0) := (others => '0');
+    signal fifo_rd_ptr  : unsigned(FIFO_PTR_BITS - 1 downto 0) := (others => '0');
 
     signal sample_ready_sync : std_logic := '0';
 
@@ -100,11 +140,13 @@ architecture Behavioral of tx_router is
         LOAD_CH0, LOAD_CH1, LOAD_CH2, LOAD_CH3,
         LOAD_CH4, LOAD_CH5, LOAD_CH6, LOAD_CH7,
         LOAD_SSRC1, LOAD_SSRC2, LOAD_SSRC3, LOAD_SSRC4,
+        LOAD_MAC1, LOAD_MAC2, LOAD_MAC3, LOAD_MAC4, LOAD_MAC5, LOAD_MAC6,
+        LOAD_PORT1, LOAD_PORT2,
         ASSERT_START, WAIT_TX_EN_HIGH, WAIT_TX_BUSY_LOW
     );
     signal tx_state : t_tx_state := IDLE;
 
-    signal current_stream    : unsigned(2 downto 0) := (others => '0');
+    signal current_stream    : unsigned(STREAM_IDX_BITS - 1 downto 0) := (others => '0');
 
     -- CDC synchronizer for tx_en_i (crosses clock domain)
     signal tx_en_meta        : std_logic := '0';
@@ -119,6 +161,10 @@ architecture Behavioral of tx_router is
 
 begin
 
+    assert max_streams >= 1 and max_streams <= 32
+        report "tx_router: max_streams must be 1..32 (10-bit stream config address)"
+        severity failure;
+
     -- ==========================================================================
     -- Config RAM Write Process (Port A - config_wr_clk_i domain)
     -- Also updates shadow registers for samples_per_packet
@@ -128,14 +174,16 @@ begin
         variable offset     : integer;
     begin
         if rising_edge(config_wr_clk_i) then
-            if config_wr_en_i = '1' then
-                config_ram(to_integer(unsigned(config_wr_addr_i))) <= config_wr_data_i;
+            -- writes beyond the implemented slots are ignored
+            if config_wr_en_i = '1'
+               and to_integer(unsigned(config_wr_addr_i)) < CFG_RAM_DEPTH then
+                config_ram(to_integer(unsigned(config_wr_addr_i(CFG_ADDR_BITS - 1 downto 0)))) <= config_wr_data_i;
                 
                 -- Update shadow register when samples_per_packet (offset 0x06) is written
-                -- Base address = stream_id * 32, so stream_idx = addr[7:5], offset = addr[4:0]
-                stream_idx := to_integer(unsigned(config_wr_addr_i(7 downto 5)));
+                -- Base address = stream_id * 32, so stream_idx = addr[9:5], offset = addr[4:0]
+                stream_idx := to_integer(unsigned(config_wr_addr_i(9 downto 5)));
                 offset := to_integer(unsigned(config_wr_addr_i(4 downto 0)));
-                if offset = 6 and stream_idx < 8 then
+                if offset = 6 and stream_idx < max_streams then
                     -- Pre-compute the threshold as (spp - 1) here, at config time,
                     -- so the per-sample compare/enqueue path no longer needs an
                     -- 8-wide "threshold - 1" subtract every sample. Streams with
@@ -189,7 +237,7 @@ begin
                             sample_count(i) <= (others => '0');
                             -- Enqueue WHICH stream is due; the start address is
                             -- re-derived from the media clock at dequeue time.
-                            fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, 3);
+                            fifo_stream(to_integer(fifo_wr_ptr)) <= to_unsigned(i, STREAM_IDX_BITS);
                             fifo_wr_ptr <= fifo_wr_ptr + 1;
                         else
                             sample_count(i) <= sample_count(i) + 1;
@@ -238,6 +286,8 @@ begin
             packet_time_o <= (others => '0');
             ch_ids_o <= (others => '0');
             ssrc_o <= (others => '0');
+            dst_mac_o <= (others => '0');
+            dst_port_o <= (others => '0');
             ram_rd_addr <= (others => '0');
         elsif rising_edge(sys_clk_i) then
 
@@ -361,10 +411,51 @@ begin
                     
                 when LOAD_SSRC4 =>
                     ssrc_o(15 downto 8) <= ram_rd_data;   -- SSRC byte 3
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC1;
+
+                -- Destination MAC (0x14-0x19) and UDP port (0x1A-0x1B)
+                when LOAD_MAC1 =>
+                    ssrc_o(7 downto 0) <= ram_rd_data;    -- SSRC byte 4
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC2;
+
+                when LOAD_MAC2 =>
+                    dst_mac_o(47 downto 40) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC3;
+
+                when LOAD_MAC3 =>
+                    dst_mac_o(39 downto 32) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC4;
+
+                when LOAD_MAC4 =>
+                    dst_mac_o(31 downto 24) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC5;
+
+                when LOAD_MAC5 =>
+                    dst_mac_o(23 downto 16) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_MAC6;
+
+                when LOAD_MAC6 =>
+                    dst_mac_o(15 downto 8) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_PORT1;
+
+                when LOAD_PORT1 =>
+                    dst_mac_o(7 downto 0) <= ram_rd_data;
+                    ram_rd_addr <= ram_rd_addr + 1;
+                    tx_state <= LOAD_PORT2;
+
+                when LOAD_PORT2 =>
+                    dst_port_o(15 downto 8) <= ram_rd_data;
                     tx_state <= ASSERT_START;
 
                 when ASSERT_START =>
-                    ssrc_o(7 downto 0) <= ram_rd_data;    -- SSRC byte 4
+                    dst_port_o(7 downto 0) <= ram_rd_data;
                     -- Commit all latched values to outputs. The read pointer is
                     -- carried by packet_time_o (set in LOAD_IP1); the transmitter
                     -- derives the RAM read base from it -- no separate address port.

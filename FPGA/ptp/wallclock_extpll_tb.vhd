@@ -141,7 +141,8 @@ begin
             MCLK_FROM_VCXO       => true,
             VCXO_EXT_PLL         => true,
             VCXO_PD_AVG_LOG2     => 8,
-            VCXO_DOMAIN_CLOCKS   => DOMAIN
+            VCXO_DOMAIN_CLOCKS   => DOMAIN,
+            VCXO_EXT_PLL_STEER   => false
         )
         port map (
             clk                  => clk,

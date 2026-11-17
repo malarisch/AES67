@@ -181,10 +181,10 @@ component litex_soc_aes67_bridge
     eth_buf_tx_addr : in std_logic_vector    (10 downto 0);
     eth_buf_tx_data : out std_logic_vector     (7 downto 0);
     eth_buf_tx_len : out std_logic_vector    (10 downto 0);
-    rx_stream_cfg_wr_addr : out std_logic_vector     (7 downto 0);
+    rx_stream_cfg_wr_addr : out std_logic_vector     (9 downto 0);
     rx_stream_cfg_wr_data : out std_logic_vector     (7 downto 0);
     rx_stream_cfg_wr_en : out std_logic;
-    tx_stream_cfg_wr_addr : out std_logic_vector     (7 downto 0);
+    tx_stream_cfg_wr_addr : out std_logic_vector     (9 downto 0);
     tx_stream_cfg_wr_data : out std_logic_vector     (7 downto 0);
     tx_stream_cfg_wr_en : out std_logic
   );
@@ -245,11 +245,11 @@ signal audio_meter_tx_signal_o : STD_LOGIC_VECTOR(syscfg.AUDIO_CONFIG.TX_AD_CFG.
 
 signal audio_tx_cfg_wr_en_i : STD_LOGIC;
 signal audio_tx_cfg_wr_data_i : STD_LOGIC_VECTOR(7 downto 0);
-signal audio_tx_cfg_wr_addr_i : STD_LOGIC_VECTOR(7 downto 0);
+signal audio_tx_cfg_wr_addr_i : STD_LOGIC_VECTOR(9 downto 0);
 
 signal audio_rx_cfg_wr_en_i : STD_LOGIC;
 signal audio_rx_cfg_wr_data_i : STD_LOGIC_VECTOR(7 downto 0);
-signal audio_rx_cfg_wr_addr_i : STD_LOGIC_VECTOR(7 downto 0);
+signal audio_rx_cfg_wr_addr_i : STD_LOGIC_VECTOR(9 downto 0);
 
 signal mac_rx_clk : std_logic;
 signal mac_tx_clk : std_logic;

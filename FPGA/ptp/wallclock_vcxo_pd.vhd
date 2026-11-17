@@ -21,7 +21,13 @@ entity wallclock_vcxo_pd is
         audio_fs      : natural;
         AVG_LOG2      : natural;
         -- pins run on the VCXO-domain clocks (shifts the reference offset)
-        DOMAIN_CLOCKS : boolean
+        DOMAIN_CLOCKS : boolean;
+        -- Never slip the MCLK counter: it free-runs from configuration on
+        -- (no reset either), so the sample grid derived from it never
+        -- jumps. The phase error is then reported over the full
+        -- +-256 cycles and has to be removed by steering the MCLK source
+        -- (external PLL, see wallclock_vcxo / wallclock_nco EXT_STEER).
+        NO_SLIP       : boolean := false
     );
     port(
         clk            : in  std_logic;
@@ -98,6 +104,7 @@ architecture rtl of wallclock_vcxo_pd is
     signal vcxo_raw    : unsigned(8 downto 0) := (others => '0');
     signal slip_ofs    : unsigned(8 downto 0) := (others => '0');
     signal vcxo_spulse : std_logic := '0';
+    signal cnt_reset_n : std_logic;
 
     -- phase detector pipeline
     signal pd_v        : std_logic_vector(1 to 8) := (others => '0');
@@ -175,16 +182,17 @@ begin
         end case;
     end process;
 
-    -- VCXO MCLK counter + phase detector stage 1
-    vcxo_cnt_proc: process(clk, reset_n)
+    -- VCXO MCLK counter. With NO_SLIP it keeps counting through reset:
+    -- every audio clock is derived from it, and a counter restart would
+    -- move the sample grid.
+    cnt_reset_n <= '1' when NO_SLIP else reset_n;
+
+    vcxo_cnt_only_proc: process(clk, cnt_reset_n)
     begin
-        if reset_n = '0' then
-            vcxo_cnt    <= (others => '0');
-            vcxo_raw    <= (others => '0');
-            slip_ofs    <= (others => '0');
-            vcxo_spulse <= '0';
-            pd_nsec     <= (others => '0');
-            pd_raw1     <= (others => '0');
+        if cnt_reset_n = '0' then
+            vcxo_cnt <= (others => '0');
+            vcxo_raw <= (others => '0');
+            slip_ofs <= (others => '0');
         elsif rising_edge(clk) then
             if vcxo_tick = '1' then
                 vcxo_raw <= vcxo_raw + 1;
@@ -194,8 +202,18 @@ begin
             elsif slip_dn = '1' then
                 slip_ofs <= slip_ofs - 1;
             end if;
+            vcxo_cnt <= cnt_next;
+        end if;
+    end process;
 
-            vcxo_cnt    <= cnt_next;
+    -- Sample pulse + phase detector stage 1
+    vcxo_cnt_proc: process(clk, reset_n)
+    begin
+        if reset_n = '0' then
+            vcxo_spulse <= '0';
+            pd_nsec     <= (others => '0');
+            pd_raw1     <= (others => '0');
+        elsif rising_edge(clk) then
             vcxo_spulse <= '0';
             if (cnt_inc = 1 and vcxo_cnt = 511) or (cnt_inc = 2 and vcxo_cnt >= 510) then
                 vcxo_spulse <= '1';
@@ -265,7 +283,9 @@ begin
             slip_up <= '0';
             slip_dn <= '0';
             if pd_v(7) = '1' then
-                if pd_err > slip_thr then
+                if NO_SLIP then
+                    pd_err_used <= pd_err;
+                elsif pd_err > slip_thr then
                     slip_up     <= '1';           -- VCXO count behind
                     pd_err_used <= pd_err - ONE_CYC;
                 elsif pd_err < -slip_thr then

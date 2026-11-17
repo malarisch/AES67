@@ -28,7 +28,18 @@ entity wallclock_nco is
         sys_clk_hz           : natural;
         audio_fs             : natural;
         pull_loop_gain_shift : natural;
-        PTP_IN_SOFTWARE      : boolean
+        PTP_IN_SOFTWARE      : boolean;
+        -- External PLL behind the NCO whose MCLK counter must not jump
+        -- (wallclock_vcxo EXT_PLL_STEER): the phase pull then uses the
+        -- measured grid offset of the PLL's counter (ext_err_i) instead of
+        -- the NCO's own counter, so the PLL output is slewed onto the
+        -- sample grid. The NCO is not restarted on a wallclock set.
+        -- Loop: d(err)/dt = -err * 512 fs / 2^(9 + EXT_STEER_GAIN_SHIFT)
+        -- * 2^32 / NCO_BASE_INC_32; 18 -> ~0.75 1/s at 100 MHz, at most
+        -- ~8 ppm for half a sample. Must stay well below the PLL's loop
+        -- bandwidth (CS2000: 1 Hz = 6.3 1/s).
+        EXT_STEER            : boolean := false;
+        EXT_STEER_GAIN_SHIFT : natural := 18
     );
     port(
         clk                   : in  std_logic;
@@ -41,6 +52,10 @@ entity wallclock_nco is
         set_i                 : in  std_logic;
         -- wallclock-derived media clock (phase reference)
         media_clock_i         : in  unsigned(31 downto 0);
+        -- EXT_STEER: grid offset of the external PLL's MCLK counter,
+        -- Q16 MCLK cycles in [-256, 256), > 0 = counter behind
+        ext_err_i             : in  signed(24 downto 0) := (others => '0');
+        ext_err_valid_i       : in  std_logic := '0';
 
         mclk_o                : out std_logic;   -- NCO MSB
         mclk_cnt_o            : out unsigned(8 downto 0);  -- MCLK cycle in sample
@@ -198,7 +213,19 @@ begin
             nco_phase_bias   <= (others => '0');
             nco_phase_locked <= '0';
         elsif rising_edge(clk) then
-            if set_i = '1' then
+            if EXT_STEER then
+                if ext_err_valid_i = '1' then
+                    nco_phase_bias <=
+                        shift_left(resize(ext_err_i, NCO_PHASE_BITS),
+                                   NCO_PHASE_BITS - 9 - 16 - EXT_STEER_GAIN_SHIFT);
+                    if ext_err_i > to_signed(65536, 25)
+                       or ext_err_i < to_signed(-65536, 25) then
+                        nco_phase_locked <= '0';
+                    else
+                        nco_phase_locked <= '1';
+                    end if;
+                end if;
+            elsif set_i = '1' then
                 nco_phase_bias   <= (others => '0');
                 nco_phase_locked <= '0';
             elsif (phase_error_valid = '1') then
@@ -243,7 +270,7 @@ begin
             nco_sample_pulse <= '0';
             media_clock_prev <= media_clock_i;
 
-            if set_i = '1' then
+            if set_i = '1' and not EXT_STEER then
                 nco_phase      <= (others => '0');
                 nco_phase_prev <= '0';
                 nco_mclk_cnt   <= (others => '0');
