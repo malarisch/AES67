@@ -10,10 +10,12 @@ This keeps the SoC portable: no target-specific PLL primitives are baked into
 the generated SoC HDL, and a single top-level PLL can drive everything
 (including non-SoC FPGA logic on the same clock).
 
-MAC clock domains (mac_rx/mac_tx) are bound ONLY where the eth packet buffer
+The MAC TX clock domain (mac_tx) is bound ONLY where the eth packet buffer
 (eth_buf) is built — i.e. the aes67_bridge target.  CPU and spibone targets do
-not instantiate eth_buf, so binding them there would just create unused clock
-domains and dangling clk_mac_rx/clk_mac_tx top-level ports.
+not instantiate eth_buf, so binding it there would just create an unused clock
+domain and a dangling clk_mac_tx top-level port.  RX needs no MAC clock in the
+SoC: the RX ring buffer lives in the FPGA-side bridge, which serves CPU reads
+on clk_sys.
 """
 
 from migen import *
@@ -24,13 +26,9 @@ from migen.genlib.resetsync import AsyncResetSynchronizer
 
 
 def _bind_mac_clocks(crg, platform):
-    """Wire mac_rx/mac_tx clock domains directly from the Ethernet MAC pads."""
-    crg.cd_mac_rx = ClockDomain(reset_less=True)
+    """Wire the mac_tx clock domain directly from the Ethernet MAC pad."""
     crg.cd_mac_tx = ClockDomain(reset_less=True)
-    crg.comb += [
-        crg.cd_mac_rx.clk.eq(platform.request("clk_mac_rx")),
-        crg.cd_mac_tx.clk.eq(platform.request("clk_mac_tx")),
-    ]
+    crg.comb += crg.cd_mac_tx.clk.eq(platform.request("clk_mac_tx"))
 
 
 # -- CRG (Clock Reset Generator) — Cyclone 10LP --------------------------------
@@ -51,9 +49,9 @@ class _CRG_Spibone(LiteXModule):
     """CRG for the CPU-less bridges (spibone / aes67_bridge): sys clock only,
     no main-RAM clocks.
 
-    The aes67_bridge instantiates eth_buf, which needs the mac_rx/mac_tx
-    domains, so they are bound there (``with_mac_clocks=True``).  spibone has no
-    eth_buf and leaves them unbound.
+    The aes67_bridge instantiates eth_buf, whose TX buffer needs the mac_tx
+    domain, so it is bound there (``with_mac_clocks=True``).  spibone has no
+    eth_buf and leaves it unbound.
     """
     def __init__(self, platform, sys_clk_freq, with_mac_clocks=False):
         self.rst    = Signal()

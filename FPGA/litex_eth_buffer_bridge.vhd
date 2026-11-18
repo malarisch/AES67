@@ -7,15 +7,30 @@
 -- # TX: SoC writes packet, sets tx_len, pulses eth_tx_request.
 -- #     TX process reads buffer directly on mac_tx_clock and feeds MAC.
 -- #
--- # RX: ethernet_packet_parser asserts parse_mcu_packet when a non-RTP
--- #     frame is ready in eth_ram.  This module copies the frame from
--- #     eth_ram into the LiteX RX buffer, then asserts rx_valid + rx_len.
+-- # RX: one dual-clock ring buffer is the only MCU frame storage. It has an
+-- #     8-bit write port on mac_rx_clock and a 32-bit read port on the LiteX
+-- #     sys clock (mcu_clk_i), built from four byte-lane RAMs (portable
+-- #     mixed-width RAM: one 9/18-kbit block per lane at 4 KB).
+-- #
+-- #     WRITER (mac_rx): every byte ethernet_receive stores (rx_byte_we_i) is
+-- #     written speculatively into free ring space as it arrives. When the
+-- #     completed, error-free frame is classified as MCU traffic
+-- #     (parse_mcu_packet_tog_i) the entry is committed: length header word
+-- #     written, write pointer advanced. RTP / filtered PTP / errored frames
+-- #     are never committed and get overwritten by the next frame.
+-- #
+-- #     READER (sys): reads the head entry's header word itself, publishes
+-- #     rx_len + rx_valid, and maps the CPU's Wishbone word reads onto the
+-- #     entry body (frame at RX offset 0, as before). The SoC ack (rising
+-- #     edge) pops the entry.
+-- #
+-- #     The two pointers cross domains with a toggle handshake each (they
+-- #     jump by whole entries, so Gray coding does not apply).
 -- #
 -- #     ethernet_receive latches the RX timestamp per frame and appends
--- #     it as a 5-byte trailer behind the frame data in eth_ram, so the
--- #     frame and its timestamp travel together (no shared-register race
--- #     during bursts).  pkt_len_i therefore already includes those 5
--- #     bytes.
+-- #     it as a 5-byte trailer behind the frame data, so the frame and its
+-- #     timestamp travel together (no shared-register race during bursts).
+-- #     pkt_len_i therefore already includes those 5 bytes.
 -- ####################################################################
 library ieee;
 use ieee.std_logic_1164.all;
@@ -25,28 +40,27 @@ use ieee.math_real.all;
 entity litex_eth_buffer_bridge is
   generic (
 
-    -- true (SW PTP): the RX-timestamp trailer in eth_ram is handed to the SoC
-    -- as part of the frame.  false (HW PTP): the trailer is stripped during
-    -- FILL and the SoC sees the bare frame.
+    -- true (SW PTP): the RX-timestamp trailer is handed to the SoC as part
+    -- of the frame.  false (HW PTP): the trailer is not committed and the
+    -- SoC sees the bare frame.
     ADD_RX_TIMESTAMP : boolean := false;
-    -- RX ring buffer size in bytes. MUST be a power of two and >= 2048 so the
-    -- byte pointers wrap naturally and any single entry (max frame + header +
-    -- trailer) always fits in the contiguous address space of one wrap window.
-    RX_RING_SIZE : integer := 2048
+    -- RX ring buffer size in bytes. MUST be a power of two and >= 2048 so
+    -- any single entry (max frame + trailer + header word) always fits.
+    -- 4096 = 4 lanes x 1024 x 8 bit = one block RAM per lane.
+    RX_RING_SIZE : integer := 4096
   );
   port (
     -- ================================================================
     -- LiteX EthPacketBuffer FPGA-side signals
-    -- RX port clocked by mac_rx_clock, TX port clocked by mac_tx_clock
+    -- RX read side on mcu_clk_i (= LiteX sys clock), TX on mac_tx_clock
     -- ================================================================
 
-    -- RX buffer: this module writes received frames
-    buf_rx_data_o   : out std_logic_vector(7 downto 0);
-    buf_rx_addr_o   : out std_logic_vector(10 downto 0);
-    buf_rx_we_o     : out std_logic;
-    buf_rx_len_o    : out std_logic_vector(10 downto 0);
+    -- RX: the SoC reads the published frame straight out of the ring
+    buf_rx_rd_addr_i : in  std_logic_vector(10 downto 0); -- Wishbone word offset into the frame
+    buf_rx_rd_data_o : out std_logic_vector(31 downto 0); -- frame bytes 4i..4i+3 (LE lanes), 1-cycle latency
+    buf_rx_len_o    : out std_logic_vector(10 downto 0);  -- valid while buf_rx_valid_o
     buf_rx_valid_o  : out std_logic;
-    buf_rx_ack_i    : in  std_logic;
+    buf_rx_ack_i    : in  std_logic;   -- rising edge releases the frame
     -- TX buffer: this module reads packet data
 
     buf_tx_addr_o   : out std_logic_vector(10 downto 0);
@@ -60,7 +74,7 @@ entity litex_eth_buffer_bridge is
     -- ================================================================
     eth_tx_request_i  : in  std_logic;   -- level from SoC: send TX
     eth_tx_done_o     : out std_logic;   -- level: TX completed
-    eth_rx_overflow_o : out std_logic;   -- level: RX frame dropped
+    eth_rx_overflow_o : out std_logic;   -- level: RX frame dropped (cleared by the next pop)
 
     -- ================================================================
     -- MAC TX interface (mac_tx_clock_i domain)
@@ -79,14 +93,16 @@ entity litex_eth_buffer_bridge is
     tx_allow_i         : in  std_logic;
 
     -- ================================================================
-    -- RX from eth_ram / packet parser (mac_rx_clock_i domain)
+    -- RX byte stream + classification from ethernet_receive
+    -- (mac_rx_clock_i domain)
     -- ================================================================
     mac_rx_clock_i      : in  std_logic;
-    mac_rx_reset_i      : in  std_logic;
-    parse_mcu_packet_tog_i  : in  std_logic;  -- toggles when packet ready
+    mac_rx_reset_i      : in  std_logic;  -- async; resets both RX domains
+    rx_byte_we_i        : in  std_logic;  -- strobe: new byte at rx_byte_index_i
+    rx_byte_index_i     : in  std_logic_vector(10 downto 0);  -- byte offset in the frame (0 = first byte, gapless)
+    rx_byte_data_i      : in  std_logic_vector(7 downto 0);
+    parse_mcu_packet_tog_i  : in  std_logic;  -- toggles when the completed frame is for the MCU
     pkt_len_i           : in  std_logic_vector(10 downto 0);  -- frame length from ethernet_receive (incl. 5-byte timestamp trailer)
-    eth_ram_data_i      : in  std_logic_vector(7 downto 0);  -- read data from eth_ram read port
-    eth_ram_addr_o      : out std_logic_vector(10 downto 0);  -- read address to eth_ram
 
     mcu_clk_i         : in std_logic
   );
@@ -110,97 +126,97 @@ architecture rtl of litex_eth_buffer_bridge is
 
   type t_tx_sm is (TX_IDLE, TX_WAIT_ALLOW, TX_PRIME, TX_PRIME_PREFETCH, TX_TRANSMIT, TX_END);
   signal sm_tx : t_tx_sm := TX_IDLE;
-
+  signal buf_tx_addr   : unsigned(10 downto 0);
+  signal tx_zsof : STD_LOGIC := '0';
 
   -- ================================================================
-  -- RX signals (mac_rx_clock domain)
-  -- ================================================================
-
-  -- Two independent state machines share the mac_rx_clock domain (no CDC):
-  --   FILL  : eth_ram -> internal RX ring buffer  (runs at each parser toggle)
-  --   DRAIN : ring buffer -> LiteX single buffer  (runs as the SoC acks)
+  -- RX ring
   --
-  -- Ring layout, entries packed back-to-back and wrapping at RX_RING_SIZE:
-  --   [len_hi][len_lo][packet byte 0 ... packet last byte]
-  -- 'len' is the MCU-visible length, i.e. exactly the byte count handed to
-  -- the SoC in buf_rx_len.  The 5-byte rx-timestamp trailer appended by
-  -- ethernet_receive is part of the packet bytes when ADD_RX_TIMESTAMP and
-  -- stripped during FILL otherwise.
-  type t_fill_sm is (FILL_IDLE, FILL_HDR_LO, FILL_COPY, FILL_COMMIT);
-  signal sm_fill : t_fill_sm := FILL_IDLE;
-  type t_drain_sm is (DR_IDLE, DR_LEN_HI, DR_LEN_LO, DR_PRIME, DR_COPY, DR_SET_VALID, DR_WAIT_ACK);
-  signal sm_drain : t_drain_sm := DR_IDLE;
+  -- Word-aligned entries, packed back-to-back, wrapping at RING_WORDS:
+  --   word 0          : header, lanes 1:0 = len (LE), lanes 3:2 unused
+  --   word 1 ..       : frame bytes, byte i in word 1 + i/4, lane i mod 4
+  -- 'len' is the MCU-visible length (= buf_rx_len). The 5-byte rx-timestamp
+  -- trailer is part of it when ADD_RX_TIMESTAMP; otherwise it is written
+  -- behind the body but not committed.
+  -- ================================================================
+  constant RING_WORDS : natural := RX_RING_SIZE / 4;
+  constant WADDR_W    : natural := integer(ceil(log2(real(RING_WORDS))));
+  constant PTR_W      : natural := WADDR_W + 1;  -- extra wrap bit: full /= empty
+  constant TS_TRAILER_LEN : natural := 5;        -- 1 byte seconds + 4 bytes nanoseconds
 
-  -- Ring geometry. RX_RING_SIZE is a power of two so the byte pointers wrap
-  -- naturally on a RING_ADDR_W-bit unsigned (no explicit modulo).
-  constant RING_ADDR_W : integer := integer(ceil(log2(real(RX_RING_SIZE))));
-  constant LEN_HDR_LEN : natural := 2;  -- 2-byte length header per entry
+  type t_lane_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
 
-  type t_ring_ram is array(0 to RX_RING_SIZE - 1) of std_logic_vector(7 downto 0);
-  signal ring_ram   : t_ring_ram;
-  signal ring_rdata : std_logic_vector(7 downto 0) := (others => '0');
-  signal ring_raddr : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0');
+  -- write port (mac_rx), registered
+  signal lane_we    : std_logic_vector(3 downto 0) := (others => '0');
+  signal lane_waddr : unsigned(WADDR_W - 1 downto 0) := (others => '0');
+  signal lane_wdata : t_lane_bytes := (others => (others => '0'));
+  -- read port (mcu_clk)
+  signal lane_raddr : unsigned(WADDR_W - 1 downto 0);
+  signal lane_rdata : t_lane_bytes;
 
-  signal wr_ptr     : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- next free byte
-  signal rd_ptr     : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- head entry's len hdr
-  signal ring_count : integer range 0 to RX_RING_SIZE := 0;                  -- committed bytes
-
-  -- FILL working state, latched at frame detection so a newer frame can't tear it.
-  signal fill_pkt_len : unsigned(10 downto 0) := (others => '0'); -- bytes copied from eth_ram (= MCU-visible length)
-  signal fill_total   : unsigned(15 downto 0) := (others => '0'); -- value stored in len hdr
-  signal fill_entry   : integer range 0 to RX_RING_SIZE := 0;     -- LEN_HDR_LEN + fill_total
-  signal rx_copy_addr : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- entry write offset
-
-  signal rx_valid_reg    : std_ulogic := '0';
-  signal rx_valid_reg_1cdc  : std_ulogic := '0';
-  signal rx_valid_reg_2cdc  : std_ulogic := '0';
+  -- ---------------- WRITER (mac_rx domain) ----------------
+  signal wr_ptr       : unsigned(PTR_W - 1 downto 0) := (others => '0'); -- next entry's header word
+  signal rd_ptr_w     : unsigned(PTR_W - 1 downto 0) := (others => '0'); -- reader's pointer, as seen here
+  -- bytes of the current frame that landed in the ring in order (index 0
+  -- restarts it; a byte that does not fit or arrives out of order freezes
+  -- it, so COMMIT sees a short frame and drops it)
+  signal fill_written : integer range 0 to 2048 := 0;
+  signal parse_mcu_d  : std_ulogic := '0';
   signal rx_overflow_reg : std_ulogic := '0';
   signal rx_overflow_reg_1cdc : std_ulogic := '0';
   signal rx_overflow_reg_2cdc : std_ulogic := '0';
 
-  signal parse_mcu_d : std_ulogic := '0';  -- delayed for edge detection
-  -- A parser toggle can arrive while FILL is still copying the previous frame
-  -- (back-to-back burst: FILL takes about as long as the frame itself), so the
-  -- edge is latched here together with its length instead of being dropped.
-  signal fill_pending : std_ulogic := '0';
-  signal pend_len     : unsigned(10 downto 0) := (others => '0');
+  -- wr_ptr -> reader (toggle handshake; wp_pub stable while wp_req /= ack)
+  signal wp_pub      : unsigned(PTR_W - 1 downto 0) := (others => '0');
+  signal wp_req      : std_ulogic := '0';
+  signal wp_ack_meta : std_ulogic := '0';
+  signal wp_ack_sync : std_ulogic := '0';
+  -- rd_ptr from reader
+  signal rp_req_meta : std_ulogic := '0';
+  signal rp_req_sync : std_ulogic := '0';
+  signal rp_ack      : std_ulogic := '0';
 
-  -- CDC for buf_rx_ack (SoC sys_clk → mac_rx_clock)
-  signal rx_ack_meta : std_ulogic := '0';
-  signal rx_ack_sync : std_ulogic := '0';
-  signal rx_ack_sync_d : std_ulogic := '0';
-  signal buf_tx_addr   : unsigned(10 downto 0);
-  -- Internal unsigned working copies of the address/length outputs; the entity
-  -- ports are std_logic_vector and driven from these via concurrent casts.
-  signal eth_ram_addr  : unsigned(10 downto 0);
-  signal buf_rx_addr   : unsigned(10 downto 0);
-  signal buf_rx_len    : unsigned(10 downto 0);
-  signal tx_zsof : STD_LOGIC := '0';
+  -- ---------------- READER (mcu_clk domain) ----------------
+  signal rd_rst_meta : std_ulogic := '1';
+  signal rd_rst      : std_ulogic := '1';   -- mac_rx_reset_i, deassert synced
+  type t_rd_sm is (RD_IDLE, RD_HDR, RD_VALID);
+  signal sm_rd       : t_rd_sm := RD_IDLE;
+  signal rd_ptr      : unsigned(PTR_W - 1 downto 0) := (others => '0'); -- head entry's header word
+  signal rd_body     : unsigned(WADDR_W - 1 downto 0) := (others => '0'); -- head entry's first body word
+  signal wr_ptr_r    : unsigned(PTR_W - 1 downto 0) := (others => '0'); -- writer's pointer, as seen here
+  signal rx_len_reg  : unsigned(10 downto 0) := (others => '0');
+  signal rx_valid_reg : std_ulogic := '0';
+  signal rx_ack_d    : std_ulogic := '0';
 
-  -- RX hardware-timestamp trailer appended by ethernet_receive in eth_ram.
-  constant TS_TRAILER_LEN : natural := 5;  -- 1 byte seconds + 4 bytes nanoseconds
+  -- rd_ptr -> writer (toggle handshake; rp_pub stable while rp_req /= ack)
+  signal rp_pub      : unsigned(PTR_W - 1 downto 0) := (others => '0');
+  signal rp_req      : std_ulogic := '0';
+  signal rp_ack_meta : std_ulogic := '0';
+  signal rp_ack_sync : std_ulogic := '0';
+  -- wr_ptr from writer
+  signal wp_req_meta : std_ulogic := '0';
+  signal wp_req_sync : std_ulogic := '0';
+  signal wp_ack      : std_ulogic := '0';
 
-  -- DRAIN working state.
-  signal drain_addr   : unsigned(RING_ADDR_W - 1 downto 0) := (others => '0'); -- data byte offset
-  signal drain_len    : unsigned(15 downto 0) := (others => '0');              -- entry len hdr value
-  signal drain_hdr_hi : std_logic_vector(7 downto 0) := (others => '0');
+  -- words an entry of 'len' bytes occupies (header + body)
+  function entry_words(len : unsigned(10 downto 0)) return unsigned is
+  begin
+    return to_unsigned(1 + (to_integer(len) + 3) / 4, PTR_W);
+  end function;
 
 begin
 
   -- ================================================================
   -- Output assignments & cdc
   -- ================================================================
-  buf_tx_addr_o  <= std_logic_vector(buf_tx_addr);
-  eth_ram_addr_o <= std_logic_vector(eth_ram_addr);
-  buf_rx_addr_o  <= std_logic_vector(buf_rx_addr);
-  buf_rx_len_o   <= std_logic_vector(buf_rx_len);
+  buf_tx_addr_o    <= std_logic_vector(buf_tx_addr);
+  buf_rx_len_o     <= std_logic_vector(rx_len_reg);
+  buf_rx_valid_o   <= rx_valid_reg;
+  buf_rx_rd_data_o <= lane_rdata(3) & lane_rdata(2) & lane_rdata(1) & lane_rdata(0);
+
   mcu_cdc : process (mcu_clk_i)
   begin
     if (rising_edge(mcu_clk_i)) then
-      rx_valid_reg_1cdc <= rx_valid_reg;
-      rx_valid_reg_2cdc <= rx_valid_reg_1cdc;
-      buf_rx_valid_o    <= rx_valid_reg_2cdc;
-
       rx_overflow_reg_1cdc <= rx_overflow_reg;
       rx_overflow_reg_2cdc <= rx_overflow_reg_1cdc;
       eth_rx_overflow_o <= rx_overflow_reg_2cdc;
@@ -302,203 +318,210 @@ begin
   end process;
 
   -- ================================================================
-  -- RX process (mac_rx_clock domain)
-  --
-  -- Two state machines share the ring buffer:
-  --   FILL  : eth_ram -> ring buffer (one entry per parser toggle)
-  --   DRAIN : ring buffer -> LiteX single buffer (one frame per SoC ack)
-  --
-  -- Both eth_ram and the ring read port are synchronous (1 clock latency):
-  -- an address presented in cycle N yields data in cycle N+1, so each copy
-  -- loop runs one cycle "ahead" on the address and writes the previous byte.
+  -- RX ring: four byte-lane RAMs, simple dual port, dual clock
   -- ================================================================
-  p_rx : process(mac_rx_clock_i, mac_rx_reset_i)
-    variable v_commit_len : integer range 0 to RX_RING_SIZE;  -- bytes committed this cycle (0 = none)
-    variable v_pop_len    : integer range 0 to RX_RING_SIZE;  -- bytes released this cycle (0 = none)
-    variable v_pkt        : unsigned(10 downto 0);
-    variable v_total      : unsigned(15 downto 0);
-    variable v_entry      : integer range 0 to RX_RING_SIZE;
-    variable v_pending    : std_ulogic;  -- fill_pending with same-cycle consume-then-set
+  gen_lanes : for k in 0 to 3 generate
+    type t_lane_ram is array (0 to RING_WORDS - 1) of std_logic_vector(7 downto 0);
+    signal lane_ram : t_lane_ram;
   begin
-    if mac_rx_reset_i = '1' then
-      rx_ack_meta      <= '0';
-      rx_ack_sync      <= '0';
-      rx_ack_sync_d    <= '0';
-      buf_rx_data_o    <= (others => '0');
-      buf_rx_addr      <= (others => '0');
-      buf_rx_we_o      <= '0';
-      buf_rx_len       <= (others => '0');
-      rx_valid_reg     <= '0';
-      rx_overflow_reg  <= '0';
-      rx_copy_addr     <= (others => '0');
-      eth_ram_addr     <= (others => '0');
-      parse_mcu_d      <= '0';
-      sm_fill          <= FILL_IDLE;
-      sm_drain         <= DR_IDLE;
-      wr_ptr           <= (others => '0');
-      rd_ptr           <= (others => '0');
-      ring_count       <= 0;
-      ring_raddr       <= (others => '0');
-      drain_addr       <= (others => '0');
-      drain_len        <= (others => '0');
-      drain_hdr_hi     <= (others => '0');
-      fill_pkt_len     <= (others => '0');
-      fill_total       <= (others => '0');
-      fill_entry       <= 0;
-      fill_pending     <= '0';
-      pend_len         <= (others => '0');
-    elsif rising_edge(mac_rx_clock_i) then
-      v_commit_len := 0;
-      v_pop_len    := 0;
-      v_pending    := fill_pending;
-      buf_rx_we_o  <= '0';
-
-      -- CDC: sync buf_rx_ack into this domain
-      rx_ack_meta   <= buf_rx_ack_i;
-      rx_ack_sync   <= rx_ack_meta;
-      rx_ack_sync_d <= rx_ack_sync;
-
-      -- Ring read port (1-cycle latency). The write port is driven inline from
-      -- the FILL states below; Quartus infers a simple dual-port RAM.
-      ring_rdata <= ring_ram(to_integer(ring_raddr));
-
-      -- ============================================================
-      -- FILL: copy one completed frame from eth_ram into the ring buffer,
-      -- prefixed with its 2-byte length header. eth_ram read timing is the same
-      -- as the legacy copy; the data simply lands two bytes further into the
-      -- entry. Drops (overflow) only when the ring lacks room for the whole entry.
-      -- ============================================================
-      case sm_fill is
-        when FILL_IDLE =>
-          if v_pending = '1' then
-            v_pending := '0';
-            -- pend_len includes the 5-byte rx-timestamp trailer that
-            -- ethernet_receive appended behind the frame in eth_ram; strip it
-            -- here unless the SoC is supposed to see it.
-            if ADD_RX_TIMESTAMP then
-              v_pkt := pend_len;
-            else
-              v_pkt := pend_len - to_unsigned(TS_TRAILER_LEN, 11);
-            end if;
-            v_total := resize(v_pkt, 16);
-            v_entry := LEN_HDR_LEN + to_integer(v_total);
-
-            if (RX_RING_SIZE - ring_count) < v_entry then
-              rx_overflow_reg <= '1';   -- not enough room: drop the frame
-            else
-              fill_pkt_len <= v_pkt;
-              fill_total   <= v_total;
-              fill_entry   <= v_entry;
-              
-              -- Length header MSB; start the eth_ram read for data byte 0.
-              ring_ram(to_integer(wr_ptr)) <= std_logic_vector(v_total(15 downto 8));
-              eth_ram_addr <= (others => '0');
-              rx_copy_addr <= (others => '0');
-              sm_fill      <= FILL_HDR_LO;
-            end if;
-          end if;
-
-        when FILL_HDR_LO =>
-          -- Length header LSB. RAM latency cycle: data for addr 0 valid next
-          -- cycle; prefetch addr 1.
-          ring_ram(to_integer(wr_ptr + 1)) <= std_logic_vector(fill_total(7 downto 0));
-          eth_ram_addr <= to_unsigned(1, eth_ram_addr'length);
-          rx_copy_addr <= to_unsigned(1, rx_copy_addr'length);
-          sm_fill      <= FILL_COPY;
-
-        when FILL_COPY =>
-          -- eth_ram_data_i holds the byte for (rx_copy_addr - 1); it lands at
-          -- entry offset (rx_copy_addr + 1) = 2-byte header + (rx_copy_addr - 1).
-          ring_ram(to_integer(wr_ptr + rx_copy_addr + 1)) <= eth_ram_data_i;
-          if rx_copy_addr >= fill_pkt_len then
-            sm_fill <= FILL_COMMIT;
-          end if;
-          eth_ram_addr <= resize(rx_copy_addr + 1, eth_ram_addr'length);
-          rx_copy_addr <= rx_copy_addr + 1;
-
-        when FILL_COMMIT =>
-          -- Publish the entry: advance the write pointer and grow the occupancy
-          -- by the whole entry (header + data) in one step.
-          wr_ptr       <= wr_ptr + to_unsigned(fill_entry, RING_ADDR_W);
-          v_commit_len := fill_entry;
-          sm_fill      <= FILL_IDLE;
-      end case;
-
-      -- Parser-toggle edge detection, AFTER the FILL fsm so a pending frame
-      -- consumed by FILL_IDLE this cycle frees the slot for a new edge.
-      -- The toggle fires after ethernet_receive finished the frame (incl.
-      -- trailer), so pkt_len_i is stable until the next frame's toggle;
-      -- latching it here keeps it valid while FILL is still busy.
-      parse_mcu_d <= parse_mcu_packet_tog_i;
-      if parse_mcu_packet_tog_i /= parse_mcu_d then
-        if v_pending = '1' then
-          rx_overflow_reg <= '1';   -- FILL already two frames behind: drop
-        else
-          v_pending := '1';
-          pend_len  <= unsigned(pkt_len_i);
+    p_lane_wr : process (mac_rx_clock_i)
+    begin
+      if rising_edge(mac_rx_clock_i) then
+        if lane_we(k) = '1' then
+          lane_ram(to_integer(lane_waddr)) <= lane_wdata(k);
         end if;
       end if;
-      fill_pending <= v_pending;
+    end process;
 
-      -- ============================================================
-      -- DRAIN: feed the head ring entry into the LiteX single buffer, one frame
-      -- at a time. Read the entry's length header, copy the body into the buffer,
-      -- raise the interrupt, and advance the read pointer only when the SoC acks.
-      -- ============================================================
-      case sm_drain is
-        when DR_IDLE =>
-          if ring_count > 0 and rx_valid_reg = '0' then
-            ring_raddr <= rd_ptr;              -- present length header MSB
-            sm_drain   <= DR_LEN_HI;
+    p_lane_rd : process (mcu_clk_i)
+    begin
+      if rising_edge(mcu_clk_i) then
+        lane_rdata(k) <= lane_ram(to_integer(lane_raddr));
+      end if;
+    end process;
+  end generate;
+
+  -- ================================================================
+  -- WRITER (mac_rx domain): INGEST + COMMIT, pointer exchange
+  --
+  -- The lane write port is registered; COMMIT's header write falls into the
+  -- gap between frames and takes priority over INGEST, so a byte colliding
+  -- with it is refused and the frame dropped instead of misplaced.
+  -- ================================================================
+  p_wr : process (mac_rx_clock_i, mac_rx_reset_i)
+    variable v_pkt     : unsigned(10 downto 0);
+    variable v_idx     : integer range 0 to 2047;
+    variable v_written : integer range 0 to 2048;
+    variable v_free    : integer range 0 to RING_WORDS;
+    variable v_commit  : boolean;
+  begin
+    if mac_rx_reset_i = '1' then
+      lane_we         <= (others => '0');
+      lane_waddr      <= (others => '0');
+      lane_wdata      <= (others => (others => '0'));
+      wr_ptr          <= (others => '0');
+      rd_ptr_w        <= (others => '0');
+      fill_written    <= 0;
+      parse_mcu_d     <= '0';
+      rx_overflow_reg <= '0';
+      wp_pub          <= (others => '0');
+      wp_req          <= '0';
+      wp_ack_meta     <= '0';
+      wp_ack_sync     <= '0';
+      rp_req_meta     <= '0';
+      rp_req_sync     <= '0';
+      rp_ack          <= '0';
+    elsif rising_edge(mac_rx_clock_i) then
+      lane_we  <= (others => '0');
+      v_commit := false;
+
+      -- ---- reader's pointer: a pop arrived (also clears the drop flag) ----
+      rp_req_meta <= rp_req;
+      rp_req_sync <= rp_req_meta;
+      if rp_req_sync /= rp_ack then
+        rd_ptr_w        <= rp_pub;
+        rp_ack          <= rp_req_sync;
+        rx_overflow_reg <= '0';
+      end if;
+      -- free words, conservative: rd_ptr_w only lags the real read pointer
+      v_free := RING_WORDS - to_integer(wr_ptr - rd_ptr_w);
+
+      -- ---- COMMIT ----
+      -- ethernet_receive toggles parse_mcu_packet_tog_i after the last byte
+      -- (incl. trailer) of an error-free MCU frame went through INGEST;
+      -- pkt_len_i is valid from then until the next frame's toggle.
+      parse_mcu_d <= parse_mcu_packet_tog_i;
+      if parse_mcu_packet_tog_i /= parse_mcu_d then
+        -- pkt_len_i includes the 5-byte rx-timestamp trailer; strip it
+        -- unless the SoC is supposed to see it.
+        if ADD_RX_TIMESTAMP then
+          v_pkt := unsigned(pkt_len_i);
+        else
+          v_pkt := unsigned(pkt_len_i) - to_unsigned(TS_TRAILER_LEN, 11);
+        end if;
+        if (not ADD_RX_TIMESTAMP and unsigned(pkt_len_i) < TS_TRAILER_LEN)
+           or to_integer(v_pkt) > fill_written then
+          -- body did not fully land in the ring (no room, or longer than
+          -- ethernet_receive stores): drop the frame
+          rx_overflow_reg <= '1';
+        else
+          v_commit      := true;
+          lane_we       <= "0011";
+          lane_waddr    <= wr_ptr(WADDR_W - 1 downto 0);
+          lane_wdata(0) <= std_logic_vector(v_pkt(7 downto 0));
+          lane_wdata(1) <= "00000" & std_logic_vector(v_pkt(10 downto 8));
+          wr_ptr        <= wr_ptr + entry_words(v_pkt);
+        end if;
+      end if;
+
+      -- ---- INGEST ----
+      -- Every stored byte goes straight to its place in the entry at wr_ptr,
+      -- behind the header word. Only free ring space is written, and only in
+      -- order: index 0 restarts the frame, any refused byte stops
+      -- fill_written for the rest of it.
+      v_written := fill_written;
+      if rx_byte_we_i = '1' then
+        v_idx := to_integer(unsigned(rx_byte_index_i));
+        if v_idx = 0 then
+          v_written := 0;
+        end if;
+        if not v_commit and v_idx = v_written and 1 + v_idx / 4 < v_free then
+          lane_we(v_idx mod 4) <= '1';
+          lane_waddr <= wr_ptr(WADDR_W - 1 downto 0) + 1
+                        + to_unsigned(v_idx / 4, WADDR_W);
+          lane_wdata(v_idx mod 4) <= rx_byte_data_i;
+          v_written := v_idx + 1;
+        end if;
+      end if;
+      fill_written <= v_written;
+
+      -- ---- publish wr_ptr once the previous value was taken ----
+      -- wr_ptr moves together with the registered header write, so the
+      -- header lands in the RAM one cycle before wp_pub can show it.
+      wp_ack_meta <= wp_ack;
+      wp_ack_sync <= wp_ack_meta;
+      if wp_ack_sync = wp_req and wp_pub /= wr_ptr then
+        wp_pub <= wr_ptr;
+        wp_req <= not wp_req;
+      end if;
+    end if;
+  end process;
+
+  -- ================================================================
+  -- READER (mcu_clk domain)
+  -- ================================================================
+  p_rd_rst : process (mcu_clk_i, mac_rx_reset_i)
+  begin
+    if mac_rx_reset_i = '1' then
+      rd_rst_meta <= '1';
+      rd_rst      <= '1';
+    elsif rising_edge(mcu_clk_i) then
+      rd_rst_meta <= '0';
+      rd_rst      <= rd_rst_meta;
+    end if;
+  end process;
+
+  -- Read address: the CPU's word offset into the published body while a
+  -- frame is valid, otherwise the head entry's header word (RD_IDLE reads
+  -- it, RD_HDR takes it one cycle later).
+  lane_raddr <= rd_body + resize(unsigned(buf_rx_rd_addr_i), WADDR_W)
+                  when sm_rd = RD_VALID
+                else rd_ptr(WADDR_W - 1 downto 0);
+
+  p_rd : process (mcu_clk_i, rd_rst)
+  begin
+    if rd_rst = '1' then
+      sm_rd        <= RD_IDLE;
+      rd_ptr       <= (others => '0');
+      rd_body      <= (others => '0');
+      wr_ptr_r     <= (others => '0');
+      rx_len_reg   <= (others => '0');
+      rx_valid_reg <= '0';
+      rx_ack_d     <= '0';
+      rp_pub       <= (others => '0');
+      rp_req       <= '0';
+      rp_ack_meta  <= '0';
+      rp_ack_sync  <= '0';
+      wp_req_meta  <= '0';
+      wp_req_sync  <= '0';
+      wp_ack       <= '0';
+    elsif rising_edge(mcu_clk_i) then
+      -- ---- writer's pointer: entries were committed ----
+      wp_req_meta <= wp_req;
+      wp_req_sync <= wp_req_meta;
+      if wp_req_sync /= wp_ack then
+        wr_ptr_r <= wp_pub;
+        wp_ack   <= wp_req_sync;
+      end if;
+
+      rx_ack_d <= buf_rx_ack_i;
+      case sm_rd is
+        when RD_IDLE =>
+          if rd_ptr /= wr_ptr_r then
+            sm_rd <= RD_HDR;             -- header word is being read now
           end if;
 
-        when DR_LEN_HI =>
-          ring_raddr <= rd_ptr + 1;            -- present length header LSB
-          sm_drain   <= DR_LEN_LO;
-
-        when DR_LEN_LO =>
-          drain_hdr_hi <= ring_rdata;          -- ring[rd_ptr] = length MSB
-          ring_raddr   <= rd_ptr + 2;          -- present data byte 0
-          sm_drain     <= DR_PRIME;
-
-        when DR_PRIME =>
-          drain_len  <= unsigned(drain_hdr_hi) & unsigned(ring_rdata); -- full length
-          ring_raddr <= rd_ptr + 3;            -- prefetch data byte 1
-          drain_addr <= to_unsigned(1, drain_addr'length);
-          sm_drain   <= DR_COPY;
-
-        when DR_COPY =>
-          -- ring_rdata holds the body byte for index (drain_addr - 1).
-          buf_rx_data_o <= ring_rdata;
-          buf_rx_addr   <= resize(drain_addr - 1, buf_rx_addr'length);
-          buf_rx_we_o   <= '1';
-          if drain_addr >= drain_len then
-            sm_drain <= DR_SET_VALID;
-          end if;
-          ring_raddr <= rd_ptr + drain_addr + 3; -- present body index (drain_addr + 1)
-          drain_addr <= drain_addr + 1;
-
-        when DR_SET_VALID =>
-          buf_rx_len   <= resize(drain_len, buf_rx_len'length);
+        when RD_HDR =>
+          rx_len_reg   <= unsigned(lane_rdata(1)(2 downto 0)) & unsigned(lane_rdata(0));
+          rd_body      <= rd_ptr(WADDR_W - 1 downto 0) + 1;
           rx_valid_reg <= '1';
-          sm_drain     <= DR_WAIT_ACK;
+          sm_rd        <= RD_VALID;
 
-        when DR_WAIT_ACK =>
-          if rx_ack_sync = '1' and rx_ack_sync_d = '0' then
-            rx_valid_reg    <= '0';
-            rx_overflow_reg <= '0';
-            -- Pop the entry: advance the read pointer past header + body and
-            -- shrink the occupancy by the same amount.
-            rd_ptr    <= rd_ptr + to_unsigned(LEN_HDR_LEN, RING_ADDR_W)
-                         + drain_len(RING_ADDR_W - 1 downto 0);
-            v_pop_len := LEN_HDR_LEN + to_integer(drain_len);
-            sm_drain  <= DR_IDLE;
+        when RD_VALID =>
+          if buf_rx_ack_i = '1' and rx_ack_d = '0' then
+            rx_valid_reg <= '0';
+            rd_ptr       <= rd_ptr + entry_words(rx_len_reg);
+            sm_rd        <= RD_IDLE;
           end if;
       end case;
 
-      -- Single update of the shared byte-occupancy counter (handles a
-      -- simultaneous commit + pop).
-      ring_count <= ring_count + v_commit_len - v_pop_len;
+      -- ---- publish rd_ptr once the previous value was taken ----
+      rp_ack_meta <= rp_ack;
+      rp_ack_sync <= rp_ack_meta;
+      if rp_ack_sync = rp_req and rp_pub /= rd_ptr then
+        rp_pub <= rd_ptr;
+        rp_req <= not rp_req;
+      end if;
     end if;
   end process;
 

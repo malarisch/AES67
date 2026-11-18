@@ -17,8 +17,8 @@ from litex.build.xilinx import XilinxPlatform
 # -- Shared I/O: everything except clock and main RAM (identical across targets) --
 
 _io_common = [
-    # MAC clock inputs (directly from FPGA Ethernet MAC).
-    ("clk_mac_rx", 0, Pins(1)),
+    # MAC TX clock input (directly from FPGA Ethernet MAC) for the eth_buf TX
+    # buffer. RX needs none: the RX ring buffer lives in the FPGA-side bridge.
     ("clk_mac_tx", 0, Pins(1)),
 
     # Serial / UART
@@ -207,12 +207,11 @@ _io_common = [
 
     # Ethernet packet buffer I/O (directly active to/from external FPGA logic)
     ("eth_buf", 0,
-        # RX buffer: FPGA writes, SoC reads
-        Subsignal("rx_data",    Pins(8)),   # input: data byte from FPGA
-        Subsignal("rx_addr",    Pins(11)),  # input: write address from FPGA (0..1499)
-        Subsignal("rx_we",      Pins(1)),   # input: write enable from FPGA
-        Subsignal("rx_len",     Pins(11)),  # input: received packet length
-        Subsignal("rx_valid",   Pins(1)),   # input: packet ready (level)
+        # RX: the SoC reads the FPGA bridge's ring buffer (all on clk_sys)
+        Subsignal("rx_rd_addr", Pins(11)),  # output: word offset into the frame
+        Subsignal("rx_rd_data", Pins(32)),  # input: frame word, 1 cycle later
+        Subsignal("rx_len",     Pins(11)),  # input: published frame length
+        Subsignal("rx_valid",   Pins(1)),   # input: frame published (level)
         Subsignal("rx_ack",     Pins(1)),   # output: SoC done reading
         # TX buffer: SoC writes, FPGA reads
         Subsignal("tx_data",    Pins(8)),   # output: data byte to FPGA

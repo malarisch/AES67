@@ -1,4 +1,7 @@
-"""Ethernet packet buffers (memory-mapped Wishbone slave, 1518 bytes each)."""
+"""Ethernet packet buffers (memory-mapped Wishbone slave).
+
+RX is a window onto the RX ring buffer that lives in the FPGA-side
+litex_eth_buffer_bridge (VHDL); TX is a 1518-byte buffer in here."""
 
 from litex.gen import *
 
@@ -9,20 +12,26 @@ from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr_eventmanager import EventManager, EventSourceProcess
 
 
-# -- Ethernet Packet Buffers (memory-mapped, 1518 bytes each) -----------------
+# -- Ethernet Packet Buffers --------------------------------------------------
 
 class EthPacketBuffer(LiteXModule, AutoCSR):
     """
-    RX and TX packet buffers (1518 bytes each) with CSR-accessible length/control
-    and an IRQ for RX packet received.
+    RX/TX packet buffers with CSR-accessible length/control and an IRQ for
+    RX packet received.
 
-    The FPGA side writes the RX buffer and reads the TX buffer via dedicated
-    byte-wide signals (MAC clocks bytes). The CPU side reads the RX buffer and
-    writes the TX buffer via a Wishbone slave.
+    RX has no memory in here: the FPGA-side bridge keeps the received frames
+    in its dual-clock ring buffer (8-bit MAC write port, 32-bit read port on
+    this SoC's sys clock) and publishes the head frame. CPU word reads of the
+    RX window go out on ``o_rx_rd_addr`` (word offset into the frame) and the
+    bridge answers on ``i_rx_rd_data`` one sys cycle later; ``i_rx_len`` /
+    ``i_rx_valid`` / ``o_rx_ack`` are sys-domain signals (no CDC here).
+
+    TX: the CPU writes the buffer via Wishbone, the FPGA reads it byte-wide on
+    the MAC TX clock.
 
     Wishbone address map (word-addressed, 4 payload bytes per 32-bit word,
     little-endian lanes: frame byte 4i+k sits in word i bits [8k+7:8k]):
-      - word 0x000..0x17B: RX buffer (1518 bytes, read-only from CPU)
+      - word 0x000..0x7FF: RX frame (read-only from CPU, frame at word 0)
       - word 0x800..0x97B: TX buffer (1518 bytes, write-only from CPU)
     Byte addresses (CPU view): RX at +0x0000, TX at +0x2000.
 
@@ -33,13 +42,12 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
     """
     def __init__(self):
         # -- External FPGA-side signals --
-        # RX: FPGA writes into buffer, asserts rx_valid when packet is complete
-        self.i_rx_data   = Signal(8)    # data byte from FPGA
-        self.i_rx_addr   = Signal(11)   # write address from FPGA (0..1517)
-        self.i_rx_we     = Signal()     # write enable from FPGA
-        self.i_rx_len    = Signal(11)   # received packet length
-        self.i_rx_valid  = Signal()     # packet ready to read (level)
-        self.o_rx_ack    = Signal()     # SoC done reading (active high)
+        # RX (all sys domain): the bridge's ring buffer read port
+        self.o_rx_rd_addr = Signal(11)  # word offset into the published frame
+        self.i_rx_rd_data = Signal(32)  # frame bytes 4i..4i+3, 1 cycle later
+        self.i_rx_len    = Signal(11)   # published frame length
+        self.i_rx_valid  = Signal()     # frame published (level)
+        self.o_rx_ack    = Signal()     # SoC done reading (rising edge pops)
         # TX: SoC writes buffer, FPGA reads via signals
         self.o_tx_data   = Signal(8)    # data byte to FPGA
         self.i_tx_addr   = Signal(11)   # read address from FPGA (0..1517)
@@ -59,33 +67,14 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
             description="Payload bytes per 32-bit buffer word (absent on "
                         "legacy 1-byte-per-word gateware)")
 
-        # -- Internal memories (true dual-port, independent clocks) --
-        #
-        # Each memory has two ports on different clock domains:
-        #   - "sys"    port: CPU side (Wishbone, sys_clk_freq SoC clock)
-        #   - "mac_rx" port: RX buffer FPGA write port (MAC RX clock)
-        #   - "mac_tx" port: TX buffer FPGA read port (MAC TX clock)
-        #
-        # Cyclone 10LP block RAMs natively support dual-clock operation.
-
-        # 4 payload bytes per 32-bit word, little-endian lanes. Implemented as
+        # -- TX memory (simple dual port, independent clocks) --
+        #   - "sys"    port: CPU writes (Wishbone, SoC clock)
+        #   - "mac_tx" port: FPGA reads (MAC TX clock)
+        # 4 payload bytes per 32-bit word, little-endian lanes, implemented as
         # four independent byte-wide lane memories instead of one 32-bit RAM
-        # with byte enables: each lane is the same plain simple-dual-port,
-        # dual-clock template as the old byte-wide buffer, so Quartus BRAM
-        # inference stays trivially safe. 1518 bytes -> 380 words per lane.
+        # with byte enables: plain simple-dual-port, dual-clock templates keep
+        # BRAM inference trivially safe. 1518 bytes -> 380 words per lane.
         buf_words = (1518 + 3) // 4
-
-        # RX buffer: MAC writes (mac_rx domain), CPU reads (sys domain)
-        rx_wr_ports = []
-        rx_rd_ports = []
-        for k in range(4):
-            mem = Memory(8, buf_words, name=f"eth_rx_buf{k}")
-            self.specials += mem
-            wr = mem.get_port(write_capable=True, clock_domain="mac_rx")
-            rd = mem.get_port(has_re=True, clock_domain="sys")
-            self.specials += wr, rd
-            rx_wr_ports.append(wr)
-            rx_rd_ports.append(rd)
 
         # TX buffer: CPU writes (sys domain), MAC reads (mac_tx domain)
         tx_wr_ports = []
@@ -99,15 +88,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
             tx_wr_ports.append(wr)
             tx_rd_ports.append(rd)
 
-        # -- FPGA-side wiring (directly on MAC clock domains) --
-        # RX: MAC writes one byte per cycle; the low byte-address bits select
-        # the lane, the rest the word.
-        for k in range(4):
-            self.comb += [
-                rx_wr_ports[k].adr.eq(self.i_rx_addr[2:]),
-                rx_wr_ports[k].dat_w.eq(self.i_rx_data),
-                rx_wr_ports[k].we.eq(self.i_rx_we & (self.i_rx_addr[:2] == k)),
-            ]
+        # -- FPGA-side wiring --
         # TX: MAC reads one byte per cycle. Lane reads keep the old port's
         # 1-cycle latency, so the lane select is the byte address delayed by
         # one mac_tx cycle.
@@ -131,12 +112,10 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         cpu_addr = Signal(11)
         self.comb += cpu_addr.eq(wb.adr[:11])
 
-        # CPU reads RX buffer (sys domain ports, one per byte lane)
-        for k in range(4):
-            self.comb += [
-                rx_rd_ports[k].adr.eq(cpu_addr),
-                rx_rd_ports[k].re.eq(wb.cyc & wb.stb & ~is_tx & ~wb.we),
-            ]
+        # CPU reads the RX frame straight from the bridge's ring buffer: the
+        # word offset goes out, the bridge's registered read port answers one
+        # cycle later (same latency as an internal block RAM).
+        self.comb += self.o_rx_rd_addr.eq(cpu_addr)
 
         # CPU writes TX buffer (sys domain ports, wb.sel gates the lanes so
         # sub-word stores from the softcore stay correct)
@@ -150,8 +129,8 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
                                      wb.sel[k]),
             ]
 
-        # Wishbone read data: only RX buffer is readable, TX is write-only
-        self.comb += wb.dat_r.eq(Cat(*[p.dat_r for p in rx_rd_ports]))
+        # Wishbone read data: only RX is readable, TX is write-only
+        self.comb += wb.dat_r.eq(self.i_rx_rd_data)
 
         # Ack: 1-cycle latency for memory read
         wb_ack = Signal()
@@ -163,31 +142,12 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         ]
         self.comb += wb.ack.eq(wb_ack)
 
-        # -- CDC: synchronise mac_rx domain signals into sys domain --
-        # i_rx_valid is a level signal from mac_rx_clock; needs 2-FF sync
-        # to avoid metastability on the IRQ trigger and status reads.
-        rx_valid_meta = Signal(reset=0)
-        rx_valid_sync = Signal(reset=0)
-        self.sync += [
-            rx_valid_meta.eq(self.i_rx_valid),
-            rx_valid_sync.eq(rx_valid_meta),
-        ]
-
-        # i_rx_len is multi-bit but only valid while rx_valid is stable-high,
-        # so we latch it on the rising edge of the synchronised rx_valid.
-        rx_valid_sync_d = Signal()
-        rx_len_latched  = Signal(11)
-        self.sync += [
-            rx_valid_sync_d.eq(rx_valid_sync),
-            If(rx_valid_sync & ~rx_valid_sync_d,
-                rx_len_latched.eq(self.i_rx_len),
-            ),
-        ]
-
         # -- RX status, ACK, TX length --
+        # i_rx_valid / i_rx_len come from the bridge's sys-domain reader (no
+        # CDC); i_rx_len is stable while i_rx_valid is high.
         self.comb += [
-            self.rx_len.status.eq(rx_len_latched),
-            self.rx_ready.status.eq(rx_valid_sync),
+            self.rx_len.status.eq(self.i_rx_len),
+            self.rx_ready.status.eq(self.i_rx_valid),
             self.o_rx_ack.eq(self.rx_ack.storage),
             self.o_tx_len.eq(self.tx_len.storage[:11]),
         ]
@@ -195,7 +155,7 @@ class EthPacketBuffer(LiteXModule, AutoCSR):
         # IRQ: EventSourceProcess triggers on low->high of its trigger input
         # (it is active-low internally, so we invert: trigger=~rx_valid means
         #  IRQ fires when rx_valid goes high)
-        self.comb += self.ev.rx_ready.trigger.eq(~rx_valid_sync)
+        self.comb += self.ev.rx_ready.trigger.eq(~self.i_rx_valid)
 
 
 def add_eth_buffer(soc, platform, origin):
@@ -212,10 +172,9 @@ def add_eth_buffer(soc, platform, origin):
     # Wire buffer signals to top-level pads
     eth_buf_pads = platform.request("eth_buf")
     soc.comb += [
-        # RX: FPGA writes -> SoC reads
-        soc.eth_buf.i_rx_data.eq(eth_buf_pads.rx_data),
-        soc.eth_buf.i_rx_addr.eq(eth_buf_pads.rx_addr),
-        soc.eth_buf.i_rx_we.eq(eth_buf_pads.rx_we),
+        # RX: SoC reads the bridge's ring buffer
+        eth_buf_pads.rx_rd_addr.eq(soc.eth_buf.o_rx_rd_addr),
+        soc.eth_buf.i_rx_rd_data.eq(eth_buf_pads.rx_rd_data),
         soc.eth_buf.i_rx_len.eq(eth_buf_pads.rx_len),
         soc.eth_buf.i_rx_valid.eq(eth_buf_pads.rx_valid),
         eth_buf_pads.rx_ack.eq(soc.eth_buf.o_rx_ack),

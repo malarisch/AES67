@@ -178,7 +178,7 @@ class AES67SoC(SoCCore):
         if cpu_less:
             # CPU-less bridge (spibone / uartbone / aes67_bridge): sys clock
             # only, no main RAM.  Only aes67_bridge instantiates eth_buf, so only
-            # it needs the mac_rx/tx domains; spibone/uartbone leave them unbound.
+            # it needs the mac_tx domain; spibone/uartbone leave it unbound.
             self.crg = _CRG_Spibone(platform, sys_clk_freq,
                                     with_mac_clocks=is_aes67_bridge)
         elif target == "gowin":
