@@ -56,8 +56,8 @@ pub enum TransportCfg {
         #[serde(default)]
         speed_hz: Option<u32>,
     },
-    /// Bus access through the `aes67_eth` kernel module's control char device
-    /// (`/dev/aes67ctl`). Used when the kernel owns the SPI link (PTP-in-software
+    /// Bus access through the `spibone` kernel bus driver's char device
+    /// (`/dev/spibone0`). Used when the kernel owns the SPI link (PTP-in-software
     /// netdev + PHC); the kernel netdev carries frames, so the TAP bridge is off.
     Kernel {
         device: String,

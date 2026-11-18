@@ -29,14 +29,20 @@ probe and adapts:
 - **HW timestamps**: TX from the `tx_timestamp_*` CSRs, RX from the 5-byte
   trailer the FPGA appends after the payload. The captured 4-bit seconds are
   extended to full time by reading the live wallclock seconds.
-- **`/dev/aes67ctl`**: a peek/poke char device so the userspace daemon
-  (`aes67d`) and `aes67cfg` keep reaching FPGA registers now that the **kernel
-  owns the SPI bus** (single Wishbone master).
+- **Register access for userspace** is no longer part of this driver: the
+  `spibone` bus driver (`../spibone`) owns the SPI link and offers
+  `/dev/spiboneN`; `aes67d` / `aes67cfg` use `--kernel /dev/spibone0`.
+
+This driver is a **client of the spibone bus**: a platform device created from a
+child node of the spibone DT node while the bus is online (`compatible =
+"aes67,eth"`, `reg` = the Wishbone window of the core). Addresses from
+`aes67_regs.h` (window `0x90000000`) are shifted to the window of `reg`, so a
+second core elsewhere on the bus works with the same header.
 
 ## Build
 
 ```sh
-make                      # against the running kernel
+make                      # against the running kernel (builds ../spibone first)
 make KDIR=<target-headers> ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-   # cross
 make regs CSV=../../litex_soc/build/aes67_bridge/csr.csv   # regenerate aes67_regs.h
 ```
@@ -50,13 +56,17 @@ register read-back at the header's address and refuses to bind on a mismatch
 
 ## Wiring
 
-Bind via a device-tree overlay (`dts/aes67-overlay.dts`): an SPI child node with
-`compatible = "aes67,spibone"`. Wire `eth_buf_irq` to a GPIO and list it under
-`interrupts` for interrupt-driven RX; otherwise the driver polls (`poll_ms`).
+Bind via a device-tree overlay (`dts/aes67-overlay.dts`): a `litex,spibone` SPI
+device with a child node `compatible = "aes67,eth"`, `reg = <0x90000000 0x20000>`.
+Wire `eth_buf_irq` to a GPIO and list it under `interrupts` of the child for
+interrupt-driven RX; otherwise the driver polls (`poll_ms`). The client exists
+while the bus is online (`litex,online-at-probe`, or set from userspace after the
+FPGA configuration, see `../spibone/README.md`).
 
 ## Use with ptp4l
 
 ```sh
+insmod ../spibone/spibone.ko
 insmod aes67_eth_drv.ko
 ethtool -T eth0          # shows HW TX/RX + a PHC index
 ptp4l -H -i eth0 -m      # hardware timestamping, disciplines the FPGA wallclock

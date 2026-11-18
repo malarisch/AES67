@@ -8,7 +8,10 @@ package system_cfg_pkg is
     constant USE_EXTERNAL_PLL : boolean := false;
     type t_mii_types is (MII, RMII, GMII, RGMII);
     type t_phy_names is (LAN8720A, LXT973, CORTINA, OTHER);
-    type t_soc_types is (LITEX_SPIBONE, LITEX_VEXRISCV_HRAM, LITEX_VEXRISCV_SDRAM, LITEX_UARTBONE);
+    -- EXTERNAL_WB: no bus master inside soc_top; the AES67 Wishbone slave is
+    -- driven through the ext_wb_* ports by a master outside of the core (e.g.
+    -- the SPIBone SoC of OpenAudioFPGA, which also serves other slaves).
+    type t_soc_types is (LITEX_SPIBONE, LITEX_VEXRISCV_HRAM, LITEX_VEXRISCV_SDRAM, LITEX_UARTBONE, EXTERNAL_WB);
     type t_platforms is (ALTERA, GOWIN, LATTICE, XILINX);
     function platform_to_string (platform : in t_platforms) return string;
     
@@ -78,6 +81,10 @@ package system_cfg_pkg is
     -- domain_clocks = true also clocks the pin BCLK/LRCK from that MCLK.
     function with_ext_pll_mclk (cfg : in t_global_system_cfg;
                                 domain_clocks : in boolean := false) return t_global_system_cfg;
+    -- cfg with another SOC_TYPE (e.g. EXTERNAL_WB for a board that brings its
+    -- own Wishbone master)
+    function with_soc_type (cfg : in t_global_system_cfg;
+                            soc_type : in t_soc_types) return t_global_system_cfg;
     constant std_mii_cfg : t_network_config := (
         MII_TYPE => MII,
         MII_WIDTH => 4,
@@ -389,6 +396,15 @@ package body system_cfg_pkg is
         r := cfg;
         r.AUDIO_CONFIG.MCLK_SOURCE := MCLK_SRC_EXT_PLL;
         r.AUDIO_CONFIG.VCXO_DOMAIN_CLOCKS := domain_clocks;
+        return r;
+    end;
+
+    function with_soc_type (cfg : in t_global_system_cfg;
+                            soc_type : in t_soc_types) return t_global_system_cfg is
+        variable r : t_global_system_cfg;
+    begin
+        r := cfg;
+        r.SOC_TYPE := soc_type;
         return r;
     end;
 

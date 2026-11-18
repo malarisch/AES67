@@ -5,9 +5,16 @@
  *
  * Build:  dtc -@ -I dts -O dtb -o aes67-overlay.dtbo aes67-overlay.dts
  *
- * The driver binds on compatible = "aes67,spibone". If `interrupts` is present
+ * Two drivers: the spibone bus driver (driver/spibone) owns the SPI device
+ * (compatible "litex,spibone") and creates the AES67 core as a client device
+ * from the child node (compatible "aes67,eth", reg = Wishbone window), which
+ * the aes67_eth driver binds. If `interrupts` is present on the child
  * (eth_buf_irq wired to a GPIO), RX is interrupt-driven; otherwise the driver
  * falls back to polling (module param poll_ms).
+ *
+ * litex,online-at-probe: the FPGA configures itself from flash, so the bridge
+ * is there at boot. Without it the bus starts offline and is set online from
+ * userspace after the FPGA has been configured (/sys/bus/spi/devices/<dev>/state).
  *
  * Raspberry Pi note: with `dtparam=spi=on` the firmware already attaches the
  * userspace `spidev` driver to CS0 (spi0.0), which then OWNS the chip-select —
@@ -29,15 +36,23 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	aes67@0 {
-		compatible = "aes67,spibone";
+	fpga@0 {
+		compatible = "litex,spibone";
 		reg = <0>;                       /* chip-select 0 */
-		spi-max-frequency = <8000000>;   /* spibone max is sys_clk/4 (~18.75 MHz @ 75 MHz); 1 MHz is safe for bring-up. Tune up via module param spi_hz. */
+		spi-max-frequency = <8000000>;   /* spibone samples SCLK with its sys_clk: keep at or below sys_clk / 12 */
 		/* SPI mode 0 (CPOL=0, CPHA=0): drive NEITHER spi-cpol NOR spi-cpha. */
+		litex,online-at-probe;
+		#address-cells = <1>;
+		#size-cells = <1>;
 
-		/* RX-ready IRQ from eth_buf_irq. Example: GPIO25 on a Pi-style
-		 * gpio controller, rising edge. Remove this property to poll. */
-		interrupt-parent = <&gpio>;
-		interrupts = <25 1>;             /* 1 = IRQ_TYPE_EDGE_RISING */
+		aes67@90000000 {
+			compatible = "aes67,eth";
+			reg = <0x90000000 0x20000>;  /* AES67 window of the aes67_bridge csr.csv */
+
+			/* RX-ready IRQ from eth_buf_irq. Example: GPIO25 on a Pi-style
+			 * gpio controller, rising edge. Remove both lines to poll. */
+			interrupt-parent = <&gpio>;
+			interrupts = <25 1>;         /* 1 = IRQ_TYPE_EDGE_RISING */
+		};
 	};
 };

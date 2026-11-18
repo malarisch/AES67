@@ -52,8 +52,8 @@ struct Cli {
     /// SPI clock in Hz for --spi.
     #[arg(long, value_name = "HZ")]
     spi_speed: Option<u32>,
-    /// aes67_eth kernel control device, e.g. /dev/aes67ctl. Bus access goes
-    /// through the kernel module (which also owns the netdev + PHC), so the TAP
+    /// spibone kernel bus device, e.g. /dev/spibone0. Bus access goes
+    /// through the kernel (whose aes67_eth client owns the netdev + PHC), so the TAP
     /// bridge is disabled in this mode.
     #[arg(long, value_name = "DEV", conflicts_with_all = ["uart", "spi"])]
     kernel: Option<String>,

@@ -55,7 +55,7 @@ MODULE_PARM_DESC(nco_smooth_shift,
 
 /* Write the 48-bit NCO adjustment: LO, then HI (commits atomically CSR-side),
  * then a valid pulse — the NCO takes the value on any valid edge. Caller holds
- * bus_lock. */
+ * the bus lock. */
 static int nco_write_adj_locked(struct aes67_priv *p, s64 units)
 {
 	int ret;
@@ -73,7 +73,7 @@ static int nco_write_adj_locked(struct aes67_priv *p, s64 units)
 	return 0;
 }
 
-/* Fold a new applied wallclock ppb into the NCO rate. Caller holds bus_lock. */
+/* Fold a new applied wallclock ppb into the NCO rate. Caller holds the bus lock. */
 static int nco_rate_update_locked(struct aes67_priv *p, s32 ppb)
 {
 	s64 target = (s64)ppb * 65536;
@@ -102,7 +102,7 @@ static struct aes67_priv *info_to_priv(struct ptp_clock_info *info)
 	return container_of(info, struct aes67_priv, ptp_info);
 }
 
-/* Read the live 48-bit wallclock seconds (caller holds bus_lock). */
+/* Read the live 48-bit wallclock seconds (caller holds the bus lock). */
 static int read_wc_seconds_locked(struct aes67_priv *p, u64 *sec)
 {
 	u32 lo, hi;
@@ -125,7 +125,7 @@ static int aes67_phc_gettime(struct ptp_clock_info *info, struct timespec64 *ts)
 	u32 nsec;
 	int ret;
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	/* Coherent snapshot: re-read seconds around the nanoseconds read and
 	 * retry if it advanced (guards a torn read across a second boundary). */
 	do {
@@ -140,7 +140,7 @@ static int aes67_phc_gettime(struct ptp_clock_info *info, struct timespec64 *ts)
 			goto out;
 	} while (sec != sec2);
 out:
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 	if (ret)
 		return ret;
 
@@ -159,7 +159,7 @@ static int aes67_phc_settime(struct ptp_clock_info *info,
 	if (!p->ptp_sw)
 		return -EOPNOTSUPP;   /* FPGA servo owns the wallclock */
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret =  aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO,
 				     (u32)sec);
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI,
@@ -170,7 +170,7 @@ static int aes67_phc_settime(struct ptp_clock_info *info,
 	 * capture window in gateware. */
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_CTRL, AES67_WC_CTRL_SET);
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_CTRL, 0);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 
 	return ret ? -EIO : 0;
 }
@@ -190,7 +190,7 @@ static int aes67_phc_adjtime(struct ptp_clock_info *info, s64 delta_ns)
 		       NS_PER_SEC);
 	nsec = delta_ns - sec * NS_PER_SEC;
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret =  aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_SECONDS_OUT_LO,
 				     (u32)sec);
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_SECONDS_OUT_HI,
@@ -199,7 +199,7 @@ static int aes67_phc_adjtime(struct ptp_clock_info *info, s64 delta_ns)
 				     (u32)nsec & 0x3fffffff);
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_CTRL, AES67_WC_CTRL_PHASEJUMP);
 	ret |= aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_CTRL, 0);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 
 	return ret ? -EIO : 0;
 }
@@ -217,12 +217,12 @@ static int aes67_phc_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 	ppb = div_s64((s64)scaled_ppm * 1000, 65536);
 	ppb = clamp_t(s64, ppb, -AES67_MAX_PPB, AES67_MAX_PPB);
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret = aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_PPB,
 				    (u32)ppb & 0xfffff);
 	if (!ret)
 		ret = nco_rate_update_locked(p, (s32)ppb);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 	return ret;
 }
 
@@ -242,9 +242,9 @@ int aes67_ts_reconstruct(struct aes67_priv *p, u8 cap_sec, u32 cap_nsec,
 	u64 wc_sec, full_sec;
 	int ret;
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret = read_wc_seconds_locked(p, &wc_sec);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 	if (ret)
 		return ret;
 
@@ -262,13 +262,13 @@ int aes67_phc_register(struct aes67_priv *p)
 	/* A warm FPGA keeps last run's rate corrections; the PTP core starts
 	 * from 0 ppb, so make the hardware agree (firmware: rate_reset). */
 	if (p->ptp_sw) {
-		mutex_lock(&p->bus_lock);
+		aes67_bus_lock(p);
 		aes67_wb_write_locked(p, AES67_REG_AES67_CSR_WALLCLOCK_PPB, 0);
 		p->nco_acc_q16 = 0;
 		p->nco_written_once = false;
 		if (nco_units_per_ppb)
 			nco_write_adj_locked(p, 0);
-		mutex_unlock(&p->bus_lock);
+		aes67_bus_unlock(p);
 	}
 
 	p->ptp_info = (struct ptp_clock_info){
@@ -282,7 +282,7 @@ int aes67_phc_register(struct aes67_priv *p)
 	};
 	scnprintf(p->ptp_info.name, sizeof(p->ptp_info.name), "aes67_wallclock");
 
-	p->ptp_clock = ptp_clock_register(&p->ptp_info, &p->spi->dev);
+	p->ptp_clock = ptp_clock_register(&p->ptp_info, p->dev);
 	if (IS_ERR(p->ptp_clock)) {
 		int ret = PTR_ERR(p->ptp_clock);
 

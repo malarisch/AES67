@@ -31,18 +31,21 @@ set_false_path -from [get_registers {*aes67soc_reset_storage*}] -to *
 set_false_path -from [get_registers {*audiotx_inst|b2v_tx_router|threshold_shadow[*][*]}]
 set_false_path -to   [get_registers {*audiotx_inst|b2v_tx_router|tx_en_meta}]
 
-# --- Ethernet packet buffer bridge (enet_rx_clk_125m -> litex_sys_clk) ---
+# --- Ethernet packet buffer bridge RX ring (enet_rx_clk <-> litex_sys_clk) ---
+# Writer (mac_rx) and reader (litex_sys_clk) pointers cross via toggle
+# handshakes: the published pointer bus is held stable until the other side
+# acks, the request/ack toggles go through 2-FF synchronisers (*_meta).
+# rx_valid / rx_len / rx_ack are litex_sys_clk-internal now (no CDC).
+set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|wp_pub[*]}]
+set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|rp_pub[*]}]
+set_false_path -to   [get_registers {*litex_eth_buffer_bridge_inst|wp_req_meta}]
+set_false_path -to   [get_registers {*litex_eth_buffer_bridge_inst|wp_ack_meta}]
+set_false_path -to   [get_registers {*litex_eth_buffer_bridge_inst|rp_req_meta}]
+set_false_path -to   [get_registers {*litex_eth_buffer_bridge_inst|rp_ack_meta}]
 set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|rx_overflow_reg*}]
-set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|rx_valid_reg*}]
-set_false_path -from [get_registers {*litex_eth_buffer_bridge_inst|buf_rx_len_o[*]}]
 
-# LiteX EthPacketBuffer internal RX CDC synchronizers
-set_false_path -to [get_registers {*eth_buf_rx_valid_meta*}]
-set_false_path -to [get_registers {*eth_buf_rx_len_latched*}]
-
-# TX buffer length / RX ack crossing litex_sys_clk -> mac_tx
+# TX buffer length crossing litex_sys_clk -> mac_tx
 set_false_path -from [get_registers {*eth_buf_tx_len*storage*}]
-set_false_path -from [get_registers {*eth_buf_rx_ack*storage*}]
 
 # --- I/O ports directly driven by LiteX SoC (slow / async, no FPGA-side timing) ---
 set_false_path -from * -to [get_ports {uart0_tx}]

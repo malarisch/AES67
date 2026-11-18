@@ -65,8 +65,8 @@ struct TransportArgs {
     #[arg(long, global = true, value_name = "HZ")]
     spi_speed: Option<u32>,
 
-    /// Direct aes67_eth kernel control device, e.g. /dev/aes67ctl (bypasses the
-    /// daemon; used when the kernel module owns the bus).
+    /// Direct spibone kernel bus device, e.g. /dev/spibone0 (bypasses the
+    /// daemon; used when the kernel owns the bus).
     #[arg(long, global = true, value_name = "DEV", conflicts_with_all = ["uart", "spi"])]
     kernel: Option<String>,
 

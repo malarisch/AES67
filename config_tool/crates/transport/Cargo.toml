@@ -19,7 +19,7 @@ serialport = { version = "4", default-features = false }
 
 # spidev is Linux-only; the SPI backend is gated on Linux. On other hosts the
 # SpiTransport constructor returns TransportError::Unsupported. libc backs the
-# KernelTransport ioctls (/dev/aes67ctl) on the same Linux-only path.
+# KernelTransport ioctls (/dev/spibone0) on the same Linux-only path.
 [target.'cfg(target_os = "linux")'.dependencies]
 spidev = "0.6"
 libc = "0.2"

@@ -8,7 +8,14 @@
  * atomic ndo_start_xmit / softirq NAPI context. Following the enc28j60/ks8851
  * model, all bus I/O happens in process context: a threaded IRQ (or a poll
  * delayed-work fallback) drains RX, and an ordered workqueue drains a software
- * TX queue. bus_lock (in the bus layer) serialises everything onto the one link.
+ * TX queue. The bus lock of the spibone driver serialises everything onto the
+ * one link.
+ *
+ * The device is a client of the spibone bus driver: a platform device that the bus
+ * creates from a child node of its DT node while the bus is online, e.g.
+ *     aes67@90000000 { compatible = "aes67,eth"; reg = <0x90000000 0x20000>; };
+ * reg is the Wishbone window of this core; an optional interrupts property wires
+ * eth_buf_irq (else RX is polled).
  */
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -16,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/net_tstamp.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/workqueue.h>
 
 #include "aes67_eth.h"
@@ -61,10 +69,10 @@ static void aes67_set_fpga_mac(struct aes67_priv *p, const u8 *mac)
 	u32 lo = ((u32)mac[2] << 24) | ((u32)mac[3] << 16) |
 		 ((u32)mac[4] << 8) | mac[5];
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	aes67_wb_write_locked(p, AES67_REG_AES67_CSR_MAC_ADDR_LO, lo);
 	aes67_wb_write_locked(p, AES67_REG_AES67_CSR_MAC_ADDR_HI, hi);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 }
 
 /* Poll eth_tx_done (bounded). The MAC de-asserts it at reset, so the very first
@@ -109,7 +117,7 @@ static void aes67_tx_one(struct aes67_priv *p, struct sk_buff *skb)
 		return;
 	}
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	aes67_wait_tx_done_locked(p);
 	/* Stream the whole frame in one burst instead of a write per byte. */
 	if (p->buf_packed)
@@ -130,7 +138,7 @@ static void aes67_tx_one(struct aes67_priv *p, struct sk_buff *skb)
 		aes67_wb_read_locked(p, AES67_REG_AES67_CSR_TX_TIMESTAMP_SEC_IN, &ts_sec);
 		aes67_wb_read_locked(p, AES67_REG_AES67_CSR_TX_TIMESTAMP_NSEC_IN, &ts_nsec);
 	}
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 
 	if (ret) {
 		ndev->stats.tx_errors++;
@@ -197,10 +205,10 @@ static bool aes67_rx_one(struct aes67_priv *p)
 	u32 cap_nsec = 0;
 	int ret;
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret = aes67_wb_read_locked(p, AES67_REG_ETH_BUF_RX_LEN, &raw_len);
 	if (ret) {
-		mutex_unlock(&p->bus_lock);
+		aes67_bus_unlock(p);
 		return false;
 	}
 	total = raw_len & 0xffff;
@@ -245,7 +253,7 @@ release:
 	aes67_wb_write_locked(p, AES67_REG_ETH_BUF_RX_ACK, 1);
 	aes67_wb_write_locked(p, AES67_REG_ETH_BUF_RX_ACK, 0);
 	aes67_wb_write_locked(p, AES67_REG_ETH_BUF_EV_PENDING, AES67_EV_RX_READY);
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 
 	if (ret || payload < MIN_ETH_FRAME)
 		return true;   /* a frame was consumed even if dropped */
@@ -491,7 +499,7 @@ static int aes67_check_csr_map(struct aes67_priv *p)
 	u32 saved, rb;
 	int i, ret;
 
-	mutex_lock(&p->bus_lock);
+	aes67_bus_lock(p);
 	ret = aes67_wb_read_locked(p, AES67_REG_AES67_CSR_SCRATCH, &saved);
 	if (ret)
 		goto out;   /* bus not answering at all */
@@ -504,7 +512,7 @@ static int aes67_check_csr_map(struct aes67_priv *p)
 	}
 	aes67_wb_write_locked(p, AES67_REG_AES67_CSR_SCRATCH, saved);
 out:
-	mutex_unlock(&p->bus_lock);
+	aes67_bus_unlock(p);
 	return ret;
 }
 
@@ -521,38 +529,49 @@ static void aes67_read_syscfg(struct aes67_priv *p)
 	p->ptp_sw = flags & AES67_SYSCFG_PTP_IN_SW;
 	p->rx_trailer = rx_ts < 0 ? p->ptp_sw : !!rx_ts;
 
-	dev_info(&p->spi->dev,
+	dev_info(p->dev,
 		 "gateware: %s PTP%s, metering %s, RX %u stream(s)/%u ch, TX %u stream(s)/%u ch\n",
 		 p->ptp_sw ? "software" : "hardware",
 		 flags & AES67_SYSCFG_STATIC_PTP ? " (static servo)" : "",
 		 flags & AES67_SYSCFG_METERING ? "on" : "off",
 		 rx & 0xff, (rx >> 8) & 0xff, tx & 0xff, (tx >> 8) & 0xff);
 	if (p->rx_trailer != p->ptp_sw)
-		dev_warn(&p->spi->dev,
+		dev_warn(p->dev,
 			 "rx_ts=%d overrides the gateware (%s PTP) — RX frames will be mis-sized\n",
 			 rx_ts, p->ptp_sw ? "software" : "hardware");
 	if (!p->ptp_sw)
-		dev_info(&p->spi->dev,
+		dev_info(p->dev,
 			 "FPGA runs PTP itself: PHC is read-only, no HW timestamping (do not run ptp4l on this port)\n");
 }
 
-static int aes67_probe(struct spi_device *spi)
+static int aes67_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
 	struct net_device *ndev;
 	struct aes67_priv *p;
-	u32 lo, hi;
+	struct spibone *sb;
+	u32 base, lo, hi;
 	int ret;
+
+	sb = spibone_get(dev);
+	if (!sb)
+		return dev_err_probe(dev, -ENODEV, "parent is no spibone bus\n");
+	ret = of_property_read_u32_index(dev->of_node, "reg", 0, &base);
+	if (ret)
+		return dev_err_probe(dev, ret, "no reg (Wishbone window)\n");
 
 	ndev = alloc_etherdev(sizeof(*p));
 	if (!ndev)
 		return -ENOMEM;
-	SET_NETDEV_DEV(ndev, &spi->dev);
+	SET_NETDEV_DEV(ndev, dev);
 
 	p = netdev_priv(ndev);
-	p->spi = spi;
+	p->dev = dev;
+	p->sb = sb;
+	p->base_off = base - AES67_WIN_BASE;
 	p->netdev = ndev;
-	p->irq = spi->irq;
-	mutex_init(&p->bus_lock);
+	ret = platform_get_irq_optional(pdev, 0);
+	p->irq = ret > 0 ? ret : 0;
 	spin_lock_init(&p->tx_ts_lock);
 	skb_queue_head_init(&p->txq);
 	INIT_WORK(&p->tx_work, aes67_tx_work);
@@ -561,16 +580,15 @@ static int aes67_probe(struct spi_device *spi)
 	/* WQ_HIGHPRI: TX timestamps are read back over SPI inside this work.
 	 * At normal priority, busy userspace (omc on the X32) delays it by tens
 	 * of ms and ptp4l runs into tx_timestamp_timeout. */
-	p->wq = alloc_ordered_workqueue("aes67_%s", WQ_HIGHPRI, dev_name(&spi->dev));
+	p->wq = alloc_ordered_workqueue("aes67_%s", WQ_HIGHPRI, dev_name(dev));
 	if (!p->wq) {
 		ret = -ENOMEM;
 		goto err_free;
 	}
 
-	/* DMA-safe scratch for SPI burst transfers (auto-freed on driver detach). */
-	p->spi_tx = devm_kmalloc(&spi->dev, AES67_BURST_BUF, GFP_KERNEL);
-	p->spi_rx = devm_kmalloc(&spi->dev, AES67_BURST_BUF, GFP_KERNEL);
-	if (!p->spi_tx || !p->spi_rx) {
+	/* word buffer of the eth_buf bursts (auto-freed on driver detach) */
+	p->wbuf = devm_kmalloc_array(dev, AES67_WBUF_WORDS, sizeof(u32), GFP_KERNEL);
+	if (!p->wbuf) {
 		ret = -ENOMEM;
 		goto err_wq;
 	}
@@ -579,12 +597,12 @@ static int aes67_probe(struct spi_device *spi)
 	ndev->ethtool_ops = &aes67_ethtool_ops;
 	ndev->watchdog_timeo = msecs_to_jiffies(5000);
 
-	spi_set_drvdata(spi, p);
+	platform_set_drvdata(pdev, p);
 
 	if (map_check) {
 		ret = aes67_check_csr_map(p);
 		if (ret) {
-			dev_err(&spi->dev,
+			dev_err(dev,
 				"CSR map mismatch (scratch read-back failed: %d): aes67_regs.h does not match the loaded gateware — rebuild with `make regs CSV=<gateware csr.csv>` (or load with map_check=0)\n",
 				ret);
 			ret = -ENODEV;
@@ -616,35 +634,27 @@ static int aes67_probe(struct spi_device *spi)
 
 		p->buf_packed = !aes67_wb_read(p, AES67_REG_ETH_BUF_BYTES_PER_WORD,
 					       &bpw) && bpw == 4;
-		dev_info(&spi->dev, "eth_buf packing: %u byte(s)/word\n",
+		dev_info(dev, "eth_buf packing: %u byte(s)/word\n",
 			 p->buf_packed ? 4 : 1);
 	}
 
 	ret = aes67_phc_register(p);
 	if (ret) {
-		dev_err(&spi->dev, "PHC register failed: %d\n", ret);
+		dev_err(dev, "PHC register failed: %d\n", ret);
 		goto err_wq;
-	}
-
-	ret = aes67_ctl_register(p);
-	if (ret) {
-		dev_err(&spi->dev, "control device register failed: %d\n", ret);
-		goto err_phc;
 	}
 
 	ret = register_netdev(ndev);
 	if (ret) {
-		dev_err(&spi->dev, "register_netdev failed: %d\n", ret);
-		goto err_ctl;
+		dev_err(dev, "register_netdev failed: %d\n", ret);
+		goto err_phc;
 	}
 
-	dev_info(&spi->dev, "AES67 netdev %s, PHC ptp%d, %s RX\n",
-		 ndev->name, ptp_clock_index(p->ptp_clock),
+	dev_info(dev, "AES67 netdev %s, PHC ptp%d, window 0x%08x, %s RX\n",
+		 ndev->name, ptp_clock_index(p->ptp_clock), base,
 		 p->irq > 0 ? "IRQ" : "polled");
 	return 0;
 
-err_ctl:
-	aes67_ctl_unregister(p);
 err_phc:
 	aes67_phc_unregister(p);
 err_wq:
@@ -654,42 +664,31 @@ err_free:
 	return ret;
 }
 
-static void aes67_remove(struct spi_device *spi)
+static void aes67_remove(struct platform_device *pdev)
 {
-	struct aes67_priv *p = spi_get_drvdata(spi);
+	struct aes67_priv *p = platform_get_drvdata(pdev);
 
 	unregister_netdev(p->netdev);
-	aes67_ctl_unregister(p);
 	aes67_phc_unregister(p);
 	destroy_workqueue(p->wq);
 	free_netdev(p->netdev);
 }
 
 static const struct of_device_id aes67_of_match[] = {
-	{ .compatible = "aes67,spibone" },
+	{ .compatible = "aes67,eth" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, aes67_of_match);
 
-/* The SPI core derives the modalias from the DT compatible by stripping the
- * vendor prefix ("aes67,spibone" -> "spibone"), so the id_table entry must be
- * named "spibone" to match (otherwise: "has no spi_device_id" warning). */
-static const struct spi_device_id aes67_spi_ids[] = {
-	{ "spibone", 0 },
-	{ }
-};
-MODULE_DEVICE_TABLE(spi, aes67_spi_ids);
-
-static struct spi_driver aes67_spi_driver = {
+static struct platform_driver aes67_driver = {
 	.driver = {
 		.name = "aes67_eth",
 		.of_match_table = aes67_of_match,
 	},
-	.id_table = aes67_spi_ids,
 	.probe = aes67_probe,
 	.remove = aes67_remove,
 };
-module_spi_driver(aes67_spi_driver);
+module_platform_driver(aes67_driver);
 
 MODULE_DESCRIPTION("AES67 FPGA Ethernet + PHC driver");
 MODULE_AUTHOR("AES67 project");

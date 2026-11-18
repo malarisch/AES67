@@ -36,8 +36,12 @@ MODULE           := aes67_eth_drv
 # derived from KDIR so it is correct for both native and cross installs.
 KRELEASE         ?= $(notdir $(patsubst %/,%,$(dir $(KDIR))))
 
+# the spibone bus driver (../spibone) is built first: aes67_eth links against it
+SPIBONE := $(abspath $(PWD)/../spibone)
+
 default:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C $(SPIBONE) KDIR=$(KDIR)
+	$(MAKE) -C $(KDIR) M=$(PWD) KBUILD_EXTRA_SYMBOLS=$(SPIBONE)/Module.symvers modules
 
 dtbo: $(DTBO)
 
@@ -56,6 +60,7 @@ regs:
 #  * the compiled overlay into the boot overlay directory,
 #  * an /etc/modules-load.d entry so the module loads on every boot.
 install: default $(DTBO)
+	$(MAKE) -C $(SPIBONE) KDIR=$(KDIR) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) install
 	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) modules_install
 	# The kernel's modules_install skips depmod when the headers package ships no
 	# System.map (e.g. Raspberry Pi OS). Run it ourselves so modprobe — and thus
@@ -64,7 +69,7 @@ install: default $(DTBO)
 	install -d $(DESTDIR)$(OVERLAY_DIR)
 	install -m 0644 $(DTBO) $(DESTDIR)$(OVERLAY_DIR)/aes67-overlay.dtbo
 	install -d $(DESTDIR)$(MODLOAD_DIR)
-	echo $(MODULE) > $(DESTDIR)$(MODLOAD_DIR)/aes67.conf
+	printf 'spibone\n$(MODULE)\n' > $(DESTDIR)$(MODLOAD_DIR)/aes67.conf
 	@echo
 	@echo "Installed module '$(MODULE)' (for kernel $(KRELEASE)) and overlay aes67-overlay.dtbo."
 	@echo "Ensure 'dtoverlay=aes67-overlay' is in config.txt, then reboot."
