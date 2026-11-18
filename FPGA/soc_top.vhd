@@ -113,6 +113,22 @@ ENTITY soc_top IS
 	spibone_irq_o : out std_logic := '1';
   uartbone_rx : IN STD_LOGIC :='0';
   uartbone_tx : OUT STD_LOGIC :='0';
+
+    -- SOC_TYPE = EXTERNAL_WB: the AES67 Wishbone slave (byte window 0x90000000
+    -- + 128 KiB, 30-bit word address) for a master outside of the core.
+    -- Synchronous to the mcu clock (ext_mcu_clk_i when CLK_IN_IS_SYS_CLK).
+    ext_wb_adr : in std_logic_vector(29 downto 0) := (others => '0');
+    ext_wb_dat_w : in std_logic_vector(31 downto 0) := (others => '0');
+    ext_wb_dat_r : out std_logic_vector(31 downto 0) := (others => '0');
+    ext_wb_sel : in std_logic_vector(3 downto 0) := (others => '0');
+    ext_wb_cyc : in std_logic := '0';
+    ext_wb_stb : in std_logic := '0';
+    ext_wb_we : in std_logic := '0';
+    ext_wb_cti : in std_logic_vector(2 downto 0) := (others => '0');
+    ext_wb_bte : in std_logic_vector(1 downto 0) := (others => '0');
+    ext_wb_ack : out std_logic := '0';
+    ext_wb_err : out std_logic := '0';
+    ext_wb_irq_o : out std_logic := '0';    -- eth_buf RX interrupt
   dbg_mac_tx_clk_o : OUT STD_LOGIC
 	);
 END soc_top;
@@ -434,6 +450,21 @@ litex_soc_spibone_inst : litex_soc_spibone
   );
 
 
+end generate;
+-- no master inside: the bus comes from the ext_wb_* ports
+ext_wb_gen : if (syscfg.SOC_TYPE = EXTERNAL_WB) generate
+    aes67_wb_adr   <= ext_wb_adr;
+    aes67_wb_dat_w <= ext_wb_dat_w;
+    aes67_wb_sel   <= ext_wb_sel;
+    aes67_wb_cyc   <= ext_wb_cyc;
+    aes67_wb_stb   <= ext_wb_stb;
+    aes67_wb_we    <= ext_wb_we;
+    aes67_wb_cti   <= ext_wb_cti;
+    aes67_wb_bte   <= ext_wb_bte;
+    ext_wb_dat_r   <= aes67_wb_dat_r;
+    ext_wb_ack     <= aes67_wb_ack;
+    ext_wb_err     <= aes67_wb_err;
+    ext_wb_irq_o   <= eth_buf_irq;
 end generate;
 litex_soc_gen_uartbone : if (syscfg.SOC_TYPE = LITEX_UARTBONE) generate
 litex_soc_uartbone_inst : litex_soc_uartbone

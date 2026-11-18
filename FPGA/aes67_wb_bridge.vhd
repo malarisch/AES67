@@ -168,16 +168,14 @@ component litex_soc_aes67_bridge
     aes67_wb_sel : in std_logic_vector     (3 downto 0);
     aes67_wb_stb : in std_logic;
     aes67_wb_we : in std_logic;
-    clk_mac_rx : in std_logic;
     clk_mac_tx : in std_logic;
     clk_sys : in std_logic;
     eth_buf_irq : out std_logic;
     eth_buf_rx_ack : out std_logic;
-    eth_buf_rx_addr : in std_logic_vector    (10 downto 0);
-    eth_buf_rx_data : in std_logic_vector     (7 downto 0);
     eth_buf_rx_len : in std_logic_vector    (10 downto 0);
+    eth_buf_rx_rd_addr : out std_logic_vector (10 downto 0);
+    eth_buf_rx_rd_data : in std_logic_vector  (31 downto 0);
     eth_buf_rx_valid : in std_logic;
-    eth_buf_rx_we : in std_logic;
     eth_buf_tx_addr : in std_logic_vector    (10 downto 0);
     eth_buf_tx_data : out std_logic_vector     (7 downto 0);
     eth_buf_tx_len : out std_logic_vector    (10 downto 0);
@@ -268,11 +266,10 @@ signal mcu_tx_allow : std_logic;
 signal mcu_tx_start_prefetch : std_logic;
 
 signal mcu_received_packet_length : unsigned(10 downto 0); 
-signal mcu_ethbuf_ram_addr: unsigned(10 downto 0);
--- std_logic_vector view of the eth-ram read address driven by the litex bridge
--- (its eth_ram_addr_o port is std_logic_vector; ethernet_top expects unsigned).
-signal mcu_ethbuf_ram_addr_slv: std_logic_vector(10 downto 0);
-signal mcu_ethbuf_ram_data: std_logic_vector(7 downto 0);
+-- received byte stream (mac_rx_clk domain) into the bridge's RX ring buffer
+signal mac_rx_byte_we: std_logic;
+signal mac_rx_byte_index: unsigned(10 downto 0);
+signal mac_rx_byte_data: std_logic_vector(7 downto 0);
 signal mcu_tx_data : std_logic_vector(7 downto 0);
 signal mcu_rx_overflow : std_logic;
 signal mcu_tx_done : std_logic;
@@ -280,15 +277,15 @@ signal mcu_tx_req : std_logic;
 
 
 signal mcu_buf_rx_ack : std_logic;
-signal mcu_buf_rx_we : std_logic;
 signal mcu_buf_rx_valid : std_logic;
 signal mcu_buf_tx_len: STD_LOGIC_VECTOR(10 downto 0);
 signal mcu_buf_tx_addr : STD_LOGIC_VECTOR(10 downto 0);
 signal mcu_buf_tx_data : STD_LOGIC_VECTOR(7 downto 0);
 
 signal mcu_buf_rx_len: STD_LOGIC_VECTOR(10 downto 0);
-signal mcu_buf_rx_addr : STD_LOGIC_VECTOR(10 downto 0);
-signal mcu_buf_rx_data : STD_LOGIC_VECTOR(7 downto 0);
+-- RX ring read port (clk_mcu_i): LiteX Wishbone word offset in, frame word out
+signal mcu_buf_rx_rd_addr : STD_LOGIC_VECTOR(10 downto 0);
+signal mcu_buf_rx_rd_data : STD_LOGIC_VECTOR(31 downto 0);
 
 signal audiorx_reset : STD_LOGIC;
 signal audiotx_reset : STD_LOGIC;
@@ -308,10 +305,7 @@ signal aes67_ctrl_nco_ppb_adj_reg : STD_LOGIC_VECTOR(47 downto 0);
 signal aes67_ctrl_nco_ppb_adj_valid_reg : STD_LOGIC;
 begin
 
-    -- eth-ram read address: litex bridge drives std_logic_vector, ethernet_top
-    -- consumes unsigned.
     dbg_mac_tx_clk_o <= mac_rx_clk;
-    mcu_ethbuf_ram_addr <= unsigned(mcu_ethbuf_ram_addr_slv);
     mac_resetn <= not mac_reset;
     litex_soc_aes67_bridge_inst: litex_soc_aes67_bridge
      port map(
@@ -378,16 +372,14 @@ begin
         aes67_wb_sel => aes67_wb_sel,
         aes67_wb_stb => aes67_wb_stb,
         aes67_wb_we => aes67_wb_we,
-        clk_mac_rx => mac_rx_clk,
         clk_mac_tx => mac_tx_clk,
         clk_sys => clk_mcu_i,
         eth_buf_irq => eth_irq_o,
         eth_buf_rx_ack => mcu_buf_rx_ack,
-        eth_buf_rx_addr => mcu_buf_rx_addr,
-        eth_buf_rx_data => mcu_buf_rx_data,
         eth_buf_rx_len => mcu_buf_rx_len,
+        eth_buf_rx_rd_addr => mcu_buf_rx_rd_addr,
+        eth_buf_rx_rd_data => mcu_buf_rx_rd_data,
         eth_buf_rx_valid => mcu_buf_rx_valid,
-        eth_buf_rx_we => mcu_buf_rx_we,
         eth_buf_tx_addr => mcu_buf_tx_addr,
         eth_buf_tx_data => mcu_buf_tx_data,
         eth_buf_tx_len => mcu_buf_tx_len,
@@ -455,8 +447,9 @@ begin
         mac_tx_clock_o => mac_tx_clk,
         mac_tx_reset_o => mac_tx_rst,
         is_mcu_pkt_tog_o => is_mcu_pkt_tog,
-        mcu_ram_addr_i => mcu_ethbuf_ram_addr,
-        eth_ram_data_rx_mcu_o => mcu_ethbuf_ram_data,
+        mac_rx_byte_we_o => mac_rx_byte_we,
+        mac_rx_byte_index_o => mac_rx_byte_index,
+        mac_rx_byte_data_o => mac_rx_byte_data,
         eth_tx_en_mcu_i => mcu_tx_en,
         eth_tx_data_mcu_i => mcu_tx_data,
         eth_tx_allow_req_mcu_i => mcu_tx_allow_req,
@@ -540,9 +533,8 @@ begin
         ADD_RX_TIMESTAMP => syscfg.PTP_IN_SOFTWARE
      )
      port map(
-        buf_rx_data_o => mcu_buf_rx_data,
-        buf_rx_addr_o => mcu_buf_rx_addr,
-        buf_rx_we_o => mcu_buf_rx_we,
+        buf_rx_rd_addr_i => mcu_buf_rx_rd_addr,
+        buf_rx_rd_data_o => mcu_buf_rx_rd_data,
         buf_rx_len_o => mcu_buf_rx_len,
         buf_rx_valid_o => mcu_buf_rx_valid,
         buf_rx_ack_i => mcu_buf_rx_ack,
@@ -563,10 +555,11 @@ begin
         tx_allow_i => mcu_tx_allow,
         mac_rx_clock_i => mac_rx_clk,
         mac_rx_reset_i => not rst_n,
+        rx_byte_we_i => mac_rx_byte_we,
+        rx_byte_index_i => std_logic_vector(mac_rx_byte_index),
+        rx_byte_data_i => mac_rx_byte_data,
         parse_mcu_packet_tog_i => is_mcu_pkt_tog,
         pkt_len_i => std_logic_vector(mcu_received_packet_length),
-        eth_ram_data_i => mcu_ethbuf_ram_data,
-        eth_ram_addr_o => mcu_ethbuf_ram_addr_slv,
         mcu_clk_i => clk_mcu_i
     );
 end architecture;

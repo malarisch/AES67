@@ -48,8 +48,10 @@ ENTITY aes67_top IS
 		mac_tx_clock_o : OUT STD_LOGIC;
 		mac_tx_reset_o : OUT STD_LOGIC;
 		is_mcu_pkt_tog_o : OUT STD_LOGIC;
-		mcu_ram_addr_i : IN UNSIGNED(10 downto 0);
-		eth_ram_data_rx_mcu_o : OUT STD_LOGIC_VECTOR(7 downto 0);
+		-- received byte stream (mac_rx_clock_o domain) for the MCU ring buffer
+		mac_rx_byte_we_o : OUT STD_LOGIC;
+		mac_rx_byte_index_o : OUT UNSIGNED(10 downto 0);
+		mac_rx_byte_data_o : OUT STD_LOGIC_VECTOR(7 downto 0);
 		eth_tx_en_mcu_i : IN STD_LOGIC;
 		eth_tx_data_mcu_i : IN STD_LOGIC_VECTOR(7 downto 0);
 		eth_tx_allow_req_mcu_i : IN STD_LOGIC;
@@ -249,6 +251,8 @@ mac_tx_clock_o <= mac_tx_clock;
 mac_reset <= not mac_resetn_i;
 
 mac_rx_clock_o <= mac_rx_clock;
+mac_rx_byte_index_o <= mac_rx_byte_receive_index;
+mac_rx_byte_data_o <= mac_rx_data;
 
 mac_tx_busy_o <= mac_tx_busy;
 mac_tx_byte_sent_o <= mac_tx_byte_sent;
@@ -545,13 +549,12 @@ ethernet_top_inst: entity work.ethernet_top
 	mac_rx_data_o => mac_rx_data,
 	mac_rx_byte_received_o => mac_rx_byte_received,
 	mac_rx_byte_receive_index_o => mac_rx_byte_receive_index,
+	mac_rx_byte_we_o => mac_rx_byte_we_o,
 
 	is_mcu_pkt_tog_o => is_mcu_pkt_tog_o,
 	is_rtp_pkt_tog_o => is_rtp_pkt_tog,
 	rtp_ram_addr_i => rtp_ram_addr,
-	mcu_ram_addr_i => mcu_ram_addr_i,
 	eth_ram_data_sys_rtp_o => eth_ram_data_sys_rtp,
-	eth_ram_data_rx_mcu_o => eth_ram_data_rx_mcu_o,
 	eth_tx_en_mcu_i => eth_tx_en_mcu_i,
 	eth_tx_en_ptp_i => eth_tx_en_ptp,
 	eth_tx_en_rtp_i => eth_tx_en_rtp,
